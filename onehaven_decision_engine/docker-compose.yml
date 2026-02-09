@@ -17,9 +17,19 @@ services:
 
   backend:
     build: ./backend
+
+    # ✅ This loads variables from ./ .env automatically
+    env_file:
+      - .env
+
+    # ✅ Optional but recommended: explicitly map required envs
+    # so it's obvious in the compose file what the container expects.
     environment:
-      DATABASE_URL: postgresql+psycopg://app:app@postgres:5432/decision_engine
-      APP_ENV: local
+      DATABASE_URL: ${DATABASE_URL}
+      APP_ENV: ${APP_ENV}
+      HUD_USER_TOKEN: ${HUD_USER_TOKEN}
+      RENTCAST_API_KEY: ${RENTCAST_API_KEY}
+
     ports:
       - "8000:8000"
     depends_on:
