@@ -1,34 +1,137 @@
+# backend/app/routers/evaluate.py
 from __future__ import annotations
 
 import json
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
-from sqlalchemy import select
 
 from ..db import get_db
-from ..models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule
-from ..schemas import UnderwritingResultOut, BatchEvalOut
-from ..config import settings
-from ..domain.decision_engine import DealContext, evaluate_deal_rules, reasons_from_json
-from ..domain.underwriting import UnderwritingInputs, run_underwriting
+from ..models import Deal, Property, RentAssumption, UnderwritingResult
+from ..schemas import BatchEvalOut, SurvivorOut
+from ..domain.decision_engine import score_and_decide
+from ..domain.underwriting import underwrite
 
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
+
+def _inventory_proxy(db: Session, snapshot_id: int, city: str, state: str) -> int:
+    cnt = db.scalar(
+        select(func.count(Deal.id))
+        .join(Property, Property.id == Deal.property_id)
+        .where(Deal.snapshot_id == snapshot_id)
+        .where(Property.city == city)
+        .where(Property.state == state)
+    )
+    return int(cnt or 0)
+
+
+def _gross_rent_used(d: Deal, p: Property, ra: Optional[RentAssumption]) -> tuple[float, bool]:
+    """
+    Returns (gross_rent_used, was_estimated).
+    Priority:
+      1) approved_rent_ceiling
+      2) rent_reasonableness_comp
+      3) section8_fmr
+      4) market_rent_estimate
+      5) fallback estimate from 1.3% rule
+    """
+    candidates = []
+    if ra:
+        for v in [ra.approved_rent_ceiling, ra.rent_reasonableness_comp, ra.section8_fmr, ra.market_rent_estimate]:
+            if v is not None and v > 0:
+                candidates.append(float(v))
+
+    if candidates:
+        return min(candidates), False
+
+    # Fallback: 1.3% rule rent estimate
+    if d.asking_price and d.asking_price > 0:
+        return float(d.asking_price) * 0.013, True
+
+    return 0.0, True
+
+
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
 def evaluate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
-    deals = db.execute(select(Deal).where(Deal.snapshot_id == snapshot_id)).scalars().all()
-    if not deals:
-        raise HTTPException(status_code=404, detail="No deals found for snapshot")
+    deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id)).all()
 
-    pass_count = review_count = reject_count = 0
+    pass_count = 0
+    review_count = 0
+    reject_count = 0
 
     for d in deals:
-        # reuse your existing single-deal evaluator
-        result = evaluate_deal(d.id, db)  # calls your existing endpoint logic
-        if result.decision == "PASS":
+        p = db.scalar(select(Property).where(Property.id == d.property_id))
+        if not p:
+            continue
+
+        ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
+
+        # Ensure inventory proxy exists even if not filled yet
+        inv = None
+        if ra and ra.inventory_count is not None:
+            inv = ra.inventory_count
+        else:
+            inv = _inventory_proxy(db, snapshot_id, p.city, p.state)
+            if ra is None:
+                ra = RentAssumption(property_id=p.id)
+                db.add(ra)
+            if ra.inventory_count is None:
+                ra.inventory_count = inv
+                db.commit()
+
+        gross_rent, estimated = _gross_rent_used(d, p, ra)
+
+        # Underwrite (math layer)
+        uw = underwrite(
+            asking_price=float(d.asking_price),
+            down_payment_pct=float(d.down_payment_pct or 0.20),
+            interest_rate=float(d.interest_rate or 0.07),
+            term_years=int(d.term_years or 30),
+            gross_rent=float(gross_rent),
+            rehab_estimate=float(d.rehab_estimate or 0.0),
+        )
+
+        # Decision engine (rules/scoring)
+        decision, score, reasons = score_and_decide(
+            property=p,
+            deal=d,
+            rent_assumption=ra,
+            underwriting=uw,
+        )
+
+        # If rent was estimated, never allow PASS (force REVIEW)
+        if estimated and decision == "PASS":
+            decision = "REVIEW"
+            reasons.append("Rent was estimated from 1.3% rule; verify with comps/FMR before PASS")
+
+        # Store result (upsert)
+        existing = db.scalar(select(UnderwritingResult).where(UnderwritingResult.deal_id == d.id))
+        if not existing:
+            existing = UnderwritingResult(deal_id=d.id)
+            db.add(existing)
+
+        existing.decision = decision
+        existing.score = int(score)
+        existing.reasons_json = json.dumps(reasons)
+
+        existing.gross_rent_used = float(gross_rent)
+        existing.mortgage_payment = float(uw.mortgage_payment)
+        existing.operating_expenses = float(uw.operating_expenses)
+        existing.noi = float(uw.noi)
+        existing.cash_flow = float(uw.cash_flow)
+        existing.dscr = float(uw.dscr)
+        existing.cash_on_cash = float(uw.cash_on_cash)
+        existing.break_even_rent = float(uw.break_even_rent)
+        existing.min_rent_for_target_roi = float(uw.min_rent_for_target_roi)
+
+        db.commit()
+
+        if decision == "PASS":
             pass_count += 1
-        elif result.decision == "REVIEW":
+        elif decision == "REVIEW":
             review_count += 1
         else:
             reject_count += 1
@@ -39,157 +142,4 @@ def evaluate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
         pass_count=pass_count,
         review_count=review_count,
         reject_count=reject_count,
-    )
-
-@router.post("/deal/{deal_id}", response_model=UnderwritingResultOut)
-def evaluate_deal(deal_id: int, db: Session = Depends(get_db)):
-    deal = db.get(Deal, deal_id)
-    if not deal:
-        raise HTTPException(status_code=404, detail="Deal not found")
-
-    prop = db.get(Property, deal.property_id)
-    if not prop:
-        raise HTTPException(status_code=500, detail="Deal has missing property")
-
-    ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == prop.id))
-
-    rent_market = ra.market_rent_estimate if ra else None
-    rent_ceiling = None
-    if ra:
-        rent_ceiling = ra.approved_rent_ceiling if ra.approved_rent_ceiling is not None else ra.section8_fmr
-
-    ctx = DealContext(
-        asking_price=deal.asking_price,
-        bedrooms=prop.bedrooms,
-        has_garage=prop.has_garage,
-        rent_market=rent_market,
-        rent_ceiling=rent_ceiling,
-        inventory_count=ra.inventory_count if ra else None,
-        starbucks_minutes=ra.starbucks_minutes if ra else None,
-    )
-    d = evaluate_deal_rules(ctx)
-
-    reasons = list(d.reasons)
-
-    if rent_market is None and rent_ceiling is None:
-        reasons.append("Missing rent data -> cannot underwrite")
-        final_decision = "REJECT"
-        final_score = 0
-
-        result = UnderwritingResult(
-            deal_id=deal.id,
-            decision=final_decision,
-            score=int(final_score),
-            reasons_json=json.dumps(reasons, ensure_ascii=False),
-            gross_rent_used=0.0,
-            mortgage_payment=0.0,
-            operating_expenses=0.0,
-            noi=0.0,
-            cash_flow=0.0,
-            dscr=0.0,
-            cash_on_cash=0.0,
-            break_even_rent=0.0,
-            min_rent_for_target_roi=0.0,
-        )
-        db.add(result)
-        db.commit()
-        db.refresh(result)
-
-        return UnderwritingResultOut(
-            id=result.id,
-            deal_id=result.deal_id,
-            decision=result.decision,
-            score=result.score,
-            reasons=reasons_from_json(result.reasons_json),
-            gross_rent_used=result.gross_rent_used,
-            mortgage_payment=result.mortgage_payment,
-            operating_expenses=result.operating_expenses,
-            noi=result.noi,
-            cash_flow=result.cash_flow,
-            dscr=result.dscr,
-            cash_on_cash=result.cash_on_cash,
-            break_even_rent=result.break_even_rent,
-            min_rent_for_target_roi=result.min_rent_for_target_roi,
-        )
-
-    if rent_market is None:
-        gross_rent_used = float(rent_ceiling)
-    elif rent_ceiling is None:
-        gross_rent_used = float(rent_market)
-    else:
-        gross_rent_used = float(min(rent_market, rent_ceiling))
-
-    purchase = deal.estimated_purchase_price if deal.estimated_purchase_price is not None else deal.asking_price
-
-    uw_in = UnderwritingInputs(
-        purchase_price=float(purchase),
-        rehab=float(deal.rehab_estimate),
-        down_payment_pct=float(deal.down_payment_pct),
-        interest_rate=float(deal.interest_rate),
-        term_years=int(deal.term_years),
-        gross_rent=float(gross_rent_used),
-        vacancy_rate=float(settings.vacancy_rate),
-        maintenance_rate=float(settings.maintenance_rate),
-        management_rate=float(settings.management_rate),
-        capex_rate=float(settings.capex_rate),
-        insurance_monthly=float(settings.insurance_monthly),
-        taxes_monthly=float(settings.taxes_monthly),
-        utilities_monthly=float(settings.utilities_monthly),
-    )
-    uw_out = run_underwriting(uw_in, target_roi=settings.target_roi)
-
-    final_decision = d.decision
-    final_score = d.score
-
-    if uw_out.dscr < settings.dscr_min:
-        reasons.append(f"DSCR {uw_out.dscr:.3f} below minimum {settings.dscr_min:.2f}")
-        final_decision = "REJECT"
-        final_score = min(final_score, 45)
-    else:
-        if uw_out.cash_flow < settings.target_monthly_cashflow:
-            reasons.append(f"Cash flow ${uw_out.cash_flow:.2f} below target ${settings.target_monthly_cashflow:.0f}")
-            final_decision = "REVIEW" if final_decision != "REJECT" else "REJECT"
-            final_score = min(final_score, 65)
-
-    jr = db.scalar(select(JurisdictionRule).where(JurisdictionRule.city == prop.city, JurisdictionRule.state == prop.state))
-    if jr and jr.processing_days is not None and jr.processing_days >= 45:
-        reasons.append(f"Jurisdiction processing delay risk ({jr.processing_days} days)")
-        if final_decision == "PASS":
-            final_decision = "REVIEW"
-            final_score = min(final_score, 70)
-
-    result = UnderwritingResult(
-        deal_id=deal.id,
-        decision=final_decision,
-        score=int(final_score),
-        reasons_json=json.dumps(reasons, ensure_ascii=False),
-        gross_rent_used=float(gross_rent_used),
-        mortgage_payment=float(uw_out.mortgage_payment),
-        operating_expenses=float(uw_out.operating_expenses),
-        noi=float(uw_out.noi),
-        cash_flow=float(uw_out.cash_flow),
-        dscr=float(uw_out.dscr),
-        cash_on_cash=float(uw_out.cash_on_cash),
-        break_even_rent=float(uw_out.break_even_rent),
-        min_rent_for_target_roi=float(uw_out.min_rent_for_target_roi),
-    )
-    db.add(result)
-    db.commit()
-    db.refresh(result)
-
-    return UnderwritingResultOut(
-        id=result.id,
-        deal_id=result.deal_id,
-        decision=result.decision,
-        score=result.score,
-        reasons=reasons_from_json(result.reasons_json),
-        gross_rent_used=result.gross_rent_used,
-        mortgage_payment=result.mortgage_payment,
-        operating_expenses=result.operating_expenses,
-        noi=result.noi,
-        cash_flow=result.cash_flow,
-        dscr=result.dscr,
-        cash_on_cash=result.cash_on_cash,
-        break_even_rent=result.break_even_rent,
-        min_rent_for_target_roi=result.min_rent_for_target_roi,
     )

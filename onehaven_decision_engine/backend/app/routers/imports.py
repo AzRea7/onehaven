@@ -1,34 +1,50 @@
+# backend/app/routers/imports.py
 from __future__ import annotations
 
+import csv
+import io
 import json
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, UploadFile, Query
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
-from sqlalchemy import select
 
 from ..db import get_db
 from ..models import Property, Deal, RentAssumption, ImportSnapshot
 from ..schemas import ImportResultOut, ImportErrorRow
-from ..domain.importers.base import parse_csv_bytes, fingerprint
-from ..domain.importers.investorlift import normalize_investorlift
 from ..domain.importers.zillow import normalize_zillow
+from ..domain.importers.investorlift import normalize_investorlift
+from ..domain.fingerprint import fingerprint
 
 router = APIRouter(prefix="/import", tags=["import"])
 
 
 def _get_or_create_property(db: Session, n) -> Property:
-    # simple dedupe: address+zip. Good enough for MVP.
-    existing = db.scalar(select(Property).where(Property.address == n.address, Property.zip == n.zip))
-    if existing:
-        # update basics if missing
-        changed = False
-        for attr in ["city", "state", "bedrooms", "bathrooms", "square_feet", "year_built", "has_garage", "property_type"]:
-            val = getattr(n, attr)
-            if val is not None and getattr(existing, attr) != val:
-                setattr(existing, attr, val)
-                changed = True
-        if changed:
-            db.commit()
-        return existing
+    p = db.scalar(
+        select(Property).where(
+            Property.address == n.address,
+            Property.city == n.city,
+            Property.state == n.state,
+            Property.zip == n.zip,
+        )
+    )
+    if p:
+        # Update sparse fields if missing
+        if p.bedrooms is None and n.bedrooms is not None:
+            p.bedrooms = n.bedrooms
+        if p.bathrooms is None and n.bathrooms is not None:
+            p.bathrooms = n.bathrooms
+        if p.square_feet is None and n.square_feet is not None:
+            p.square_feet = n.square_feet
+        if p.year_built is None and n.year_built is not None:
+            p.year_built = n.year_built
+        if p.has_garage is False and n.has_garage is True:
+            p.has_garage = True
+        db.commit()
+        db.refresh(p)
+        return p
 
     p = Property(
         address=n.address,
@@ -49,36 +65,78 @@ def _get_or_create_property(db: Session, n) -> Property:
 
 
 def _upsert_rent(db: Session, property_id: int, n) -> None:
-    if all(
-        x is None
-        for x in [
-            n.market_rent_estimate,
-            n.section8_fmr,
-            n.approved_rent_ceiling,
-            n.rent_reasonableness_comp,
-            n.inventory_count,
-            n.starbucks_minutes,
-        ]
-    ):
-        return
-
+    """
+    IMPORTANT CHANGE:
+    Always ensure a RentAssumption row exists so we can backfill inventory_count,
+    then later add FMR / comps / etc.
+    """
     ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == property_id))
     if not ra:
         ra = RentAssumption(property_id=property_id)
         db.add(ra)
 
-    ra.market_rent_estimate = n.market_rent_estimate
-    ra.section8_fmr = n.section8_fmr
-    ra.approved_rent_ceiling = n.approved_rent_ceiling
-    ra.rent_reasonableness_comp = n.rent_reasonableness_comp
-    ra.inventory_count = n.inventory_count
-    ra.starbucks_minutes = n.starbucks_minutes
+    # Only overwrite if provided (so later enrichments don’t get nuked)
+    if n.market_rent_estimate is not None:
+        ra.market_rent_estimate = n.market_rent_estimate
+    if n.section8_fmr is not None:
+        ra.section8_fmr = n.section8_fmr
+    if n.approved_rent_ceiling is not None:
+        ra.approved_rent_ceiling = n.approved_rent_ceiling
+    if n.rent_reasonableness_comp is not None:
+        ra.rent_reasonableness_comp = n.rent_reasonableness_comp
+    if n.inventory_count is not None:
+        ra.inventory_count = n.inventory_count
+    if n.starbucks_minutes is not None:
+        ra.starbucks_minutes = n.starbucks_minutes
 
     db.commit()
 
 
+def _backfill_inventory_counts_from_snapshot(db: Session, snapshot_id: int) -> None:
+    """
+    Inventory proxy = count of deals in this snapshot per (city,state).
+    This gives you the “inventory >= 80” filter ability even before MLS/InvestorLift scale.
+    """
+    rows = db.execute(
+        select(Property.city, Property.state, func.count(Deal.id))
+        .join(Deal, Deal.property_id == Property.id)
+        .where(Deal.snapshot_id == snapshot_id)
+        .group_by(Property.city, Property.state)
+    ).all()
+
+    inv_map = {(city, state): int(cnt) for (city, state, cnt) in rows}
+
+    deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id)).all()
+    for d in deals:
+        p = db.scalar(select(Property).where(Property.id == d.property_id))
+        if not p:
+            continue
+        inv = inv_map.get((p.city, p.state))
+        if inv is None:
+            continue
+
+        ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
+        if not ra:
+            ra = RentAssumption(property_id=p.id)
+            db.add(ra)
+
+        # Only fill if empty
+        if ra.inventory_count is None:
+            ra.inventory_count = inv
+
+    db.commit()
+
+
+def _read_csv_rows(file: UploadFile) -> list[dict[str, str]]:
+    content = file.file.read()
+    # try utf-8-sig to handle BOM
+    text = content.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    return [dict(row) for row in reader]
+
+
 def _import_rows(db: Session, source: str, rows: list[dict[str, str]], notes: str | None) -> ImportResultOut:
-    snap = ImportSnapshot(source=source, notes=notes)
+    snap = ImportSnapshot(source=source, notes=notes, created_at=datetime.utcnow())
     db.add(snap)
     db.commit()
     db.refresh(snap)
@@ -119,12 +177,16 @@ def _import_rows(db: Session, source: str, rows: list[dict[str, str]], notes: st
             db.commit()
             db.refresh(d)
 
+            # IMPORTANT: always create/update RentAssumption row
             _upsert_rent(db, prop.id, n)
 
             imported += 1
 
         except Exception as e:
             errors.append(ImportErrorRow(row=idx, error=str(e)))
+
+    # IMPORTANT: snapshot-level backfill
+    _backfill_inventory_counts_from_snapshot(db, snap.id)
 
     return ImportResultOut(
         snapshot_id=snap.id,
@@ -135,27 +197,21 @@ def _import_rows(db: Session, source: str, rows: list[dict[str, str]], notes: st
     )
 
 
-@router.post("/investorlift", response_model=ImportResultOut)
-async def import_investorlift(
-    file: UploadFile = File(...),
-    notes: str | None = Query(None),
-    db: Session = Depends(get_db),
-):
-    data = await file.read()
-    rows = parse_csv_bytes(data)
-    if not rows:
-        raise HTTPException(status_code=400, detail="CSV appears empty or unreadable")
-    return _import_rows(db, "investorlift", rows, notes)
-
-
 @router.post("/zillow", response_model=ImportResultOut)
-async def import_zillow(
+def import_zillow(
+    notes: Optional[str] = Query(default=None),
     file: UploadFile = File(...),
-    notes: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    data = await file.read()
-    rows = parse_csv_bytes(data)
-    if not rows:
-        raise HTTPException(status_code=400, detail="CSV appears empty or unreadable")
+    rows = _read_csv_rows(file)
     return _import_rows(db, "zillow", rows, notes)
+
+
+@router.post("/investorlift", response_model=ImportResultOut)
+def import_investorlift(
+    notes: Optional[str] = Query(default=None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    rows = _read_csv_rows(file)
+    return _import_rows(db, "investorlift", rows, notes)
