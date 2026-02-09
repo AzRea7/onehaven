@@ -1,15 +1,64 @@
 from __future__ import annotations
 
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, desc
+
 
 from ..db import get_db
-from ..models import Deal, Property, RentAssumption
-from ..schemas import DealCreate, DealOut, RentAssumptionUpsert, RentAssumptionOut
+from ..models import Deal, Property, RentAssumption, UnderwritingResult
+from ..schemas import DealCreate, DealOut, RentAssumptionUpsert, RentAssumptionOut, SurvivorOut
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 
+@router.get("/survivors", response_model=list[SurvivorOut])
+def survivors(
+    snapshot_id: int | None = None,
+    decision: str = "PASS",
+    min_dscr: float = 1.20,
+    min_cashflow: float = 400.0,
+    limit: int = 25,
+    db: Session = Depends(get_db),
+):
+    # Latest result per deal: easiest MVP approach is “max created_at”
+    # We'll join and filter; for production you'd do a window function.
+    q = (
+        select(Deal, Property, UnderwritingResult)
+        .join(Property, Property.id == Deal.property_id)
+        .join(UnderwritingResult, UnderwritingResult.deal_id == Deal.id)
+        .where(UnderwritingResult.decision == decision)
+        .where(UnderwritingResult.dscr >= min_dscr)
+        .where(UnderwritingResult.cash_flow >= min_cashflow)
+        .order_by(desc(UnderwritingResult.score), desc(UnderwritingResult.dscr), desc(UnderwritingResult.cash_flow))
+        .limit(limit)
+    )
+
+    if snapshot_id is not None:
+        q = q.where(Deal.snapshot_id == snapshot_id)
+
+    rows = db.execute(q).all()
+
+    out: list[SurvivorOut] = []
+    for d, p, r in rows:
+        out.append(
+            SurvivorOut(
+                deal_id=d.id,
+                property_id=p.id,
+                address=p.address,
+                city=p.city,
+                zip=p.zip,
+                decision=r.decision,
+                score=r.score,
+                reasons=json.loads(r.reasons_json),
+                dscr=r.dscr,
+                cash_flow=r.cash_flow,
+                gross_rent_used=r.gross_rent_used,
+                asking_price=d.asking_price,
+            )
+        )
+
+    return out
 
 @router.post("", response_model=DealOut)
 def create_deal(payload: DealCreate, db: Session = Depends(get_db)):

@@ -8,13 +8,38 @@ from sqlalchemy import select
 
 from ..db import get_db
 from ..models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule
-from ..schemas import UnderwritingResultOut
+from ..schemas import UnderwritingResultOut, BatchEvalOut
 from ..config import settings
 from ..domain.decision_engine import DealContext, evaluate_deal_rules, reasons_from_json
 from ..domain.underwriting import UnderwritingInputs, run_underwriting
 
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
+@router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
+def evaluate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
+    deals = db.execute(select(Deal).where(Deal.snapshot_id == snapshot_id)).scalars().all()
+    if not deals:
+        raise HTTPException(status_code=404, detail="No deals found for snapshot")
+
+    pass_count = review_count = reject_count = 0
+
+    for d in deals:
+        # reuse your existing single-deal evaluator
+        result = evaluate_deal(d.id, db)  # calls your existing endpoint logic
+        if result.decision == "PASS":
+            pass_count += 1
+        elif result.decision == "REVIEW":
+            review_count += 1
+        else:
+            reject_count += 1
+
+    return BatchEvalOut(
+        snapshot_id=snapshot_id,
+        total_deals=len(deals),
+        pass_count=pass_count,
+        review_count=review_count,
+        reject_count=reject_count,
+    )
 
 @router.post("/deal/{deal_id}", response_model=UnderwritingResultOut)
 def evaluate_deal(deal_id: int, db: Session = Depends(get_db)):
