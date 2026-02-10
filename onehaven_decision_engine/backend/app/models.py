@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime, date
 from typing import Optional, List
 import json
 
@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     JSON,
+    Date,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

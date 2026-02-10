@@ -8,8 +8,8 @@ Create Date: 2026-02-10
 from alembic import op
 import sqlalchemy as sa
 
-revision = "XXXX_api_usage"
-down_revision = "<PUT_PREVIOUS_REVISION_ID_HERE>"
+revision = "0005_api_usage"
+down_revision = "0004_rent_learning"
 branch_labels = None
 depends_on = None
 
