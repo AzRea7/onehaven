@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # ---- Deal rules defaults ----
     max_price: int = 150_000
     min_bedrooms: int = 2
-    min_inventory: int = 80
+    min_inventory: int = 40
     rent_rule_min_pct: float = 0.013  # 1.3%
     rent_rule_target_pct: float = 0.015  # 1.5%
 
@@ -31,6 +31,13 @@ class Settings(BaseSettings):
 
     dscr_min: float = 1.20
     dscr_penalty_enabled: bool = True
+
+    rent_calibration_apha: float = 0.20
+
+    rent_calibration_min_mult: float = 0.70
+    rent_calibration_max_mult: float = 1.30
+
+    default_payment_standard_pct: float = 1.00
 
     # ---- External APIs ----
     # HUD User API: you generate an access token on huduser.gov and pass it here

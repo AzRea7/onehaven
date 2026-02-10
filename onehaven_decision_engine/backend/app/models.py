@@ -48,7 +48,11 @@ class Property(Base):
     )
 
     inspections: Mapped[List["Inspection"]] = relationship(back_populates="property", cascade="all, delete-orphan")
-
+    
+    rent_comps: Mapped[List["RentComp"]] = relationship(back_populates="property", cascade="all, delete-orphan")
+    rent_observations: Mapped[List["RentObservation"]] = relationship(
+        back_populates="property", cascade="all, delete-orphan"
+    )
 
 class Deal(Base):
     __tablename__ = "deals"
@@ -78,8 +82,6 @@ class Deal(Base):
 
     property: Mapped["Property"] = relationship(back_populates="deals")
     results: Mapped[List["UnderwritingResult"]] = relationship(back_populates="deal", cascade="all, delete-orphan")
-
-    # NEW
     snapshot: Mapped[Optional["ImportSnapshot"]] = relationship(back_populates="deals")
 
 
@@ -101,6 +103,66 @@ class RentAssumption(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     property: Mapped["Property"] = relationship(back_populates="rent_assumption")
+
+class RentComp(Base):
+    __tablename__ = "rent_comps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")  # manual | zillow | etc
+    address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    rent: Mapped[float] = mapped_column(Float, nullable=False)
+    bedrooms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    bathrooms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    square_feet: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship(back_populates="rent_comps")
+
+class RentObservation(Base):
+    __tablename__ = "rent_observations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+
+    # section8 | market
+    strategy: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    achieved_rent: Mapped[float] = mapped_column(Float, nullable=False)
+    tenant_portion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    hap_portion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    lease_start: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lease_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship(back_populates="rent_observations")
+
+
+class RentCalibration(Base):
+    __tablename__ = "rent_calibrations"
+    __table_args__ = (UniqueConstraint("zip", "bedrooms", "strategy", name="uq_rent_calibration_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    zip: Mapped[str] = mapped_column(String(10), nullable=False)
+    bedrooms: Mapped[int] = mapped_column(Integer, nullable=False)
+    strategy: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # mean absolute percent error (optional tracking)
+    mape: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class JurisdictionRule(Base):

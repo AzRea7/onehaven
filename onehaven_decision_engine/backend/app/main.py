@@ -26,5 +26,5 @@ app.include_router(evaluate_router)
 app.include_router(inspections_router)
 app.include_router(imports_router)
 app.include_router(rent_enrich_router)  
-app.include_router(imports_alias_router)  # ✅ NEW
+app.include_router(imports_alias_router)
 app.include_router(rent_router)  

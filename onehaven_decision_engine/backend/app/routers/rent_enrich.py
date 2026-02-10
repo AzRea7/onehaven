@@ -1,4 +1,3 @@
-# backend/app/routers/rent_enrich.py
 from __future__ import annotations
 
 import json
@@ -6,7 +5,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Optional, Iterable
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -24,13 +23,16 @@ router = APIRouter(prefix="/rent", tags=["rent"])
 
 class RentEnrichOut(BaseModel):
     property_id: int
+    strategy: str = "section8"
 
     market_rent_estimate: Optional[float] = None
     section8_fmr: Optional[float] = None
 
-    # New: conservative “rent reasonableness” proxy & safe ceiling
     rent_reasonableness_comp: Optional[float] = None
     approved_rent_ceiling: Optional[float] = None
+
+    # NEW: what the app will actually use for underwriting, given strategy
+    rent_used: Optional[float] = None
 
     # Debug payloads
     hud: dict[str, Any] = Field(default_factory=dict)
@@ -71,14 +73,6 @@ def _http_get_json(url: str, headers: dict[str, str], timeout_s: int = 20) -> Ht
 # ---------------------------- HUD FMR client (no USPS) ----------------------------
 
 class HudUserClient:
-    """
-    Uses HUD USER FMR API only:
-      Base URL: https://www.huduser.gov/hudapi/public/fmr
-      Endpoint: fmr/data/{entityid}  (optional ?year=YYYY)
-
-    We DO NOT call the USPS endpoint (it can 403 depending on token/dataset access).
-    We derive the county entityid from RentCast comparables (stateFips + countyFips).
-    """
     FMR_BASE = "https://www.huduser.gov/hudapi/public/fmr"
 
     def __init__(self, token: str):
@@ -129,7 +123,6 @@ class HudUserClient:
             except Exception:
                 return None
 
-        # SAFMR list shape (rare for MI but guard anyway)
         if isinstance(basic, list):
             row = None
             for r in basic:
@@ -183,12 +176,10 @@ class RentCastClient:
         qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         url = f"{self.BASE}?{qs}"
 
-        # Try X-Api-Key first (common)
         resp1 = _http_get_json(url, {"X-Api-Key": self.api_key})
         if resp1.status == 200:
             return resp1.data if isinstance(resp1.data, dict) else {"data": resp1.data}
 
-        # Try Authorization: Bearer fallback
         resp2 = _http_get_json(url, {"Authorization": f"Bearer {self.api_key}"})
         if resp2.status == 200:
             return resp2.data if isinstance(resp2.data, dict) else {"data": resp2.data}
@@ -213,10 +204,6 @@ class RentCastClient:
 
     @staticmethod
     def _extract_comp_rents(payload: dict[str, Any]) -> list[float]:
-        """
-        Pull comparable rents from RentCast response (best-effort).
-        RentCast comparables items usually have "price" (rent).
-        """
         out: list[float] = []
         comps = payload.get("comparables")
         if not isinstance(comps, list):
@@ -251,13 +238,6 @@ class RentCastClient:
 
     @staticmethod
     def pick_rent_reasonableness_proxy(payload: dict[str, Any]) -> Optional[float]:
-        """
-        Conservative “rent reasonableness” proxy:
-          median(comparable rents)
-        If comps missing, fall back to the AVM rent itself (less ideal, but keeps pipeline flowing).
-        """
-        if not isinstance(payload, dict):
-            return None
         comps = RentCastClient._extract_comp_rents(payload)
         med = RentCastClient._median(comps)
         if med is not None:
@@ -266,11 +246,6 @@ class RentCastClient:
 
     @staticmethod
     def derive_hud_entityid_from_comps(payload: dict[str, Any]) -> Optional[str]:
-        """
-        Build HUD FMR county entityid:
-          stateFips(2) + countyFips(3) + '99999'
-        Uses first comparable that contains both fields.
-        """
         comps = payload.get("comparables")
         if not isinstance(comps, list) or not comps:
             return None
@@ -301,7 +276,43 @@ def _get_or_create_rent_assumption(db: Session, property_id: int) -> RentAssumpt
     return ra
 
 
-def _enrich_one(db: Session, property_id: int) -> RentEnrichOut:
+def _rent_used(strategy: str, market: Optional[float], ceiling: Optional[float]) -> Optional[float]:
+    strategy = (strategy or "section8").strip().lower()
+    if strategy == "market":
+        return market
+    # section8
+    if market is None and ceiling is None:
+        return None
+    if market is None:
+        return ceiling
+    if ceiling is None:
+        return market
+    return min(market, ceiling)
+
+
+def _compute_approved_ceiling(ra: RentAssumption) -> Optional[float]:
+    """
+    Deterministic conservative ceiling:
+      - if approved_rent_ceiling already set, keep it
+      - else compute min(FMR, RR comp) when both exist
+      - else whichever exists
+    """
+    try:
+        if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
+            return float(ra.approved_rent_ceiling)
+
+        candidates: list[float] = []
+        if ra.section8_fmr is not None and float(ra.section8_fmr) > 0:
+            candidates.append(float(ra.section8_fmr))
+        if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
+            candidates.append(float(ra.rent_reasonableness_comp))
+
+        return min(candidates) if candidates else None
+    except Exception:
+        return None
+
+
+def _enrich_one(db: Session, property_id: int, strategy: str = "section8") -> RentEnrichOut:
     prop = db.get(Property, property_id)
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
@@ -349,7 +360,6 @@ def _enrich_one(db: Session, property_id: int) -> RentEnrichOut:
 
         rr_proxy = rc.pick_rent_reasonableness_proxy(rc_payload)
         if rr_proxy is not None and rr_proxy > 0:
-            # Store into your existing column
             if ra.rent_reasonableness_comp != float(rr_proxy):
                 ra.rent_reasonableness_comp = float(rr_proxy)
                 updated_fields.append("rent_reasonableness_comp")
@@ -385,34 +395,31 @@ def _enrich_one(db: Session, property_id: int) -> RentEnrichOut:
     except Exception as e:
         hud_debug = {"error": str(e)}
 
-    # ---- Compute conservative “approved_rent_ceiling” (your Section 8 safe cap) ----
-    # This is the number you should feed into Section 8 underwriting/eval, not raw market rent.
+    # ---- Compute approved_rent_ceiling (only if not manually set) ----
     try:
-        ceiling_candidates: list[float] = []
-        if ra.section8_fmr is not None and float(ra.section8_fmr) > 0:
-            ceiling_candidates.append(float(ra.section8_fmr))
-        if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-            ceiling_candidates.append(float(ra.rent_reasonableness_comp))
-
-        new_ceiling = min(ceiling_candidates) if ceiling_candidates else None
-        if new_ceiling is not None and new_ceiling > 0:
-            if ra.approved_rent_ceiling != float(new_ceiling):
+        if ra.approved_rent_ceiling is None:
+            new_ceiling = _compute_approved_ceiling(ra)
+            if new_ceiling is not None and new_ceiling > 0:
                 ra.approved_rent_ceiling = float(new_ceiling)
                 updated_fields.append("approved_rent_ceiling")
     except Exception:
-        # Keep enrichment resilient; don't fail the whole request.
         pass
 
     if updated_fields:
         db.commit()
         db.refresh(ra)
 
+    ceiling = _compute_approved_ceiling(ra)
+    rent_used = _rent_used(strategy, ra.market_rent_estimate, ceiling)
+
     return RentEnrichOut(
         property_id=property_id,
+        strategy=strategy,
         market_rent_estimate=ra.market_rent_estimate,
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
-        approved_rent_ceiling=ra.approved_rent_ceiling,
+        approved_rent_ceiling=ceiling,
+        rent_used=rent_used,
         hud=hud_debug,
         rentcast=rentcast_debug,
         updated_fields=updated_fields,
@@ -420,12 +427,12 @@ def _enrich_one(db: Session, property_id: int) -> RentEnrichOut:
 
 
 # ---------------------------- ROUTES ----------------------------
-# IMPORTANT: batch must appear before /enrich/{property_id}
 
 @router.post("/enrich/batch", response_model=RentEnrichBatchOut)
 def enrich_rent_batch(
     snapshot_id: int = Query(...),
     limit: int = Query(50, ge=1, le=500),
+    strategy: str = Query("section8"),
     sleep_ms: int = Query(0, ge=0, le=5000),
     db: Session = Depends(get_db),
 ):
@@ -444,7 +451,7 @@ def enrich_rent_batch(
 
     for pid in pids:
         try:
-            _enrich_one(db, pid)
+            _enrich_one(db, pid, strategy=strategy)
             enriched += 1
         except Exception as e:
             errors.append({"property_id": pid, "error": str(e)})
@@ -456,5 +463,9 @@ def enrich_rent_batch(
 
 
 @router.post("/enrich/{property_id}", response_model=RentEnrichOut)
-def enrich_rent(property_id: int, db: Session = Depends(get_db)):
-    return _enrich_one(db, property_id)
+def enrich_rent(
+    property_id: int,
+    strategy: str = Query("section8"),
+    db: Session = Depends(get_db),
+):
+    return _enrich_one(db, property_id, strategy=strategy)

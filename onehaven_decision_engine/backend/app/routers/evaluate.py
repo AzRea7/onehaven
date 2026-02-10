@@ -1,8 +1,7 @@
-# onehaven_decision_engine/backend/app/routers/evaluate.py
 from __future__ import annotations
 
 import json
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
@@ -17,42 +16,85 @@ from ..domain.underwriting import underwrite
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
 
-def _inventory_proxy(db: Session, snapshot_id: int, city: str, state: str) -> int:
-    # Simple proxy: count of deals in same city/state for this snapshot
-    # (acts like “inventory density” until you plug real MLS/market counts)
-    q = (
-        select(Deal)
-        .join(Property, Property.id == Deal.property_id)
-        .where(Deal.snapshot_id == snapshot_id)
-        .where(Property.city == city)
-        .where(Property.state == state)
-    )
-    return len(db.scalars(q).all())
-
-
-def _gross_rent_used(d: Deal, p: Property, ra: Optional[RentAssumption]) -> tuple[float, bool]:
+def _rent_used_for_underwriting(
+    *,
+    strategy: str,
+    d: Deal,
+    ra: Optional[RentAssumption],
+) -> Tuple[float, bool, list[str]]:
     """
-    Picks the best available rent for underwriting.
-    Priority:
-      1) market_rent_estimate
-      2) section8_fmr
-      3) 1.3% rule estimate (price * 0.013)
-    Returns: (rent, estimated_flag)
+    Picks rent to use for underwriting + returns whether it was estimated.
+
+    Goals:
+      - Strategy-aware rent selection.
+      - Section 8: cap by approved_rent_ceiling (safe) when available.
+      - Market: use market_rent_estimate only (no cap).
+      - If missing data, fall back to 1.3% heuristic => mark estimated=True.
+    Returns: (rent_used, estimated_flag, notes)
     """
+    notes: list[str] = []
+    strategy = (strategy or "section8").strip().lower()
+
+    market = None
+    ceiling = None
+
     if ra is not None:
-        if ra.market_rent_estimate is not None and ra.market_rent_estimate > 0:
-            return float(ra.market_rent_estimate), False
-        if ra.section8_fmr is not None and ra.section8_fmr > 0:
-            return float(ra.section8_fmr), False
+        try:
+            if ra.market_rent_estimate is not None and float(ra.market_rent_estimate) > 0:
+                market = float(ra.market_rent_estimate)
+        except Exception:
+            market = None
 
-    # fallback estimate
-    asking = float(d.asking_price or 0.0)
-    est = asking * 0.013
-    return float(est), True
+        # Prefer approved_rent_ceiling. If not present, compute a conservative fallback.
+        try:
+            if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
+                ceiling = float(ra.approved_rent_ceiling)
+            else:
+                candidates: list[float] = []
+                if ra.section8_fmr is not None and float(ra.section8_fmr) > 0:
+                    candidates.append(float(ra.section8_fmr))
+                if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
+                    candidates.append(float(ra.rent_reasonableness_comp))
+                ceiling = min(candidates) if candidates else None
+        except Exception:
+            ceiling = None
+
+    # Strategy selection
+    if strategy == "market":
+        if market is not None:
+            return market, False, notes
+        # fallback
+        asking = float(d.asking_price or 0.0)
+        est = asking * 0.013
+        notes.append("Market strategy missing market rent; fell back to 1.3% heuristic")
+        return float(est), True, notes
+
+    # section8 default
+    if market is None and ceiling is None:
+        asking = float(d.asking_price or 0.0)
+        est = asking * 0.013
+        notes.append("Section 8 strategy missing market rent and ceiling; fell back to 1.3% heuristic")
+        return float(est), True, notes
+
+    if market is None:
+        notes.append("Section 8 strategy missing market rent; using ceiling only")
+        return float(ceiling), False, notes
+
+    if ceiling is None:
+        notes.append("Section 8 strategy missing ceiling; using market rent only")
+        return float(market), False, notes
+
+    if market > ceiling:
+        notes.append("Section 8 cap applied: market rent > approved ceiling")
+    return float(min(market, ceiling)), False, notes
 
 
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
-def evaluate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
+def evaluate_snapshot(
+    snapshot_id: int,
+    strategy: str = Query("section8", description="section8|market"),
+    db: Session = Depends(get_db),
+):
     deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id)).all()
 
     pass_count = 0
@@ -66,19 +108,7 @@ def evaluate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
 
         ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
 
-        # Ensure inventory proxy exists even if not filled yet
-        if ra and ra.inventory_count is not None:
-            inv = ra.inventory_count
-        else:
-            inv = _inventory_proxy(db, snapshot_id, p.city, p.state)
-            if ra is None:
-                ra = RentAssumption(property_id=p.id)
-                db.add(ra)
-            if ra.inventory_count is None:
-                ra.inventory_count = inv
-                db.commit()
-
-        gross_rent, estimated = _gross_rent_used(d, p, ra)
+        gross_rent, estimated, rent_notes = _rent_used_for_underwriting(strategy=strategy, d=d, ra=ra)
 
         # Underwrite (math layer)
         uw = underwrite(
@@ -96,12 +126,17 @@ def evaluate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
             deal=d,
             rent_assumption=ra,
             underwriting=uw,
+            strategy=strategy,
         )
+
+        # Add rent selection notes (explainable)
+        for n in rent_notes:
+            reasons.append(n)
 
         # If rent was estimated, never allow PASS (force REVIEW)
         if estimated and decision == "PASS":
             decision = "REVIEW"
-            reasons.append("Rent was estimated from 1.3% rule; verify with comps/FMR before PASS")
+            reasons.append("Rent was estimated from 1.3% heuristic; verify with comps/FMR/ceiling before PASS")
 
         # Store result (upsert)
         existing = db.scalar(select(UnderwritingResult).where(UnderwritingResult.deal_id == d.id))
@@ -144,9 +179,13 @@ def evaluate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
 # ---- Compatibility aliases for your curl workflow ----
 
 @router.post("/run", response_model=BatchEvalOut)
-def evaluate_run(snapshot_id: int = Query(...), db: Session = Depends(get_db)):
-    # allows: POST /evaluate/run?snapshot_id=4
-    return evaluate_snapshot(snapshot_id=snapshot_id, db=db)
+def evaluate_run(
+    snapshot_id: int = Query(...),
+    strategy: str = Query("section8", description="section8|market"),
+    db: Session = Depends(get_db),
+):
+    # allows: POST /evaluate/run?snapshot_id=4&strategy=section8
+    return evaluate_snapshot(snapshot_id=snapshot_id, strategy=strategy, db=db)
 
 
 @router.get("/results", response_model=List[UnderwritingResultOut])

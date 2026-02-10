@@ -202,3 +202,80 @@ class ComplianceStatsOut(BaseModel):
     pass_rate: float
     reinspect_rate: float
     top_fail_points: List[dict]
+
+class RentCompCreate(BaseModel):
+    rent: float
+    source: str = "manual"
+    address: Optional[str] = None
+    url: Optional[str] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[float] = None
+    square_feet: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class RentCompOut(RentCompCreate):
+    id: int
+    property_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RentCompsBatchIn(BaseModel):
+    comps: List[RentCompCreate] = Field(..., min_length=1)
+
+
+class RentCompsSummaryOut(BaseModel):
+    property_id: int
+    count: int
+    median_rent: float
+    mean_rent: float
+    min_rent: float
+    max_rent: float
+
+
+class RentObservationCreate(BaseModel):
+    property_id: int
+    strategy: str = Field(..., description="section8 | market")
+    achieved_rent: float
+
+    tenant_portion: Optional[float] = None
+    hap_portion: Optional[float] = None
+
+    lease_start: Optional[datetime] = None
+    lease_end: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class RentObservationOut(RentObservationCreate):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RentCalibrationOut(BaseModel):
+    zip: str
+    bedrooms: int
+    strategy: str
+    multiplier: float
+    samples: int
+    mape: Optional[float] = None
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RentRecomputeOut(BaseModel):
+    property_id: int
+    market_rent_estimate: Optional[float]
+    section8_fmr: Optional[float]
+    rent_reasonableness_comp: Optional[float]
+    approved_rent_ceiling: Optional[float]
+    calibrated_market_rent: Optional[float]
+    strategy: str
+    rent_used: Optional[float]

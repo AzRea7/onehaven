@@ -1,162 +1,185 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from datetime import datetime
+from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Property, Deal, RentAssumption
-from ..clients.rentcast import RentcastClient
-from ..clients.hud_user import HudUserClient
-from .rent_enrich import router
+from ..models import Property, RentAssumption, RentComp, RentObservation, RentCalibration
+from ..schemas import (
+    RentAssumptionOut,
+    RentAssumptionUpsert,
+    RentCompsBatchIn,
+    RentCompOut,
+    RentCompsSummaryOut,
+    RentObservationCreate,
+    RentObservationOut,
+    RentCalibrationOut,
+    RentRecomputeOut,
+)
+from ..domain.rent_learning import (
+    get_or_create_rent_assumption,
+    summarize_comps,
+    update_calibration_from_observation,
+    recompute_rent_fields,
+)
 
 router = APIRouter(prefix="/rent", tags=["rent"])
 
 
-def _upsert_rent_assumption(
-    db: Session,
-    *,
-    property_id: int,
-    market_rent_estimate: Optional[float],
-    section8_fmr: Optional[float],
-) -> list[str]:
-    updated: list[str] = []
-    ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == property_id))
-
-    if ra is None:
-        ra = RentAssumption(property_id=property_id)
-        db.add(ra)
-
-    if market_rent_estimate is not None and ra.market_rent_estimate != market_rent_estimate:
-        ra.market_rent_estimate = market_rent_estimate
-        updated.append("market_rent_estimate")
-
-    if section8_fmr is not None and ra.section8_fmr != section8_fmr:
-        ra.section8_fmr = section8_fmr
-        updated.append("section8_fmr")
-
-    db.commit()
-    db.refresh(ra)
-    return updated
+@router.get("/{property_id}", response_model=RentAssumptionOut)
+def get_rent_assumption(property_id: int, db: Session = Depends(get_db)):
+    ra = db.execute(select(RentAssumption).where(RentAssumption.property_id == property_id)).scalar_one_or_none()
+    if not ra:
+        raise HTTPException(status_code=404, detail="rent assumption not found")
+    return ra
 
 
-def _entityid_from_rentcast_raw(raw: dict[str, Any]) -> Optional[str]:
-    """
-    RentCast comparables often include stateFips + countyFips.
-    We'll grab the first comparable and build:
-      entityid = stateFips(2) + countyFips(3) + "99999"
-    Example: 26 + 163 + 99999 => 2616399999
-    """
-    comps = raw.get("comparables")
-    if not isinstance(comps, list) or not comps:
-        return None
-
-    c0 = comps[0]
-    if not isinstance(c0, dict):
-        return None
-
-    state_fips = c0.get("stateFips")
-    county_fips = c0.get("countyFips")
-    if not (isinstance(state_fips, str) and isinstance(county_fips, str)):
-        return None
-
-    county_fips = county_fips.zfill(3)
-    return f"{state_fips}{county_fips}99999"
-
-
-@router.post("/enrich/batch")
-def enrich_batch(snapshot_id: int, limit: int = 50, db: Session = Depends(get_db)):
-    """
-    Batch enrich rents for a snapshot.
-    NOTE: This must be declared BEFORE /enrich/{property_id} to avoid route collision.
-    """
-    deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id).limit(limit)).all()  # type: ignore[attr-defined]
-    if not deals:
-        return {"snapshot_id": snapshot_id, "processed": 0, "updated": 0, "errors": []}
-
-    updated_count = 0
-    errors: list[dict[str, Any]] = []
-    processed = 0
-
-    for d in deals:
-        processed += 1
-        try:
-            _ = enrich_single(d.property_id, db=db)
-            if _ and isinstance(_, dict) and _.get("updated_fields"):
-                updated_count += 1
-        except Exception as e:
-            errors.append({"deal_id": getattr(d, "id", None), "property_id": d.property_id, "error": str(e)})
-
-    return {"snapshot_id": snapshot_id, "processed": processed, "updated": updated_count, "errors": errors}
-
-
-@router.post("/enrich/{property_id}")
-def enrich_single(property_id: int, db: Session = Depends(get_db)):
+@router.post("/{property_id}", response_model=RentAssumptionOut)
+def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db)):
     prop = db.get(Property, property_id)
     if not prop:
-        raise HTTPException(status_code=404, detail="Property not found")
+        raise HTTPException(status_code=404, detail="property not found")
 
-    rentcast = RentcastClient()
-    hud = HudUserClient()
+    ra = get_or_create_rent_assumption(db, property_id)
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(ra, k, v)
 
-    debug: dict[str, Any] = {"rentcast": None, "hud": None}
-    market_rent = None
-    section8_fmr = None
+    db.add(ra)
+    db.commit()
+    db.refresh(ra)
+    return ra
 
-    # ---- RentCast market rent ----
-    if rentcast.enabled():
-        rc = rentcast.estimate_long_term_rent(
-            address=prop.address,
-            city=prop.city,
-            state=prop.state,
-            zip_code=prop.zip,
-            bedrooms=prop.bedrooms,
-            bathrooms=float(prop.bathrooms),
-            square_feet=prop.square_feet,
+
+@router.post("/comps/{property_id}", response_model=RentCompsSummaryOut)
+def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = Depends(get_db)):
+    prop = db.get(Property, property_id)
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    ra = get_or_create_rent_assumption(db, property_id)
+
+    rents: List[float] = []
+    for c in payload.comps:
+        comp = RentComp(
+            property_id=property_id,
+            source=c.source,
+            address=c.address,
+            url=c.url,
+            rent=float(c.rent),
+            bedrooms=c.bedrooms,
+            bathrooms=c.bathrooms,
+            square_feet=c.square_feet,
+            notes=c.notes,
+            created_at=datetime.utcnow(),
         )
-        market_rent = rc.rent
-        debug["rentcast"] = {
-            "endpoint": f"{rentcast.base}/avm/rent/long-term",
-            "request": {
-                "address": prop.address,
-                "city": prop.city,
-                "state": prop.state,
-                "zip": prop.zip,
-                "bedrooms": prop.bedrooms,
-                "bathrooms": float(prop.bathrooms),
-                "square_feet": prop.square_feet,
-            },
-            "raw": rc.raw,
-        }
-    else:
-        debug["rentcast"] = {"error": "RentCast disabled (rentcast_api_key not set)"}
+        db.add(comp)
+        rents.append(float(c.rent))
 
-    # ---- HUD FMR (fallback path that avoids USPS endpoint) ----
-    if hud.enabled():
-        entityid = None
-        if isinstance(debug.get("rentcast"), dict):
-            raw = debug["rentcast"].get("raw")
-            if isinstance(raw, dict):
-                entityid = _entityid_from_rentcast_raw(raw)
+    summary = summarize_comps(rents)
 
-        if entityid:
-            hr = hud.fmr_by_entityid(entityid=entityid, bedrooms=prop.bedrooms)
-            section8_fmr = hr.fmr
-            debug["hud"] = {"entityid": entityid, "raw": hr.raw}
-        else:
-            debug["hud"] = {"error": "Could not derive HUD entityid from RentCast comparables"}
-    else:
-        debug["hud"] = {"error": "HUD disabled (hud_user_token not set)"}
+    # The key behavior: persist median into rent_reasonableness_comp
+    ra.rent_reasonableness_comp = summary.median_rent
+    db.add(ra)
 
-    updated_fields = _upsert_rent_assumption(db, property_id=property_id, market_rent_estimate=market_rent, section8_fmr=section8_fmr)
+    db.commit()
 
-    return {
-        "property_id": property_id,
-        "market_rent_estimate": market_rent,
-        "section8_fmr": section8_fmr,
-        "hud": debug["hud"],
-        "rentcast": debug["rentcast"],
-        "updated_fields": updated_fields,
-    }
+    return RentCompsSummaryOut(
+        property_id=property_id,
+        count=summary.count,
+        median_rent=summary.median_rent,
+        mean_rent=summary.mean_rent,
+        min_rent=summary.min_rent,
+        max_rent=summary.max_rent,
+    )
+
+
+@router.get("/comps/{property_id}", response_model=list[RentCompOut])
+def list_comps(property_id: int, db: Session = Depends(get_db)):
+    rows = db.execute(select(RentComp).where(RentComp.property_id == property_id).order_by(RentComp.created_at.desc())).scalars().all()
+    return rows
+
+
+@router.post("/observe", response_model=RentObservationOut)
+def add_rent_observation(payload: RentObservationCreate, db: Session = Depends(get_db)):
+    prop = db.get(Property, payload.property_id)
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    ra = get_or_create_rent_assumption(db, payload.property_id)
+
+    obs = RentObservation(
+        property_id=payload.property_id,
+        strategy=payload.strategy,
+        achieved_rent=float(payload.achieved_rent),
+        tenant_portion=payload.tenant_portion,
+        hap_portion=payload.hap_portion,
+        lease_start=payload.lease_start,
+        lease_end=payload.lease_end,
+        notes=payload.notes,
+        created_at=datetime.utcnow(),
+    )
+    db.add(obs)
+
+    # Update calibration using *current* market estimate as the predictor
+    update_calibration_from_observation(
+        db,
+        property_row=prop,
+        strategy=payload.strategy,
+        predicted_market_rent=ra.market_rent_estimate,
+        achieved_rent=float(payload.achieved_rent),
+    )
+
+    db.commit()
+    db.refresh(obs)
+    return obs
+
+
+@router.get("/calibration", response_model=list[RentCalibrationOut])
+def list_calibration(
+    zip: str | None = Query(default=None),
+    bedrooms: int | None = Query(default=None),
+    strategy: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    q = select(RentCalibration).order_by(RentCalibration.updated_at.desc())
+    if zip:
+        q = q.where(RentCalibration.zip == zip)
+    if bedrooms is not None:
+        q = q.where(RentCalibration.bedrooms == bedrooms)
+    if strategy:
+        q = q.where(RentCalibration.strategy == strategy)
+    return db.execute(q).scalars().all()
+
+
+@router.post("/recompute/{property_id}", response_model=RentRecomputeOut)
+def recompute(property_id: int, strategy: str = Query(default="section8"), payment_standard_pct: float | None = None, db: Session = Depends(get_db)):
+    try:
+        computed = recompute_rent_fields(db, property_id=property_id, strategy=strategy, payment_standard_pct=payment_standard_pct)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    ra = db.execute(select(RentAssumption).where(RentAssumption.property_id == property_id)).scalar_one_or_none()
+    if not ra:
+        raise HTTPException(status_code=404, detail="rent assumption not found")
+
+    # Persist approved ceiling (computed) only if none set manually
+    if ra.approved_rent_ceiling is None:
+        ra.approved_rent_ceiling = computed["approved_rent_ceiling"]
+        db.add(ra)
+        db.commit()
+        db.refresh(ra)
+
+    return RentRecomputeOut(
+        property_id=property_id,
+        market_rent_estimate=ra.market_rent_estimate,
+        section8_fmr=ra.section8_fmr,
+        rent_reasonableness_comp=ra.rent_reasonableness_comp,
+        approved_rent_ceiling=ra.approved_rent_ceiling,
+        calibrated_market_rent=computed["calibrated_market_rent"],
+        strategy=strategy,
+        rent_used=computed["rent_used"],
+    )
