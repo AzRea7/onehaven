@@ -26,6 +26,7 @@ from ..domain.rent_learning import (
     summarize_comps,
     update_calibration_from_observation,
     recompute_rent_fields,
+    compute_approved_ceiling,
 )
 
 router = APIRouter(prefix="/rent", tags=["rent"])
@@ -39,7 +40,6 @@ def get_rent_assumption(property_id: int, db: Session = Depends(get_db)):
     return ra
 
 
-# ✅ alias: your earlier curl used /rent/assumption/{id}
 @router.get("/assumption/{property_id}", response_model=RentAssumptionOut)
 def get_rent_assumption_alias(property_id: int, db: Session = Depends(get_db)):
     return get_rent_assumption(property_id=property_id, db=db)
@@ -61,7 +61,6 @@ def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: 
     return ra
 
 
-# ✅ alias POST route too
 @router.post("/assumption/{property_id}", response_model=RentAssumptionOut)
 def upsert_rent_assumption_alias(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db)):
     return upsert_rent_assumption(property_id=property_id, payload=payload, db=db)
@@ -94,10 +93,8 @@ def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = D
 
     summary = summarize_comps(rents)
 
-    # Persist median into rent_reasonableness_comp
     ra.rent_reasonableness_comp = summary.median_rent
     db.add(ra)
-
     db.commit()
 
     return RentCompsSummaryOut(
@@ -145,7 +142,6 @@ def add_rent_observation(payload: RentObservationCreate, db: Session = Depends(g
     )
     db.add(obs)
 
-    # Update calibration using *current* market estimate as the predictor
     update_calibration_from_observation(
         db,
         property_row=prop,
@@ -197,12 +193,16 @@ def recompute(
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
 
-    # Persist approved ceiling (computed) only if none set manually
+    # Persist computed approved ceiling only if user didn't manually override it.
     if ra.approved_rent_ceiling is None:
         ra.approved_rent_ceiling = computed["approved_rent_ceiling"]
-        db.add(ra)
-        db.commit()
-        db.refresh(ra)
+
+    # ALWAYS persist rent_used; underwriting consumes this.
+    ra.rent_used = computed["rent_used"]
+
+    db.add(ra)
+    db.commit()
+    db.refresh(ra)
 
     return RentRecomputeOut(
         property_id=property_id,
@@ -212,8 +212,9 @@ def recompute(
         approved_rent_ceiling=ra.approved_rent_ceiling,
         calibrated_market_rent=computed["calibrated_market_rent"],
         strategy=strategy,
-        rent_used=computed["rent_used"],
+        rent_used=ra.rent_used,
     )
+
 
 @router.get("/explain/{property_id}", response_model=RentExplainOut)
 def explain_rent(
@@ -228,38 +229,66 @@ def explain_rent(
 
     ra = get_or_create_rent_assumption(db, property_id)
 
-    constraints = []
-    caps = []
+    strategy = (strategy or "section8").strip().lower()
+    if strategy not in {"section8", "market"}:
+        strategy = "section8"
 
-    if ra.section8_fmr:
-        ps = ra.section8_fmr * payment_standard_pct
+    ceiling_candidates: list[dict] = []
+    caps: list[float] = []
+
+    # payment standard candidate (FMR * pct)
+    if ra.section8_fmr is not None and float(ra.section8_fmr) > 0:
+        ps = float(ra.section8_fmr) * float(payment_standard_pct)
         caps.append(ps)
-        constraints.append({"type": "payment_standard", "value": ps})
+        ceiling_candidates.append({"type": "payment_standard", "value": ps})
 
-    if ra.rent_reasonableness_comp:
-        caps.append(ra.rent_reasonableness_comp)
-        constraints.append({"type": "rent_reasonableness", "value": ra.rent_reasonableness_comp})
+    # rent reasonableness candidate (median comps)
+    if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
+        rr = float(ra.rent_reasonableness_comp)
+        caps.append(rr)
+        ceiling_candidates.append({"type": "rent_reasonableness", "value": rr})
 
-    ceiling = min(caps) if caps else None
-    ra.rent_used = ceiling
-    if ra.approved_rent_ceiling is None:
-        ra.approved_rent_ceiling = ceiling
+    computed_ceiling = min(caps) if caps else None
 
+    # approved ceiling: manual override wins
+    approved = (
+        float(ra.approved_rent_ceiling)
+        if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0
+        else computed_ceiling
+    )
+
+    market = float(ra.market_rent_estimate) if ra.market_rent_estimate is not None else None
+
+    if strategy == "market":
+        rent_used = market
+        explanation = "Market strategy uses the market rent estimate (no Section 8 ceiling cap applied)."
+    else:
+        # section8
+        if market is not None and approved is not None:
+            rent_used = float(min(market, approved))
+            explanation = "Section 8 strategy caps rent by the strictest limit (approved ceiling vs market estimate)."
+        elif approved is not None:
+            rent_used = approved
+            explanation = "Section 8 strategy: market estimate missing; using approved ceiling only."
+        else:
+            rent_used = market
+            explanation = "Section 8 strategy: ceiling missing; using market estimate only."
+
+    # persist computed fields (optional but useful for later)
+    ra.rent_used = rent_used
+    if ra.approved_rent_ceiling is None and approved is not None:
+        ra.approved_rent_ceiling = approved
     db.commit()
 
     return RentExplainOut(
         property_id=property_id,
         strategy=strategy,
-        inputs={
-            "market_rent_estimate": ra.market_rent_estimate,
-            "section8_fmr": ra.section8_fmr,
-            "payment_standard_pct": payment_standard_pct,
-            "rent_reasonableness_comp": ra.rent_reasonableness_comp,
-        },
-        constraints=constraints,
-        results={
-            "approved_rent_ceiling": ra.approved_rent_ceiling,
-            "rent_used": ra.rent_used,
-        },
-        explanation="Section 8 rent is bounded by payment standard and rent reasonableness. The strictest limit wins.",
+        market_rent_estimate=market,
+        section8_fmr=ra.section8_fmr,
+        rent_reasonableness_comp=ra.rent_reasonableness_comp,
+        approved_rent_ceiling=approved,
+        rent_used=rent_used,
+        explanation=explanation,
+        ceiling_candidates=ceiling_candidates,
     )
+

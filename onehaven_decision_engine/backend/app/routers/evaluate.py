@@ -1,3 +1,4 @@
+# backend/app/routers/evaluate.py
 from __future__ import annotations
 
 import json
@@ -22,10 +23,6 @@ def _rent_used_for_underwriting(
     d: Deal,
     ra: Optional[RentAssumption],
 ) -> Tuple[float, bool, list[str]]:
-    """
-    Picks rent to use for underwriting + returns whether it was estimated.
-    Returns: (rent_used, estimated_flag, notes)
-    """
     notes: list[str] = []
     strategy = (strategy or "section8").strip().lower()
 
@@ -83,7 +80,8 @@ def _rent_used_for_underwriting(
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
 def evaluate_snapshot(
     snapshot_id: int,
-    strategy: str = Query("section8", description="section8|market"),
+    # ✅ If provided, overrides per-deal strategy. If omitted, uses Deal.strategy.
+    strategy: Optional[str] = Query(default=None, description="section8|market (optional override)"),
     db: Session = Depends(get_db),
 ):
     deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id)).all()
@@ -102,7 +100,11 @@ def evaluate_snapshot(
 
             ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
 
-            gross_rent, estimated, rent_notes = _rent_used_for_underwriting(strategy=strategy, d=d, ra=ra)
+            deal_strategy = (strategy or getattr(d, "strategy", None) or "section8").strip().lower()
+            if deal_strategy not in {"section8", "market"}:
+                deal_strategy = "section8"
+
+            gross_rent, estimated, rent_notes = _rent_used_for_underwriting(strategy=deal_strategy, d=d, ra=ra)
 
             purchase_price = float(d.estimated_purchase_price or d.asking_price or 0.0)
             if purchase_price <= 0:
@@ -123,7 +125,7 @@ def evaluate_snapshot(
                 deal=d,
                 rent_assumption=ra,
                 underwriting=uw,
-                strategy=strategy,
+                strategy=deal_strategy,
             )
 
             reasons.extend(rent_notes)
@@ -177,7 +179,7 @@ def evaluate_snapshot(
 @router.post("/run", response_model=BatchEvalOut)
 def evaluate_run(
     snapshot_id: int = Query(...),
-    strategy: str = Query("section8", description="section8|market"),
+    strategy: Optional[str] = Query(default=None, description="section8|market (optional override)"),
     db: Session = Depends(get_db),
 ):
     return evaluate_snapshot(snapshot_id=snapshot_id, strategy=strategy, db=db)
@@ -198,6 +200,4 @@ def evaluate_results(
         q = q.where(UnderwritingResult.decision == decision)
 
     rows = db.scalars(q.limit(limit)).all()
-
-    # ✅ schema handles reasons_json coercion
     return [UnderwritingResultOut.model_validate(r) for r in rows]

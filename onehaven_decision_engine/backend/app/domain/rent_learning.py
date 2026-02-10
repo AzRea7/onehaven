@@ -50,29 +50,24 @@ def compute_approved_ceiling(
     approved_override: Optional[float] = None,
 ) -> Optional[float]:
     """
-    Conservative ceiling you can defend.
+    Operating truth:
+      approved_rent_ceiling = min(FMR * payment_standard_pct, median_local_comp)
 
-    v1 rule:
-      - If approved_override provided -> use it.
-      - Else start from fmr * payment_standard_pct (if fmr exists)
-      - If comps exist, ceiling = min(that, comps)
+    If one side is missing, ceiling falls back to the side that exists.
+    If approved_override is provided, it wins (manual override).
     """
     if approved_override is not None:
         return float(approved_override)
 
-    base: Optional[float] = None
+    candidates: list[float] = []
     if section8_fmr is not None:
-        base = float(section8_fmr) * float(payment_standard_pct)
-
-    if base is None:
-        # No FMR means we cannot compute an S8 ceiling (yet).
-        # You can still do market strategy though.
-        return None
-
+        candidates.append(float(section8_fmr) * float(payment_standard_pct))
     if rent_reasonableness_comp is not None:
-        return float(min(base, float(rent_reasonableness_comp)))
+        candidates.append(float(rent_reasonableness_comp))
 
-    return float(base)
+    if not candidates:
+        return None
+    return float(min(candidates))
 
 
 def get_calibration_multiplier(db: Session, *, zip_code: str, bedrooms: int, strategy: str) -> float:
@@ -103,12 +98,6 @@ def update_calibration_from_observation(
     predicted_market_rent: Optional[float],
     achieved_rent: float,
 ) -> RentCalibration:
-    """
-    “Learning” = calibrate RentCast (market) toward achieved rent per ZIP+bedrooms+strategy.
-
-    - If predicted_market_rent is missing, we still store the observation,
-      but we can’t update multiplier meaningfully.
-    """
     zip_code = property_row.zip
     bedrooms = property_row.bedrooms
 
@@ -134,16 +123,13 @@ def update_calibration_from_observation(
         db.flush()
 
     if predicted_market_rent and predicted_market_rent > 0:
-        # ratio > 1 => we were underestimating; ratio < 1 => we were overestimating
         ratio = float(achieved_rent) / float(predicted_market_rent)
 
         alpha = float(settings.rent_calibration_alpha)
         new_mult = (1 - alpha) * float(cal.multiplier) + alpha * float(ratio)
 
-        # clamp for safety
         new_mult = max(float(settings.rent_calibration_min_mult), min(float(settings.rent_calibration_max_mult), new_mult))
 
-        # MAPE update (approx EMA of abs percent error)
         abs_pe = abs(float(achieved_rent) - float(predicted_market_rent)) / float(predicted_market_rent)
         if cal.mape is None:
             cal.mape = abs_pe
@@ -166,10 +152,10 @@ def recompute_rent_fields(
     payment_standard_pct: Optional[float] = None,
 ) -> dict:
     """
-    Returns computed values for:
-      - approved_rent_ceiling
-      - calibrated_market_rent
-      - rent_used (strategy-dependent)
+    Computes:
+      - approved_rent_ceiling (policy ceiling)
+      - calibrated_market_rent (market estimate after calibration)
+      - rent_used (what underwriting consumes)
     """
     prop = db.get(Property, property_id)
     if not prop:
@@ -183,27 +169,29 @@ def recompute_rent_fields(
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
         payment_standard_pct=pct,
-        approved_override=ra.approved_rent_ceiling,  # if you manually set it, it wins
+        approved_override=ra.approved_rent_ceiling,
     )
 
     mult = get_calibration_multiplier(db, zip_code=prop.zip, bedrooms=prop.bedrooms, strategy=strategy)
     calibrated_market = apply_calibration(ra.market_rent_estimate, mult)
 
+    s = (strategy or "section8").strip().lower()
     rent_used: Optional[float] = None
-    if strategy == "market":
+
+    if s == "market":
         rent_used = calibrated_market
     else:
-        # section8
-        if calibrated_market is not None and approved is not None:
-            rent_used = float(min(calibrated_market, approved))
-        elif approved is not None:
-            rent_used = approved
-        else:
-            rent_used = calibrated_market
+        candidates: list[float] = []
+        if calibrated_market is not None:
+            candidates.append(float(calibrated_market))
+        if approved is not None:
+            candidates.append(float(approved))
+        rent_used = float(min(candidates)) if candidates else None
 
     return {
         "approved_rent_ceiling": approved,
         "calibrated_market_rent": calibrated_market,
         "rent_used": rent_used,
         "multiplier": mult,
+        "payment_standard_pct": pct,
     }

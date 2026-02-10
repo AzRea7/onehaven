@@ -1,3 +1,4 @@
+# backend/app/routers/deals.py
 from __future__ import annotations
 
 import json
@@ -5,12 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 
-
 from ..db import get_db
 from ..models import Deal, Property, RentAssumption, UnderwritingResult
 from ..schemas import DealCreate, DealOut, RentAssumptionUpsert, RentAssumptionOut, SurvivorOut
 
 router = APIRouter(prefix="/deals", tags=["deals"])
+
 
 @router.get("/survivors", response_model=list[SurvivorOut])
 def survivors(
@@ -21,8 +22,6 @@ def survivors(
     limit: int = 25,
     db: Session = Depends(get_db),
 ):
-    # Latest result per deal: easiest MVP approach is “max created_at”
-    # We'll join and filter; for production you'd do a window function.
     q = (
         select(Deal, Property, UnderwritingResult)
         .join(Property, Property.id == Deal.property_id)
@@ -60,13 +59,20 @@ def survivors(
 
     return out
 
+
 @router.post("", response_model=DealOut)
 def create_deal(payload: DealCreate, db: Session = Depends(get_db)):
     prop = db.get(Property, payload.property_id)
     if not prop:
         raise HTTPException(status_code=400, detail="Invalid property_id")
 
-    d = Deal(**payload.model_dump())
+    data = payload.model_dump()
+    data["strategy"] = (data.get("strategy") or "section8").strip().lower()
+
+    if data["strategy"] not in {"section8", "market"}:
+        raise HTTPException(status_code=400, detail="strategy must be 'section8' or 'market'")
+
+    d = Deal(**data)
     db.add(d)
     db.commit()
     db.refresh(d)

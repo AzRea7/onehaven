@@ -13,7 +13,9 @@ class Settings(BaseSettings):
     # ---- Deal rules defaults ----
     max_price: int = 150_000
     min_bedrooms: int = 2
-    min_inventory: int = 40
+
+    min_inventory: int | None = None
+
     rent_rule_min_pct: float = 0.013  # 1.3%
     rent_rule_target_pct: float = 0.015  # 1.5%
 
@@ -36,20 +38,18 @@ class Settings(BaseSettings):
     rent_calibration_alpha: float = 0.20
 
     # ✅ Back-compat for old env var / old field name (deprecated)
-    # If you had RENT_CALIBRATION_APHA set anywhere, we'll copy it into alpha.
     rent_calibration_apha: float | None = None
 
     rent_calibration_min_mult: float = 0.70
     rent_calibration_max_mult: float = 1.30
 
+    # Section 8 payment standard (PHA policy proxy)
     default_payment_standard_pct: float = 1.00
 
     # ---- External APIs ----
-    # HUD User API: you generate an access token on huduser.gov and pass it here
     hud_user_token: str | None = None
     hud_base_url: str = "https://www.huduser.gov/hudapi/public"
 
-    # RentCast API
     rentcast_api_key: str | None = None
     rentcast_base_url: str = "https://api.rentcast.io/v1"
 
