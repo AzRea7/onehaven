@@ -38,7 +38,7 @@ class BatchEvalOut(BaseModel):
     review_count: int
     reject_count: int
 
-    # ✅ NEW: report per-deal errors so endpoint always returns JSON
+    # report per-deal errors so endpoint always returns JSON
     errors: List[str] = Field(default_factory=list)
 
 
@@ -78,23 +78,35 @@ class PropertyCreate(BaseModel):
 
 class PropertyOut(PropertyCreate):
     id: int
+
+    # ✅ include nested objects in property response
+    rent_assumption: Optional["RentAssumptionOut"] = None
+    rent_comps: List["RentCompOut"] = Field(default_factory=list)
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class DealCreate(BaseModel):
     property_id: int
-    source: Optional[str] = None
     asking_price: float
     estimated_purchase_price: Optional[float] = None
     rehab_estimate: float = 0.0
+
     financing_type: str = "dscr"
     interest_rate: float = 0.07
     term_years: int = 30
     down_payment_pct: float = 0.20
 
+    # optional ingestion metadata
+    snapshot_id: Optional[int] = None
+    source_fingerprint: Optional[str] = None
+    source_raw_json: Optional[str] = None
+    source: Optional[str] = None
+
 
 class DealOut(DealCreate):
     id: int
+    created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -112,6 +124,10 @@ class RentAssumptionUpsert(BaseModel):
 class RentAssumptionOut(RentAssumptionUpsert):
     id: int
     property_id: int
+
+    # ✅ include created_at because your DB table has it and you will want it in API
+    created_at: Optional[datetime] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -131,7 +147,7 @@ class JurisdictionRuleOut(JurisdictionRuleUpsert):
     model_config = ConfigDict(from_attributes=True)
 
 
-# -------------------- Underwriting Results (CRITICAL FIX) --------------------
+# -------------------- Underwriting Results --------------------
 
 class UnderwritingResultOut(BaseModel):
     """
@@ -161,7 +177,6 @@ class UnderwritingResultOut(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _coerce_reasons(cls, data: Any) -> Any:
-        # --- Case 1: dict payload ---
         if isinstance(data, dict):
             if "reasons" in data and isinstance(data["reasons"], list):
                 return data
@@ -179,7 +194,6 @@ class UnderwritingResultOut(BaseModel):
                 data["reasons"] = [f"Failed to parse reasons_json: {rj!r}"]
             return data
 
-        # --- Case 2: ORM-ish object ---
         try:
             rj = getattr(data, "reasons_json", "[]")
         except Exception:
@@ -264,7 +278,7 @@ class ComplianceStatsOut(BaseModel):
     top_fail_points: List[dict]
 
 
-# -------------------- NEW: Rent Comps + Observations + Calibration --------------------
+# -------------------- Rent Comps + Observations + Calibration --------------------
 
 class RentCompCreate(BaseModel):
     rent: float
@@ -336,3 +350,7 @@ class RentRecomputeOut(BaseModel):
     calibrated_market_rent: Optional[float]
     strategy: str
     rent_used: Optional[float]
+
+
+# ✅ Important: rebuild forward refs so PropertyOut can include RentAssumptionOut/RentCompOut
+PropertyOut.model_rebuild()

@@ -38,6 +38,12 @@ def get_rent_assumption(property_id: int, db: Session = Depends(get_db)):
     return ra
 
 
+# ✅ alias: your earlier curl used /rent/assumption/{id}
+@router.get("/assumption/{property_id}", response_model=RentAssumptionOut)
+def get_rent_assumption_alias(property_id: int, db: Session = Depends(get_db)):
+    return get_rent_assumption(property_id=property_id, db=db)
+
+
 @router.post("/{property_id}", response_model=RentAssumptionOut)
 def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db)):
     prop = db.get(Property, property_id)
@@ -52,6 +58,12 @@ def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: 
     db.commit()
     db.refresh(ra)
     return ra
+
+
+# ✅ alias POST route too
+@router.post("/assumption/{property_id}", response_model=RentAssumptionOut)
+def upsert_rent_assumption_alias(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db)):
+    return upsert_rent_assumption(property_id=property_id, payload=payload, db=db)
 
 
 @router.post("/comps/{property_id}", response_model=RentCompsSummaryOut)
@@ -81,7 +93,7 @@ def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = D
 
     summary = summarize_comps(rents)
 
-    # The key behavior: persist median into rent_reasonableness_comp
+    # Persist median into rent_reasonableness_comp
     ra.rent_reasonableness_comp = summary.median_rent
     db.add(ra)
 
@@ -99,7 +111,15 @@ def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = D
 
 @router.get("/comps/{property_id}", response_model=list[RentCompOut])
 def list_comps(property_id: int, db: Session = Depends(get_db)):
-    rows = db.execute(select(RentComp).where(RentComp.property_id == property_id).order_by(RentComp.created_at.desc())).scalars().all()
+    rows = (
+        db.execute(
+            select(RentComp)
+            .where(RentComp.property_id == property_id)
+            .order_by(RentComp.created_at.desc(), RentComp.id.desc())
+        )
+        .scalars()
+        .all()
+    )
     return rows
 
 
@@ -156,9 +176,19 @@ def list_calibration(
 
 
 @router.post("/recompute/{property_id}", response_model=RentRecomputeOut)
-def recompute(property_id: int, strategy: str = Query(default="section8"), payment_standard_pct: float | None = None, db: Session = Depends(get_db)):
+def recompute(
+    property_id: int,
+    strategy: str = Query(default="section8"),
+    payment_standard_pct: float | None = None,
+    db: Session = Depends(get_db),
+):
     try:
-        computed = recompute_rent_fields(db, property_id=property_id, strategy=strategy, payment_standard_pct=payment_standard_pct)
+        computed = recompute_rent_fields(
+            db,
+            property_id=property_id,
+            strategy=strategy,
+            payment_standard_pct=payment_standard_pct,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
