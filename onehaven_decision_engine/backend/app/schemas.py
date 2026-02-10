@@ -1,3 +1,4 @@
+# backend/app/schemas.py
 from __future__ import annotations
 
 import json
@@ -79,7 +80,7 @@ class PropertyCreate(BaseModel):
 class PropertyOut(PropertyCreate):
     id: int
 
-    # ✅ include nested objects in property response
+    # include nested objects in property response
     rent_assumption: Optional["RentAssumptionOut"] = None
     rent_comps: List["RentCompOut"] = Field(default_factory=list)
 
@@ -117,6 +118,10 @@ class RentAssumptionUpsert(BaseModel):
     section8_fmr: Optional[float] = None
     approved_rent_ceiling: Optional[float] = None
     rent_reasonableness_comp: Optional[float] = None
+
+    # NOTE: models.py has rent_used now, but you typically don't let clients set it.
+    # If you DO want to expose it, add: rent_used: Optional[float] = None
+
     inventory_count: Optional[int] = None
     starbucks_minutes: Optional[int] = None
 
@@ -124,8 +129,6 @@ class RentAssumptionUpsert(BaseModel):
 class RentAssumptionOut(RentAssumptionUpsert):
     id: int
     property_id: int
-
-    # ✅ include created_at because your DB table has it and you will want it in API
     created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -223,7 +226,7 @@ class UnderwritingResultOut(BaseModel):
         }
 
 
-# -------------------- NEW: Compliance --------------------
+# -------------------- Compliance --------------------
 
 class InspectorUpsert(BaseModel):
     name: str
@@ -243,6 +246,62 @@ class InspectionCreate(BaseModel):
     reinspect_required: bool = False
     notes: Optional[str] = None
 
+# -------------------- NEW: Compliance Checklists --------------------
+
+class ChecklistItemOut(BaseModel):
+    """
+    A single checklist item (rule / requirement / inspection item).
+    This is an output schema only, used by /compliance routes.
+    """
+    code: str
+    title: str
+    description: Optional[str] = None
+
+    # status flags (UI-friendly)
+    required: bool = True
+    passed: bool = False
+    failed: bool = False
+    needs_review: bool = False
+
+    # optional evidence / notes
+    notes: Optional[str] = None
+    evidence: Optional[dict] = None  # room for debug payloads, source citations, etc.
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ChecklistOut(BaseModel):
+    """
+    A checklist for a property (or for a city/jurisdiction),
+    returned by /compliance endpoints.
+    """
+    property_id: int
+    city: Optional[str] = None
+    state: Optional[str] = None
+
+    checklist_name: str = "section8_compliance"
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    items: List[ChecklistItemOut] = Field(default_factory=list)
+
+    # summary stats for quick UI rendering
+    total: int = 0
+    passed: int = 0
+    failed: int = 0
+    needs_review: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def _compute_counts(self):
+        # If router didn't precompute totals, compute them here.
+        if self.items:
+            self.total = len(self.items)
+            self.passed = sum(1 for i in self.items if i.passed)
+            self.failed = sum(1 for i in self.items if i.failed)
+            self.needs_review = sum(1 for i in self.items if i.needs_review)
+        return self
+
 
 class InspectionOut(InspectionCreate):
     id: int
@@ -257,9 +316,38 @@ class InspectionItemCreate(BaseModel):
     details: Optional[str] = None
 
 
+class InspectionItemUpdate(BaseModel):
+    """
+    Generic patch/update for an inspection item.
+    Useful if you support editing severity/location/details later.
+    """
+    failed: Optional[bool] = None
+    severity: Optional[int] = Field(default=None, ge=1, le=5)
+    location: Optional[str] = None
+    details: Optional[str] = None
+    resolution_notes: Optional[str] = None
+
+
+class InspectionItemResolve(BaseModel):
+    """
+    This is the missing schema your router is trying to import.
+    Use this for a 'resolve' endpoint: mark item resolved with optional notes.
+    """
+    resolved: bool = Field(True, description="Set true to resolve, false to un-resolve")
+    resolution_notes: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+
+
 class InspectionItemOut(InspectionItemCreate):
     id: int
     inspection_id: int
+
+    # these exist in models.py now
+    resolved_at: Optional[datetime] = None
+    resolution_notes: Optional[str] = None
+
+    created_at: Optional[datetime] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -329,6 +417,43 @@ class RentObservationOut(RentObservationCreate):
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
+class RentExplainOut(BaseModel):
+    """
+    Human-readable explanation of how rent_used was chosen.
+
+    Intended for /rent/explain style endpoints that tell you:
+      - market estimate
+      - section8 FMR
+      - rent reasonableness comp
+      - approved ceiling
+      - strategy
+      - final rent_used
+    """
+    property_id: int
+    strategy: str
+
+    market_rent_estimate: Optional[float] = None
+    section8_fmr: Optional[float] = None
+    rent_reasonableness_comp: Optional[float] = None
+    approved_rent_ceiling: Optional[float] = None
+    rent_used: Optional[float] = None
+
+    # explanation text so UI can show it
+    explanation: str = ""
+
+    # optional: show how ceiling was computed
+    ceiling_candidates: List[dict] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RentExplainBatchOut(BaseModel):
+    snapshot_id: int
+    strategy: str
+    attempted: int
+    explained: int
+    errors: List[dict] = Field(default_factory=list)
+    model_config = ConfigDict(from_attributes=True)
 
 class RentCalibrationOut(BaseModel):
     zip: str
@@ -351,6 +476,5 @@ class RentRecomputeOut(BaseModel):
     strategy: str
     rent_used: Optional[float]
 
-
-# ✅ Important: rebuild forward refs so PropertyOut can include RentAssumptionOut/RentCompOut
+# Important: rebuild forward refs so PropertyOut can include RentAssumptionOut/RentCompOut
 PropertyOut.model_rebuild()

@@ -133,6 +133,7 @@ class RentObservation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
+    # section8 | market
     strategy: Mapped[str] = mapped_column(String(20), nullable=False)
 
     achieved_rent: Mapped[float] = mapped_column(Float, nullable=False)
@@ -161,6 +162,7 @@ class RentCalibration(Base):
     multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # mean absolute percent error (optional tracking)
     mape: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -218,7 +220,7 @@ class Inspector(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
-    agency: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    agency: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)  # housing commission, etc.
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -238,7 +240,6 @@ class Inspection(Base):
     reinspect_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     property: Mapped["Property"] = relationship(back_populates="inspections")
@@ -253,11 +254,12 @@ class InspectionItem(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     inspection_id: Mapped[int] = mapped_column(ForeignKey("inspections.id", ondelete="CASCADE"), nullable=False)
 
+    # “code” is your normalized fail point key: GFCI, HANDRAIL, OUTLET, PAINT, TRIP_HAZARD...
     code: Mapped[str] = mapped_column(String(80), nullable=False)
 
     failed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    severity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    location: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    severity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)  # 1..5
+    location: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)  # "Kitchen", "Basement", etc.
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # ✅ NEW: resolution tracking for root-cause analytics
@@ -274,20 +276,20 @@ class ImportSnapshot(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)  # investorlift | zillow
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     deals: Mapped[List["Deal"]] = relationship(back_populates="snapshot")
 
+
 class ApiUsage(Base):
     __tablename__ = "api_usage"
+    __table_args__ = (UniqueConstraint("provider", "day", name="uq_api_usage_provider_day"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g. "rentcast"
     day: Mapped[date] = mapped_column(Date, nullable=False)
     calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
-    __table_args__ = (UniqueConstraint("provider", "day", name="uq_api_usage_provider_day"),)
