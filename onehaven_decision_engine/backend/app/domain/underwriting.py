@@ -58,6 +58,7 @@ def _finite(x: float, *, fallback: float) -> float:
 
 
 def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> UnderwritingOutputs:
+    # NOTE: keep your original behavior: down payment based on ALL-IN cost
     all_in_cost = float(inp.purchase_price) + float(inp.rehab)
     down_payment = all_in_cost * float(inp.down_payment_pct)
     loan_amount = max(all_in_cost - down_payment, 0.0)
@@ -91,7 +92,11 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
     else:
         cash_on_cash = 999.0  # finite sentinel
 
-    a = (1.0 - float(inp.vacancy_rate)) - (float(inp.maintenance_rate) + float(inp.management_rate) + float(inp.capex_rate))
+    # cash_flow = rent * a - b, where:
+    # a = (1-vacancy) - (maintenance+management+capex), b = fixed_opex + mortgage
+    a = (1.0 - float(inp.vacancy_rate)) - (
+        float(inp.maintenance_rate) + float(inp.management_rate) + float(inp.capex_rate)
+    )
     b = fixed_opex + mortgage_payment
 
     if a > 1e-6:
@@ -126,7 +131,12 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
 
 
 def underwrite(
-    asking_price: float,
+    *,
+    # ✅ NEW: accept purchase_price (what evaluate.py uses)
+    purchase_price: Optional[float] = None,
+    # ✅ Back-compat: old name (your existing code used asking_price)
+    asking_price: Optional[float] = None,
+
     down_payment_pct: float,
     interest_rate: float,
     term_years: int,
@@ -136,18 +146,38 @@ def underwrite(
     insurance_monthly: Optional[float] = None,
     utilities_monthly: Optional[float] = None,
 ) -> UnderwritingOutputs:
+    """
+    Backward compatible wrapper.
+
+    - New callers should pass purchase_price=...
+    - Old callers can pass asking_price=...
+    """
     vacancy_rate = float(getattr(settings, "vacancy_rate", 0.05))
     maintenance_rate = float(getattr(settings, "maintenance_rate", 0.10))
     management_rate = float(getattr(settings, "management_rate", 0.08))
     capex_rate = float(getattr(settings, "capex_rate", 0.05))
     target_roi = float(getattr(settings, "target_roi", 0.15))
 
-    taxes_monthly = float(taxes_monthly) if taxes_monthly is not None else float(getattr(settings, "taxes_monthly_default", 0.0))
-    insurance_monthly = float(insurance_monthly) if insurance_monthly is not None else float(getattr(settings, "insurance_monthly_default", 0.0))
-    utilities_monthly = float(utilities_monthly) if utilities_monthly is not None else float(getattr(settings, "utilities_monthly_default", 0.0))
+    taxes_monthly = float(taxes_monthly) if taxes_monthly is not None else float(
+        getattr(settings, "taxes_monthly_default", 0.0)
+    )
+    insurance_monthly = float(insurance_monthly) if insurance_monthly is not None else float(
+        getattr(settings, "insurance_monthly_default", 0.0)
+    )
+    utilities_monthly = float(utilities_monthly) if utilities_monthly is not None else float(
+        getattr(settings, "utilities_monthly_default", 0.0)
+    )
+
+    # ✅ choose canonical price
+    if purchase_price is not None:
+        pp = float(purchase_price)
+    elif asking_price is not None:
+        pp = float(asking_price)
+    else:
+        raise ValueError("underwrite(): must provide purchase_price or asking_price")
 
     inp = UnderwritingInputs(
-        purchase_price=float(asking_price),
+        purchase_price=float(pp),
         rehab=float(rehab_estimate or 0.0),
         down_payment_pct=float(down_payment_pct),
         interest_rate=float(interest_rate),

@@ -24,19 +24,13 @@ def _rent_used_for_underwriting(
 ) -> Tuple[float, bool, list[str]]:
     """
     Picks rent to use for underwriting + returns whether it was estimated.
-
-    Goals:
-      - Strategy-aware rent selection.
-      - Section 8: cap by approved_rent_ceiling (safe) when available.
-      - Market: use market_rent_estimate only (no cap).
-      - If missing data, fall back to 1.3% heuristic => mark estimated=True.
     Returns: (rent_used, estimated_flag, notes)
     """
     notes: list[str] = []
     strategy = (strategy or "section8").strip().lower()
 
-    market = None
-    ceiling = None
+    market: Optional[float] = None
+    ceiling: Optional[float] = None
 
     if ra is not None:
         try:
@@ -45,7 +39,6 @@ def _rent_used_for_underwriting(
         except Exception:
             market = None
 
-        # Prefer approved_rent_ceiling. If not present, compute a conservative fallback.
         try:
             if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
                 ceiling = float(ra.approved_rent_ceiling)
@@ -59,11 +52,9 @@ def _rent_used_for_underwriting(
         except Exception:
             ceiling = None
 
-    # Strategy selection
     if strategy == "market":
         if market is not None:
             return market, False, notes
-        # fallback
         asking = float(d.asking_price or 0.0)
         est = asking * 0.013
         notes.append("Market strategy missing market rent; fell back to 1.3% heuristic")
@@ -78,7 +69,7 @@ def _rent_used_for_underwriting(
 
     if market is None:
         notes.append("Section 8 strategy missing market rent; using ceiling only")
-        return float(ceiling), False, notes
+        return float(ceiling), False, notes  # type: ignore[arg-type]
 
     if ceiling is None:
         notes.append("Section 8 strategy missing ceiling; using market rent only")
@@ -100,72 +91,78 @@ def evaluate_snapshot(
     pass_count = 0
     review_count = 0
     reject_count = 0
+    errors: list[str] = []
 
     for d in deals:
-        p = db.scalar(select(Property).where(Property.id == d.property_id))
-        if not p:
-            continue
+        try:
+            p = db.scalar(select(Property).where(Property.id == d.property_id))
+            if not p:
+                errors.append(f"deal_id={d.id}: missing property_id={d.property_id}")
+                continue
 
-        ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
+            ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
 
-        gross_rent, estimated, rent_notes = _rent_used_for_underwriting(strategy=strategy, d=d, ra=ra)
+            gross_rent, estimated, rent_notes = _rent_used_for_underwriting(strategy=strategy, d=d, ra=ra)
 
-        # Underwrite (math layer)
-        uw = underwrite(
-            asking_price=float(d.asking_price),
-            down_payment_pct=float(d.down_payment_pct or 0.20),
-            interest_rate=float(d.interest_rate or 0.07),
-            term_years=int(d.term_years or 30),
-            gross_rent=float(gross_rent),
-            rehab_estimate=float(d.rehab_estimate or 0.0),
-        )
+            purchase_price = float(d.estimated_purchase_price or d.asking_price or 0.0)
+            if purchase_price <= 0:
+                errors.append(f"deal_id={d.id}: invalid purchase_price={purchase_price}")
+                continue
 
-        # Decision engine (rules/scoring)
-        decision, score, reasons = score_and_decide(
-            property=p,
-            deal=d,
-            rent_assumption=ra,
-            underwriting=uw,
-            strategy=strategy,
-        )
+            uw = underwrite(
+                purchase_price=purchase_price,
+                gross_rent=float(gross_rent),
+                interest_rate=float(d.interest_rate),
+                term_years=int(d.term_years),
+                down_payment_pct=float(d.down_payment_pct),
+                rehab_estimate=float(d.rehab_estimate or 0.0),
+            )
 
-        # Add rent selection notes (explainable)
-        for n in rent_notes:
-            reasons.append(n)
+            decision, score, reasons = score_and_decide(
+                property=p,
+                deal=d,
+                rent_assumption=ra,
+                underwriting=uw,
+                strategy=strategy,
+            )
 
-        # If rent was estimated, never allow PASS (force REVIEW)
-        if estimated and decision == "PASS":
-            decision = "REVIEW"
-            reasons.append("Rent was estimated from 1.3% heuristic; verify with comps/FMR/ceiling before PASS")
+            reasons.extend(rent_notes)
 
-        # Store result (upsert)
-        existing = db.scalar(select(UnderwritingResult).where(UnderwritingResult.deal_id == d.id))
-        if not existing:
-            existing = UnderwritingResult(deal_id=d.id)
-            db.add(existing)
+            if estimated and decision == "PASS":
+                decision = "REVIEW"
+                reasons.append("Rent was estimated from 1.3% heuristic; verify with comps/FMR/ceiling before PASS")
 
-        existing.decision = decision
-        existing.score = int(score)
-        existing.reasons_json = json.dumps(reasons)
+            existing = db.scalar(select(UnderwritingResult).where(UnderwritingResult.deal_id == d.id))
+            if not existing:
+                existing = UnderwritingResult(deal_id=d.id)
+                db.add(existing)
 
-        existing.gross_rent_used = float(gross_rent)
-        existing.mortgage_payment = float(uw.mortgage_payment)
-        existing.operating_expenses = float(uw.operating_expenses)
-        existing.noi = float(uw.noi)
-        existing.cash_flow = float(uw.cash_flow)
-        existing.dscr = float(uw.dscr)
-        existing.cash_on_cash = float(uw.cash_on_cash)
-        existing.break_even_rent = float(uw.break_even_rent)
-        existing.min_rent_for_target_roi = float(uw.min_rent_for_target_roi)
+            existing.decision = decision
+            existing.score = int(score)
+            existing.reasons_json = json.dumps(reasons)
 
-        db.commit()
+            existing.gross_rent_used = float(gross_rent)
+            existing.mortgage_payment = float(uw.mortgage_payment)
+            existing.operating_expenses = float(uw.operating_expenses)
+            existing.noi = float(uw.noi)
+            existing.cash_flow = float(uw.cash_flow)
+            existing.dscr = float(uw.dscr)
+            existing.cash_on_cash = float(uw.cash_on_cash)
+            existing.break_even_rent = float(uw.break_even_rent)
+            existing.min_rent_for_target_roi = float(uw.min_rent_for_target_roi)
 
-        if decision == "PASS":
-            pass_count += 1
-        elif decision == "REVIEW":
-            review_count += 1
-        else:
-            reject_count += 1
+            db.commit()
+
+            if decision == "PASS":
+                pass_count += 1
+            elif decision == "REVIEW":
+                review_count += 1
+            else:
+                reject_count += 1
+
+        except Exception as e:
+            db.rollback()
+            errors.append(f"deal_id={getattr(d, 'id', '?')}: {type(e).__name__}: {e}")
 
     return BatchEvalOut(
         snapshot_id=snapshot_id,
@@ -173,10 +170,9 @@ def evaluate_snapshot(
         pass_count=pass_count,
         review_count=review_count,
         reject_count=reject_count,
+        errors=errors,
     )
 
-
-# ---- Compatibility aliases for your curl workflow ----
 
 @router.post("/run", response_model=BatchEvalOut)
 def evaluate_run(
@@ -184,7 +180,6 @@ def evaluate_run(
     strategy: str = Query("section8", description="section8|market"),
     db: Session = Depends(get_db),
 ):
-    # allows: POST /evaluate/run?snapshot_id=4&strategy=section8
     return evaluate_snapshot(snapshot_id=snapshot_id, strategy=strategy, db=db)
 
 
@@ -196,10 +191,13 @@ def evaluate_results(
     db: Session = Depends(get_db),
 ):
     q = select(UnderwritingResult).join(Deal, Deal.id == UnderwritingResult.deal_id)
+
     if snapshot_id is not None:
         q = q.where(Deal.snapshot_id == snapshot_id)
     if decision is not None:
         q = q.where(UnderwritingResult.decision == decision)
 
     rows = db.scalars(q.limit(limit)).all()
+
+    # ✅ schema handles reasons_json coercion
     return [UnderwritingResultOut.model_validate(r) for r in rows]

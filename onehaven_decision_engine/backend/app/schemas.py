@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+import json
 from datetime import datetime
+from typing import Optional, List, Any
 
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+
+
+# -------------------- Imports / Snapshots --------------------
 
 class ImportSnapshotOut(BaseModel):
     id: int
     source: str
     notes: Optional[str] = None
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ImportErrorRow(BaseModel):
@@ -26,12 +29,17 @@ class ImportResultOut(BaseModel):
     errors: list[ImportErrorRow]
 
 
+# -------------------- Evaluation / Survivors --------------------
+
 class BatchEvalOut(BaseModel):
     snapshot_id: int
     total_deals: int
     pass_count: int
     review_count: int
     reject_count: int
+
+    # ✅ NEW: report per-deal errors so endpoint always returns JSON
+    errors: List[str] = Field(default_factory=list)
 
 
 class SurvivorOut(BaseModel):
@@ -50,9 +58,10 @@ class SurvivorOut(BaseModel):
     gross_rent_used: float
     asking_price: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
+
+# -------------------- Properties / Deals --------------------
 
 class PropertyCreate(BaseModel):
     address: str
@@ -69,8 +78,7 @@ class PropertyCreate(BaseModel):
 
 class PropertyOut(PropertyCreate):
     id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DealCreate(BaseModel):
@@ -87,9 +95,10 @@ class DealCreate(BaseModel):
 
 class DealOut(DealCreate):
     id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
+
+# -------------------- Rent Assumptions / Jurisdiction --------------------
 
 class RentAssumptionUpsert(BaseModel):
     market_rent_estimate: Optional[float] = None
@@ -103,8 +112,7 @@ class RentAssumptionUpsert(BaseModel):
 class RentAssumptionOut(RentAssumptionUpsert):
     id: int
     property_id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class JurisdictionRuleUpsert(BaseModel):
@@ -120,16 +128,22 @@ class JurisdictionRuleUpsert(BaseModel):
 
 class JurisdictionRuleOut(JurisdictionRuleUpsert):
     id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
+
+# -------------------- Underwriting Results (CRITICAL FIX) --------------------
 
 class UnderwritingResultOut(BaseModel):
+    """
+    DB stores reasons_json (TEXT) while API wants reasons: List[str].
+    This schema safely accepts dicts OR ORM rows and will never throw on bad JSON.
+    """
+
     id: int
     deal_id: int
     decision: str
     score: int
-    reasons: List[str]
+    reasons: List[str] = Field(default_factory=list)
 
     gross_rent_used: float
     mortgage_payment: float
@@ -142,8 +156,57 @@ class UnderwritingResultOut(BaseModel):
     break_even_rent: float
     min_rent_for_target_roi: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_reasons(cls, data: Any) -> Any:
+        # --- Case 1: dict payload ---
+        if isinstance(data, dict):
+            if "reasons" in data and isinstance(data["reasons"], list):
+                return data
+
+            rj = data.get("reasons_json")
+            if rj is None:
+                if "reasons" in data and isinstance(data["reasons"], str):
+                    data["reasons"] = [data["reasons"]]
+                return data
+
+            try:
+                parsed = json.loads(rj) if isinstance(rj, str) else []
+                data["reasons"] = parsed if isinstance(parsed, list) else [str(parsed)]
+            except Exception:
+                data["reasons"] = [f"Failed to parse reasons_json: {rj!r}"]
+            return data
+
+        # --- Case 2: ORM-ish object ---
+        try:
+            rj = getattr(data, "reasons_json", "[]")
+        except Exception:
+            rj = "[]"
+
+        try:
+            parsed = json.loads(rj) if isinstance(rj, str) else []
+            reasons = parsed if isinstance(parsed, list) else [str(parsed)]
+        except Exception:
+            reasons = [f"Failed to parse reasons_json: {rj!r}"]
+
+        return {
+            "id": getattr(data, "id"),
+            "deal_id": getattr(data, "deal_id"),
+            "decision": getattr(data, "decision"),
+            "score": getattr(data, "score"),
+            "reasons": reasons,
+            "gross_rent_used": getattr(data, "gross_rent_used"),
+            "mortgage_payment": getattr(data, "mortgage_payment"),
+            "operating_expenses": getattr(data, "operating_expenses"),
+            "noi": getattr(data, "noi"),
+            "cash_flow": getattr(data, "cash_flow"),
+            "dscr": getattr(data, "dscr"),
+            "cash_on_cash": getattr(data, "cash_on_cash"),
+            "break_even_rent": getattr(data, "break_even_rent"),
+            "min_rent_for_target_roi": getattr(data, "min_rent_for_target_roi"),
+        }
 
 
 # -------------------- NEW: Compliance --------------------
@@ -155,8 +218,7 @@ class InspectorUpsert(BaseModel):
 
 class InspectorOut(InspectorUpsert):
     id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class InspectionCreate(BaseModel):
@@ -170,8 +232,7 @@ class InspectionCreate(BaseModel):
 
 class InspectionOut(InspectionCreate):
     id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class InspectionItemCreate(BaseModel):
@@ -185,15 +246,14 @@ class InspectionItemCreate(BaseModel):
 class InspectionItemOut(InspectionItemCreate):
     id: int
     inspection_id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PredictFailPointsOut(BaseModel):
     city: str
     inspector: Optional[str] = None
     window_inspections: int
-    top_fail_points: List[dict]  # [{"code":"GFCI","count":7,"rate":0.35}, ...]
+    top_fail_points: List[dict]
 
 
 class ComplianceStatsOut(BaseModel):
@@ -202,6 +262,9 @@ class ComplianceStatsOut(BaseModel):
     pass_rate: float
     reinspect_rate: float
     top_fail_points: List[dict]
+
+
+# -------------------- NEW: Rent Comps + Observations + Calibration --------------------
 
 class RentCompCreate(BaseModel):
     rent: float
@@ -218,9 +281,7 @@ class RentCompOut(RentCompCreate):
     id: int
     property_id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RentCompsBatchIn(BaseModel):
@@ -252,9 +313,7 @@ class RentObservationCreate(BaseModel):
 class RentObservationOut(RentObservationCreate):
     id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RentCalibrationOut(BaseModel):
@@ -265,9 +324,7 @@ class RentCalibrationOut(BaseModel):
     samples: int
     mape: Optional[float] = None
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RentRecomputeOut(BaseModel):

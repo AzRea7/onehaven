@@ -32,7 +32,12 @@ class Settings(BaseSettings):
     dscr_min: float = 1.20
     dscr_penalty_enabled: bool = True
 
-    rent_calibration_apha: float = 0.20
+    # ✅ Correct spelling
+    rent_calibration_alpha: float = 0.20
+
+    # ✅ Back-compat for old env var / old field name (deprecated)
+    # If you had RENT_CALIBRATION_APHA set anywhere, we'll copy it into alpha.
+    rent_calibration_apha: float | None = None
 
     rent_calibration_min_mult: float = 0.70
     rent_calibration_max_mult: float = 1.30
@@ -47,6 +52,11 @@ class Settings(BaseSettings):
     # RentCast API
     rentcast_api_key: str | None = None
     rentcast_base_url: str = "https://api.rentcast.io/v1"
+
+    def model_post_init(self, __context) -> None:
+        # If someone used the misspelled config, keep the app running.
+        if self.rent_calibration_apha is not None:
+            object.__setattr__(self, "rent_calibration_alpha", float(self.rent_calibration_apha))
 
 
 settings = Settings()
