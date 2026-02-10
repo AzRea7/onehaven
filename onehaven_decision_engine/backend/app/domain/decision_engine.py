@@ -1,9 +1,9 @@
-# onehaven_decision_engine/backend/app/domain/decision_engine.py
+# backend/app/domain/decision_engine.py
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Optional, List, Any, Tuple
+from typing import Optional, List, Any
 
 from ..config import settings
 
@@ -15,8 +15,8 @@ class DealContext:
     has_garage: bool
 
     rent_market: Optional[float]
-    rent_ceiling: Optional[float]
-    inventory_count: Optional[int]
+    rent_ceiling: Optional[float]   # should be your *safe* cap (approved_rent_ceiling preferred)
+    inventory_count: Optional[int]  # kept for analytics only (NOT a deal killer)
     starbucks_minutes: Optional[int]
 
 
@@ -28,6 +28,11 @@ class Decision:
 
 
 def _rent_used(rent_market: Optional[float], rent_ceiling: Optional[float]) -> Optional[float]:
+    """
+    Rent used for rule checks:
+      - if we have both market and a ceiling, use min(market, ceiling)
+      - else fall back to whichever exists
+    """
     if rent_market is None and rent_ceiling is None:
         return None
     if rent_market is None:
@@ -39,8 +44,10 @@ def _rent_used(rent_market: Optional[float], rent_ceiling: Optional[float]) -> O
 
 def evaluate_deal_rules(ctx: DealContext) -> Decision:
     """
-    Your fast "reject bad deals" rules layer.
-    This is intentionally deterministic and explainable.
+    Deterministic, explainable scoring.
+    Key updates:
+      - Inventory is NOT a reject/penalty gate anymore.
+      - Market rent can exceed HUD FMR; we use rent_ceiling (approved_rent_ceiling) to cap.
     """
     reasons: list[str] = []
     score = 50
@@ -57,37 +64,31 @@ def evaluate_deal_rules(ctx: DealContext) -> Decision:
 
     rent = _rent_used(ctx.rent_market, ctx.rent_ceiling)
     if rent is None:
-        reasons.append("Missing rent inputs (need market rent and/or FMR/ceiling)")
+        reasons.append("Missing rent inputs (need market rent and/or safe ceiling)")
         score -= 20
     else:
         min_rent = ctx.asking_price * settings.rent_rule_min_pct
         target_rent = ctx.asking_price * settings.rent_rule_target_pct
 
+        # Hard gate (you can relax later if you want REVIEW instead)
         if rent < min_rent:
-            return Decision("REJECT", 0, [f"Fails 1.3% rule: rent {rent:.0f} < {min_rent:.0f}"])
+            return Decision("REJECT", 0, [f"Fails rent rule: rent_used {rent:.0f} < min {min_rent:.0f}"])
 
         if rent >= target_rent:
             score += 15
-            reasons.append("Meets 1.5% target rent rule")
+            reasons.append("Meets target rent rule")
         else:
             score += 5
-            reasons.append("Meets 1.3% minimum rent rule")
+            reasons.append("Meets minimum rent rule")
 
-    # If market rent > Section 8 ceiling, you're capped.
+    # Explain capping (small penalty only)
     if ctx.rent_ceiling is not None and ctx.rent_market is not None and ctx.rent_market > ctx.rent_ceiling:
-        reasons.append("Market rent exceeds Section 8 ceiling (rent will be capped)")
-        score -= 5
+        reasons.append("Market rent above conservative Section 8 ceiling (we cap rent_used)")
+        score -= 3
 
-    if ctx.inventory_count is None:
-        reasons.append("Missing inventory count proxy")
-        score -= 5
-    else:
-        if ctx.inventory_count < settings.min_inventory:
-            reasons.append(f"Inventory proxy low ({ctx.inventory_count} < {settings.min_inventory})")
-            score -= 15
-        else:
-            reasons.append("Inventory proxy healthy")
-            score += 10
+    # Inventory is NO LONGER used for scoring gates.
+    if ctx.inventory_count is not None:
+        reasons.append(f"Inventory proxy recorded (snapshot count): {ctx.inventory_count}")
 
     if ctx.starbucks_minutes is not None:
         if ctx.starbucks_minutes <= 10:
@@ -123,43 +124,30 @@ def reasons_from_json(s: str) -> list[str]:
     return []
 
 
-# ✅ Router-compatible entrypoint
 def score_and_decide(*args: Any, **kwargs: Any):
     """
-    Your routers/evaluate.py currently calls:
-
-        decision, score, reasons = score_and_decide(
-            property=p,
-            deal=d,
-            rent_assumption=ra,
-            underwriting=uw,
-        )
-
-    But older code called score_and_decide(ctx: DealContext) -> Decision.
-
-    This function supports BOTH, to keep your router stable.
+    Supports BOTH call patterns:
+      A) score_and_decide(ctx: DealContext) -> Decision
+      B) score_and_decide(property=..., deal=..., rent_assumption=..., underwriting=...) -> (decision, score, reasons)
     """
 
-    # --- Mode A: score_and_decide(ctx)
+    # --- Mode A
     if len(args) == 1 and isinstance(args[0], DealContext):
-        dec = evaluate_deal_rules(args[0])
-        return dec
+        return evaluate_deal_rules(args[0])
 
-    # --- Mode B: score_and_decide(property=..., deal=..., rent_assumption=..., underwriting=...)
+    # --- Mode B
     prop = kwargs.get("property")
     deal = kwargs.get("deal")
     ra = kwargs.get("rent_assumption")
     uw = kwargs.get("underwriting")
 
-    # Required for meaningful decision
     asking_price = float(getattr(deal, "asking_price", 0.0) or 0.0)
     bedrooms = int(getattr(prop, "bedrooms", 0) or 0)
     has_garage = bool(getattr(prop, "has_garage", False) or False)
 
-    # Market rent: RentCast estimate typically lands here
     rent_market = getattr(ra, "market_rent_estimate", None)
 
-    # Ceiling: the most restrictive of the "gov constraints"
+    # Prefer approved_rent_ceiling first (this is the “safe cap” we compute in enrichment)
     ceiling_candidates = []
     for field in ("approved_rent_ceiling", "rent_reasonableness_comp", "section8_fmr"):
         v = getattr(ra, field, None)
@@ -190,7 +178,7 @@ def score_and_decide(*args: Any, **kwargs: Any):
     score = dec.score
     reasons = list(dec.reasons)
 
-    # Underwriting gates (DSCR / cashflow) = “regulated distributed system” constraints
+    # Optional underwriting gates
     min_dscr = float(getattr(settings, "min_dscr", 1.10))
     min_cashflow = float(getattr(settings, "min_cashflow", 400.0))
 

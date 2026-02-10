@@ -10,6 +10,7 @@ from ..db import get_db
 from ..models import Property, Deal, RentAssumption
 from ..clients.rentcast import RentcastClient
 from ..clients.hud_user import HudUserClient
+from .rent_enrich import router
 
 router = APIRouter(prefix="/rent", tags=["rent"])
 

@@ -1,16 +1,16 @@
-# backend/app/routers/evaluate.py
+# onehaven_decision_engine/backend/app/routers/evaluate.py
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Deal, Property, RentAssumption, UnderwritingResult
-from ..schemas import BatchEvalOut, SurvivorOut
+from ..schemas import BatchEvalOut, UnderwritingResultOut
 from ..domain.decision_engine import score_and_decide
 from ..domain.underwriting import underwrite
 
@@ -18,40 +18,37 @@ router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
 
 def _inventory_proxy(db: Session, snapshot_id: int, city: str, state: str) -> int:
-    cnt = db.scalar(
-        select(func.count(Deal.id))
+    # Simple proxy: count of deals in same city/state for this snapshot
+    # (acts like “inventory density” until you plug real MLS/market counts)
+    q = (
+        select(Deal)
         .join(Property, Property.id == Deal.property_id)
         .where(Deal.snapshot_id == snapshot_id)
         .where(Property.city == city)
         .where(Property.state == state)
     )
-    return int(cnt or 0)
+    return len(db.scalars(q).all())
 
 
 def _gross_rent_used(d: Deal, p: Property, ra: Optional[RentAssumption]) -> tuple[float, bool]:
     """
-    Returns (gross_rent_used, was_estimated).
+    Picks the best available rent for underwriting.
     Priority:
-      1) approved_rent_ceiling
-      2) rent_reasonableness_comp
-      3) section8_fmr
-      4) market_rent_estimate
-      5) fallback estimate from 1.3% rule
+      1) market_rent_estimate
+      2) section8_fmr
+      3) 1.3% rule estimate (price * 0.013)
+    Returns: (rent, estimated_flag)
     """
-    candidates = []
-    if ra:
-        for v in [ra.approved_rent_ceiling, ra.rent_reasonableness_comp, ra.section8_fmr, ra.market_rent_estimate]:
-            if v is not None and v > 0:
-                candidates.append(float(v))
+    if ra is not None:
+        if ra.market_rent_estimate is not None and ra.market_rent_estimate > 0:
+            return float(ra.market_rent_estimate), False
+        if ra.section8_fmr is not None and ra.section8_fmr > 0:
+            return float(ra.section8_fmr), False
 
-    if candidates:
-        return min(candidates), False
-
-    # Fallback: 1.3% rule rent estimate
-    if d.asking_price and d.asking_price > 0:
-        return float(d.asking_price) * 0.013, True
-
-    return 0.0, True
+    # fallback estimate
+    asking = float(d.asking_price or 0.0)
+    est = asking * 0.013
+    return float(est), True
 
 
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
@@ -70,7 +67,6 @@ def evaluate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
         ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
 
         # Ensure inventory proxy exists even if not filled yet
-        inv = None
         if ra and ra.inventory_count is not None:
             inv = ra.inventory_count
         else:
@@ -143,3 +139,28 @@ def evaluate_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
         review_count=review_count,
         reject_count=reject_count,
     )
+
+
+# ---- Compatibility aliases for your curl workflow ----
+
+@router.post("/run", response_model=BatchEvalOut)
+def evaluate_run(snapshot_id: int = Query(...), db: Session = Depends(get_db)):
+    # allows: POST /evaluate/run?snapshot_id=4
+    return evaluate_snapshot(snapshot_id=snapshot_id, db=db)
+
+
+@router.get("/results", response_model=List[UnderwritingResultOut])
+def evaluate_results(
+    decision: Optional[str] = Query(None, description="PASS|REVIEW|REJECT"),
+    snapshot_id: Optional[int] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    q = select(UnderwritingResult).join(Deal, Deal.id == UnderwritingResult.deal_id)
+    if snapshot_id is not None:
+        q = q.where(Deal.snapshot_id == snapshot_id)
+    if decision is not None:
+        q = q.where(UnderwritingResult.decision == decision)
+
+    rows = db.scalars(q.limit(limit)).all()
+    return [UnderwritingResultOut.model_validate(r) for r in rows]

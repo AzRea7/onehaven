@@ -31,7 +31,6 @@ def _get_or_create_property(db: Session, n) -> Property:
         )
     )
     if p:
-        # Update sparse fields if missing
         if p.bedrooms is None and n.bedrooms is not None:
             p.bedrooms = n.bedrooms
         if p.bathrooms is None and n.bathrooms is not None:
@@ -65,17 +64,11 @@ def _get_or_create_property(db: Session, n) -> Property:
 
 
 def _upsert_rent(db: Session, property_id: int, n) -> None:
-    """
-    IMPORTANT CHANGE:
-    Always ensure a RentAssumption row exists so we can backfill inventory_count,
-    then later add FMR / comps / etc.
-    """
     ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == property_id))
     if not ra:
         ra = RentAssumption(property_id=property_id)
         db.add(ra)
 
-    # Only overwrite if provided (so later enrichments don’t get nuked)
     if n.market_rent_estimate is not None:
         ra.market_rent_estimate = n.market_rent_estimate
     if n.section8_fmr is not None:
@@ -93,10 +86,6 @@ def _upsert_rent(db: Session, property_id: int, n) -> None:
 
 
 def _backfill_inventory_counts_from_snapshot(db: Session, snapshot_id: int) -> None:
-    """
-    Inventory proxy = count of deals in this snapshot per (city,state).
-    This gives you the “inventory >= 80” filter ability even before MLS/InvestorLift scale.
-    """
     rows = db.execute(
         select(Property.city, Property.state, func.count(Deal.id))
         .join(Deal, Deal.property_id == Property.id)
@@ -120,7 +109,6 @@ def _backfill_inventory_counts_from_snapshot(db: Session, snapshot_id: int) -> N
             ra = RentAssumption(property_id=p.id)
             db.add(ra)
 
-        # Only fill if empty
         if ra.inventory_count is None:
             ra.inventory_count = inv
 
@@ -129,7 +117,6 @@ def _backfill_inventory_counts_from_snapshot(db: Session, snapshot_id: int) -> N
 
 def _read_csv_rows(file: UploadFile) -> list[dict[str, str]]:
     content = file.file.read()
-    # try utf-8-sig to handle BOM
     text = content.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
     return [dict(row) for row in reader]
@@ -147,7 +134,7 @@ def _import_rows(db: Session, source: str, rows: list[dict[str, str]], notes: st
 
     normalizer = normalize_investorlift if source == "investorlift" else normalize_zillow
 
-    for idx, row in enumerate(rows, start=2):  # start=2 because header row is 1
+    for idx, row in enumerate(rows, start=2):
         try:
             n = normalizer(row)
             prop = _get_or_create_property(db, n)
@@ -177,7 +164,6 @@ def _import_rows(db: Session, source: str, rows: list[dict[str, str]], notes: st
             db.commit()
             db.refresh(d)
 
-            # IMPORTANT: always create/update RentAssumption row
             _upsert_rent(db, prop.id, n)
 
             imported += 1
@@ -185,7 +171,6 @@ def _import_rows(db: Session, source: str, rows: list[dict[str, str]], notes: st
         except Exception as e:
             errors.append(ImportErrorRow(row=idx, error=str(e)))
 
-    # IMPORTANT: snapshot-level backfill
     _backfill_inventory_counts_from_snapshot(db, snap.id)
 
     return ImportResultOut(
@@ -215,3 +200,25 @@ def import_investorlift(
 ):
     rows = _read_csv_rows(file)
     return _import_rows(db, "investorlift", rows, notes)
+
+
+@router.get("/status")
+def import_status(snapshot_id: int = Query(...), db: Session = Depends(get_db)):
+    snap = db.scalar(select(ImportSnapshot).where(ImportSnapshot.id == snapshot_id))
+    if snap is None:
+        return {"snapshot_id": snapshot_id, "exists": False}
+
+    deal_count = db.scalar(select(func.count()).select_from(Deal).where(Deal.snapshot_id == snapshot_id)) or 0
+    distinct_props = (
+        db.scalar(select(func.count(func.distinct(Deal.property_id))).where(Deal.snapshot_id == snapshot_id)) or 0
+    )
+
+    return {
+        "snapshot_id": snapshot_id,
+        "exists": True,
+        "source": snap.source,
+        "notes": snap.notes,
+        "created_at": snap.created_at,
+        "deal_count": int(deal_count),
+        "distinct_property_count": int(distinct_props),
+    }

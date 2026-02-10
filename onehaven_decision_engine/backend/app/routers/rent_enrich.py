@@ -1,3 +1,4 @@
+# backend/app/routers/rent_enrich.py
 from __future__ import annotations
 
 import json
@@ -5,16 +6,16 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Iterable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db
-from ..models import Property, RentAssumption
+from ..models import Deal, Property, RentAssumption
 
 router = APIRouter(prefix="/rent", tags=["rent"])
 
@@ -27,12 +28,22 @@ class RentEnrichOut(BaseModel):
     market_rent_estimate: Optional[float] = None
     section8_fmr: Optional[float] = None
 
-    # Where the numbers came from (debuggable “audit trail”)
+    # New: conservative “rent reasonableness” proxy & safe ceiling
+    rent_reasonableness_comp: Optional[float] = None
+    approved_rent_ceiling: Optional[float] = None
+
+    # Debug payloads
     hud: dict[str, Any] = Field(default_factory=dict)
     rentcast: dict[str, Any] = Field(default_factory=dict)
 
-    # What we updated in DB
     updated_fields: list[str] = Field(default_factory=list)
+
+
+class RentEnrichBatchOut(BaseModel):
+    snapshot_id: int
+    attempted: int
+    enriched: int
+    errors: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------- Small HTTP helper ----------------------------
@@ -54,25 +65,20 @@ def _http_get_json(url: str, headers: dict[str, str], timeout_s: int = 20) -> Ht
                 payload = {"_raw": raw}
             return HttpResp(status=int(resp.status), data=payload)
     except Exception as e:
-        # urllib errors are inconsistent; wrap into a consistent shape
         return HttpResp(status=0, data={"error": str(e), "url": url})
 
 
-# ---------------------------- HUD USER clients ----------------------------
+# ---------------------------- HUD FMR client (no USPS) ----------------------------
 
 class HudUserClient:
     """
-    Uses:
-      - USPS Crosswalk API (ZIP -> County GEOID) via type=2 zip-county
-      - FMR API (county entityid -> FMR by bedroom)
+    Uses HUD USER FMR API only:
+      Base URL: https://www.huduser.gov/hudapi/public/fmr
+      Endpoint: fmr/data/{entityid}  (optional ?year=YYYY)
 
-    USPS docs show:
-      base: https://www.huduser.gov/hudapi/public/usps
-      params: type (required), query (required)
-      zip-county is type=2 and query is 5-digit ZIP :contentReference[oaicite:3]{index=3}
+    We DO NOT call the USPS endpoint (it can 403 depending on token/dataset access).
+    We derive the county entityid from RentCast comparables (stateFips + countyFips).
     """
-
-    USPS_BASE = "https://www.huduser.gov/hudapi/public/usps"
     FMR_BASE = "https://www.huduser.gov/hudapi/public/fmr"
 
     def __init__(self, token: str):
@@ -80,83 +86,7 @@ class HudUserClient:
             raise ValueError("HUD_USER_TOKEN is missing")
         self._headers = {"Authorization": f"Bearer {token}"}
 
-    def zip_to_primary_county_geoid(self, zip5: str) -> dict[str, Any]:
-        """
-        Returns best county GEOID (5 digits: stateFIPS+countyFIPS) by max residential ratio.
-        HUD USPS returns an array of results with ratios; we pick the county with highest res_ratio.
-
-        NOTE: USPS response field names vary by type; for zip-county it includes a county geoid. :contentReference[oaicite:4]{index=4}
-        """
-        zip5 = (zip5 or "").strip()[:5]
-        if len(zip5) != 5 or not zip5.isdigit():
-            raise ValueError(f"Invalid ZIP: {zip5!r}")
-
-        qs = urllib.parse.urlencode({"type": 2, "query": zip5})
-        url = f"{self.USPS_BASE}?{qs}"
-
-        resp = _http_get_json(url, self._headers)
-        if resp.status != 200:
-            raise RuntimeError(f"HUD USPS zip->county failed (status={resp.status}): {resp.data}")
-
-        # HUD examples show data is inside "data" (sometimes array), but USPS docs show "data":[{...}] :contentReference[oaicite:5]{index=5}
-        payload = resp.data
-        data = payload.get("data") if isinstance(payload, dict) else payload
-        if not data:
-            raise RuntimeError(f"HUD USPS zip->county empty response: {payload}")
-
-        # Most HUD endpoints wrap as a list with a single object containing "results"
-        if isinstance(data, list) and data and isinstance(data[0], dict) and "results" in data[0]:
-            results = data[0].get("results") or []
-            meta = {k: v for k, v in data[0].items() if k != "results"}
-        elif isinstance(data, dict) and "results" in data:
-            results = data.get("results") or []
-            meta = {k: v for k, v in data.items() if k != "results"}
-        else:
-            # fallback: sometimes results are directly "results"
-            results = payload.get("results") if isinstance(payload, dict) else []
-            meta = {}
-
-        if not isinstance(results, list) or not results:
-            raise RuntimeError(f"HUD USPS zip->county has no results: {payload}")
-
-        def _res_ratio(x: dict[str, Any]) -> float:
-            v = x.get("res_ratio", 0) or 0
-            try:
-                return float(v)
-            except Exception:
-                return 0.0
-
-        best = max((r for r in results if isinstance(r, dict)), key=_res_ratio)
-        geoid = best.get("geoid") or best.get("county")  # depending on HUD fields
-        if not geoid:
-            raise RuntimeError(f"HUD USPS zip->county missing geoid: best={best}")
-
-        geoid = str(geoid).strip()
-        if len(geoid) != 5 or not geoid.isdigit():
-            # County GEOID should be 5 digits (state+county) :contentReference[oaicite:6]{index=6}
-            raise RuntimeError(f"Unexpected county GEOID format: {geoid!r} (best={best})")
-
-        return {
-            "zip": zip5,
-            "county_geoid_5": geoid,
-            "picked": best,
-            "meta": meta,
-            "all_results_count": len(results),
-        }
-
-    @staticmethod
-    def county_geoid_to_fmr_entityid(county_geoid_5: str) -> str:
-        """
-        HUD FMR county entity IDs are commonly the 5-digit county GEOID + '99999'.
-        Example in HUD docs: listCounties shows fips_code like '5100199999' (county 51001 + 99999). :contentReference[oaicite:7]{index=7}
-        """
-        county_geoid_5 = str(county_geoid_5).strip()
-        return f"{county_geoid_5}99999"
-
-    def fmr_for_county_entityid(self, entityid: str, year: Optional[int] = None) -> dict[str, Any]:
-        """
-        Calls: /fmr/data/{entityid}?year=YYYY (year optional; default is latest) :contentReference[oaicite:8]{index=8}
-        """
+    def fmr_for_entityid(self, entityid: str, year: Optional[int] = None) -> dict[str, Any]:
         entityid = str(entityid).strip()
         if not entityid:
             raise ValueError("entityid missing")
@@ -178,14 +108,7 @@ class HudUserClient:
 
     @staticmethod
     def pick_bedroom_fmr(fmr_data: dict[str, Any], bedrooms: int) -> Optional[float]:
-        """
-        HUD FMR "basicdata" may be:
-          - dict with keys "One-Bedroom", "Two-Bedroom", ... :contentReference[oaicite:9]{index=9}
-          - list when smallarea_status=1 (ZIP-level SAFMR), but MI usually isn't SAFMR; we still guard.
-        """
         b = int(bedrooms or 0)
-
-        # Clamp “reasonable” bedroom counts to HUD keys
         if b <= 0:
             key = "Efficiency"
         elif b == 1:
@@ -199,7 +122,6 @@ class HudUserClient:
 
         basic = fmr_data.get("basicdata")
 
-        # Standard county FMR shape: dict
         if isinstance(basic, dict):
             val = basic.get(key)
             try:
@@ -207,9 +129,8 @@ class HudUserClient:
             except Exception:
                 return None
 
-        # SAFMR shape: list of dicts with zip_code rows :contentReference[oaicite:10]{index=10}
+        # SAFMR list shape (rare for MI but guard anyway)
         if isinstance(basic, list):
-            # Prefer “MSA level” if available; otherwise just take the first row.
             row = None
             for r in basic:
                 if isinstance(r, dict) and str(r.get("zip_code", "")).lower() == "msa level":
@@ -217,7 +138,6 @@ class HudUserClient:
                     break
             if row is None and basic and isinstance(basic[0], dict):
                 row = basic[0]
-
             if row:
                 val = row.get(key)
                 try:
@@ -231,16 +151,6 @@ class HudUserClient:
 # ---------------------------- RentCast client ----------------------------
 
 class RentCastClient:
-    """
-    RentCast rent estimate endpoint:
-      GET https://api.rentcast.io/v1/avm/rent/long-term :contentReference[oaicite:11]{index=11}
-
-    Auth header is not fully visible in the clipped doc view, so we attempt both common styles:
-      - X-Api-Key: <key>
-      - Authorization: Bearer <key>
-    (One will succeed; if both fail you’ll see the status + body in error.)
-    """
-
     BASE = "https://api.rentcast.io/v1/avm/rent/long-term"
 
     def __init__(self, api_key: str):
@@ -248,8 +158,17 @@ class RentCastClient:
             raise ValueError("RENTCAST_API_KEY is missing")
         self.api_key = api_key
 
-    def rent_estimate(self, *, address: str, city: str, state: str, zip_code: str,
-                      bedrooms: int, bathrooms: float, square_feet: Optional[int]) -> dict[str, Any]:
+    def rent_estimate(
+        self,
+        *,
+        address: str,
+        city: str,
+        state: str,
+        zip_code: str,
+        bedrooms: int,
+        bathrooms: float,
+        square_feet: Optional[int],
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "address": address,
             "city": city,
@@ -264,12 +183,12 @@ class RentCastClient:
         qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         url = f"{self.BASE}?{qs}"
 
-        # Try header style #1
+        # Try X-Api-Key first (common)
         resp1 = _http_get_json(url, {"X-Api-Key": self.api_key})
         if resp1.status == 200:
             return resp1.data if isinstance(resp1.data, dict) else {"data": resp1.data}
 
-        # Try header style #2
+        # Try Authorization: Bearer fallback
         resp2 = _http_get_json(url, {"Authorization": f"Bearer {self.api_key}"})
         if resp2.status == 200:
             return resp2.data if isinstance(resp2.data, dict) else {"data": resp2.data}
@@ -282,41 +201,95 @@ class RentCastClient:
 
     @staticmethod
     def pick_estimated_rent(payload: dict[str, Any]) -> Optional[float]:
-        """
-        RentCast response typically includes an estimated rent value plus comps.
-        Because response fields can evolve, we robustly check common keys.
-        """
         if not isinstance(payload, dict):
             return None
-
-        # Common patterns in AVM APIs
-        for key in ["rent", "rentEstimate", "estimatedRent", "price", "value"]:
+        for key in ["rent", "rentEstimate", "estimatedRent", "value"]:
             if key in payload:
                 try:
                     return float(payload[key])
                 except Exception:
                     pass
+        return None
 
-        # Sometimes nested
-        for path in [("data", "rent"), ("data", "rentEstimate"), ("data", "estimatedRent")]:
-            cur: Any = payload
-            ok = True
-            for p in path:
-                if isinstance(cur, dict) and p in cur:
-                    cur = cur[p]
-                else:
-                    ok = False
-                    break
-            if ok:
+    @staticmethod
+    def _extract_comp_rents(payload: dict[str, Any]) -> list[float]:
+        """
+        Pull comparable rents from RentCast response (best-effort).
+        RentCast comparables items usually have "price" (rent).
+        """
+        out: list[float] = []
+        comps = payload.get("comparables")
+        if not isinstance(comps, list):
+            return out
+
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            for k in ("price", "rent", "rentEstimate", "value"):
+                v = c.get(k)
+                if v is None:
+                    continue
                 try:
-                    return float(cur)
+                    fv = float(v)
+                    if fv > 0:
+                        out.append(fv)
+                        break
                 except Exception:
-                    pass
+                    continue
+        return out
+
+    @staticmethod
+    def _median(xs: list[float]) -> Optional[float]:
+        if not xs:
+            return None
+        ys = sorted(xs)
+        n = len(ys)
+        mid = n // 2
+        if n % 2 == 1:
+            return float(ys[mid])
+        return float((ys[mid - 1] + ys[mid]) / 2.0)
+
+    @staticmethod
+    def pick_rent_reasonableness_proxy(payload: dict[str, Any]) -> Optional[float]:
+        """
+        Conservative “rent reasonableness” proxy:
+          median(comparable rents)
+        If comps missing, fall back to the AVM rent itself (less ideal, but keeps pipeline flowing).
+        """
+        if not isinstance(payload, dict):
+            return None
+        comps = RentCastClient._extract_comp_rents(payload)
+        med = RentCastClient._median(comps)
+        if med is not None:
+            return med
+        return RentCastClient.pick_estimated_rent(payload)
+
+    @staticmethod
+    def derive_hud_entityid_from_comps(payload: dict[str, Any]) -> Optional[str]:
+        """
+        Build HUD FMR county entityid:
+          stateFips(2) + countyFips(3) + '99999'
+        Uses first comparable that contains both fields.
+        """
+        comps = payload.get("comparables")
+        if not isinstance(comps, list) or not comps:
+            return None
+
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            st = str(c.get("stateFips") or "").strip()
+            co = str(c.get("countyFips") or "").strip()
+            if not (st.isdigit() and co.isdigit()):
+                continue
+            st = st.zfill(2)
+            co = co.zfill(3)
+            return f"{st}{co}99999"
 
         return None
 
 
-# ---------------------------- Enrichment logic ----------------------------
+# ---------------------------- DB helpers ----------------------------
 
 def _get_or_create_rent_assumption(db: Session, property_id: int) -> RentAssumption:
     ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == property_id))
@@ -328,18 +301,7 @@ def _get_or_create_rent_assumption(db: Session, property_id: int) -> RentAssumpt
     return ra
 
 
-@router.post("/enrich/{property_id}", response_model=RentEnrichOut)
-def enrich_rent(property_id: int, db: Session = Depends(get_db)):
-    """
-    One-shot enrichment endpoint:
-      - RentCast -> market_rent_estimate
-      - HUD USPS (ZIP->county) + HUD FMR (county->FMR) -> section8_fmr
-
-    This makes your “Rent math” deterministic and auditable:
-      - Market rent is a measured input (RentCast AVM + comps payload)
-      - Section 8 ceiling is a measured input (HUD FMR by bedroom)
-      - Underwriting can safely take min(...) or whichever priority you defined
-    """
+def _enrich_one(db: Session, property_id: int) -> RentEnrichOut:
     prop = db.get(Property, property_id)
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
@@ -350,7 +312,9 @@ def enrich_rent(property_id: int, db: Session = Depends(get_db)):
     hud_debug: dict[str, Any] = {}
     rentcast_debug: dict[str, Any] = {}
 
-    # --- RentCast market rent ---
+    rc_payload: Optional[dict[str, Any]] = None
+
+    # ---- RentCast market rent + RR proxy ----
     try:
         rc = RentCastClient(getattr(settings, "rentcast_api_key", "") or "")
         rc_payload = rc.rent_estimate(
@@ -358,10 +322,11 @@ def enrich_rent(property_id: int, db: Session = Depends(get_db)):
             city=prop.city,
             state=prop.state,
             zip_code=prop.zip,
-            bedrooms=prop.bedrooms,
-            bathrooms=prop.bathrooms,
+            bedrooms=int(prop.bedrooms or 0),
+            bathrooms=float(prop.bathrooms or 0),
             square_feet=prop.square_feet,
         )
+
         rentcast_debug = {
             "endpoint": RentCastClient.BASE,
             "request": {
@@ -369,51 +334,74 @@ def enrich_rent(property_id: int, db: Session = Depends(get_db)):
                 "city": prop.city,
                 "state": prop.state,
                 "zip": prop.zip,
-                "bedrooms": prop.bedrooms,
-                "bathrooms": prop.bathrooms,
+                "bedrooms": int(prop.bedrooms or 0),
+                "bathrooms": float(prop.bathrooms or 0),
                 "square_feet": prop.square_feet,
             },
             "raw": rc_payload,
         }
 
-        est = rc.pick_estimated_rent(rc_payload)
-        if est is not None and est > 0:
-            ra.market_rent_estimate = float(est)
-            updated_fields.append("market_rent_estimate")
+        est_market = rc.pick_estimated_rent(rc_payload)
+        if est_market is not None and est_market > 0:
+            if ra.market_rent_estimate != float(est_market):
+                ra.market_rent_estimate = float(est_market)
+                updated_fields.append("market_rent_estimate")
+
+        rr_proxy = rc.pick_rent_reasonableness_proxy(rc_payload)
+        if rr_proxy is not None and rr_proxy > 0:
+            # Store into your existing column
+            if ra.rent_reasonableness_comp != float(rr_proxy):
+                ra.rent_reasonableness_comp = float(rr_proxy)
+                updated_fields.append("rent_reasonableness_comp")
+
     except Exception as e:
         rentcast_debug = {"error": str(e)}
 
-    # --- HUD FMR by bedroom (ZIP -> county -> entityid -> FMR) ---
+    # ---- HUD FMR (derive entityid from RentCast comps) ----
     try:
         hud = HudUserClient(getattr(settings, "hud_user_token", "") or "")
+        if not isinstance(rc_payload, dict):
+            raise RuntimeError("HUD FMR requires RentCast payload to derive county FIPS (no USPS crosswalk).")
 
-        # Step 1: ZIP -> primary county GEOID (5 digits), by highest res_ratio
-        zip_meta = hud.zip_to_primary_county_geoid(prop.zip)
+        entityid = RentCastClient.derive_hud_entityid_from_comps(rc_payload)
+        if not entityid:
+            raise RuntimeError("Could not derive HUD entityid from RentCast comparables (missing stateFips/countyFips).")
 
-        # Step 2: county GEOID -> FMR entityid
-        entityid = hud.county_geoid_to_fmr_entityid(zip_meta["county_geoid_5"])
-
-        # Step 3: call FMR
-        fmr_data = hud.fmr_for_county_entityid(entityid)
-
-        # Step 4: pick correct bedroom bucket
-        fmr_value = hud.pick_bedroom_fmr(fmr_data, prop.bedrooms)
+        fmr_data = hud.fmr_for_entityid(entityid)
+        fmr_value = hud.pick_bedroom_fmr(fmr_data, int(prop.bedrooms or 0))
 
         hud_debug = {
-            "usps": zip_meta,
-            "fmr": {
-                "entityid": entityid,
-                "raw": fmr_data,
-                "bedrooms": prop.bedrooms,
-                "picked_value": fmr_value,
-            },
+            "entityid": entityid,
+            "bedrooms": int(prop.bedrooms or 0),
+            "picked_value": fmr_value,
+            "raw": fmr_data,
         }
 
         if fmr_value is not None and fmr_value > 0:
-            ra.section8_fmr = float(fmr_value)
-            updated_fields.append("section8_fmr")
+            if ra.section8_fmr != float(fmr_value):
+                ra.section8_fmr = float(fmr_value)
+                updated_fields.append("section8_fmr")
+
     except Exception as e:
         hud_debug = {"error": str(e)}
+
+    # ---- Compute conservative “approved_rent_ceiling” (your Section 8 safe cap) ----
+    # This is the number you should feed into Section 8 underwriting/eval, not raw market rent.
+    try:
+        ceiling_candidates: list[float] = []
+        if ra.section8_fmr is not None and float(ra.section8_fmr) > 0:
+            ceiling_candidates.append(float(ra.section8_fmr))
+        if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
+            ceiling_candidates.append(float(ra.rent_reasonableness_comp))
+
+        new_ceiling = min(ceiling_candidates) if ceiling_candidates else None
+        if new_ceiling is not None and new_ceiling > 0:
+            if ra.approved_rent_ceiling != float(new_ceiling):
+                ra.approved_rent_ceiling = float(new_ceiling)
+                updated_fields.append("approved_rent_ceiling")
+    except Exception:
+        # Keep enrichment resilient; don't fail the whole request.
+        pass
 
     if updated_fields:
         db.commit()
@@ -423,7 +411,50 @@ def enrich_rent(property_id: int, db: Session = Depends(get_db)):
         property_id=property_id,
         market_rent_estimate=ra.market_rent_estimate,
         section8_fmr=ra.section8_fmr,
+        rent_reasonableness_comp=ra.rent_reasonableness_comp,
+        approved_rent_ceiling=ra.approved_rent_ceiling,
         hud=hud_debug,
         rentcast=rentcast_debug,
         updated_fields=updated_fields,
     )
+
+
+# ---------------------------- ROUTES ----------------------------
+# IMPORTANT: batch must appear before /enrich/{property_id}
+
+@router.post("/enrich/batch", response_model=RentEnrichBatchOut)
+def enrich_rent_batch(
+    snapshot_id: int = Query(...),
+    limit: int = Query(50, ge=1, le=500),
+    sleep_ms: int = Query(0, ge=0, le=5000),
+    db: Session = Depends(get_db),
+):
+    deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id).limit(limit)).all()
+
+    # distinct property ids preserving order
+    seen: set[int] = set()
+    pids: list[int] = []
+    for d in deals:
+        if d.property_id not in seen:
+            seen.add(d.property_id)
+            pids.append(d.property_id)
+
+    enriched = 0
+    errors: list[dict[str, Any]] = []
+
+    for pid in pids:
+        try:
+            _enrich_one(db, pid)
+            enriched += 1
+        except Exception as e:
+            errors.append({"property_id": pid, "error": str(e)})
+
+        if sleep_ms:
+            time.sleep(sleep_ms / 1000.0)
+
+    return RentEnrichBatchOut(snapshot_id=snapshot_id, attempted=len(pids), enriched=enriched, errors=errors)
+
+
+@router.post("/enrich/{property_id}", response_model=RentEnrichOut)
+def enrich_rent(property_id: int, db: Session = Depends(get_db)):
+    return _enrich_one(db, property_id)

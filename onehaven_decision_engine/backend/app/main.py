@@ -10,6 +10,8 @@ from .routers.evaluate import router as evaluate_router
 from .routers.inspections import router as inspections_router
 from .routers.imports import router as imports_router
 from .routers.rent_enrich import router as rent_enrich_router  # ✅ NEW
+from .routers.imports_alias import router as imports_alias_router  # ✅ NEW
+from .routers.rent import router as rent_router
 
 app = FastAPI(
     title="Decision Engine for Regulated Residential Cash-Flow Assets",
@@ -23,4 +25,6 @@ app.include_router(jurisdictions_router)
 app.include_router(evaluate_router)
 app.include_router(inspections_router)
 app.include_router(imports_router)
-app.include_router(rent_enrich_router)  # ✅ NEW
+app.include_router(rent_enrich_router)  
+app.include_router(imports_alias_router)  # ✅ NEW
+app.include_router(rent_router)  
