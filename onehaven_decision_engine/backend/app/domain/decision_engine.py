@@ -1,8 +1,9 @@
+# onehaven_decision_engine/backend/app/domain/decision_engine.py
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Any, Tuple
 
 from ..config import settings
 
@@ -38,10 +39,8 @@ def _rent_used(rent_market: Optional[float], rent_ceiling: Optional[float]) -> O
 
 def evaluate_deal_rules(ctx: DealContext) -> Decision:
     """
-    Deterministic rule engine for deal triage (PASS/REVIEW/REJECT).
-
-    This is intentionally not the full underwriting engine (DSCR, CoC, etc.).
-    It's your 'Deal Intake & Scoring' module: reject bad deals early.
+    Your fast "reject bad deals" rules layer.
+    This is intentionally deterministic and explainable.
     """
     reasons: list[str] = []
     score = 50
@@ -74,6 +73,7 @@ def evaluate_deal_rules(ctx: DealContext) -> Decision:
             score += 5
             reasons.append("Meets 1.3% minimum rent rule")
 
+    # If market rent > Section 8 ceiling, you're capped.
     if ctx.rent_ceiling is not None and ctx.rent_market is not None and ctx.rent_market > ctx.rent_ceiling:
         reasons.append("Market rent exceeds Section 8 ceiling (rent will be capped)")
         score -= 5
@@ -109,15 +109,6 @@ def evaluate_deal_rules(ctx: DealContext) -> Decision:
     return Decision(decision, score, reasons)
 
 
-# ✅ Compatibility wrapper for routers that import score_and_decide
-def score_and_decide(ctx: DealContext) -> Decision:
-    """
-    Backwards-compatible entrypoint used by routers/evaluate.py.
-    Keeps the router stable while we evolve internals.
-    """
-    return evaluate_deal_rules(ctx)
-
-
 def reasons_to_json(reasons: list[str]) -> str:
     return json.dumps(reasons, ensure_ascii=False)
 
@@ -130,3 +121,90 @@ def reasons_from_json(s: str) -> list[str]:
     except Exception:
         pass
     return []
+
+
+# ✅ Router-compatible entrypoint
+def score_and_decide(*args: Any, **kwargs: Any):
+    """
+    Your routers/evaluate.py currently calls:
+
+        decision, score, reasons = score_and_decide(
+            property=p,
+            deal=d,
+            rent_assumption=ra,
+            underwriting=uw,
+        )
+
+    But older code called score_and_decide(ctx: DealContext) -> Decision.
+
+    This function supports BOTH, to keep your router stable.
+    """
+
+    # --- Mode A: score_and_decide(ctx)
+    if len(args) == 1 and isinstance(args[0], DealContext):
+        dec = evaluate_deal_rules(args[0])
+        return dec
+
+    # --- Mode B: score_and_decide(property=..., deal=..., rent_assumption=..., underwriting=...)
+    prop = kwargs.get("property")
+    deal = kwargs.get("deal")
+    ra = kwargs.get("rent_assumption")
+    uw = kwargs.get("underwriting")
+
+    # Required for meaningful decision
+    asking_price = float(getattr(deal, "asking_price", 0.0) or 0.0)
+    bedrooms = int(getattr(prop, "bedrooms", 0) or 0)
+    has_garage = bool(getattr(prop, "has_garage", False) or False)
+
+    # Market rent: RentCast estimate typically lands here
+    rent_market = getattr(ra, "market_rent_estimate", None)
+
+    # Ceiling: the most restrictive of the "gov constraints"
+    ceiling_candidates = []
+    for field in ("approved_rent_ceiling", "rent_reasonableness_comp", "section8_fmr"):
+        v = getattr(ra, field, None)
+        if v is not None:
+            try:
+                fv = float(v)
+                if fv > 0:
+                    ceiling_candidates.append(fv)
+            except Exception:
+                pass
+    rent_ceiling = min(ceiling_candidates) if ceiling_candidates else None
+
+    inventory_count = getattr(ra, "inventory_count", None)
+    starbucks_minutes = getattr(ra, "starbucks_minutes", None)
+
+    ctx = DealContext(
+        asking_price=asking_price,
+        bedrooms=bedrooms,
+        has_garage=has_garage,
+        rent_market=float(rent_market) if rent_market is not None else None,
+        rent_ceiling=float(rent_ceiling) if rent_ceiling is not None else None,
+        inventory_count=int(inventory_count) if inventory_count is not None else None,
+        starbucks_minutes=int(starbucks_minutes) if starbucks_minutes is not None else None,
+    )
+
+    dec = evaluate_deal_rules(ctx)
+    decision = dec.decision
+    score = dec.score
+    reasons = list(dec.reasons)
+
+    # Underwriting gates (DSCR / cashflow) = “regulated distributed system” constraints
+    min_dscr = float(getattr(settings, "min_dscr", 1.10))
+    min_cashflow = float(getattr(settings, "min_cashflow", 400.0))
+
+    if uw is not None:
+        try:
+            dscr = float(getattr(uw, "dscr", 999))
+            cash_flow = float(getattr(uw, "cash_flow", 999999))
+            if dscr < min_dscr:
+                return ("REJECT", 0, [f"DSCR {dscr:.2f} below minimum {min_dscr:.2f}"])
+            if cash_flow < min_cashflow:
+                return ("REJECT", 0, [f"Cash flow ${cash_flow:.0f} below minimum ${min_cashflow:.0f}"])
+        except Exception:
+            reasons.append("Could not validate DSCR/cashflow gates (underwriting parse failed)")
+            score = min(score, 55)
+            decision = "REVIEW"
+
+    return (decision, score, reasons)

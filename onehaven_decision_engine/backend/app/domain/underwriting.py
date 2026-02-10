@@ -1,7 +1,11 @@
+# onehaven_decision_engine/backend/app/domain/underwriting.py
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Optional
+
+from ..config import settings
 
 
 @dataclass(frozen=True)
@@ -78,9 +82,7 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
 
     required_annual_cash_flow = target_roi * cash_invested
     required_monthly_cash_flow = required_annual_cash_flow / 12.0
-    min_rent_for_target_roi = (
-        (fixed_opex + mortgage_payment + required_monthly_cash_flow) / a
-    ) if a > 1e-9 else float("inf")
+    min_rent_for_target_roi = ((fixed_opex + mortgage_payment + required_monthly_cash_flow) / a) if a > 1e-9 else float("inf")
 
     return UnderwritingOutputs(
         mortgage_payment=round(mortgage_payment, 2),
@@ -94,10 +96,48 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
     )
 
 
-# ✅ Compatibility wrapper expected by routers/evaluate.py
-def underwrite(inp: UnderwritingInputs, target_roi: float) -> UnderwritingOutputs:
+# ✅ Router-compatible wrapper
+def underwrite(
+    asking_price: float,
+    down_payment_pct: float,
+    interest_rate: float,
+    term_years: int,
+    gross_rent: float,
+    rehab_estimate: float = 0.0,
+    taxes_monthly: Optional[float] = None,
+    insurance_monthly: Optional[float] = None,
+    utilities_monthly: Optional[float] = None,
+) -> UnderwritingOutputs:
     """
-    Backwards-compatible entrypoint for routers that import `underwrite`.
-    Internally delegates to `run_underwriting`.
+    routers/evaluate.py imports underwrite() directly.
+    This function uses your configurable defaults (vacancy/maintenance/management/capex)
+    and outputs DSCR + cash-on-cash + break-even rent.
     """
-    return run_underwriting(inp, target_roi)
+
+    vacancy_rate = float(getattr(settings, "vacancy_rate", 0.05))
+    maintenance_rate = float(getattr(settings, "maintenance_rate", 0.10))
+    management_rate = float(getattr(settings, "management_rate", 0.08))
+    capex_rate = float(getattr(settings, "capex_rate", 0.05))
+    target_roi = float(getattr(settings, "target_roi", 0.15))
+
+    # If not explicitly provided, use configured defaults
+    taxes_monthly = float(taxes_monthly) if taxes_monthly is not None else float(getattr(settings, "taxes_monthly_default", 0.0))
+    insurance_monthly = float(insurance_monthly) if insurance_monthly is not None else float(getattr(settings, "insurance_monthly_default", 0.0))
+    utilities_monthly = float(utilities_monthly) if utilities_monthly is not None else float(getattr(settings, "utilities_monthly_default", 0.0))
+
+    inp = UnderwritingInputs(
+        purchase_price=float(asking_price),
+        rehab=float(rehab_estimate or 0.0),
+        down_payment_pct=float(down_payment_pct),
+        interest_rate=float(interest_rate),
+        term_years=int(term_years),
+        gross_rent=float(gross_rent),
+        vacancy_rate=vacancy_rate,
+        maintenance_rate=maintenance_rate,
+        management_rate=management_rate,
+        capex_rate=capex_rate,
+        insurance_monthly=float(insurance_monthly),
+        taxes_monthly=float(taxes_monthly),
+        utilities_monthly=float(utilities_monthly),
+    )
+    return run_underwriting(inp, target_roi=target_roi)
