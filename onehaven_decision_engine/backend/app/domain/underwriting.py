@@ -78,7 +78,9 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
 
     required_annual_cash_flow = target_roi * cash_invested
     required_monthly_cash_flow = required_annual_cash_flow / 12.0
-    min_rent_for_target_roi = ((fixed_opex + mortgage_payment + required_monthly_cash_flow) / a) if a > 1e-9 else float("inf")
+    min_rent_for_target_roi = (
+        (fixed_opex + mortgage_payment + required_monthly_cash_flow) / a
+    ) if a > 1e-9 else float("inf")
 
     return UnderwritingOutputs(
         mortgage_payment=round(mortgage_payment, 2),
@@ -90,3 +92,12 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
         break_even_rent=round(break_even_rent, 2) if math.isfinite(break_even_rent) else break_even_rent,
         min_rent_for_target_roi=round(min_rent_for_target_roi, 2) if math.isfinite(min_rent_for_target_roi) else min_rent_for_target_roi,
     )
+
+
+# ✅ Compatibility wrapper expected by routers/evaluate.py
+def underwrite(inp: UnderwritingInputs, target_roi: float) -> UnderwritingOutputs:
+    """
+    Backwards-compatible entrypoint for routers that import `underwrite`.
+    Internally delegates to `run_underwriting`.
+    """
+    return run_underwriting(inp, target_roi)

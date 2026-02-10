@@ -18,12 +18,9 @@ services:
   backend:
     build: ./backend
 
-    # ✅ This loads variables from ./ .env automatically
     env_file:
       - .env
 
-    # ✅ Optional but recommended: explicitly map required envs
-    # so it's obvious in the compose file what the container expects.
     environment:
       DATABASE_URL: ${DATABASE_URL}
       APP_ENV: ${APP_ENV}

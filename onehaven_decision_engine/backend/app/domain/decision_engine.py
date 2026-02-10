@@ -37,6 +37,12 @@ def _rent_used(rent_market: Optional[float], rent_ceiling: Optional[float]) -> O
 
 
 def evaluate_deal_rules(ctx: DealContext) -> Decision:
+    """
+    Deterministic rule engine for deal triage (PASS/REVIEW/REJECT).
+
+    This is intentionally not the full underwriting engine (DSCR, CoC, etc.).
+    It's your 'Deal Intake & Scoring' module: reject bad deals early.
+    """
     reasons: list[str] = []
     score = 50
 
@@ -101,6 +107,15 @@ def evaluate_deal_rules(ctx: DealContext) -> Decision:
         decision = "REJECT"
 
     return Decision(decision, score, reasons)
+
+
+# ✅ Compatibility wrapper for routers that import score_and_decide
+def score_and_decide(ctx: DealContext) -> Decision:
+    """
+    Backwards-compatible entrypoint used by routers/evaluate.py.
+    Keeps the router stable while we evolve internals.
+    """
+    return evaluate_deal_rules(ctx)
 
 
 def reasons_to_json(reasons: list[str]) -> str:
