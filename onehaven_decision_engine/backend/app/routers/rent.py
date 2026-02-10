@@ -19,6 +19,7 @@ from ..schemas import (
     RentObservationOut,
     RentCalibrationOut,
     RentRecomputeOut,
+    RentExplainOut,
 )
 from ..domain.rent_learning import (
     get_or_create_rent_assumption,
@@ -212,4 +213,53 @@ def recompute(
         calibrated_market_rent=computed["calibrated_market_rent"],
         strategy=strategy,
         rent_used=computed["rent_used"],
+    )
+
+@router.get("/explain/{property_id}", response_model=RentExplainOut)
+def explain_rent(
+    property_id: int,
+    strategy: str = Query("section8"),
+    payment_standard_pct: float = Query(1.0),
+    db: Session = Depends(get_db),
+):
+    prop = db.get(Property, property_id)
+    if not prop:
+        raise HTTPException(404, "property not found")
+
+    ra = get_or_create_rent_assumption(db, property_id)
+
+    constraints = []
+    caps = []
+
+    if ra.section8_fmr:
+        ps = ra.section8_fmr * payment_standard_pct
+        caps.append(ps)
+        constraints.append({"type": "payment_standard", "value": ps})
+
+    if ra.rent_reasonableness_comp:
+        caps.append(ra.rent_reasonableness_comp)
+        constraints.append({"type": "rent_reasonableness", "value": ra.rent_reasonableness_comp})
+
+    ceiling = min(caps) if caps else None
+    ra.rent_used = ceiling
+    if ra.approved_rent_ceiling is None:
+        ra.approved_rent_ceiling = ceiling
+
+    db.commit()
+
+    return RentExplainOut(
+        property_id=property_id,
+        strategy=strategy,
+        inputs={
+            "market_rent_estimate": ra.market_rent_estimate,
+            "section8_fmr": ra.section8_fmr,
+            "payment_standard_pct": payment_standard_pct,
+            "rent_reasonableness_comp": ra.rent_reasonableness_comp,
+        },
+        constraints=constraints,
+        results={
+            "approved_rent_ceiling": ra.approved_rent_ceiling,
+            "rent_used": ra.rent_used,
+        },
+        explanation="Section 8 rent is bounded by payment standard and rent reasonableness. The strictest limit wins.",
     )

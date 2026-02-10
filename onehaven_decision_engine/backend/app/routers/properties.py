@@ -5,8 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..db import get_db
-from ..models import Property
-from ..schemas import PropertyCreate, PropertyOut
+from ..models import Property, JurisdictionRule
+from ..schemas import PropertyCreate, PropertyOut, JurisdictionRuleOut
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 
@@ -33,4 +33,15 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
     p = db.execute(stmt).scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Property not found")
-    return p
+
+    jr = db.scalar(
+        select(JurisdictionRule).where(
+            JurisdictionRule.city == p.city,
+            JurisdictionRule.state == p.state,
+        )
+    )
+
+    # Return a dict so we can “attach” computed jurisdiction_rule
+    out = PropertyOut.model_validate(p, from_attributes=True).model_dump()
+    out["jurisdiction_rule"] = JurisdictionRuleOut.model_validate(jr, from_attributes=True).model_dump() if jr else None
+    return out

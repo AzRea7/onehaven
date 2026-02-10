@@ -210,7 +210,6 @@ class RentCastClient:
                     return float(payload[key])
                 except Exception:
                     pass
-        # sometimes nested
         data = payload.get("data")
         if isinstance(data, dict):
             for key in ["rent", "rentEstimate", "estimatedRent", "value"]:
@@ -223,23 +222,17 @@ class RentCastClient:
 
     @staticmethod
     def _extract_comparables(payload: dict[str, Any]) -> list[dict[str, Any]]:
-        """
-        Try multiple shapes; normalize into dict comps.
-        """
         if not isinstance(payload, dict):
             return []
 
-        # common: payload["comparables"] is list
         comps = payload.get("comparables")
         if isinstance(comps, list):
             return [c for c in comps if isinstance(c, dict)]
 
-        # sometimes nested under "data"
         data = payload.get("data")
         if isinstance(data, dict) and isinstance(data.get("comparables"), list):
             return [c for c in data.get("comparables") if isinstance(c, dict)]
 
-        # fallback keys
         for k in ("comps", "rent_comps", "comparablesList"):
             v = payload.get(k)
             if isinstance(v, list):
@@ -296,7 +289,6 @@ class RentCastClient:
 # ---------------------------- Budget + comps persistence ----------------------------
 
 def _rentcast_daily_limit() -> int:
-    # hard default 50; you can put RENTCAST_DAILY_LIMIT=50 in settings later
     try:
         v = getattr(settings, "rentcast_daily_limit", None)
         if v is None:
@@ -315,7 +307,6 @@ def _consume_rentcast_call(db: Session) -> dict[str, Any]:
     today = date.today()
     limit = _rentcast_daily_limit()
     remaining_before = get_remaining(db, provider=provider, day=today, daily_limit=limit)
-
     remaining_after = consume(db, provider=provider, day=today, daily_limit=limit, calls=1)
 
     return {
@@ -327,10 +318,30 @@ def _consume_rentcast_call(db: Session) -> dict[str, Any]:
     }
 
 
+@router.get("/enrich/budget")
+def get_rentcast_budget(
+    db: Session = Depends(get_db),
+):
+    """
+    Smoke-test helper endpoint:
+      - lets you assert api_usage increments
+      - lets you see remaining calls for today
+    """
+    provider = "rentcast"
+    today = date.today()
+    limit = _rentcast_daily_limit()
+    remaining = get_remaining(db, provider=provider, day=today, daily_limit=limit)
+    used = max(0, limit - remaining)
+    return {
+        "provider": provider,
+        "day": today.isoformat(),
+        "daily_limit": limit,
+        "used": used,
+        "remaining": remaining,
+    }
+
+
 def _extract_normalized_comps(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Normalize RentCast comparables into our RentCompCreate-ish dict shape.
-    """
     comps = RentCastClient._extract_comparables(payload)
     out: list[dict[str, Any]] = []
 
@@ -343,7 +354,6 @@ def _extract_normalized_comps(payload: dict[str, Any]) -> list[dict[str, Any]]:
         if rent <= 0:
             continue
 
-        # Many providers don't give a full listing URL; store what exists.
         out.append(
             {
                 "rent": rent,
@@ -366,10 +376,6 @@ def _persist_rentcast_comps_and_get_median(
     payload: dict[str, Any],
     replace_existing: bool = True,
 ) -> Optional[float]:
-    """
-    Stores comps in RentComp table (source='rentcast').
-    Returns median rent if any comps were stored.
-    """
     comps = _extract_normalized_comps(payload)
     if not comps:
         return None
@@ -463,8 +469,6 @@ def _enrich_one(db: Session, property_id: int, strategy: str = "section8") -> Re
 
     # ---- RentCast market rent + comps + RR proxy (BUDGETED) ----
     try:
-        # Hard cap: consume 1 call before making the request.
-        # If this throws, we NEVER call RentCast.
         budget_debug = _consume_rentcast_call(db)
 
         rc = RentCastClient(getattr(settings, "rentcast_api_key", "") or "")
@@ -492,25 +496,21 @@ def _enrich_one(db: Session, property_id: int, strategy: str = "section8") -> Re
             "raw": rc_payload,
         }
 
-        # 1) Store market estimate
         est_market = rc.pick_estimated_rent(rc_payload)
         if est_market is not None and est_market > 0:
             if ra.market_rent_estimate != float(est_market):
                 ra.market_rent_estimate = float(est_market)
                 updated_fields.append("market_rent_estimate")
 
-        # 2) Persist comps and set RR comp from *median comps*
         rr_median = None
         if isinstance(rc_payload, dict):
             rr_median = _persist_rentcast_comps_and_get_median(db, property_id=property_id, payload=rc_payload)
 
-        # If we got real comps median, use it (stronger than the proxy)
         if rr_median is not None and rr_median > 0:
             if ra.rent_reasonableness_comp != float(rr_median):
                 ra.rent_reasonableness_comp = float(rr_median)
                 updated_fields.append("rent_reasonableness_comp")
         else:
-            # fallback to proxy (median if extractable; else estimated rent)
             rr_proxy = rc.pick_rent_reasonableness_proxy(rc_payload if isinstance(rc_payload, dict) else {})
             if rr_proxy is not None and rr_proxy > 0:
                 if ra.rent_reasonableness_comp != float(rr_proxy):
@@ -518,7 +518,6 @@ def _enrich_one(db: Session, property_id: int, strategy: str = "section8") -> Re
                     updated_fields.append("rent_reasonableness_comp")
 
     except ApiBudgetExceeded as e:
-        # Stop enrichment for this property: budget is a hard constraint.
         raise HTTPException(status_code=429, detail=str(e))
     except Exception as e:
         rentcast_debug = {"error": str(e)}
@@ -561,16 +560,20 @@ def _enrich_one(db: Session, property_id: int, strategy: str = "section8") -> Re
     except Exception:
         pass
 
-    if updated_fields:
-        db.commit()
-        db.refresh(ra)
-    else:
-        # still flush if we inserted comps
-        db.commit()
-        db.refresh(ra)
-
     ceiling = _compute_approved_ceiling(ra)
     rent_used = _rent_used(strategy, ra.market_rent_estimate, ceiling)
+
+    # ✅ NEW: persist rent_used so underwriting can just read it later
+    try:
+        if getattr(ra, "rent_used", None) != rent_used:
+            ra.rent_used = rent_used
+            updated_fields.append("rent_used")
+    except Exception:
+        # if DB isn't migrated yet, don't crash enrich
+        pass
+
+    db.commit()
+    db.refresh(ra)
 
     return RentEnrichOut(
         property_id=property_id,
@@ -599,7 +602,6 @@ def enrich_rent_batch(
 ):
     deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id).limit(limit)).all()
 
-    # distinct property ids preserving order
     seen: set[int] = set()
     pids: list[int] = []
     for d in deals:
@@ -612,7 +614,6 @@ def enrich_rent_batch(
     stopped_early = False
     stop_reason: Optional[str] = None
 
-    # include current budget snapshot before running
     provider = "rentcast"
     today = date.today()
     daily_limit = _rentcast_daily_limit()
@@ -628,7 +629,6 @@ def enrich_rent_batch(
             _enrich_one(db, pid, strategy=strategy)
             enriched += 1
         except HTTPException as he:
-            # Budget exceeded => stop early (hard cap)
             if he.status_code == 429:
                 errors.append({"property_id": pid, "error": he.detail, "type": "budget_exceeded"})
                 stopped_early = True

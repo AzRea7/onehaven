@@ -1,10 +1,8 @@
+# backend/app/models.py
 from __future__ import annotations
 
 from datetime import datetime, date
 from typing import Optional, List
-import json
-
-
 
 from sqlalchemy import (
     Boolean,
@@ -15,7 +13,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    JSON,
     Date,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -49,11 +46,12 @@ class Property(Base):
     )
 
     inspections: Mapped[List["Inspection"]] = relationship(back_populates="property", cascade="all, delete-orphan")
-    
+
     rent_comps: Mapped[List["RentComp"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     rent_observations: Mapped[List["RentObservation"]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )
+
 
 class Deal(Base):
     __tablename__ = "deals"
@@ -62,7 +60,6 @@ class Deal(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
-    # NEW
     snapshot_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("import_snapshots.id", ondelete="SET NULL"), nullable=True
     )
@@ -98,6 +95,9 @@ class RentAssumption(Base):
     approved_rent_ceiling: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     rent_reasonableness_comp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # ✅ NEW: persist final rent used by underwriting (computed from strategy)
+    rent_used: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     inventory_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     starbucks_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
@@ -105,13 +105,14 @@ class RentAssumption(Base):
 
     property: Mapped["Property"] = relationship(back_populates="rent_assumption")
 
+
 class RentComp(Base):
     __tablename__ = "rent_comps"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
-    source: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")  # manual | zillow | etc
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
     address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -125,13 +126,13 @@ class RentComp(Base):
 
     property: Mapped["Property"] = relationship(back_populates="rent_comps")
 
+
 class RentObservation(Base):
     __tablename__ = "rent_observations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
-    # section8 | market
     strategy: Mapped[str] = mapped_column(String(20), nullable=False)
 
     achieved_rent: Mapped[float] = mapped_column(Float, nullable=False)
@@ -160,7 +161,6 @@ class RentCalibration(Base):
     multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    # mean absolute percent error (optional tracking)
     mape: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -210,7 +210,7 @@ class UnderwritingResult(Base):
     deal: Mapped["Deal"] = relationship(back_populates="results")
 
 
-# -------------------- NEW: Compliance logging --------------------
+# -------------------- Compliance logging --------------------
 
 class Inspector(Base):
     __tablename__ = "inspectors"
@@ -218,7 +218,7 @@ class Inspector(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
-    agency: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)  # housing commission, etc.
+    agency: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -253,24 +253,28 @@ class InspectionItem(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     inspection_id: Mapped[int] = mapped_column(ForeignKey("inspections.id", ondelete="CASCADE"), nullable=False)
 
-    # “code” is your normalized fail point key: GFCI, HANDRAIL, OUTLET, PAINT, TRIP_HAZARD...
     code: Mapped[str] = mapped_column(String(80), nullable=False)
 
     failed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    severity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)  # 1..5
-    location: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)  # "Kitchen", "Basement", etc.
+    severity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    location: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ✅ NEW: resolution tracking for root-cause analytics
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    resolution_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     inspection: Mapped["Inspection"] = relationship(back_populates="items")
+
 
 class ImportSnapshot(Base):
     __tablename__ = "import_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    source: Mapped[str] = mapped_column(String(40), nullable=False)  # investorlift | zillow
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -281,11 +285,9 @@ class ApiUsage(Base):
     __tablename__ = "api_usage"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    provider: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g. "rentcast"
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
     day: Mapped[date] = mapped_column(Date, nullable=False)
     calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("provider", "day", name="uq_api_usage_provider_day"),
-    )
+    __table_args__ = (UniqueConstraint("provider", "day", name="uq_api_usage_provider_day"),)
