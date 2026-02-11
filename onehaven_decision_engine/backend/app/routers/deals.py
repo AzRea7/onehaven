@@ -2,13 +2,24 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 
 from ..db import get_db
 from ..models import Deal, Property, RentAssumption, UnderwritingResult
-from ..schemas import DealCreate, DealOut, RentAssumptionUpsert, RentAssumptionOut, SurvivorOut
+from ..schemas import (
+    DealCreate,
+    DealOut,
+    RentAssumptionUpsert,
+    RentAssumptionOut,
+    SurvivorOut,
+    DealIntakeIn,
+    DealIntakeOut,
+    PropertyOut,
+)
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 
@@ -58,6 +69,67 @@ def survivors(
         )
 
     return out
+
+
+@router.post("/intake", response_model=DealIntakeOut)
+def intake(payload: DealIntakeIn, db: Session = Depends(get_db)):
+    """
+    Phase 1 "manual first" intake.
+    Creates:
+      - Property
+      - Deal
+      - RentAssumption stub (so rent intelligence can be entered immediately)
+    """
+    strategy = (payload.strategy or "section8").strip().lower()
+    if strategy not in {"section8", "market"}:
+        raise HTTPException(status_code=400, detail="strategy must be 'section8' or 'market'")
+
+    # Create Property
+    p = Property(
+        address=payload.address.strip(),
+        city=payload.city.strip(),
+        state=(payload.state or "MI").strip(),
+        zip=payload.zip.strip(),
+        bedrooms=int(payload.bedrooms),
+        bathrooms=float(payload.bathrooms),
+        square_feet=payload.square_feet,
+        year_built=payload.year_built,
+        has_garage=bool(payload.has_garage),
+        property_type=(payload.property_type or "single_family").strip(),
+        created_at=datetime.utcnow(),
+    )
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+
+    # Create Deal
+    d = Deal(
+        property_id=p.id,
+        asking_price=float(payload.purchase_price),
+        estimated_purchase_price=float(payload.purchase_price),
+        rehab_estimate=float(payload.est_rehab or 0.0),
+        strategy=strategy,
+        financing_type=(payload.financing_type or "dscr").strip(),
+        interest_rate=float(payload.interest_rate),
+        term_years=int(payload.term_years),
+        down_payment_pct=float(payload.down_payment_pct),
+        created_at=datetime.utcnow(),
+    )
+    db.add(d)
+    db.commit()
+    db.refresh(d)
+
+    # Create RentAssumption stub if not present
+    ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
+    if ra is None:
+        ra = RentAssumption(property_id=p.id, created_at=datetime.utcnow())
+        db.add(ra)
+        db.commit()
+
+    return DealIntakeOut(
+        property=PropertyOut.model_validate(p, from_attributes=True),
+        deal=DealOut.model_validate(d, from_attributes=True),
+    )
 
 
 @router.post("", response_model=DealOut)
