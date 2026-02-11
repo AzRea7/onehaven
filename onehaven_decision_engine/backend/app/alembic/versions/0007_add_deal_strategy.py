@@ -16,6 +16,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.add_column('jurisdiction_rules', sa.Column('inspection_frequency', sa.String(), nullable=True))
     op.add_column("deals", sa.Column("strategy", sa.String(length=20), nullable=False, server_default="section8"))
     op.execute("UPDATE deals SET strategy = 'section8' WHERE strategy IS NULL")
     op.alter_column("deals", "strategy", server_default=None)

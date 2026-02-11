@@ -233,16 +233,17 @@ def explain_rent(
     if strategy not in {"section8", "market"}:
         strategy = "section8"
 
+    # Build ceiling candidates as structured objects (matches schemas.CeilingCandidate)
     ceiling_candidates: list[dict] = []
     caps: list[float] = []
 
-    # payment standard candidate (FMR * pct)
+    # Payment standard candidate: FMR * pct
     if ra.section8_fmr is not None and float(ra.section8_fmr) > 0:
         ps = float(ra.section8_fmr) * float(payment_standard_pct)
         caps.append(ps)
         ceiling_candidates.append({"type": "payment_standard", "value": ps})
 
-    # rent reasonableness candidate (median comps)
+    # Rent reasonableness candidate: median comps
     if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
         rr = float(ra.rent_reasonableness_comp)
         caps.append(rr)
@@ -250,7 +251,7 @@ def explain_rent(
 
     computed_ceiling = min(caps) if caps else None
 
-    # approved ceiling: manual override wins
+    # Approved ceiling: manual override wins; else computed
     approved = (
         float(ra.approved_rent_ceiling)
         if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0
@@ -274,21 +275,25 @@ def explain_rent(
             rent_used = market
             explanation = "Section 8 strategy: ceiling missing; using market estimate only."
 
-    # persist computed fields (optional but useful for later)
+    # Persist (useful for underwriting)
     ra.rent_used = rent_used
     if ra.approved_rent_ceiling is None and approved is not None:
         ra.approved_rent_ceiling = approved
     db.commit()
 
+    # IMPORTANT: include payment_standard_pct (required by schema)
     return RentExplainOut(
         property_id=property_id,
         strategy=strategy,
+        payment_standard_pct=float(payment_standard_pct),
         market_rent_estimate=market,
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
         approved_rent_ceiling=approved,
+        calibrated_market_rent=None,  # keep schema happy if you later add calibration
         rent_used=rent_used,
-        explanation=explanation,
         ceiling_candidates=ceiling_candidates,
+        explanation=explanation,
     )
+
 

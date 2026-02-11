@@ -184,6 +184,8 @@ class JurisdictionRule(Base):
     registration_fee: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     processing_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tenant_waitlist_depth: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    inspection_frequency: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    jurisdiction_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 

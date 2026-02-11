@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
@@ -400,28 +400,29 @@ class RentObservationOut(RentObservationCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CeilingCandidate(BaseModel):
+    type: Literal["payment_standard", "rent_reasonableness", "fmr", "manual", "other"]
+    value: float
+
 class RentExplainOut(BaseModel):
-    """
-    Phase 3: explain rent ceiling + rent_used.
-    """
     property_id: int
+
     strategy: str
+    payment_standard_pct: float
 
     market_rent_estimate: Optional[float] = None
     section8_fmr: Optional[float] = None
-    payment_standard_pct: float = 1.0
-
     rent_reasonableness_comp: Optional[float] = None
-    ceiling_candidates: Optional[List[float]] = None
-
     approved_rent_ceiling: Optional[float] = None
+
+    calibrated_market_rent: Optional[float] = None
     rent_used: Optional[float] = None
 
-    constraints: List[str] = Field(default_factory=list)
-    why_capped: Optional[List[str]] = None
+    # ✅ FIX: list of structured candidates
+    ceiling_candidates: List[CeilingCandidate] = Field(default_factory=list)
 
-    model_config = ConfigDict(from_attributes=True)
-
+    # optional: explanation strings if your router returns them
+    explanation: Optional[str] = None
 
 class RentExplainBatchOut(BaseModel):
     snapshot_id: int
