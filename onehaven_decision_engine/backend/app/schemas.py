@@ -88,7 +88,8 @@ class DealCreate(BaseModel):
     estimated_purchase_price: Optional[float] = None
     rehab_estimate: float = 0.0
 
-    strategy: str = "section8"  # section8 | market
+    # section8 | market
+    strategy: str = "section8"
 
     financing_type: str = "dscr"
     interest_rate: float = 0.07
@@ -121,6 +122,7 @@ class DealIntakeIn(BaseModel):
     property_type: str = "single_family"
 
     # Deal fields
+    # NOTE: your DB model uses Deal.asking_price. Many people map intake.purchase_price -> asking_price internally.
     purchase_price: float
     est_rehab: float = 0.0
     strategy: str = Field(default="section8", description="section8|market")
@@ -130,7 +132,7 @@ class DealIntakeIn(BaseModel):
     term_years: int = 30
     down_payment_pct: float = 0.20
 
-    # ✅ Phase 1 plumbing: allow snapshot selection (optional)
+    # allow snapshot selection (optional)
     snapshot_id: Optional[int] = None
 
 
@@ -167,7 +169,10 @@ class JurisdictionRuleUpsert(BaseModel):
 
     inspection_frequency: Optional[str] = Field(default=None, description="annual|biennial|complaint")
     inspection_authority: Optional[str] = None
+
+    # Stored in DB as JSON text (typical_fail_points_json) — schema stays list[str] for ergonomics.
     typical_fail_points: Optional[List[str]] = None
+
     registration_fee: Optional[float] = None
     processing_days: Optional[int] = None
     tenant_waitlist_depth: Optional[str] = None
@@ -201,7 +206,7 @@ class UnderwritingResultOut(BaseModel):
     break_even_rent: float
     min_rent_for_target_roi: float
 
-    # ✅ Phase 0/2/3 persisted truth
+    # Phase 0/2/3 persisted truth
     decision_version: Optional[str] = None
     payment_standard_pct_used: Optional[float] = None
     jurisdiction_multiplier: Optional[float] = None
@@ -233,12 +238,12 @@ class UnderwritingResultOut(BaseModel):
             if "reasons" not in data:
                 data["reasons"] = _load_list(rj)
 
-            # decode jurisdiction reasons if present
             if "jurisdiction_reasons" not in data:
                 data["jurisdiction_reasons"] = _load_list(data.get("jurisdiction_reasons_json"))
 
-            # map to output field name
-            data["jurisdiction_reasons"] = data.get("jurisdiction_reasons") or _load_list(data.get("jurisdiction_reasons_json"))
+            data["jurisdiction_reasons"] = data.get("jurisdiction_reasons") or _load_list(
+                data.get("jurisdiction_reasons_json")
+            )
             return data
 
         # ORM object
@@ -280,7 +285,7 @@ class ChecklistItemOut(BaseModel):
     description: str
     severity: int = Field(default=2, ge=1, le=5)
     common_fail: bool = False
-    applies_if: Optional[Dict[str, Any]] = None  # ✅ was Optional[str]
+    applies_if: Optional[Dict[str, Any]] = None
 
 
 class ChecklistOut(BaseModel):
@@ -382,7 +387,6 @@ class RentExplainOut(BaseModel):
     property_id: int
     strategy: str
 
-    # Operating truth
     payment_standard_pct: float
     fmr_adjusted: Optional[float] = None
 
@@ -396,9 +400,7 @@ class RentExplainOut(BaseModel):
 
     ceiling_candidates: List[CeilingCandidate] = Field(default_factory=list)
 
-    # ✅ winner label for explainability
     cap_reason: Optional[str] = None  # fmr|comps|override|none
-
     explanation: Optional[str] = None
 
 

@@ -15,6 +15,11 @@ from .routers.rent import router as rent_router
 from .routers.compliance import router as compliance_router  # ✅ NEW
 from .routers.dashboard import router as dashboard_router
 from .routers.meta import router as meta_router
+from .routers.agents import router as agents_router
+from .routers.rehab import router as rehab_router
+from .routers.tenants import router as tenants_router
+from .routers.cash import router as cash_router
+from .routers.equity import router as equity_router
 
 app = FastAPI(
     title="Decision Engine for Regulated Residential Cash-Flow Assets",
@@ -34,3 +39,8 @@ app.include_router(rent_router)
 app.include_router(compliance_router)
 app.include_router(dashboard_router)
 app.include_router(meta_router)
+app.include_router(agents_router)
+app.include_router(rehab_router)
+app.include_router(tenants_router)
+app.include_router(cash_router)
+app.include_router(equity_router)

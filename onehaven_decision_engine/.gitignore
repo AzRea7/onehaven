@@ -25,6 +25,9 @@ build/
 venv/
 ENV/
 
+# npm lockfile (don’t track)
+**/package-lock.json
+
 # ===============================
 # DATABASE / LOCAL STATE
 # ===============================
@@ -66,3 +69,21 @@ pytest_cache/
 tmp/
 temp/
 exports/
+
+**/node_modules/
+**/dist/
+**/build/
+**/.vite/
+**/.turbo/
+**/.next/
+**/.cache/
+
+# logs
+**/*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# env
+**/.env
+**/.env.*

@@ -1,4 +1,3 @@
-# backend/app/models.py
 from __future__ import annotations
 
 from datetime import datetime, date
@@ -52,7 +51,6 @@ class Property(Base):
         back_populates="property", cascade="all, delete-orphan"
     )
 
-    # Phase 3: persisted checklist instances
     checklists: Mapped[List["PropertyChecklist"]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )
@@ -103,7 +101,6 @@ class RentAssumption(Base):
     approved_rent_ceiling: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     rent_reasonableness_comp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # persist final rent used by underwriting (computed from strategy)
     rent_used: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     inventory_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -188,7 +185,10 @@ class JurisdictionRule(Base):
     registration_fee: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     processing_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tenant_waitlist_depth: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
+    # added in revision 0007_add_deal_strategy
     inspection_frequency: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+
     jurisdiction_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -215,16 +215,13 @@ class UnderwritingResult(Base):
     break_even_rent: Mapped[float] = mapped_column(Float, nullable=False)
     min_rent_for_target_roi: Mapped[float] = mapped_column(Float, nullable=False)
 
-    # ✅ Phase 0: reproducibility
     decision_version: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
     payment_standard_pct_used: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # ✅ Phase 2: persist friction used
     jurisdiction_multiplier: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     jurisdiction_reasons_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # ✅ Phase 3-ish: rent explain winners
-    rent_cap_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # fmr|comps|override|none
+    rent_cap_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     fmr_adjusted: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -324,7 +321,7 @@ class ChecklistTemplateItem(Base):
     strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="section8")
     version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1")
 
-    code: Mapped[str] = mapped_column(String(80), nullable=False)  # item_code
+    code: Mapped[str] = mapped_column(String(80), nullable=False)
     category: Mapped[str] = mapped_column(String(80), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
 
