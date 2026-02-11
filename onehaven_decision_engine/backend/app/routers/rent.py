@@ -1,14 +1,16 @@
+# backend/app/routers/rent.py
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List
+from typing import List, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..db import get_db
-from ..models import Property, RentAssumption, RentComp, RentObservation, RentCalibration
+from ..models import Deal, Property, RentAssumption, RentComp, RentObservation, RentCalibration
 from ..schemas import (
     RentAssumptionOut,
     RentAssumptionUpsert,
@@ -20,16 +22,31 @@ from ..schemas import (
     RentCalibrationOut,
     RentRecomputeOut,
     RentExplainOut,
+    RentExplainBatchOut,
 )
 from ..domain.rent_learning import (
     get_or_create_rent_assumption,
     summarize_comps,
     update_calibration_from_observation,
     recompute_rent_fields,
-    compute_approved_ceiling,
 )
 
 router = APIRouter(prefix="/rent", tags=["rent"])
+
+
+def _norm_strategy(strategy: Optional[str]) -> str:
+    s = (strategy or "section8").strip().lower()
+    return s if s in {"section8", "market"} else "section8"
+
+
+def _to_pos_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        f = float(v)
+        return f if f > 0 else None
+    except Exception:
+        return None
 
 
 @router.get("/{property_id}", response_model=RentAssumptionOut)
@@ -93,6 +110,7 @@ def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = D
 
     summary = summarize_comps(rents)
 
+    # “Rent reasonableness” is the comps median (your operational meaning)
     ra.rent_reasonableness_comp = summary.median_rent
     db.add(ra)
     db.commit()
@@ -129,9 +147,11 @@ def add_rent_observation(payload: RentObservationCreate, db: Session = Depends(g
 
     ra = get_or_create_rent_assumption(db, payload.property_id)
 
+    strategy = _norm_strategy(payload.strategy)
+
     obs = RentObservation(
         property_id=payload.property_id,
-        strategy=payload.strategy,
+        strategy=strategy,
         achieved_rent=float(payload.achieved_rent),
         tenant_portion=payload.tenant_portion,
         hap_portion=payload.hap_portion,
@@ -145,7 +165,7 @@ def add_rent_observation(payload: RentObservationCreate, db: Session = Depends(g
     update_calibration_from_observation(
         db,
         property_row=prop,
-        strategy=payload.strategy,
+        strategy=strategy,
         predicted_market_rent=ra.market_rent_estimate,
         achieved_rent=float(payload.achieved_rent),
     )
@@ -168,7 +188,7 @@ def list_calibration(
     if bedrooms is not None:
         q = q.where(RentCalibration.bedrooms == bedrooms)
     if strategy:
-        q = q.where(RentCalibration.strategy == strategy)
+        q = q.where(RentCalibration.strategy == _norm_strategy(strategy))
     return db.execute(q).scalars().all()
 
 
@@ -176,15 +196,26 @@ def list_calibration(
 def recompute(
     property_id: int,
     strategy: str = Query(default="section8"),
-    payment_standard_pct: float | None = None,
+    payment_standard_pct: float | None = Query(default=None, ge=0.5, le=1.5),
     db: Session = Depends(get_db),
 ):
+    """
+    Computes rent fields using your learning module and persists:
+      - rent_used ALWAYS (underwriting consumes this)
+      - approved_rent_ceiling ONLY when there is no manual override (None/<=0 treated as no override)
+
+    payment_standard_pct:
+      - if not provided, defaults to settings.default_payment_standard_pct
+    """
+    strategy = _norm_strategy(strategy)
+    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
+
     try:
         computed = recompute_rent_fields(
             db,
             property_id=property_id,
             strategy=strategy,
-            payment_standard_pct=payment_standard_pct,
+            payment_standard_pct=pct,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -193,12 +224,18 @@ def recompute(
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
 
-    # Persist computed approved ceiling only if user didn't manually override it.
-    if ra.approved_rent_ceiling is None:
-        ra.approved_rent_ceiling = computed["approved_rent_ceiling"]
+    # Manual override exists only if >0
+    override = _to_pos_float(ra.approved_rent_ceiling)
 
-    # ALWAYS persist rent_used; underwriting consumes this.
-    ra.rent_used = computed["rent_used"]
+    computed_ceiling = _to_pos_float(computed.get("approved_rent_ceiling"))
+    computed_rent_used = computed.get("rent_used", None)
+
+    # Persist computed ceiling only if no manual override exists
+    if override is None and computed_ceiling is not None:
+        ra.approved_rent_ceiling = float(computed_ceiling)
+
+    # ALWAYS persist rent_used (can be None if you truly have no data)
+    ra.rent_used = float(computed_rent_used) if computed_rent_used is not None else None
 
     db.add(ra)
     db.commit()
@@ -210,7 +247,7 @@ def recompute(
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
         approved_rent_ceiling=ra.approved_rent_ceiling,
-        calibrated_market_rent=computed["calibrated_market_rent"],
+        calibrated_market_rent=computed.get("calibrated_market_rent"),
         strategy=strategy,
         rent_used=ra.rent_used,
     )
@@ -220,80 +257,159 @@ def recompute(
 def explain_rent(
     property_id: int,
     strategy: str = Query("section8"),
-    payment_standard_pct: float = Query(1.0),
+    payment_standard_pct: float | None = Query(default=None, ge=0.5, le=1.5),
+    persist: bool = Query(default=True, description="If true, persist rent_used/approved ceiling when appropriate"),
     db: Session = Depends(get_db),
 ):
+    """
+    Transparent “why” endpoint.
+
+    Operating Truth:
+      - ceiling candidates:
+          payment_standard = FMR * payment_standard_pct
+          rent_reasonableness = comps_median
+      - computed_ceiling = min(candidates)
+      - approved_ceiling = manual_override_if_present_else(computed_ceiling)
+      - section8 rent_used = min(market_rent_estimate, approved_ceiling) (when both exist)
+
+    Notes:
+      - If strategy=market: rent_used = market_rent_estimate (no cap)
+      - If required fields are missing, rent_used may be None (and explanation will tell you why)
+    """
     prop = db.get(Property, property_id)
     if not prop:
-        raise HTTPException(404, "property not found")
+        raise HTTPException(status_code=404, detail="property not found")
 
     ra = get_or_create_rent_assumption(db, property_id)
 
-    strategy = (strategy or "section8").strip().lower()
-    if strategy not in {"section8", "market"}:
-        strategy = "section8"
+    strategy = _norm_strategy(strategy)
+    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
 
-    # Build ceiling candidates as structured objects (matches schemas.CeilingCandidate)
     ceiling_candidates: list[dict] = []
     caps: list[float] = []
 
-    # Payment standard candidate: FMR * pct
-    if ra.section8_fmr is not None and float(ra.section8_fmr) > 0:
-        ps = float(ra.section8_fmr) * float(payment_standard_pct)
+    # Payment standard: FMR * pct
+    fmr = _to_pos_float(ra.section8_fmr)
+    if fmr is not None:
+        ps = float(fmr) * float(pct)
         caps.append(ps)
         ceiling_candidates.append({"type": "payment_standard", "value": ps})
 
-    # Rent reasonableness candidate: median comps
-    if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-        rr = float(ra.rent_reasonableness_comp)
-        caps.append(rr)
-        ceiling_candidates.append({"type": "rent_reasonableness", "value": rr})
+    # Rent reasonableness: comps median
+    rr = _to_pos_float(ra.rent_reasonableness_comp)
+    if rr is not None:
+        caps.append(float(rr))
+        ceiling_candidates.append({"type": "rent_reasonableness", "value": float(rr)})
 
     computed_ceiling = min(caps) if caps else None
 
-    # Approved ceiling: manual override wins; else computed
-    approved = (
-        float(ra.approved_rent_ceiling)
-        if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0
-        else computed_ceiling
-    )
+    manual = _to_pos_float(ra.approved_rent_ceiling)
+    approved = manual if manual is not None else computed_ceiling
 
-    market = float(ra.market_rent_estimate) if ra.market_rent_estimate is not None else None
+    market = _to_pos_float(ra.market_rent_estimate)
+
+    rent_used: Optional[float]
+    explanation: str
 
     if strategy == "market":
-        rent_used = market
-        explanation = "Market strategy uses the market rent estimate (no Section 8 ceiling cap applied)."
+        if market is None:
+            rent_used = None
+            explanation = "Market strategy: market_rent_estimate is missing, so rent_used cannot be computed."
+        else:
+            rent_used = float(market)
+            explanation = "Market strategy uses market_rent_estimate (no Section 8 ceiling cap applied)."
     else:
         # section8
-        if market is not None and approved is not None:
-            rent_used = float(min(market, approved))
-            explanation = "Section 8 strategy caps rent by the strictest limit (approved ceiling vs market estimate)."
-        elif approved is not None:
-            rent_used = approved
-            explanation = "Section 8 strategy: market estimate missing; using approved ceiling only."
+        if market is None and approved is None:
+            rent_used = None
+            explanation = "Section 8 strategy: both market_rent_estimate and ceiling inputs are missing; cannot compute rent_used."
+        elif market is None:
+            rent_used = float(approved)  # type: ignore[arg-type]
+            explanation = "Section 8 strategy: market_rent_estimate missing; using approved ceiling only."
+        elif approved is None:
+            rent_used = float(market)
+            explanation = "Section 8 strategy: ceiling missing; using market_rent_estimate only."
         else:
-            rent_used = market
-            explanation = "Section 8 strategy: ceiling missing; using market estimate only."
+            rent_used = float(min(float(market), float(approved)))
+            explanation = "Section 8 strategy caps rent by the strictest limit (approved ceiling vs market estimate)."
 
-    # Persist (useful for underwriting)
-    ra.rent_used = rent_used
-    if ra.approved_rent_ceiling is None and approved is not None:
-        ra.approved_rent_ceiling = approved
-    db.commit()
+    if persist:
+        # persist rent_used for underwriting if present
+        ra.rent_used = float(rent_used) if rent_used is not None else None
 
-    # IMPORTANT: include payment_standard_pct (required by schema)
+        # persist approved ceiling only when no manual override exists
+        if manual is None and approved is not None:
+            ra.approved_rent_ceiling = float(approved)
+
+        db.add(ra)
+        db.commit()
+
     return RentExplainOut(
         property_id=property_id,
         strategy=strategy,
-        payment_standard_pct=float(payment_standard_pct),
+        payment_standard_pct=float(pct),
         market_rent_estimate=market,
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
         approved_rent_ceiling=approved,
-        calibrated_market_rent=None,  # keep schema happy if you later add calibration
+        calibrated_market_rent=None,
         rent_used=rent_used,
         ceiling_candidates=ceiling_candidates,
         explanation=explanation,
     )
 
 
+@router.get("/explain/batch", response_model=RentExplainBatchOut)
+def explain_rent_batch(
+    snapshot_id: int = Query(...),
+    strategy: str = Query(default="section8"),
+    payment_standard_pct: float | None = Query(default=None, ge=0.5, le=1.5),
+    limit: int = Query(default=50, ge=1, le=500),
+    persist: bool = Query(default=True),
+    db: Session = Depends(get_db),
+):
+    """
+    Batch explain for a snapshot (useful before /evaluate).
+    Pulls deals in the snapshot -> explains rent for their properties.
+
+    Returns counts + errors (per deal/property).
+    """
+    strategy = _norm_strategy(strategy)
+    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
+
+    deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id).limit(limit)).all()
+
+    attempted = len(deals)
+    explained = 0
+    errors: list[dict] = []
+
+    for d in deals:
+        try:
+            pid = int(d.property_id)
+            # Reuse the core logic via a direct call pattern (no HTTP hop)
+            out = explain_rent(
+                property_id=pid,
+                strategy=strategy,
+                payment_standard_pct=pct,
+                persist=persist,
+                db=db,
+            )
+            # If we got a response, count it as explained (even if rent_used is None)
+            _ = out  # keep lint calm
+            explained += 1
+        except Exception as e:
+            errors.append(
+                {
+                    "deal_id": getattr(d, "id", None),
+                    "property_id": getattr(d, "property_id", None),
+                    "error": f"{type(e).__name__}: {e}",
+                }
+            )
+
+    return RentExplainBatchOut(
+        snapshot_id=snapshot_id,
+        strategy=strategy,
+        attempted=attempted,
+        explained=explained,
+        errors=errors,
+    )

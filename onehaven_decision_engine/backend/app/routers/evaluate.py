@@ -5,7 +5,7 @@ import json
 from typing import Optional, List, Tuple
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -13,60 +13,51 @@ from ..models import Deal, Property, RentAssumption, UnderwritingResult, Jurisdi
 from ..schemas import BatchEvalOut, UnderwritingResultOut
 from ..domain.decision_engine import score_and_decide
 from ..domain.underwriting import underwrite
-
-# NOTE: adjust this import if your function lives elsewhere
 from ..domain.jurisdiction_scoring import compute_friction
+from ..config import settings
 
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
 
-def _compute_ceiling_from_inputs(
-    *,
+def _ceiling_and_reason(
     ra: Optional[RentAssumption],
     payment_standard_pct: float,
-) -> Optional[float]:
+) -> tuple[Optional[float], str, Optional[float]]:
     """
-    Operating Truth:
-      rent_ceiling = min(FMR * payment_standard_pct, rent_reasonableness_comp)
-
-    If a manual approved_rent_ceiling override exists, we treat that as the ceiling.
+    Returns: (ceiling, cap_reason, fmr_adjusted)
+      cap_reason: override | fmr | comps | none
     """
     if ra is None:
-        return None
+        return None, "none", None
 
-    # 1) Manual override wins (this is your persisted "approved ceiling")
+    # manual override wins
     try:
         if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
-            return float(ra.approved_rent_ceiling)
+            return float(ra.approved_rent_ceiling), "override", None
     except Exception:
         pass
 
-    # 2) Otherwise compute from FMR + comps median
-    fmr: Optional[float] = None
-    comp: Optional[float] = None
+    fmr_adjusted: Optional[float] = None
+    candidates: list[tuple[str, float]] = []
 
     try:
         if ra.section8_fmr is not None and float(ra.section8_fmr) > 0:
-            fmr = float(ra.section8_fmr)
+            fmr_adjusted = float(ra.section8_fmr) * float(payment_standard_pct)
+            candidates.append(("fmr", float(fmr_adjusted)))
     except Exception:
-        fmr = None
+        fmr_adjusted = None
 
     try:
         if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-            comp = float(ra.rent_reasonableness_comp)
+            candidates.append(("comps", float(ra.rent_reasonableness_comp)))
     except Exception:
-        comp = None
+        pass
 
-    if fmr is None and comp is None:
-        return None
+    if not candidates:
+        return None, "none", fmr_adjusted
 
-    candidates: list[float] = []
-    if fmr is not None:
-        candidates.append(float(fmr) * float(payment_standard_pct))
-    if comp is not None:
-        candidates.append(float(comp))
-
-    return min(candidates) if candidates else None
+    cap_reason, ceiling = min(candidates, key=lambda x: x[1])
+    return float(ceiling), cap_reason, fmr_adjusted
 
 
 def _rent_used_for_underwriting(
@@ -75,12 +66,15 @@ def _rent_used_for_underwriting(
     d: Deal,
     ra: Optional[RentAssumption],
     payment_standard_pct: float,
-) -> Tuple[float, bool, list[str], Optional[float]]:
+) -> Tuple[float, bool, list[str], Optional[float], str, Optional[float]]:
     """
     Returns:
-      (gross_rent_used, was_estimated, notes, computed_ceiling)
-
-    computed_ceiling is included so we can persist it (when appropriate) and explain reasons.
+      gross_rent_used,
+      was_estimated,
+      notes,
+      ceiling,
+      cap_reason,
+      fmr_adjusted
     """
     notes: list[str] = []
     strategy = (strategy or "section8").strip().lower()
@@ -93,47 +87,45 @@ def _rent_used_for_underwriting(
         except Exception:
             market = None
 
-    ceiling = _compute_ceiling_from_inputs(ra=ra, payment_standard_pct=float(payment_standard_pct))
+    ceiling, cap_reason, fmr_adjusted = _ceiling_and_reason(ra, payment_standard_pct=float(payment_standard_pct))
 
-    # --- MARKET strategy ---
     if strategy == "market":
         if market is not None:
-            return market, False, notes, ceiling
-
+            return market, False, notes, ceiling, "none", fmr_adjusted
         asking = float(d.asking_price or 0.0)
-        est = asking * 0.013
-        notes.append("Market strategy missing market rent; fell back to 1.3% heuristic")
-        return float(est), True, notes, ceiling
+        est = asking * float(settings.rent_rule_min_pct)
+        notes.append("Market strategy missing market rent; fell back to rent_rule_min_pct heuristic")
+        return float(est), True, notes, ceiling, "none", fmr_adjusted
 
-    # --- SECTION 8 default ---
+    # section8 default
     if market is None and ceiling is None:
         asking = float(d.asking_price or 0.0)
-        est = asking * 0.013
-        notes.append("Section 8 strategy missing market rent and ceiling; fell back to 1.3% heuristic")
-        return float(est), True, notes, ceiling
+        est = asking * float(settings.rent_rule_min_pct)
+        notes.append("Section 8 missing market rent and ceiling; fell back to rent_rule_min_pct heuristic")
+        return float(est), True, notes, ceiling, "none", fmr_adjusted
 
     if market is None:
-        notes.append("Section 8 strategy missing market rent; using ceiling only")
-        return float(ceiling), False, notes, ceiling  # type: ignore[arg-type]
+        notes.append("Section 8 missing market rent; using ceiling only")
+        return float(ceiling), False, notes, ceiling, cap_reason, fmr_adjusted  # type: ignore[arg-type]
 
     if ceiling is None:
-        notes.append("Section 8 strategy missing ceiling; using market rent only")
-        return float(market), False, notes, ceiling
+        notes.append("Section 8 missing ceiling; using market only")
+        return float(market), False, notes, ceiling, "none", fmr_adjusted
 
     if market > ceiling:
-        notes.append("Section 8 cap applied: market rent > approved ceiling")
-    return float(min(market, ceiling)), False, notes, ceiling
+        notes.append("Section 8 cap applied: market > ceiling")
+    return float(min(market, ceiling)), False, notes, ceiling, cap_reason, fmr_adjusted
 
 
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
 def evaluate_snapshot(
     snapshot_id: int,
-    # ✅ optional override for all deals in snapshot
     strategy: Optional[str] = Query(default=None, description="section8|market (optional override)"),
-    # ✅ Operating Truth knob (payment standard percent)
-    payment_standard_pct: float = Query(default=1.0, ge=0.5, le=1.5),
+    payment_standard_pct: float | None = Query(default=None, description="Override. Default from config."),
     db: Session = Depends(get_db),
 ):
+    ps = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.payment_standard_pct)
+
     deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id)).all()
 
     pass_count = 0
@@ -154,20 +146,18 @@ def evaluate_snapshot(
             if deal_strategy not in {"section8", "market"}:
                 deal_strategy = "section8"
 
-            gross_rent, estimated, rent_notes, computed_ceiling = _rent_used_for_underwriting(
+            gross_rent, estimated, rent_notes, computed_ceiling, cap_reason, fmr_adjusted = _rent_used_for_underwriting(
                 strategy=deal_strategy,
                 d=d,
                 ra=ra,
-                payment_standard_pct=float(payment_standard_pct),
+                payment_standard_pct=ps,
             )
 
-            # Persist rent outputs back to RentAssumption (Phase 1 heart)
+            # Persist rent_used always (underwriting consumes this)
             if ra is not None:
                 ra.rent_used = float(gross_rent)
 
-                # Only set approved_rent_ceiling automatically if:
-                # - no manual override exists (or invalid)
-                # - computed_ceiling exists
+                # Only auto-fill approved_rent_ceiling if no valid manual override exists
                 try:
                     override_ok = ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0
                 except Exception:
@@ -201,15 +191,13 @@ def evaluate_snapshot(
                 strategy=deal_strategy,
             )
 
-            # Always include rent reasoning notes
             reasons.extend(rent_notes)
 
-            # If rent was heuristic-estimated, never PASS automatically
             if estimated and decision == "PASS":
                 decision = "REVIEW"
-                reasons.append("Rent was estimated from 1.3% heuristic; verify with comps/FMR/ceiling before PASS")
+                reasons.append("Rent was heuristic-estimated; verify comps/FMR/ceiling before PASS")
 
-            # ---- Phase 2: Jurisdiction friction multiplier ----
+            # Phase 2: jurisdiction friction (persist exact friction used)
             jr = db.scalar(
                 select(JurisdictionRule).where(
                     JurisdictionRule.city == p.city,
@@ -218,21 +206,31 @@ def evaluate_snapshot(
             )
             friction = compute_friction(jr)
 
-            if getattr(friction, "reasons", None):
-                reasons.extend([f"[Jurisdiction] {r}" for r in friction.reasons])
+            fr_reasons = getattr(friction, "reasons", []) or []
+            fr_mult = float(getattr(friction, "multiplier", 1.0) or 1.0)
 
-            # Apply multiplier to score (clamp 0..100)
-            try:
-                mult = float(getattr(friction, "multiplier", 1.0))
-            except Exception:
-                mult = 1.0
+            if fr_reasons:
+                reasons.extend([f"[Jurisdiction] {r}" for r in fr_reasons])
 
-            score = int(round(float(score) * mult))
+            # Apply multiplier to score (clamp)
+            score = int(round(float(score) * fr_mult))
             score = max(0, min(100, score))
 
             existing = db.scalar(select(UnderwritingResult).where(UnderwritingResult.deal_id == d.id))
             if not existing:
-                existing = UnderwritingResult(deal_id=d.id)
+                existing = UnderwritingResult(
+                    deal_id=d.id,
+                    decision="REVIEW",
+                    gross_rent_used=0.0,
+                    mortgage_payment=0.0,
+                    operating_expenses=0.0,
+                    noi=0.0,
+                    cash_flow=0.0,
+                    dscr=0.0,
+                    cash_on_cash=0.0,
+                    break_even_rent=0.0,
+                    min_rent_for_target_roi=0.0,
+                )
                 db.add(existing)
 
             existing.decision = decision
@@ -248,6 +246,18 @@ def evaluate_snapshot(
             existing.cash_on_cash = float(uw.cash_on_cash)
             existing.break_even_rent = float(uw.break_even_rent)
             existing.min_rent_for_target_roi = float(uw.min_rent_for_target_roi)
+
+            # ✅ Phase 0 reproducibility
+            existing.decision_version = str(settings.decision_version)
+            existing.payment_standard_pct_used = float(ps)
+
+            # ✅ Phase 2 persist friction used
+            existing.jurisdiction_multiplier = float(fr_mult)
+            existing.jurisdiction_reasons_json = json.dumps(fr_reasons)
+
+            # ✅ Phase 3 rent explain winners
+            existing.rent_cap_reason = cap_reason
+            existing.fmr_adjusted = float(fmr_adjusted) if fmr_adjusted is not None else None
 
             db.commit()
 
@@ -276,15 +286,10 @@ def evaluate_snapshot(
 def evaluate_run(
     snapshot_id: int = Query(...),
     strategy: Optional[str] = Query(default=None, description="section8|market (optional override)"),
-    payment_standard_pct: float = Query(default=1.0, ge=0.5, le=1.5),
+    payment_standard_pct: float | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    return evaluate_snapshot(
-        snapshot_id=snapshot_id,
-        strategy=strategy,
-        payment_standard_pct=payment_standard_pct,
-        db=db,
-    )
+    return evaluate_snapshot(snapshot_id=snapshot_id, strategy=strategy, payment_standard_pct=payment_standard_pct, db=db)
 
 
 @router.get("/results", response_model=List[UnderwritingResultOut])
@@ -301,5 +306,5 @@ def evaluate_results(
     if decision is not None:
         q = q.where(UnderwritingResult.decision == decision)
 
-    rows = db.scalars(q.limit(limit)).all()
+    rows = db.scalars(q.order_by(desc(UnderwritingResult.id)).limit(limit)).all()
     return [UnderwritingResultOut.model_validate(r) for r in rows]

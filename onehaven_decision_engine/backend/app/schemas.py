@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Optional, List, Any, Literal
+from typing import Optional, List, Any, Literal, Dict
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
@@ -88,7 +88,6 @@ class DealCreate(BaseModel):
     estimated_purchase_price: Optional[float] = None
     rehab_estimate: float = 0.0
 
-    # ✅ NEW: per-deal underwriting strategy
     strategy: str = "section8"  # section8 | market
 
     financing_type: str = "dscr"
@@ -96,7 +95,6 @@ class DealCreate(BaseModel):
     term_years: int = 30
     down_payment_pct: float = 0.20
 
-    # optional ingestion metadata
     snapshot_id: Optional[int] = None
     source_fingerprint: Optional[str] = None
     source_raw_json: Optional[str] = None
@@ -107,7 +105,6 @@ class DealOut(DealCreate):
     id: int
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
-
 
 
 class DealIntakeIn(BaseModel):
@@ -133,6 +130,9 @@ class DealIntakeIn(BaseModel):
     term_years: int = 30
     down_payment_pct: float = 0.20
 
+    # ✅ Phase 1 plumbing: allow snapshot selection (optional)
+    snapshot_id: Optional[int] = None
+
 
 class DealIntakeOut(BaseModel):
     property: PropertyOut
@@ -156,9 +156,7 @@ class RentAssumptionOut(RentAssumptionUpsert):
     property_id: int
     created_at: Optional[datetime] = None
 
-    # ✅ persisted output
     rent_used: Optional[float] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -167,7 +165,6 @@ class JurisdictionRuleUpsert(BaseModel):
     state: str = "MI"
     rental_license_required: bool = False
 
-    # ✅ Phase 2
     inspection_frequency: Optional[str] = Field(default=None, description="annual|biennial|complaint")
     inspection_authority: Optional[str] = None
     typical_fail_points: Optional[List[str]] = None
@@ -204,45 +201,57 @@ class UnderwritingResultOut(BaseModel):
     break_even_rent: float
     min_rent_for_target_roi: float
 
+    # ✅ Phase 0/2/3 persisted truth
+    decision_version: Optional[str] = None
+    payment_standard_pct_used: Optional[float] = None
+    jurisdiction_multiplier: Optional[float] = None
+    jurisdiction_reasons: Optional[List[str]] = None
+    rent_cap_reason: Optional[str] = None
+    fmr_adjusted: Optional[float] = None
+
     model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="before")
     @classmethod
     def _coerce_reasons(cls, data: Any) -> Any:
+        def _load_list(s: Any) -> List[str]:
+            if s is None:
+                return []
+            if isinstance(s, list):
+                return [str(x) for x in s]
+            if isinstance(s, str):
+                try:
+                    v = json.loads(s)
+                    if isinstance(v, list):
+                        return [str(x) for x in v]
+                except Exception:
+                    pass
+            return [str(s)]
+
         if isinstance(data, dict):
-            if "reasons" in data and isinstance(data["reasons"], list):
-                return data
-
             rj = data.get("reasons_json")
-            if rj is None:
-                if "reasons" in data and isinstance(data["reasons"], str):
-                    data["reasons"] = [data["reasons"]]
-                return data
+            if "reasons" not in data:
+                data["reasons"] = _load_list(rj)
 
-            try:
-                parsed = json.loads(rj) if isinstance(rj, str) else []
-                data["reasons"] = parsed if isinstance(parsed, list) else [str(parsed)]
-            except Exception:
-                data["reasons"] = [f"Failed to parse reasons_json: {rj!r}"]
+            # decode jurisdiction reasons if present
+            if "jurisdiction_reasons" not in data:
+                data["jurisdiction_reasons"] = _load_list(data.get("jurisdiction_reasons_json"))
+
+            # map to output field name
+            data["jurisdiction_reasons"] = data.get("jurisdiction_reasons") or _load_list(data.get("jurisdiction_reasons_json"))
             return data
 
-        try:
-            rj = getattr(data, "reasons_json", "[]")
-        except Exception:
-            rj = "[]"
-
-        try:
-            parsed = json.loads(rj) if isinstance(rj, str) else []
-            reasons = parsed if isinstance(parsed, list) else [str(parsed)]
-        except Exception:
-            reasons = [f"Failed to parse reasons_json: {rj!r}"]
+        # ORM object
+        rj = getattr(data, "reasons_json", "[]")
+        jurj = getattr(data, "jurisdiction_reasons_json", None)
 
         return {
             "id": getattr(data, "id"),
             "deal_id": getattr(data, "deal_id"),
             "decision": getattr(data, "decision"),
             "score": getattr(data, "score"),
-            "reasons": reasons,
+            "reasons": _load_list(rj),
+
             "gross_rent_used": getattr(data, "gross_rent_used"),
             "mortgage_payment": getattr(data, "mortgage_payment"),
             "operating_expenses": getattr(data, "operating_expenses"),
@@ -250,40 +259,28 @@ class UnderwritingResultOut(BaseModel):
             "cash_flow": getattr(data, "cash_flow"),
             "dscr": getattr(data, "dscr"),
             "cash_on_cash": getattr(data, "cash_on_cash"),
+
             "break_even_rent": getattr(data, "break_even_rent"),
             "min_rent_for_target_roi": getattr(data, "min_rent_for_target_roi"),
+
+            "decision_version": getattr(data, "decision_version", None),
+            "payment_standard_pct_used": getattr(data, "payment_standard_pct_used", None),
+            "jurisdiction_multiplier": getattr(data, "jurisdiction_multiplier", None),
+            "jurisdiction_reasons": _load_list(jurj),
+            "rent_cap_reason": getattr(data, "rent_cap_reason", None),
+            "fmr_adjusted": getattr(data, "fmr_adjusted", None),
         }
 
 
-# -------------------- Compliance --------------------
+# -------------------- Compliance (existing checklist out + new template + persisted checklist) --------------------
 
-class InspectorUpsert(BaseModel):
-    name: str
-    agency: Optional[str] = None
-
-
-class InspectorOut(InspectorUpsert):
-    id: int
-    model_config = ConfigDict(from_attributes=True)
-
-
-class InspectionCreate(BaseModel):
-    property_id: int
-    inspector_id: Optional[int] = None
-    inspection_date: Optional[datetime] = None
-    passed: bool = False
-    reinspect_required: bool = False
-    notes: Optional[str] = None
-
-
-# ✅ Phase 3 checklist output matches generator
 class ChecklistItemOut(BaseModel):
     item_code: str
     category: str
     description: str
     severity: int = Field(default=2, ge=1, le=5)
     common_fail: bool = False
-    applies_if: Optional[str] = None
+    applies_if: Optional[Dict[str, Any]] = None  # ✅ was Optional[str]
 
 
 class ChecklistOut(BaseModel):
@@ -297,55 +294,31 @@ class ChecklistOut(BaseModel):
     items: List[ChecklistItemOut] = Field(default_factory=list)
 
 
-class InspectionOut(InspectionCreate):
+class ChecklistTemplateItemUpsert(BaseModel):
+    strategy: str = "section8"
+    version: str = "v1"
+    code: str
+    category: str
+    description: str
+    applies_if: Optional[Dict[str, Any]] = None
+    severity: int = 2
+    common_fail: bool = True
+
+
+class ChecklistTemplateItemOut(ChecklistTemplateItemUpsert):
     id: int
+    created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 
-class InspectionItemCreate(BaseModel):
-    code: str = Field(..., description="Normalized fail point key e.g. GFCI, HANDRAIL, OUTLET, PAINT, TRIP_HAZARD")
-    failed: bool = True
-    severity: int = 1
-    location: Optional[str] = None
-    details: Optional[str] = None
-
-
-class InspectionItemUpdate(BaseModel):
-    failed: Optional[bool] = None
-    severity: Optional[int] = Field(default=None, ge=1, le=5)
-    location: Optional[str] = None
-    details: Optional[str] = None
-    resolution_notes: Optional[str] = None
-
-
-class InspectionItemResolve(BaseModel):
-    resolved: bool = Field(True, description="Set true to resolve, false to un-resolve")
-    resolution_notes: Optional[str] = None
-    resolved_at: Optional[datetime] = None
-
-
-class InspectionItemOut(InspectionItemCreate):
+class PropertyChecklistOut(BaseModel):
     id: int
-    inspection_id: int
-    resolved_at: Optional[datetime] = None
-    resolution_notes: Optional[str] = None
-    created_at: Optional[datetime] = None
+    property_id: int
+    strategy: str
+    version: str
+    generated_at: datetime
+    items: List[ChecklistItemOut]
     model_config = ConfigDict(from_attributes=True)
-
-
-class PredictFailPointsOut(BaseModel):
-    city: str
-    inspector: Optional[str] = None
-    window_inspections: int
-    top_fail_points: List[dict]
-
-
-class ComplianceStatsOut(BaseModel):
-    city: str
-    inspections: int
-    pass_rate: float
-    reinspect_rate: float
-    top_fail_points: List[dict]
 
 
 # -------------------- Rent Comps + Observations + Calibration --------------------
@@ -404,11 +377,14 @@ class CeilingCandidate(BaseModel):
     type: Literal["payment_standard", "rent_reasonableness", "fmr", "manual", "other"]
     value: float
 
+
 class RentExplainOut(BaseModel):
     property_id: int
-
     strategy: str
+
+    # Operating truth
     payment_standard_pct: float
+    fmr_adjusted: Optional[float] = None
 
     market_rent_estimate: Optional[float] = None
     section8_fmr: Optional[float] = None
@@ -418,11 +394,13 @@ class RentExplainOut(BaseModel):
     calibrated_market_rent: Optional[float] = None
     rent_used: Optional[float] = None
 
-    # ✅ FIX: list of structured candidates
     ceiling_candidates: List[CeilingCandidate] = Field(default_factory=list)
 
-    # optional: explanation strings if your router returns them
+    # ✅ winner label for explainability
+    cap_reason: Optional[str] = None  # fmr|comps|override|none
+
     explanation: Optional[str] = None
+
 
 class RentExplainBatchOut(BaseModel):
     snapshot_id: int
@@ -453,6 +431,18 @@ class RentRecomputeOut(BaseModel):
     calibrated_market_rent: Optional[float]
     strategy: str
     rent_used: Optional[float]
+
+
+# -------------------- Phase 4: Single Property View --------------------
+
+class PropertyViewOut(BaseModel):
+    property: PropertyOut
+    deal: DealOut
+    rent_explain: RentExplainOut
+    jurisdiction_rule: Optional[JurisdictionRuleOut] = None
+    jurisdiction_friction: dict
+    last_underwriting_result: Optional[UnderwritingResultOut] = None
+    checklist: Optional[ChecklistOut] = None
 
 
 PropertyOut.model_rebuild()

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 
 from ..db import get_db
-from ..models import Deal, Property, RentAssumption, UnderwritingResult
+from ..models import Deal, Property, RentAssumption, UnderwritingResult, ImportSnapshot
 from ..schemas import (
     DealCreate,
     DealOut,
@@ -22,6 +22,17 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/deals", tags=["deals"])
+
+
+def _get_or_create_manual_snapshot(db: Session) -> ImportSnapshot:
+    snap = db.scalar(select(ImportSnapshot).where(ImportSnapshot.source == "manual"))
+    if snap:
+        return snap
+    snap = ImportSnapshot(source="manual", notes="Manual intake snapshot", created_at=datetime.utcnow())
+    db.add(snap)
+    db.commit()
+    db.refresh(snap)
+    return snap
 
 
 @router.get("/survivors", response_model=list[SurvivorOut])
@@ -75,14 +86,22 @@ def survivors(
 def intake(payload: DealIntakeIn, db: Session = Depends(get_db)):
     """
     Phase 1 "manual first" intake.
-    Creates:
-      - Property
-      - Deal
-      - RentAssumption stub (so rent intelligence can be entered immediately)
+    Ensures snapshot_id is ALWAYS set:
+      - uses payload.snapshot_id if provided and exists
+      - else defaults to ImportSnapshot(source="manual")
     """
     strategy = (payload.strategy or "section8").strip().lower()
     if strategy not in {"section8", "market"}:
         raise HTTPException(status_code=400, detail="strategy must be 'section8' or 'market'")
+
+    # Resolve snapshot
+    snap_id = payload.snapshot_id
+    if snap_id is None:
+        snap_id = _get_or_create_manual_snapshot(db).id
+    else:
+        snap = db.get(ImportSnapshot, snap_id)
+        if not snap:
+            raise HTTPException(status_code=400, detail="Invalid snapshot_id")
 
     # Create Property
     p = Property(
@@ -102,7 +121,7 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(p)
 
-    # Create Deal
+    # Create Deal (snapshot_id set!)
     d = Deal(
         property_id=p.id,
         asking_price=float(payload.purchase_price),
@@ -113,6 +132,7 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db)):
         interest_rate=float(payload.interest_rate),
         term_years=int(payload.term_years),
         down_payment_pct=float(payload.down_payment_pct),
+        snapshot_id=int(snap_id),
         created_at=datetime.utcnow(),
     )
     db.add(d)
@@ -140,9 +160,11 @@ def create_deal(payload: DealCreate, db: Session = Depends(get_db)):
 
     data = payload.model_dump()
     data["strategy"] = (data.get("strategy") or "section8").strip().lower()
-
     if data["strategy"] not in {"section8", "market"}:
         raise HTTPException(status_code=400, detail="strategy must be 'section8' or 'market'")
+
+    if data.get("snapshot_id") is None:
+        data["snapshot_id"] = _get_or_create_manual_snapshot(db).id
 
     d = Deal(**data)
     db.add(d)
@@ -169,7 +191,7 @@ def upsert_rent(property_id: int, payload: RentAssumptionUpsert, db: Session = D
     data = payload.model_dump(exclude_unset=True)
 
     if ra is None:
-        ra = RentAssumption(property_id=property_id, **data)
+        ra = RentAssumption(property_id=property_id, **data, created_at=datetime.utcnow())
         db.add(ra)
     else:
         for k, v in data.items():

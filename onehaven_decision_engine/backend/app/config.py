@@ -1,3 +1,4 @@
+# backend/app/config.py
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,6 +10,14 @@ class Settings(BaseSettings):
 
     app_env: str = "local"
     database_url: str
+
+    # ---- Operating Truth / Reproducibility ----
+    # Put this in env: PAYMENT_STANDARD_PCT=1.10 (example)
+    payment_standard_pct: float = 1.00
+
+    # Bump this when your rules change so history doesn't rewrite itself.
+    # Put in env: DECISION_VERSION=2026-02-10.v1
+    decision_version: str = "2026-02-10.v1"
 
     # ---- Deal rules defaults ----
     max_price: int = 150_000
@@ -43,7 +52,7 @@ class Settings(BaseSettings):
     rent_calibration_min_mult: float = 0.70
     rent_calibration_max_mult: float = 1.30
 
-    # Section 8 payment standard (PHA policy proxy)
+    # Back-compat (deprecated): if you used this before, keep it but don't rely on it.
     default_payment_standard_pct: float = 1.00
 
     # ---- External APIs ----
@@ -54,7 +63,6 @@ class Settings(BaseSettings):
     rentcast_base_url: str = "https://api.rentcast.io/v1"
 
     def model_post_init(self, __context) -> None:
-        # If someone used the misspelled config, keep the app running.
         if self.rent_calibration_apha is not None:
             object.__setattr__(self, "rent_calibration_alpha", float(self.rent_calibration_apha))
 

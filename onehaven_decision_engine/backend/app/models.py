@@ -52,6 +52,11 @@ class Property(Base):
         back_populates="property", cascade="all, delete-orphan"
     )
 
+    # Phase 3: persisted checklist instances
+    checklists: Mapped[List["PropertyChecklist"]] = relationship(
+        back_populates="property", cascade="all, delete-orphan"
+    )
+
 
 class Deal(Base):
     __tablename__ = "deals"
@@ -71,7 +76,6 @@ class Deal(Base):
     estimated_purchase_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     rehab_estimate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
-    # ✅ NEW: per-deal underwriting strategy
     # section8 | market
     strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="section8")
 
@@ -211,12 +215,24 @@ class UnderwritingResult(Base):
     break_even_rent: Mapped[float] = mapped_column(Float, nullable=False)
     min_rent_for_target_roi: Mapped[float] = mapped_column(Float, nullable=False)
 
+    # ✅ Phase 0: reproducibility
+    decision_version: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    payment_standard_pct_used: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # ✅ Phase 2: persist friction used
+    jurisdiction_multiplier: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    jurisdiction_reasons_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ✅ Phase 3-ish: rent explain winners
+    rent_cap_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # fmr|comps|override|none
+    fmr_adjusted: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     deal: Mapped["Deal"] = relationship(back_populates="results")
 
 
-# -------------------- Compliance logging --------------------
+# -------------------- Compliance logging (existing) --------------------
 
 class Inspector(Base):
     __tablename__ = "inspectors"
@@ -295,3 +311,40 @@ class ApiUsage(Base):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+# -------------------- Phase 3: checklist templates + persisted checklists --------------------
+
+class ChecklistTemplateItem(Base):
+    __tablename__ = "checklist_template_items"
+    __table_args__ = (UniqueConstraint("strategy", "code", "version", name="uq_checklist_template_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="section8")
+    version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1")
+
+    code: Mapped[str] = mapped_column(String(80), nullable=False)  # item_code
+    category: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    applies_if_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    severity: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    common_fail: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class PropertyChecklist(Base):
+    __tablename__ = "property_checklists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+
+    strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="section8")
+    version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1")
+
+    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    items_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
+    property: Mapped["Property"] = relationship(back_populates="checklists")
