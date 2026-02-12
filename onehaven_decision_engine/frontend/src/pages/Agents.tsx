@@ -13,32 +13,47 @@ export default function Agents() {
   }, []);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <div className="text-xl font-semibold">Agents</div>
-        <div className="text-sm text-zinc-400">
-          These are workflow slots. Today they’re humans. Later they’re
-          cooperating agents using the same operating principles.
+    <div className="space-y-5">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <div className="text-2xl font-semibold tracking-tight">Agents</div>
+          <div className="text-sm text-zinc-400 mt-1">
+            Workflow slots (humans now, automation later). Each agent is a
+            contract: inputs → outputs → audit trail.
+          </div>
         </div>
       </div>
 
       {err && (
-        <div className="p-3 rounded-lg bg-red-950/40 border border-red-800 text-red-200">
+        <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
           {err}
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {agents.map((a) => (
-          <div
-            key={a.key}
-            className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/30"
-          >
-            <div className="font-semibold">{a.name}</div>
-            <div className="text-xs text-zinc-400">{a.key}</div>
-            <div className="mt-2 text-sm text-zinc-300">{a.description}</div>
-            <div className="mt-3 text-xs text-zinc-400">
-              default payload schema: {JSON.stringify(a.default_payload_schema)}
+          <div key={a.agent_key ?? a.key} className="oh-panel p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-lg font-semibold tracking-tight">
+                  {a.title ?? a.name}
+                </div>
+                <div className="text-xs text-zinc-400 mt-1">
+                  key: <span className="oh-kbd">{a.agent_key ?? a.key}</span>
+                </div>
+              </div>
+              <span className="oh-badge">spec</span>
+            </div>
+
+            <div className="mt-3 text-sm text-zinc-300 leading-relaxed">
+              {a.description}
+            </div>
+
+            <div className="mt-4">
+              <div className="text-xs text-zinc-500 mb-2">Default payload</div>
+              <pre className="text-xs text-zinc-200 bg-zinc-950/60 border border-zinc-800 rounded-xl p-3 overflow-auto">
+                {JSON.stringify(a.default_payload_schema ?? {}, null, 2)}
+              </pre>
             </div>
           </div>
         ))}

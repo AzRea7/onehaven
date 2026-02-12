@@ -23,7 +23,18 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 @router.get("", response_model=list[AgentSpecOut])
 def list_agents():
-    return [AgentSpecOut(**a.__dict__) for a in AGENTS.values()]
+    out: list[AgentSpecOut] = []
+    for a in AGENTS.values():
+        # AgentSpec typically has: key, name, description, default_payload_schema
+        out.append(
+            AgentSpecOut(
+                agent_key=getattr(a, "key", None),
+                title=getattr(a, "name", None),
+                description=getattr(a, "description", None),
+                notes=None,
+            )
+        )
+    return out
 
 
 @router.post("/runs", response_model=AgentRunOut)
@@ -80,8 +91,11 @@ def list_messages(
     limit: int = 200,
     db: Session = Depends(get_db),
 ):
-    q = select(AgentMessage).where(AgentMessage.thread_key == thread_key).order_by(AgentMessage.id.asc())
+    q = (
+        select(AgentMessage)
+        .where(AgentMessage.thread_key == thread_key)
+        .order_by(AgentMessage.id.asc())
+    )
     if recipient:
         q = q.where(AgentMessage.recipient == recipient)
     return list(db.scalars(q.limit(limit)).all())
-
