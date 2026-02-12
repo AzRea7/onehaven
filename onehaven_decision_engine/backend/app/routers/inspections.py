@@ -1,3 +1,4 @@
+# backend/app/routers/inspections.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -24,25 +25,55 @@ from ..domain.compliance import top_fail_points, compliance_stats
 router = APIRouter(prefix="/inspections", tags=["inspections"])
 
 
+def _normalize_code(raw: str) -> str:
+    code = (raw or "").strip().upper().replace(" ", "_")
+    return code
+
+
+# -----------------------------
+# Inspectors
+# -----------------------------
 @router.put("/inspectors", response_model=InspectorOut)
-def upsert_inspector(payload: InspectorUpsert, db: Session = Depends(get_db)):
-    ins = db.scalar(select(Inspector).where(Inspector.name == payload.name, Inspector.agency == payload.agency))
+def upsert_inspector(payload: InspectorUpsert, db: Session = Depends(get_db)) -> InspectorOut:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Inspector name is required")
+
+    # Important: NULL comparisons must use IS NULL in SQL
+    stmt = select(Inspector).where(Inspector.name == name)
+    if payload.agency is None:
+        stmt = stmt.where(Inspector.agency.is_(None))
+    else:
+        stmt = stmt.where(Inspector.agency == payload.agency)
+
+    ins = db.scalar(stmt)
+
     if ins is None:
-        ins = Inspector(name=payload.name, agency=payload.agency)
+        ins = Inspector(name=name, agency=payload.agency)
         db.add(ins)
         db.commit()
         db.refresh(ins)
         return ins
 
-    # update if needed (idempotent)
+    # idempotent update: keep record stable, but allow agency changes if you want
+    # If you truly want (name) unique regardless of agency, change the model constraint.
     ins.agency = payload.agency
     db.commit()
     db.refresh(ins)
     return ins
 
 
+# -----------------------------
+# Inspections
+# -----------------------------
 @router.post("", response_model=InspectionOut)
-def create_inspection(payload: InspectionCreate, db: Session = Depends(get_db)):
+def create_inspection(payload: InspectionCreate, db: Session = Depends(get_db)) -> InspectionOut:
+    # Validate inspector if provided
+    if payload.inspector_id is not None:
+        ins = db.get(Inspector, payload.inspector_id)
+        if not ins:
+            raise HTTPException(status_code=400, detail="Invalid inspector_id")
+
     insp = Inspection(
         property_id=payload.property_id,
         inspector_id=payload.inspector_id,
@@ -58,17 +89,20 @@ def create_inspection(payload: InspectionCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/{inspection_id}/items", response_model=InspectionItemOut)
-def add_item(inspection_id: int, payload: InspectionItemCreate, db: Session = Depends(get_db)):
+def add_item(inspection_id: int, payload: InspectionItemCreate, db: Session = Depends(get_db)) -> InspectionItemOut:
     insp = db.get(Inspection, inspection_id)
     if not insp:
         raise HTTPException(status_code=404, detail="Inspection not found")
 
-    code = payload.code.strip().upper().replace(" ", "_")
+    code = _normalize_code(payload.code)
     if not code:
         raise HTTPException(status_code=400, detail="Invalid code")
 
     existing = db.scalar(
-        select(InspectionItem).where(InspectionItem.inspection_id == inspection_id, InspectionItem.code == code)
+        select(InspectionItem).where(
+            InspectionItem.inspection_id == inspection_id,
+            InspectionItem.code == code,
+        )
     )
     if existing:
         existing.failed = payload.failed
@@ -76,9 +110,14 @@ def add_item(inspection_id: int, payload: InspectionItemCreate, db: Session = De
         existing.location = payload.location
         existing.details = payload.details
 
-        # If something is marked not failed, auto-resolve unless user explicitly resolves later.
+        # If marked not failed, auto-resolve timestamp (unless already resolved)
         if existing.failed is False and existing.resolved_at is None:
             existing.resolved_at = datetime.utcnow()
+
+        # If marked failed again, clear resolved_at (optional but usually correct)
+        if existing.failed is True and existing.resolved_at is not None:
+            existing.resolved_at = None
+            existing.resolution_notes = None
 
         db.commit()
         db.refresh(existing)
@@ -92,6 +131,7 @@ def add_item(inspection_id: int, payload: InspectionItemCreate, db: Session = De
         location=payload.location,
         details=payload.details,
     )
+
     if item.failed is False:
         item.resolved_at = datetime.utcnow()
 
@@ -102,7 +142,7 @@ def add_item(inspection_id: int, payload: InspectionItemCreate, db: Session = De
 
 
 @router.patch("/items/{item_id}/resolve", response_model=InspectionItemOut)
-def resolve_item(item_id: int, payload: InspectionItemResolve, db: Session = Depends(get_db)):
+def resolve_item(item_id: int, payload: InspectionItemResolve, db: Session = Depends(get_db)) -> InspectionItemOut:
     item = db.get(InspectionItem, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Inspection item not found")
@@ -111,12 +151,14 @@ def resolve_item(item_id: int, payload: InspectionItemResolve, db: Session = Dep
     item.resolution_notes = payload.resolution_notes
     item.resolved_at = payload.resolved_at or datetime.utcnow()
 
-    db.add(item)
     db.commit()
     db.refresh(item)
     return item
 
 
+# -----------------------------
+# Analytics / Prediction
+# -----------------------------
 @router.get("/predict", response_model=PredictFailPointsOut)
 def predict_fail_points(
     city: str = Query(...),
@@ -124,7 +166,7 @@ def predict_fail_points(
     inspector_id: int | None = Query(None),
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
-):
+) -> PredictFailPointsOut:
     inspector_name = None
     if inspector_id is not None:
         ins = db.get(Inspector, inspector_id)
@@ -133,11 +175,14 @@ def predict_fail_points(
         inspector_name = ins.name
 
     out = top_fail_points(db, city=city, state=state, inspector_id=inspector_id, limit=limit)
+
+    # Expected out shape:
+    # { "inspection_count": int, "top": [{"code":..., "count":..., "severity":...}, ...] }
     return PredictFailPointsOut(
         city=city,
         inspector=inspector_name,
-        window_inspections=out["inspection_count"],
-        top_fail_points=out["top"],
+        window_inspections=out.get("inspection_count", 0),
+        top_fail_points=out.get("top", []),
     )
 
 
@@ -147,12 +192,20 @@ def stats(
     state: str = Query("MI"),
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
-):
+) -> ComplianceStatsOut:
     s = compliance_stats(db, city=city, state=state, limit=limit)
+
+    # Expected s shape:
+    # {
+    #   "inspections": int,
+    #   "pass_rate": float,
+    #   "reinspect_rate": float,
+    #   "top_fail_points": [...]
+    # }
     return ComplianceStatsOut(
         city=city,
-        inspections=s["inspections"],
-        pass_rate=s["pass_rate"],
-        reinspect_rate=s["reinspect_rate"],
-        top_fail_points=s["top_fail_points"],
+        inspections=s.get("inspections", 0),
+        pass_rate=s.get("pass_rate", 0.0),
+        reinspect_rate=s.get("reinspect_rate", 0.0),
+        top_fail_points=s.get("top_fail_points", []),
     )

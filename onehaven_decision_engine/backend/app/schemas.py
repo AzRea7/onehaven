@@ -122,7 +122,6 @@ class DealIntakeIn(BaseModel):
     property_type: str = "single_family"
 
     # Deal fields
-    # NOTE: your DB model uses Deal.asking_price. Many people map intake.purchase_price -> asking_price internally.
     purchase_price: float
     est_rehab: float = 0.0
     strategy: str = Field(default="section8", description="section8|market")
@@ -132,7 +131,6 @@ class DealIntakeIn(BaseModel):
     term_years: int = 30
     down_payment_pct: float = 0.20
 
-    # allow snapshot selection (optional)
     snapshot_id: Optional[int] = None
 
 
@@ -170,7 +168,6 @@ class JurisdictionRuleUpsert(BaseModel):
     inspection_frequency: Optional[str] = Field(default=None, description="annual|biennial|complaint")
     inspection_authority: Optional[str] = None
 
-    # Stored in DB as JSON text (typical_fail_points_json) — schema stays list[str] for ergonomics.
     typical_fail_points: Optional[List[str]] = None
 
     registration_fee: Optional[float] = None
@@ -206,7 +203,6 @@ class UnderwritingResultOut(BaseModel):
     break_even_rent: float
     min_rent_for_target_roi: float
 
-    # Phase 0/2/3 persisted truth
     decision_version: Optional[str] = None
     payment_standard_pct_used: Optional[float] = None
     jurisdiction_multiplier: Optional[float] = None
@@ -246,7 +242,6 @@ class UnderwritingResultOut(BaseModel):
             )
             return data
 
-        # ORM object
         rj = getattr(data, "reasons_json", "[]")
         jurj = getattr(data, "jurisdiction_reasons_json", None)
 
@@ -448,3 +443,284 @@ class PropertyViewOut(BaseModel):
 
 
 PropertyOut.model_rebuild()
+
+
+# -----------------------------
+# Rehab
+# -----------------------------
+class RehabTaskCreate(BaseModel):
+    property_id: int
+    title: str
+    category: str = "rehab"
+    inspection_relevant: bool = True
+    status: str = "todo"
+    cost_estimate: float | None = None
+    vendor: str | None = None
+    deadline: datetime | None = None
+    notes: str | None = None
+
+
+class RehabTaskOut(RehabTaskCreate):
+    id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -----------------------------
+# Tenants + Leases
+# -----------------------------
+class TenantCreate(BaseModel):
+    full_name: str
+    phone: str | None = None
+    email: str | None = None
+    voucher_status: str | None = None
+    notes: str | None = None
+
+
+class TenantOut(TenantCreate):
+    id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LeaseCreate(BaseModel):
+    property_id: int
+    tenant_id: int
+    start_date: datetime
+    end_date: datetime | None = None
+    total_rent: float = 0.0
+    tenant_portion: float | None = None
+    housing_authority_portion: float | None = None
+    hap_contract_status: str | None = None
+    notes: str | None = None
+
+
+class LeaseOut(LeaseCreate):
+    id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -----------------------------
+# Cash (Transactions)
+# -----------------------------
+class TransactionCreate(BaseModel):
+    property_id: int
+    txn_date: datetime | None = None
+    txn_type: str | None = None
+    type: str | None = None
+    amount: float
+    memo: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_type(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("txn_type") and data.get("type"):
+                data["txn_type"] = data["type"]
+        return data
+
+
+class TransactionOut(BaseModel):
+    id: int
+    property_id: int
+    txn_date: datetime
+    txn_type: str
+    amount: float
+    memo: str | None
+    created_at: datetime
+    type: str = Field(default="")
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_type(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("type") and data.get("txn_type"):
+                data["type"] = data["txn_type"]
+        else:
+            if not getattr(data, "type", "") and getattr(data, "txn_type", None):
+                setattr(data, "type", getattr(data, "txn_type"))
+        return data
+
+
+# -----------------------------
+# Equity (Valuations) — MUST MATCH DB: valuations.as_of
+# -----------------------------
+class ValuationCreate(BaseModel):
+    property_id: int
+    as_of: datetime | None = None
+    estimated_value: float
+    loan_balance: float | None = None
+    notes: str | None = None
+
+
+class ValuationOut(BaseModel):
+    id: int
+    property_id: int
+    as_of: datetime
+    estimated_value: float
+    loan_balance: float | None
+    notes: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -----------------------------
+# Inspections (existing compliance models: Inspector / Inspection / InspectionItem)
+# -----------------------------
+class InspectorUpsert(BaseModel):
+    name: str
+    agency: str | None = None
+
+
+class InspectorOut(BaseModel):
+    id: int
+    name: str
+    agency: str | None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InspectionItemCreate(BaseModel):
+    code: str
+    failed: bool = True
+    severity: int = 1
+    location: str | None = None
+    details: str | None = None
+    resolved_at: datetime | None = None
+    resolution_notes: str | None = None
+
+
+class InspectionItemOut(InspectionItemCreate):
+    id: int
+    inspection_id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InspectionCreate(BaseModel):
+    property_id: int
+    inspector_id: int | None = None
+    inspection_date: datetime | None = None
+    passed: bool = False
+    reinspect_required: bool = False
+    notes: str | None = None
+    items: List[InspectionItemCreate] = Field(default_factory=list)
+
+
+class InspectionOut(BaseModel):
+    id: int
+    property_id: int
+    inspector_id: int | None
+    inspection_date: datetime
+    passed: bool
+    reinspect_required: bool
+    notes: str | None
+    created_at: datetime
+    items: List[InspectionItemOut] = Field(default_factory=list)
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -----------------------------
+# Agents
+# -----------------------------
+class AgentRunCreate(BaseModel):
+    property_id: int | None = None
+    agent_key: str
+    status: str = "queued"
+    input_json: str | None = None
+
+# -----------------------------
+# Agents: catalog / specs (what agents exist + what they do)
+# -----------------------------
+class AgentSlotOut(BaseModel):
+    """
+    UI/ops concept: a slot is a place in the sidebar where a human or agent can act.
+    Example: "Tenant Screening", "Inspection Prep", "HAP Packet Submit".
+    """
+    key: str
+    title: str
+    description: str | None = None
+    needs_human: bool = False
+
+
+class AgentSpecOut(BaseModel):
+    """
+    What an 'agent' is, at a product level.
+    This is usually returned by GET /agents/specs so the frontend can render the sidebar.
+    """
+    agent_key: str
+    title: str
+    description: str | None = None
+
+    # If True, this "agent" is really a human workflow slot (or requires human confirmation).
+    needs_human: bool = False
+
+    # Optional UI grouping ("Deal Intake", "Compliance", "Tenant", etc.)
+    category: str | None = None
+
+    # Optional sidebar placement
+    sidebar_slots: list[AgentSlotOut] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentRunOut(BaseModel):
+    id: int
+    property_id: int | None
+    agent_key: str
+    status: str
+    input_json: str | None
+    output_json: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentMessageCreate(BaseModel):
+    thread_key: str
+    sender: str
+    message: str
+    recipient: str | None = None
+
+
+class AgentMessageOut(BaseModel):
+    id: int
+    thread_key: str
+    sender: str
+    message: str
+    recipient: str | None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+# -----------------------------
+# Inspection Analytics / Prediction
+# -----------------------------
+class InspectionItemResolve(BaseModel):
+    resolution_notes: str | None = None
+    resolved_at: datetime | None = None
+
+
+class FailPointStat(BaseModel):
+    code: str
+    count: int
+    severity: int | None = None
+
+
+class PredictFailPointsOut(BaseModel):
+    city: str
+    inspector: str | None = None
+    window_inspections: int
+    top_fail_points: List[FailPointStat] = Field(default_factory=list)
+
+
+class ComplianceStatsOut(BaseModel):
+    city: str
+    inspections: int
+    pass_rate: float
+    reinspect_rate: float
+    top_fail_points: List[FailPointStat] = Field(default_factory=list)
+

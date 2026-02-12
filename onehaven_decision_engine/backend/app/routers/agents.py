@@ -74,11 +74,14 @@ def post_message(payload: AgentMessageCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/messages", response_model=list[AgentMessageOut])
-def get_messages(
+def list_messages(
     thread_key: str,
-    limit: int = Query(default=100, ge=1, le=1000),
+    recipient: str | None = None,
+    limit: int = 200,
     db: Session = Depends(get_db),
 ):
-    q = select(AgentMessage).where(AgentMessage.thread_key == thread_key).order_by(desc(AgentMessage.id))
-    rows = db.scalars(q.limit(limit)).all()
-    return list(reversed(rows))
+    q = select(AgentMessage).where(AgentMessage.thread_key == thread_key).order_by(AgentMessage.id.asc())
+    if recipient:
+        q = q.where(AgentMessage.recipient == recipient)
+    return list(db.scalars(q.limit(limit)).all())
+

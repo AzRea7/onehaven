@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Date,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -345,3 +346,157 @@ class PropertyChecklist(Base):
     items_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
     property: Mapped["Property"] = relationship(back_populates="checklists")
+
+
+class InspectionEvent(Base):
+    __tablename__ = "inspection_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
+    )
+
+    inspector_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    inspection_date: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+
+    # scheduled | passed | failed | reinspect
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="scheduled")
+
+    fail_items_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    days_to_resolve: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reinspection_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
+class RehabTask(Base):
+    __tablename__ = "rehab_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
+    )
+
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(50), nullable=False, server_default="rehab")
+    inspection_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+
+    # todo | doing | blocked | done
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="todo")
+
+    cost_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vendor: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    deadline: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    voucher_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+    leases: Mapped[list["Lease"]] = relationship("Lease", back_populates="tenant")
+
+
+class Lease(Base):
+    __tablename__ = "leases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
+
+    start_date: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
+    end_date: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+
+    total_rent: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    tenant_portion: Mapped[float | None] = mapped_column(Float, nullable=True)
+    housing_authority_portion: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    hap_contract_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+    tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="leases")
+
+
+class Transaction(Base):
+    __tablename__ = "transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
+    )
+
+    txn_date: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
+    txn_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
+class Valuation(Base):
+    __tablename__ = "valuations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
+    )
+
+    as_of: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
+
+    estimated_value: Mapped[float] = mapped_column(Float, nullable=False)
+    loan_balance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    property_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # example keys: "s8_intake", "tenant_screen", "inspection_prep"
+    agent_key: Mapped[str] = mapped_column(String(80), nullable=False)
+
+    # queued | running | needs_human | done | failed
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="queued")
+
+    input_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
+class AgentMessage(Base):
+    __tablename__ = "agent_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # thread key ties messages to a property workflow:
+    # e.g. "property:123" or "deal:45"
+    thread_key: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    # "human" | "agent:<name>" | "system"
+    sender: Mapped[str] = mapped_column(String(80), nullable=False)
+    recipient: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
