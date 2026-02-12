@@ -724,3 +724,31 @@ class ComplianceStatsOut(BaseModel):
     reinspect_rate: float
     top_fail_points: List[FailPointStat] = Field(default_factory=list)
 
+class AgentSlotSpecOut(BaseModel):
+    slot_key: str
+    title: str
+    description: str
+    owner_type: str
+    default_status: str
+
+
+class AgentSlotAssignmentUpsert(BaseModel):
+    slot_key: str
+    property_id: int | None = None
+    owner_type: str | None = None
+    assignee: str | None = None
+    status: str | None = None
+    notes: str | None = None
+
+
+class AgentSlotAssignmentOut(BaseModel):
+    id: int
+    slot_key: str
+    property_id: int | None
+    owner_type: str
+    assignee: str | None
+    status: str
+    notes: str | None
+    updated_at: datetime
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)

@@ -30,17 +30,22 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Business standard: backend is internal; frontend/nginx is the public entrypoint
+    # backend is internal; frontend/nginx is the public entrypoint
     expose:
       - "8000"
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     depends_on:
       - backend
     ports:
       - "8080:80"
+    environment:
+      # optional, but keeps expectations clear
+      NODE_ENV: production
     restart: unless-stopped
 
 volumes:

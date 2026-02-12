@@ -1,45 +1,47 @@
-import React from "react";
 import { motion } from "framer-motion";
 
 export default function AuroraBackground() {
+  // Smaller layers + slightly lower blur = dramatically faster.
+  // Still feels like tinted black, just not a GPU furnace.
   return (
     <div className="absolute inset-0 overflow-hidden">
-      {/* subtle grid */}
-      <div className="absolute inset-0 subtle-grid opacity-[0.35]" />
-
-      {/* aurora blobs (original shapes, not copied assets) */}
       <motion.div
-        className="absolute -top-40 -left-40 h-[520px] w-[520px] rounded-full blur-3xl opacity-35"
+        className="absolute -top-44 -left-44 h-[520px] w-[520px] rounded-full opacity-30"
         style={{
           background:
-            "radial-gradient(circle at 30% 30%, rgba(59,130,246,0.9), rgba(59,130,246,0) 60%)",
+            "radial-gradient(circle at 30% 30%, rgba(120,90,255,0.80), rgba(120,90,255,0) 62%)",
+          filter: "blur(42px)",
+          willChange: "transform",
         }}
-        animate={{ x: [0, 40, -10, 0], y: [0, -20, 10, 0] }}
-        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute top-10 -right-48 h-[560px] w-[560px] rounded-full blur-3xl opacity-30"
-        style={{
-          background:
-            "radial-gradient(circle at 70% 40%, rgba(168,85,247,0.9), rgba(168,85,247,0) 60%)",
-        }}
-        animate={{ x: [0, -35, 15, 0], y: [0, 25, -10, 0] }}
-        transition={{ duration: 16, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute -bottom-56 left-1/3 h-[640px] w-[640px] rounded-full blur-3xl opacity-25"
-        style={{
-          background:
-            "radial-gradient(circle at 40% 60%, rgba(34,197,94,0.75), rgba(34,197,94,0) 62%)",
-        }}
-        animate={{ x: [0, 20, -25, 0], y: [0, -15, 20, 0] }}
+        animate={{ x: [0, 28, -8, 0], y: [0, -14, 10, 0] }}
         transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
       />
 
-      {/* vignette */}
-      <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/10 via-zinc-950/55 to-zinc-950" />
+      <motion.div
+        className="absolute top-12 -right-52 h-[560px] w-[560px] rounded-full opacity-22"
+        style={{
+          background:
+            "radial-gradient(circle at 70% 40%, rgba(255,88,122,0.75), rgba(255,88,122,0) 62%)",
+          filter: "blur(46px)",
+          willChange: "transform",
+        }}
+        animate={{ x: [0, -34, 14, 0], y: [0, 18, -8, 0] }}
+        transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }}
+      />
 
-      {/* grain */}
+      <motion.div
+        className="absolute -bottom-64 left-1/3 h-[620px] w-[620px] rounded-full opacity-18"
+        style={{
+          background:
+            "radial-gradient(circle at 45% 60%, rgba(35,255,200,0.52), rgba(35,255,200,0) 64%)",
+          filter: "blur(52px)",
+          willChange: "transform",
+        }}
+        animate={{ x: [0, 20, -18, 0], y: [0, -10, 14, 0] }}
+        transition={{ duration: 26, repeat: Infinity, ease: "easeInOut" }}
+      />
+
+      <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/45 to-black/80" />
       <div className="noise" />
     </div>
   );

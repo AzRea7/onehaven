@@ -2,20 +2,25 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import AgentRun, AgentMessage
+from ..models import AgentRun, AgentMessage, AgentSlotAssignment
 from ..schemas import (
     AgentSpecOut,
     AgentRunCreate,
     AgentRunOut,
     AgentMessageCreate,
     AgentMessageOut,
+    AgentSlotSpecOut,
+    AgentSlotAssignmentUpsert,
+    AgentSlotAssignmentOut,
 )
-from ..domain.agents.registry import AGENTS
+from ..domain.agents.registry import AGENTS, SLOTS
 
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -25,7 +30,6 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 def list_agents():
     out: list[AgentSpecOut] = []
     for a in AGENTS.values():
-        # AgentSpec typically has: key, name, description, default_payload_schema
         out.append(
             AgentSpecOut(
                 agent_key=getattr(a, "key", None),
@@ -37,6 +41,9 @@ def list_agents():
     return out
 
 
+# -----------------------------
+# Agent Runs
+# -----------------------------
 @router.post("/runs", response_model=AgentRunOut)
 def create_run(payload: AgentRunCreate, db: Session = Depends(get_db)):
     if payload.agent_key not in AGENTS:
@@ -70,6 +77,9 @@ def list_runs(
     return list(rows)
 
 
+# -----------------------------
+# Agent Messages
+# -----------------------------
 @router.post("/messages", response_model=AgentMessageOut)
 def post_message(payload: AgentMessageCreate, db: Session = Depends(get_db)):
     msg = AgentMessage(
@@ -99,3 +109,73 @@ def list_messages(
     if recipient:
         q = q.where(AgentMessage.recipient == recipient)
     return list(db.scalars(q.limit(limit)).all())
+
+
+# -----------------------------
+# NEW: Slot Specs + Slot Assignments
+# -----------------------------
+@router.get("/slots/specs", response_model=list[AgentSlotSpecOut])
+def slot_specs():
+    return [
+        AgentSlotSpecOut(
+            slot_key=s.slot_key,
+            title=s.title,
+            description=s.description,
+            owner_type=s.owner_type,
+            default_status=s.default_status,
+        )
+        for s in SLOTS
+    ]
+
+
+@router.get("/slots/assignments", response_model=list[AgentSlotAssignmentOut])
+def slot_assignments(
+    property_id: int | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    q = select(AgentSlotAssignment).order_by(desc(AgentSlotAssignment.updated_at))
+    if property_id is not None:
+        q = q.where(AgentSlotAssignment.property_id == property_id)
+    return list(db.scalars(q.limit(limit)).all())
+
+
+@router.post("/slots/assignments", response_model=AgentSlotAssignmentOut)
+def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Depends(get_db)):
+    # find existing for (slot_key, property_id)
+    existing = db.scalar(
+        select(AgentSlotAssignment).where(
+            AgentSlotAssignment.slot_key == payload.slot_key,
+            AgentSlotAssignment.property_id == payload.property_id,
+        ).limit(1)
+    )
+
+    if existing:
+        if payload.owner_type is not None:
+            existing.owner_type = payload.owner_type
+        if payload.assignee is not None:
+            existing.assignee = payload.assignee
+        if payload.status is not None:
+            existing.status = payload.status
+        if payload.notes is not None:
+            existing.notes = payload.notes
+        existing.updated_at = datetime.utcnow()
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        return existing
+
+    row = AgentSlotAssignment(
+        slot_key=payload.slot_key,
+        property_id=payload.property_id,
+        owner_type=payload.owner_type or "human",
+        assignee=payload.assignee,
+        status=payload.status or "idle",
+        notes=payload.notes,
+        updated_at=datetime.utcnow(),
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row

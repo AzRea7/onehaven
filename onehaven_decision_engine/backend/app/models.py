@@ -500,3 +500,28 @@ class AgentMessage(Base):
     recipient: Mapped[str | None] = mapped_column(String(80), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+class AgentSlotAssignment(Base):
+    __tablename__ = "agent_slot_assignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # slot definition key (from domain.agents.registry.SLOTS)
+    slot_key: Mapped[str] = mapped_column(String(80), index=True)
+
+    # optional: tie assignment to a property
+    property_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
+
+    # "human" | "ai" | "hybrid"
+    owner_type: Mapped[str] = mapped_column(String(20), default="human")
+
+    # who is responsible (human name/email, or "system", or agent key)
+    assignee: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    # "idle" | "queued" | "in_progress" | "blocked" | "done"
+    status: Mapped[str] = mapped_column(String(20), default="idle")
+
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -11,22 +11,23 @@ const nav = [
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100">
-      {/* animated/art background */}
+    <div className="h-screen w-screen overflow-hidden bg-black text-zinc-100">
       <div className="relative h-full w-full">
         <AuroraBackground />
 
         <div className="relative h-full w-full flex overflow-hidden">
           {/* Sidebar */}
-          <aside className="w-72 p-4 flex flex-col gap-4 border-r border-zinc-800/80 bg-zinc-950/55 backdrop-blur-xl">
-            <div className="gradient-border rounded-2xl glass p-3">
+          <aside className="w-72 p-5 flex flex-col gap-5 border-r border-white/10 bg-black/45 backdrop-blur-xl">
+            <div className="gradient-border rounded-2xl glass p-4">
               <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-xl bg-zinc-800/70 border border-zinc-700/70" />
+                <div className="h-10 w-10 rounded-xl bg-white/[0.06] border border-white/[0.10]" />
                 <div>
                   <div className="text-sm font-semibold tracking-tight">
                     OneHaven
                   </div>
-                  <div className="text-xs text-zinc-400">Decision Engine</div>
+                  <div className="text-xs text-zinc-400">
+                    Centralized Real Estate Dashboard
+                  </div>
                 </div>
               </div>
             </div>
@@ -38,10 +39,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   to={n.to}
                   className={({ isActive }) =>
                     clsx(
-                      "px-3 py-2 rounded-xl text-sm transition border",
+                      "px-3 py-2.5 rounded-xl text-sm transition border",
                       isActive
-                        ? "bg-zinc-900/55 text-zinc-100 border-zinc-700/70"
-                        : "text-zinc-300 border-transparent hover:bg-zinc-900/35 hover:border-zinc-800",
+                        ? "bg-white/[0.06] text-zinc-100 border-white/[0.14]"
+                        : "text-zinc-300 border-transparent hover:bg-white/[0.04] hover:border-white/[0.10]",
                     )
                   }
                 >
@@ -50,31 +51,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               ))}
             </nav>
 
-            <div className="mt-auto text-xs text-zinc-500">
+            <div className="mt-auto text-xs text-zinc-500 leading-relaxed">
               Built for ruthless deal clarity.
+              <div className="text-[11px] text-zinc-600 mt-2">
+                Tip: keep the UI calm. Make the system loud.
+              </div>
             </div>
           </aside>
 
           {/* Main */}
-          <main className="flex-1 overflow-auto">
-            <div className="max-w-6xl mx-auto p-6">
-              {/* top bar */}
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <div className="text-sm text-zinc-400">OneHaven</div>
-                  <div className="text-xl font-semibold tracking-tight">
-                    Portfolio Console
-                  </div>
-                </div>
-
-                <div className="gradient-border rounded-2xl glass px-4 py-2">
-                  <div className="text-xs text-zinc-400">Status</div>
-                  <div className="text-sm">Live • Local API</div>
-                </div>
-              </div>
-
-              {children}
-            </div>
+          <main className="flex-1 overflow-y-auto">
+            <div className="min-h-full">{children}</div>
           </main>
         </div>
       </div>

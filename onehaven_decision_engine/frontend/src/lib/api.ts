@@ -20,7 +20,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   // Dashboard / properties
-  dashboard: () => request<any[]>(`/dashboard/properties?limit=100`),
+  dashboardProperties: () => request<any[]>(`/dashboard/properties?limit=100`),
   propertyView: (id: number) => request<any>(`/properties/${id}/view`),
 
   // Rehab
@@ -44,7 +44,7 @@ export const api = {
   valuations: (propertyId: number) =>
     request<any[]>(`/equity/valuations?property_id=${propertyId}&limit=200`),
 
-  // Agents
+  // Agents (automation-capable)
   agents: () => request<any[]>(`/agents`),
   agentRuns: (propertyId: number) =>
     request<any[]>(`/agents/runs?property_id=${propertyId}&limit=200`),
@@ -54,7 +54,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Agent messages (this is what Property.tsx expects)
+  // Messages
   messages: (threadKey: string) =>
     request<any[]>(
       `/agents/messages?thread_key=${encodeURIComponent(threadKey)}&limit=200`,
@@ -64,9 +64,31 @@ export const api = {
     thread_key: string;
     sender: string;
     message: string;
-    recipient?: string; // <-- add this
+    recipient?: string;
   }) =>
     request<any>(`/agents/messages`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // NEW: Slot Specs + Assignments
+  slotSpecs: () => request<any[]>(`/agents/slots/specs`),
+  slotAssignments: (propertyId?: number) => {
+    const q =
+      propertyId != null
+        ? `?property_id=${propertyId}&limit=200`
+        : `?limit=200`;
+    return request<any[]>(`/agents/slots/assignments${q}`);
+  },
+  upsertSlotAssignment: (payload: {
+    slot_key: string;
+    property_id?: number | null;
+    owner_type?: string | null;
+    assignee?: string | null;
+    status?: string | null;
+    notes?: string | null;
+  }) =>
+    request<any>(`/agents/slots/assignments`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),

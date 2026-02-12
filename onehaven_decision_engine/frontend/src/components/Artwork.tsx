@@ -1,5 +1,54 @@
 import clsx from "clsx";
+import React from "react";
 
+/**
+ * HoverTilt:
+ * - sets --rx/--ry based on pointer position
+ * - gives OpenClaw-ish “alive” hover feel without heavy JS libs
+ */
+export function HoverTilt({
+  className,
+  children,
+  intensity = 10,
+}: {
+  className?: string;
+  children: React.ReactNode;
+  intensity?: number;
+}) {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+
+  const onMove = (e: React.PointerEvent) => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width; // 0..1
+    const py = (e.clientY - r.top) / r.height; // 0..1
+    const ry = (px - 0.5) * intensity; // left/right
+    const rx = (0.5 - py) * intensity; // up/down
+    el.style.setProperty("--rx", `${rx}deg`);
+    el.style.setProperty("--ry", `${ry}deg`);
+  };
+
+  const onLeave = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.setProperty("--rx", `0deg`);
+    el.style.setProperty("--ry", `0deg`);
+  };
+
+  return (
+    <div
+      ref={ref}
+      className={clsx("hover-tilt", className)}
+      onPointerMove={onMove}
+      onPointerLeave={onLeave}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* --- Existing art, recolored slightly warmer --- */
 export function OrbDealEngine({ className }: { className?: string }) {
   return (
     <svg
@@ -10,17 +59,17 @@ export function OrbDealEngine({ className }: { className?: string }) {
       <defs>
         <radialGradient id="orbCore" cx="50%" cy="45%" r="60%">
           <stop offset="0%" stopColor="rgba(255,255,255,0.55)" />
-          <stop offset="35%" stopColor="rgba(99,102,241,0.45)" />
-          <stop offset="70%" stopColor="rgba(168,85,247,0.22)" />
+          <stop offset="35%" stopColor="rgba(120,90,255,0.40)" />
+          <stop offset="70%" stopColor="rgba(255,88,122,0.18)" />
           <stop offset="100%" stopColor="rgba(0,0,0,0)" />
         </radialGradient>
         <linearGradient id="orbRing" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="rgba(99,102,241,0.9)" />
-          <stop offset="50%" stopColor="rgba(168,85,247,0.9)" />
-          <stop offset="100%" stopColor="rgba(34,197,94,0.85)" />
+          <stop offset="0%" stopColor="rgba(120,90,255,0.95)" />
+          <stop offset="55%" stopColor="rgba(255,88,122,0.95)" />
+          <stop offset="100%" stopColor="rgba(35,255,200,0.75)" />
         </linearGradient>
         <filter id="glow">
-          <feGaussianBlur stdDeviation="6" result="blur" />
+          <feGaussianBlur stdDeviation="7" result="blur" />
           <feColorMatrix
             in="blur"
             type="matrix"
@@ -28,7 +77,7 @@ export function OrbDealEngine({ className }: { className?: string }) {
               1 0 0 0 0
               0 1 0 0 0
               0 0 1 0 0
-              0 0 0 0.8 0"
+              0 0 0 0.85 0"
           />
           <feMerge>
             <feMergeNode />
@@ -46,7 +95,6 @@ export function OrbDealEngine({ className }: { className?: string }) {
         strokeWidth="2"
       />
 
-      {/* ring */}
       <g filter="url(#glow)" opacity="0.95">
         <path
           d="M70 230C90 120 170 70 250 80C330 90 370 160 350 240C330 320 250 360 170 345C90 330 50 290 70 230Z"
@@ -56,35 +104,19 @@ export function OrbDealEngine({ className }: { className?: string }) {
         />
       </g>
 
-      {/* ticks */}
-      {Array.from({ length: 22 }).map((_, i) => {
-        const a = (i / 22) * Math.PI * 2;
-        const r1 = 178;
-        const r2 = i % 2 === 0 ? 194 : 188;
-        const x1 = 210 + Math.cos(a) * r1;
-        const y1 = 210 + Math.sin(a) * r1;
-        const x2 = 210 + Math.cos(a) * r2;
-        const y2 = 210 + Math.sin(a) * r2;
-        return (
-          <line
-            key={i}
-            x1={x1}
-            y1={y1}
-            x2={x2}
-            y2={y2}
-            stroke="rgba(255,255,255,0.18)"
-            strokeWidth={i % 2 === 0 ? 2 : 1}
-          />
-        );
-      })}
-
-      {/* “signal” arc */}
-      <path
-        d="M140 255C160 290 195 310 230 305C275 298 305 260 300 220"
-        stroke="rgba(255,255,255,0.22)"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
+      {/* spark arcs */}
+      <g opacity="0.55">
+        <path
+          d="M140 120c18-10 44-12 65-6"
+          stroke="rgba(255,255,255,0.25)"
+          strokeWidth="2"
+        />
+        <path
+          d="M250 300c-20 10-46 12-70 5"
+          stroke="rgba(255,255,255,0.22)"
+          strokeWidth="2"
+        />
+      </g>
     </svg>
   );
 }
@@ -93,86 +125,63 @@ export function Section8Badge({ className }: { className?: string }) {
   return (
     <svg
       className={clsx("w-full h-full", className)}
-      viewBox="0 0 520 260"
+      viewBox="0 0 420 420"
       fill="none"
     >
       <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="rgba(34,197,94,0.90)" />
-          <stop offset="45%" stopColor="rgba(99,102,241,0.85)" />
-          <stop offset="100%" stopColor="rgba(168,85,247,0.85)" />
+        <linearGradient id="badge" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="rgba(255,88,122,0.55)" />
+          <stop offset="45%" stopColor="rgba(120,90,255,0.45)" />
+          <stop offset="100%" stopColor="rgba(35,255,200,0.25)" />
         </linearGradient>
+        <filter id="softGlow">
+          <feGaussianBlur stdDeviation="8" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
 
-      <rect
-        x="18"
-        y="18"
-        width="484"
-        height="224"
-        rx="28"
-        fill="rgba(255,255,255,0.04)"
-        stroke="rgba(255,255,255,0.10)"
-      />
-      <rect
-        x="38"
-        y="38"
-        width="444"
-        height="184"
-        rx="22"
-        fill="rgba(0,0,0,0)"
-        stroke="url(#g)"
-        strokeWidth="2"
-        opacity="0.8"
-      />
+      <g filter="url(#softGlow)">
+        <path
+          d="M210 55c55 35 105 25 140 55v120c0 90-70 140-140 160-70-20-140-70-140-160V110c35-30 85-20 140-55Z"
+          fill="rgba(255,255,255,0.03)"
+          stroke="url(#badge)"
+          strokeWidth="3.5"
+        />
+      </g>
 
-      {/* shield */}
-      <path
-        d="M260 55C305 72 345 74 380 70V128C380 170 338 205 260 220C182 205 140 170 140 128V70C175 74 215 72 260 55Z"
-        fill="rgba(255,255,255,0.05)"
-        stroke="rgba(255,255,255,0.16)"
-      />
+      <g opacity="0.85">
+        <path
+          d="M165 220c20-55 85-65 120-22 26 32 12 85-24 110-38 26-86 12-103-25"
+          stroke="rgba(255,255,255,0.22)"
+          strokeWidth="3"
+        />
+      </g>
 
-      {/* check */}
-      <path
-        d="M205 136L245 170L320 96"
-        stroke="url(#g)"
-        strokeWidth="10"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-
-      {/* text-ish lines */}
-      <path
-        d="M78 92H190"
-        stroke="rgba(255,255,255,0.16)"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-      <path
-        d="M78 126H170"
-        stroke="rgba(255,255,255,0.12)"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-      <path
-        d="M78 160H200"
-        stroke="rgba(255,255,255,0.10)"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-
-      <path
-        d="M330 120H440"
-        stroke="rgba(255,255,255,0.14)"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-      <path
-        d="M330 154H420"
-        stroke="rgba(255,255,255,0.10)"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
+      <text
+        x="210"
+        y="235"
+        textAnchor="middle"
+        fontSize="52"
+        fontWeight="700"
+        fill="rgba(255,255,255,0.85)"
+        style={{ letterSpacing: "-1px" }}
+      >
+        HQS
+      </text>
+      <text
+        x="210"
+        y="272"
+        textAnchor="middle"
+        fontSize="13"
+        fontWeight="600"
+        fill="rgba(255,255,255,0.55)"
+        style={{ letterSpacing: "2px" }}
+      >
+        SECTION 8
+      </text>
     </svg>
   );
 }
@@ -185,66 +194,176 @@ export function AgentClaw({ className }: { className?: string }) {
       fill="none"
     >
       <defs>
-        <linearGradient id="claw" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="rgba(99,102,241,0.9)" />
-          <stop offset="50%" stopColor="rgba(168,85,247,0.9)" />
-          <stop offset="100%" stopColor="rgba(34,197,94,0.85)" />
+        <linearGradient id="agentGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="rgba(120,90,255,0.8)" />
+          <stop offset="55%" stopColor="rgba(255,88,122,0.7)" />
+          <stop offset="100%" stopColor="rgba(35,255,200,0.55)" />
         </linearGradient>
-        <radialGradient id="eye" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="rgba(255,255,255,0.9)" />
-          <stop offset="100%" stopColor="rgba(255,255,255,0.2)" />
-        </radialGradient>
+        <filter id="agentGlow">
+          <feGaussianBlur stdDeviation="7" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
 
-      {/* body */}
+      {/* “claw” abstract */}
+      <g filter="url(#agentGlow)" opacity="0.95">
+        <path
+          d="M115 280c40-80 90-120 150-120 60 0 95 40 70 95-18 40-60 70-115 80-55 10-95-5-105-55Z"
+          stroke="url(#agentGrad)"
+          strokeWidth="5"
+          fill="rgba(255,255,255,0.02)"
+        />
+        <path
+          d="M150 275c30-55 62-80 100-80"
+          stroke="rgba(255,255,255,0.18)"
+          strokeWidth="3"
+          strokeLinecap="round"
+        />
+      </g>
+
+      <circle cx="290" cy="190" r="6" fill="rgba(255,255,255,0.65)" />
+      <circle cx="305" cy="210" r="3.5" fill="rgba(255,255,255,0.35)" />
+    </svg>
+  );
+}
+
+/**
+ * NEW: BuildStack
+ * “brick/house being stacked” with internal moving parts.
+ * Use inside cards for that OpenClaw-like “alive artwork”.
+ */
+export function BuildStack({ className }: { className?: string }) {
+  return (
+    <svg
+      className={clsx("w-full h-full", className)}
+      viewBox="0 0 420 420"
+      fill="none"
+    >
+      <defs>
+        <linearGradient id="brick" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="rgba(255,88,122,0.75)" />
+          <stop offset="45%" stopColor="rgba(120,90,255,0.75)" />
+          <stop offset="100%" stopColor="rgba(35,255,200,0.55)" />
+        </linearGradient>
+        <filter id="bGlow">
+          <feGaussianBlur stdDeviation="10" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+
+      {/* base glow */}
+      <g filter="url(#bGlow)" opacity="0.75">
+        <ellipse
+          cx="210"
+          cy="330"
+          rx="110"
+          ry="26"
+          fill="rgba(255,255,255,0.05)"
+        />
+      </g>
+
+      {/* house outline */}
       <path
-        d="M120 250C120 185 155 140 210 140C265 140 300 185 300 250C300 305 265 340 210 340C155 340 120 305 120 250Z"
-        fill="rgba(255,255,255,0.04)"
+        d="M140 210l70-55 70 55v110c0 18-14 32-32 32H172c-18 0-32-14-32-32V210Z"
+        fill="rgba(255,255,255,0.02)"
         stroke="rgba(255,255,255,0.12)"
+        strokeWidth="2.5"
       />
-
-      {/* eyes */}
-      <circle cx="180" cy="230" r="18" fill="url(#eye)" opacity="0.85" />
-      <circle cx="240" cy="230" r="18" fill="url(#eye)" opacity="0.85" />
-      <circle cx="180" cy="230" r="6" fill="rgba(0,0,0,0.55)" />
-      <circle cx="240" cy="230" r="6" fill="rgba(0,0,0,0.55)" />
-
-      {/* left claw */}
       <path
-        d="M105 240C70 225 60 190 85 165C110 140 150 160 155 195C160 230 135 255 105 240Z"
-        fill="rgba(255,255,255,0.03)"
-        stroke="url(#claw)"
-        strokeWidth="3"
-      />
-      {/* right claw */}
-      <path
-        d="M315 240C350 225 360 190 335 165C310 140 270 160 265 195C260 230 285 255 315 240Z"
-        fill="rgba(255,255,255,0.03)"
-        stroke="url(#claw)"
-        strokeWidth="3"
-      />
-
-      {/* antenna / signal */}
-      <path
-        d="M210 140V95"
+        d="M165 220l45-36 45 36"
         stroke="rgba(255,255,255,0.18)"
-        strokeWidth="3"
-        strokeLinecap="round"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
       />
-      <circle
-        cx="210"
-        cy="85"
-        r="10"
-        stroke="url(#claw)"
-        strokeWidth="3"
-        fill="rgba(255,255,255,0.04)"
-      />
-      <path
-        d="M175 92C188 75 202 68 210 68C218 68 232 75 245 92"
-        stroke="rgba(255,255,255,0.12)"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
+
+      {/* bricks that “bob” independently */}
+      <g opacity="0.95">
+        <rect
+          x="120"
+          y="275"
+          width="86"
+          height="34"
+          rx="10"
+          fill="rgba(255,255,255,0.03)"
+          stroke="url(#brick)"
+          strokeWidth="3"
+        />
+        <rect
+          x="214"
+          y="275"
+          width="86"
+          height="34"
+          rx="10"
+          fill="rgba(255,255,255,0.03)"
+          stroke="url(#brick)"
+          strokeWidth="3"
+        />
+      </g>
+
+      {/* animated bricks using <animateTransform> (pure SVG, no JS) */}
+      <g>
+        <rect
+          x="150"
+          y="235"
+          width="120"
+          height="40"
+          rx="12"
+          fill="rgba(255,255,255,0.035)"
+          stroke="url(#brick)"
+          strokeWidth="3.5"
+        />
+        <animateTransform
+          attributeName="transform"
+          type="translate"
+          values="0 0; 0 -6; 0 0"
+          dur="3.8s"
+          repeatCount="indefinite"
+        />
+      </g>
+
+      <g>
+        <rect
+          x="172"
+          y="120"
+          width="76"
+          height="34"
+          rx="10"
+          fill="rgba(255,255,255,0.03)"
+          stroke="url(#brick)"
+          strokeWidth="3"
+        />
+        <animateTransform
+          attributeName="transform"
+          type="translate"
+          values="0 0; 0 -8; 0 0"
+          dur="4.4s"
+          repeatCount="indefinite"
+        />
+      </g>
+
+      {/* little “spark” */}
+      <circle cx="292" cy="165" r="4" fill="rgba(255,255,255,0.65)">
+        <animate
+          attributeName="opacity"
+          values="0.2;0.8;0.2"
+          dur="2.6s"
+          repeatCount="indefinite"
+        />
+      </circle>
+      <circle cx="305" cy="150" r="2.5" fill="rgba(255,255,255,0.35)">
+        <animate
+          attributeName="opacity"
+          values="0.1;0.6;0.1"
+          dur="2.1s"
+          repeatCount="indefinite"
+        />
+      </circle>
     </svg>
   );
 }
