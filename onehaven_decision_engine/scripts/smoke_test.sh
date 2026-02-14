@@ -4,6 +4,17 @@ set -euo pipefail
 BASE="${BASE:-http://localhost:8000}"
 STATE="${STATE:-MI}"
 
+# ---- multitenant identity (defaults match your demo org/user) ----
+ORG_SLUG="${ORG_SLUG:-demo}"
+USER_EMAIL="${USER_EMAIL:-austin@demo.local}"
+USER_ROLE="${USER_ROLE:-owner}"
+
+H_AUTH=(
+  -H "X-Org-Slug: ${ORG_SLUG}"
+  -H "X-User-Email: ${USER_EMAIL}"
+  -H "X-User-Role: ${USER_ROLE}"
+)
+
 require() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
 }
@@ -12,6 +23,7 @@ require curl
 require jq
 
 echo "== Smoke test: create property -> enrich -> assert rent_assumption + comps + api usage =="
+echo "ORG_SLUG=${ORG_SLUG} USER_EMAIL=${USER_EMAIL} USER_ROLE=${USER_ROLE}"
 
 CITY="${CITY:-Detroit}"
 ZIP="${ZIP:-48201}"
@@ -27,6 +39,7 @@ PROP_TYPE="single_family"
 echo "-- Creating property..."
 PID="$(
   curl -sS -X POST "$BASE/properties" \
+    "${H_AUTH[@]}" \
     -H "Content-Type: application/json" \
     -d "{
       \"address\": \"${ADDR}\",
@@ -50,14 +63,20 @@ echo "Created property_id=${PID}"
 
 echo "-- Capture budget before (rentcast)..."
 BEFORE_USED="$(
-  curl -sS "$BASE/rent/enrich/budget?provider=rentcast" | jq -r '.used'
+  curl -sS "$BASE/rent/enrich/budget?provider=rentcast" \
+    "${H_AUTH[@]}" \
+    | jq -r '.used'
 )"
 
 echo "-- Enrich rent (section8)..."
-curl -sS -X POST "$BASE/rent/enrich/${PID}?strategy=section8" | jq '.' >/tmp/smoke_enrich.json
+curl -sS -X POST "$BASE/rent/enrich/${PID}?strategy=section8" \
+  "${H_AUTH[@]}" \
+  | jq '.' >/tmp/smoke_enrich.json
 
 echo "-- Fetch property..."
-curl -sS "$BASE/properties/${PID}" | jq '.' >/tmp/smoke_property.json
+curl -sS "$BASE/properties/${PID}" \
+  "${H_AUTH[@]}" \
+  | jq '.' >/tmp/smoke_property.json
 
 echo "-- Assertions..."
 
@@ -73,7 +92,7 @@ if ! [[ "${COMPS_COUNT}" =~ ^[0-9]+$ ]]; then
 fi
 (( COMPS_COUNT > 0 )) || { echo "FAILED: comps count is 0"; exit 1; }
 
-# median/min/max non-null (from rent_assumption fields you compute)
+# required fields non-null
 MEDIAN="$(jq -r '.rent_assumption.rent_reasonableness_comp' /tmp/smoke_property.json)"
 MARKET="$(jq -r '.rent_assumption.market_rent_estimate' /tmp/smoke_property.json)"
 FMR="$(jq -r '.rent_assumption.section8_fmr' /tmp/smoke_property.json)"
@@ -84,9 +103,12 @@ CEIL="$(jq -r '.rent_assumption.approved_rent_ceiling' /tmp/smoke_property.json)
 [[ "${FMR}" != "null" ]] || { echo "FAILED: section8_fmr is null"; exit 1; }
 [[ "${CEIL}" != "null" ]] || { echo "FAILED: approved_rent_ceiling is null"; exit 1; }
 
-# api_usage incremented
 echo "-- Capture budget after (rentcast)..."
-AFTER_USED="$(curl -sS "$BASE/rent/enrich/budget?provider=rentcast" | jq -r '.used')"
+AFTER_USED="$(
+  curl -sS "$BASE/rent/enrich/budget?provider=rentcast" \
+    "${H_AUTH[@]}" \
+    | jq -r '.used'
+)"
 
 if ! [[ "${BEFORE_USED}" =~ ^[0-9]+$ && "${AFTER_USED}" =~ ^[0-9]+$ ]]; then
   echo "FAILED: api usage used not numeric (before=${BEFORE_USED}, after=${AFTER_USED})"

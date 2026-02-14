@@ -195,7 +195,7 @@ class Deal(Base):
 # -----------------------------
 class RentAssumption(Base):
     __tablename__ = "rent_assumptions"
-    __table_args__ = (UniqueConstraint("property_id", name="uq_rent_assumptions_property"),)
+    __table_args__ = (UniqueConstraint("org_id", "property_id", name="uq_rent_assumptions_org_property"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 

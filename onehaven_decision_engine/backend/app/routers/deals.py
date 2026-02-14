@@ -1,4 +1,3 @@
-# backend/app/routers/deals.py
 from __future__ import annotations
 
 import json
@@ -8,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 
+from ..auth import get_principal
 from ..db import get_db
 from ..models import Deal, Property, RentAssumption, UnderwritingResult, ImportSnapshot
 from ..schemas import (
@@ -43,11 +43,15 @@ def survivors(
     min_cashflow: float = 400.0,
     limit: int = 25,
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
     q = (
         select(Deal, Property, UnderwritingResult)
         .join(Property, Property.id == Deal.property_id)
         .join(UnderwritingResult, UnderwritingResult.deal_id == Deal.id)
+        .where(Deal.org_id == p.org_id)
+        .where(Property.org_id == p.org_id)
+        .where(UnderwritingResult.org_id == p.org_id)
         .where(UnderwritingResult.decision == decision)
         .where(UnderwritingResult.dscr >= min_dscr)
         .where(UnderwritingResult.cash_flow >= min_cashflow)
@@ -61,14 +65,14 @@ def survivors(
     rows = db.execute(q).all()
 
     out: list[SurvivorOut] = []
-    for d, p, r in rows:
+    for d, prop, r in rows:
         out.append(
             SurvivorOut(
                 deal_id=d.id,
-                property_id=p.id,
-                address=p.address,
-                city=p.city,
-                zip=p.zip,
+                property_id=prop.id,
+                address=prop.address,
+                city=prop.city,
+                zip=prop.zip,
                 decision=r.decision,
                 score=r.score,
                 reasons=json.loads(r.reasons_json),
@@ -83,13 +87,7 @@ def survivors(
 
 
 @router.post("/intake", response_model=DealIntakeOut)
-def intake(payload: DealIntakeIn, db: Session = Depends(get_db)):
-    """
-    Phase 1 "manual first" intake.
-    Ensures snapshot_id is ALWAYS set:
-      - uses payload.snapshot_id if provided and exists
-      - else defaults to ImportSnapshot(source="manual")
-    """
+def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_principal)):
     strategy = (payload.strategy or "section8").strip().lower()
     if strategy not in {"section8", "market"}:
         raise HTTPException(status_code=400, detail="strategy must be 'section8' or 'market'")
@@ -103,8 +101,9 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db)):
         if not snap:
             raise HTTPException(status_code=400, detail="Invalid snapshot_id")
 
-    # Create Property
-    p = Property(
+    # Create Property (ORG-SCOPED)
+    prop = Property(
+        org_id=p.org_id,
         address=payload.address.strip(),
         city=payload.city.strip(),
         state=(payload.state or "MI").strip(),
@@ -117,13 +116,14 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db)):
         property_type=(payload.property_type or "single_family").strip(),
         created_at=datetime.utcnow(),
     )
-    db.add(p)
+    db.add(prop)
     db.commit()
-    db.refresh(p)
+    db.refresh(prop)
 
-    # Create Deal (snapshot_id set!)
+    # Create Deal (ORG-SCOPED)
     d = Deal(
-        property_id=p.id,
+        org_id=p.org_id,
+        property_id=prop.id,
         asking_price=float(payload.purchase_price),
         estimated_purchase_price=float(payload.purchase_price),
         rehab_estimate=float(payload.est_rehab or 0.0),
@@ -139,23 +139,27 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(d)
 
-    # Create RentAssumption stub if not present
-    ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
+    # RentAssumption stub (ORG-SCOPED)
+    ra = db.scalar(
+        select(RentAssumption)
+        .where(RentAssumption.property_id == prop.id)
+        .where(RentAssumption.org_id == p.org_id)
+    )
     if ra is None:
-        ra = RentAssumption(property_id=p.id, created_at=datetime.utcnow())
+        ra = RentAssumption(property_id=prop.id, org_id=p.org_id, created_at=datetime.utcnow())
         db.add(ra)
         db.commit()
 
     return DealIntakeOut(
-        property=PropertyOut.model_validate(p, from_attributes=True),
+        property=PropertyOut.model_validate(prop, from_attributes=True),
         deal=DealOut.model_validate(d, from_attributes=True),
     )
 
 
 @router.post("", response_model=DealOut)
-def create_deal(payload: DealCreate, db: Session = Depends(get_db)):
+def create_deal(payload: DealCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     prop = db.get(Property, payload.property_id)
-    if not prop:
+    if not prop or prop.org_id != p.org_id:
         raise HTTPException(status_code=400, detail="Invalid property_id")
 
     data = payload.model_dump()
@@ -166,6 +170,8 @@ def create_deal(payload: DealCreate, db: Session = Depends(get_db)):
     if data.get("snapshot_id") is None:
         data["snapshot_id"] = _get_or_create_manual_snapshot(db).id
 
+    data["org_id"] = p.org_id
+
     d = Deal(**data)
     db.add(d)
     db.commit()
@@ -174,24 +180,28 @@ def create_deal(payload: DealCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{deal_id}", response_model=DealOut)
-def get_deal(deal_id: int, db: Session = Depends(get_db)):
+def get_deal(deal_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
     d = db.get(Deal, deal_id)
-    if not d:
+    if not d or d.org_id != p.org_id:
         raise HTTPException(status_code=404, detail="Deal not found")
     return d
 
 
 @router.put("/property/{property_id}/rent", response_model=RentAssumptionOut)
-def upsert_rent(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db)):
+def upsert_rent(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
     prop = db.get(Property, property_id)
-    if not prop:
+    if not prop or prop.org_id != p.org_id:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == property_id))
+    ra = db.scalar(
+        select(RentAssumption)
+        .where(RentAssumption.property_id == property_id)
+        .where(RentAssumption.org_id == p.org_id)
+    )
     data = payload.model_dump(exclude_unset=True)
 
     if ra is None:
-        ra = RentAssumption(property_id=property_id, **data, created_at=datetime.utcnow())
+        ra = RentAssumption(property_id=property_id, org_id=p.org_id, **data, created_at=datetime.utcnow())
         db.add(ra)
     else:
         for k, v in data.items():
@@ -203,8 +213,16 @@ def upsert_rent(property_id: int, payload: RentAssumptionUpsert, db: Session = D
 
 
 @router.get("/property/{property_id}/rent", response_model=RentAssumptionOut)
-def get_rent(property_id: int, db: Session = Depends(get_db)):
-    ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == property_id))
+def get_rent(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    prop = db.get(Property, property_id)
+    if not prop or prop.org_id != p.org_id:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    ra = db.scalar(
+        select(RentAssumption)
+        .where(RentAssumption.property_id == property_id)
+        .where(RentAssumption.org_id == p.org_id)
+    )
     if not ra:
         raise HTTPException(status_code=404, detail="Rent assumptions not found")
     return ra

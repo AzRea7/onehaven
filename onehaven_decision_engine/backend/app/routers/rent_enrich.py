@@ -1,4 +1,3 @@
-# backend/app/routers/rent_enrich.py
 from __future__ import annotations
 
 import json
@@ -15,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from ..auth import get_principal
 from ..config import settings
 from ..db import get_db
 from ..models import Deal, Property, RentAssumption, RentComp
@@ -35,13 +35,10 @@ class RentEnrichOut(BaseModel):
     rent_reasonableness_comp: Optional[float] = None
     approved_rent_ceiling: Optional[float] = None
 
-    # what the app will actually use for underwriting, given strategy
     rent_used: Optional[float] = None
 
-    # budget info (rentcast)
     rentcast_budget: dict[str, Any] = Field(default_factory=dict)
 
-    # Debug payloads
     hud: dict[str, Any] = Field(default_factory=dict)
     rentcast: dict[str, Any] = Field(default_factory=dict)
 
@@ -80,7 +77,7 @@ def _http_get_json(url: str, headers: dict[str, str], timeout_s: int = 20) -> Ht
         return HttpResp(status=0, data={"error": str(e), "url": url})
 
 
-# ---------------------------- HUD FMR client (no USPS) ----------------------------
+# ---------------------------- HUD FMR client ----------------------------
 
 class HudUserClient:
     FMR_BASE = "https://www.huduser.gov/hudapi/public/fmr"
@@ -286,7 +283,7 @@ class RentCastClient:
         return None
 
 
-# ---------------------------- Budget + comps persistence ----------------------------
+# ---------------------------- Budget helpers ----------------------------
 
 def _rentcast_daily_limit() -> int:
     try:
@@ -299,10 +296,6 @@ def _rentcast_daily_limit() -> int:
 
 
 def _consume_rentcast_call(db: Session) -> dict[str, Any]:
-    """
-    Enforces a HARD per-day call cap for RentCast.
-    Consumes 1 call. Returns a budget dict with remaining.
-    """
     provider = "rentcast"
     today = date.today()
     limit = _rentcast_daily_limit()
@@ -321,12 +314,8 @@ def _consume_rentcast_call(db: Session) -> dict[str, Any]:
 @router.get("/enrich/budget")
 def get_rentcast_budget(
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
-    """
-    Smoke-test helper endpoint:
-      - lets you assert api_usage increments
-      - lets you see remaining calls for today
-    """
     provider = "rentcast"
     today = date.today()
     limit = _rentcast_daily_limit()
@@ -340,6 +329,8 @@ def get_rentcast_budget(
         "remaining": remaining,
     }
 
+
+# ---------------------------- Comps persistence ----------------------------
 
 def _extract_normalized_comps(payload: dict[str, Any]) -> list[dict[str, Any]]:
     comps = RentCastClient._extract_comparables(payload)
@@ -405,12 +396,16 @@ def _persist_rentcast_comps_and_get_median(
         return None
 
 
-# ---------------------------- DB helpers ----------------------------
+# ---------------------------- DB helpers (FIXED for multitenancy) ----------------------------
 
-def _get_or_create_rent_assumption(db: Session, property_id: int) -> RentAssumption:
-    ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == property_id))
+def _get_or_create_rent_assumption(db: Session, property_id: int, org_id: int) -> RentAssumption:
+    ra = db.scalar(
+        select(RentAssumption)
+        .where(RentAssumption.property_id == property_id)
+        .where(RentAssumption.org_id == org_id)
+    )
     if ra is None:
-        ra = RentAssumption(property_id=property_id)
+        ra = RentAssumption(property_id=property_id, org_id=org_id)
         db.add(ra)
         db.commit()
         db.refresh(ra)
@@ -421,7 +416,6 @@ def _rent_used(strategy: str, market: Optional[float], ceiling: Optional[float])
     strategy = (strategy or "section8").strip().lower()
     if strategy == "market":
         return market
-    # section8
     if market is None and ceiling is None:
         return None
     if market is None:
@@ -432,12 +426,6 @@ def _rent_used(strategy: str, market: Optional[float], ceiling: Optional[float])
 
 
 def _compute_approved_ceiling(ra: RentAssumption) -> Optional[float]:
-    """
-    Deterministic conservative ceiling:
-      - if approved_rent_ceiling already set, keep it
-      - else compute min(FMR, RR comp) when both exist
-      - else whichever exists
-    """
     try:
         if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
             return float(ra.approved_rent_ceiling)
@@ -453,12 +441,12 @@ def _compute_approved_ceiling(ra: RentAssumption) -> Optional[float]:
         return None
 
 
-def _enrich_one(db: Session, property_id: int, strategy: str = "section8") -> RentEnrichOut:
+def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "section8") -> RentEnrichOut:
     prop = db.get(Property, property_id)
-    if not prop:
+    if not prop or prop.org_id != org_id:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    ra = _get_or_create_rent_assumption(db, property_id)
+    ra = _get_or_create_rent_assumption(db, property_id, org_id)
 
     updated_fields: list[str] = []
     hud_debug: dict[str, Any] = {}
@@ -563,13 +551,12 @@ def _enrich_one(db: Session, property_id: int, strategy: str = "section8") -> Re
     ceiling = _compute_approved_ceiling(ra)
     rent_used = _rent_used(strategy, ra.market_rent_estimate, ceiling)
 
-    # ✅ NEW: persist rent_used so underwriting can just read it later
+    # persist rent_used
     try:
         if getattr(ra, "rent_used", None) != rent_used:
             ra.rent_used = rent_used
             updated_fields.append("rent_used")
     except Exception:
-        # if DB isn't migrated yet, don't crash enrich
         pass
 
     db.commit()
@@ -599,8 +586,15 @@ def enrich_rent_batch(
     strategy: str = Query("section8"),
     sleep_ms: int = Query(0, ge=0, le=5000),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
-    deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id).limit(limit)).all()
+    # org-scoped
+    deals = db.scalars(
+        select(Deal)
+        .where(Deal.snapshot_id == snapshot_id)
+        .where(Deal.org_id == p.org_id)
+        .limit(limit)
+    ).all()
 
     seen: set[int] = set()
     pids: list[int] = []
@@ -626,7 +620,7 @@ def enrich_rent_batch(
 
     for pid in pids:
         try:
-            _enrich_one(db, pid, strategy=strategy)
+            _enrich_one(db, pid, org_id=p.org_id, strategy=strategy)
             enriched += 1
         except HTTPException as he:
             if he.status_code == 429:
@@ -659,5 +653,6 @@ def enrich_rent(
     property_id: int,
     strategy: str = Query("section8"),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
-    return _enrich_one(db, property_id, strategy=strategy)
+    return _enrich_one(db, property_id, org_id=p.org_id, strategy=strategy)

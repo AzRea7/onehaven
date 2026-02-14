@@ -22,6 +22,7 @@ services:
     env_file:
       - .env
     environment:
+      ALEMBIC_CONFIG: /app/app/alembic.ini
       DATABASE_URL: ${DATABASE_URL}
       APP_ENV: ${APP_ENV:-dev}
       HUD_USER_TOKEN: ${HUD_USER_TOKEN}
