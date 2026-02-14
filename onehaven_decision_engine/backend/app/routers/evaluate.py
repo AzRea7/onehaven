@@ -126,7 +126,6 @@ def _rent_used_for_underwriting(
 
     if market is None:
         notes.append("Section 8: missing market_rent_estimate; using ceiling only.")
-        # computed_ceiling cannot be None here due to earlier branch
         return float(computed_ceiling), False, notes, computed_ceiling, cap_reason, fmr_adjusted  # type: ignore[arg-type]
 
     if computed_ceiling is None:
@@ -146,8 +145,6 @@ def evaluate_snapshot(
     payment_standard_pct: float | None = Query(default=None, description="Override. Default from config."),
     db: Session = Depends(get_db),
 ):
-    # Prefer the newer naming if you have it; fall back to legacy if not.
-    # In your newer code you’re using settings.default_payment_standard_pct in rent.py.
     ps_default = getattr(settings, "default_payment_standard_pct", None)
     if ps_default is None:
         ps_default = getattr(settings, "payment_standard_pct", 1.0)
@@ -167,6 +164,19 @@ def evaluate_snapshot(
             if not p:
                 errors.append(f"deal_id={d.id}: missing property_id={d.property_id}")
                 continue
+
+            # ---- Critical: backfill deal-level beds/baths if missing ----
+            # Many flows persist beds/baths on Property only; results/scoring may reference Deal.
+            dirty = False
+            if getattr(d, "bedrooms", None) is None and getattr(p, "bedrooms", None) is not None:
+                d.bedrooms = p.bedrooms
+                dirty = True
+            if getattr(d, "bathrooms", None) is None and getattr(p, "bathrooms", None) is not None:
+                d.bathrooms = p.bathrooms
+                dirty = True
+            if dirty:
+                db.add(d)
+                # no commit here; commit at end of loop keeps atomicity
 
             ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == p.id))
 
@@ -189,11 +199,12 @@ def evaluate_snapshot(
                     ra.approved_rent_ceiling = float(computed_ceiling)
 
                 db.add(ra)
-                db.commit()
+                # defer commit until later in this iteration
 
             purchase_price = float(getattr(d, "estimated_purchase_price", None) or getattr(d, "asking_price", 0.0) or 0.0)
             if purchase_price <= 0:
                 errors.append(f"deal_id={d.id}: invalid purchase_price={purchase_price}")
+                db.rollback()
                 continue
 
             uw = underwrite(
@@ -328,12 +339,54 @@ def evaluate_results(
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
-    q = select(UnderwritingResult).join(Deal, Deal.id == UnderwritingResult.deal_id)
+    # IMPORTANT: UnderwritingResult does not carry property fields (bedrooms, city, etc).
+    # Join Deal + Property and explicitly inject what the API expects (bedrooms at minimum).
+    q = (
+        select(UnderwritingResult, Deal, Property)
+        .join(Deal, Deal.id == UnderwritingResult.deal_id)
+        .join(Property, Property.id == Deal.property_id)
+    )
 
     if snapshot_id is not None:
         q = q.where(Deal.snapshot_id == snapshot_id)
     if decision is not None:
         q = q.where(UnderwritingResult.decision == decision)
 
-    rows = db.scalars(q.order_by(desc(UnderwritingResult.id)).limit(limit)).all()
-    return [UnderwritingResultOut.model_validate(r) for r in rows]
+    rows = db.execute(q.order_by(desc(UnderwritingResult.id)).limit(limit)).all()
+
+    out: list[UnderwritingResultOut] = []
+    for r, d, p in rows:
+        # Build a dict so we can add computed/joined fields like bedrooms.
+        payload = {
+            "id": r.id,
+            "deal_id": r.deal_id,
+            "decision": r.decision,
+            "score": r.score,
+            "dscr": r.dscr,
+            "cash_flow": r.cash_flow,
+            "gross_rent_used": r.gross_rent_used,
+            "mortgage_payment": r.mortgage_payment,
+            "operating_expenses": r.operating_expenses,
+            "noi": r.noi,
+            "cash_on_cash": r.cash_on_cash,
+            "break_even_rent": r.break_even_rent,
+            "min_rent_for_target_roi": r.min_rent_for_target_roi,
+            "decision_version": r.decision_version,
+            "payment_standard_pct_used": r.payment_standard_pct_used,
+            "jurisdiction_multiplier": r.jurisdiction_multiplier,
+            "rent_cap_reason": r.rent_cap_reason,
+            "fmr_adjusted": r.fmr_adjusted,
+            # join-derived:
+            "bedrooms": getattr(p, "bedrooms", None),
+            "bathrooms": getattr(p, "bathrooms", None),
+        }
+
+        # reasons are stored as JSON; expose as list[str]
+        try:
+            payload["reasons"] = json.loads(r.reasons_json) if r.reasons_json else []
+        except Exception:
+            payload["reasons"] = []
+
+        out.append(UnderwritingResultOut.model_validate(payload))
+
+    return out

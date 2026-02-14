@@ -4,7 +4,7 @@ set -euo pipefail
 BASE="${BASE:-http://localhost:8000}"
 CSV_PATH="${1:-}"
 STRATEGY="${STRATEGY:-section8}"
-LIMIT="${LIMIT:-10}"
+LIMIT="${LIMIT:-50}"
 
 MIN_DSCR="${MIN_DSCR:-1.20}"
 MIN_CASHFLOW="${MIN_CASHFLOW:-400}"
