@@ -1,6 +1,6 @@
-# backend/app/routers/rent.py
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import List, Optional, Any
 
@@ -8,9 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import get_principal
 from ..config import settings
 from ..db import get_db
-from ..models import Deal, Property, RentAssumption, RentComp, RentObservation, RentCalibration
+from ..models import Deal, Property, RentAssumption, RentComp, RentObservation, RentCalibration, AuditEvent
 from ..schemas import (
     RentAssumptionOut,
     RentAssumptionUpsert,
@@ -49,28 +50,89 @@ def _to_pos_float(v: Any) -> Optional[float]:
         return None
 
 
+def _audit(
+    db: Session,
+    *,
+    org_id: int,
+    actor_user_id: Optional[int],
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    before: Optional[dict],
+    after: Optional[dict],
+) -> None:
+    ev = AuditEvent(
+        org_id=org_id,
+        actor_user_id=actor_user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        before_json=json.dumps(before) if before is not None else None,
+        after_json=json.dumps(after) if after is not None else None,
+        created_at=datetime.utcnow(),
+    )
+    db.add(ev)
+
+
 @router.get("/{property_id}", response_model=RentAssumptionOut)
-def get_rent_assumption(property_id: int, db: Session = Depends(get_db)):
-    ra = db.execute(select(RentAssumption).where(RentAssumption.property_id == property_id)).scalar_one_or_none()
+def get_rent_assumption(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    prop = db.get(Property, property_id)
+    if not prop or prop.org_id != p.org_id:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    ra = db.execute(
+        select(RentAssumption).where(RentAssumption.property_id == property_id).where(RentAssumption.org_id == p.org_id)
+    ).scalar_one_or_none()
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
     return ra
 
 
 @router.get("/assumption/{property_id}", response_model=RentAssumptionOut)
-def get_rent_assumption_alias(property_id: int, db: Session = Depends(get_db)):
-    return get_rent_assumption(property_id=property_id, db=db)
+def get_rent_assumption_alias(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    return get_rent_assumption(property_id=property_id, db=db, p=p)
 
 
 @router.post("/{property_id}", response_model=RentAssumptionOut)
-def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db)):
+def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
     prop = db.get(Property, property_id)
-    if not prop:
+    if not prop or prop.org_id != p.org_id:
         raise HTTPException(status_code=404, detail="property not found")
 
     ra = get_or_create_rent_assumption(db, property_id)
+    ra.org_id = p.org_id
+
+    before = {
+        "market_rent_estimate": ra.market_rent_estimate,
+        "section8_fmr": ra.section8_fmr,
+        "rent_reasonableness_comp": ra.rent_reasonableness_comp,
+        "approved_rent_ceiling": ra.approved_rent_ceiling,
+        "rent_used": ra.rent_used,
+    }
+
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(ra, k, v)
+
+    after = {
+        "market_rent_estimate": ra.market_rent_estimate,
+        "section8_fmr": ra.section8_fmr,
+        "rent_reasonableness_comp": ra.rent_reasonableness_comp,
+        "approved_rent_ceiling": ra.approved_rent_ceiling,
+        "rent_used": ra.rent_used,
+    }
+
+    # Audit only when override changed (this is your "who changed rent ceiling override")
+    if before.get("approved_rent_ceiling") != after.get("approved_rent_ceiling"):
+        _audit(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            action="rent_override_set",
+            entity_type="rent_assumption",
+            entity_id=str(property_id),
+            before={"approved_rent_ceiling": before.get("approved_rent_ceiling")},
+            after={"approved_rent_ceiling": after.get("approved_rent_ceiling")},
+        )
 
     db.add(ra)
     db.commit()
@@ -79,17 +141,18 @@ def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: 
 
 
 @router.post("/assumption/{property_id}", response_model=RentAssumptionOut)
-def upsert_rent_assumption_alias(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db)):
-    return upsert_rent_assumption(property_id=property_id, payload=payload, db=db)
+def upsert_rent_assumption_alias(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
+    return upsert_rent_assumption(property_id=property_id, payload=payload, db=db, p=p)
 
 
 @router.post("/comps/{property_id}", response_model=RentCompsSummaryOut)
-def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = Depends(get_db)):
+def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = Depends(get_db), p=Depends(get_principal)):
     prop = db.get(Property, property_id)
-    if not prop:
+    if not prop or prop.org_id != p.org_id:
         raise HTTPException(status_code=404, detail="property not found")
 
     ra = get_or_create_rent_assumption(db, property_id)
+    ra.org_id = p.org_id
 
     rents: List[float] = []
     for c in payload.comps:
@@ -110,7 +173,6 @@ def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = D
 
     summary = summarize_comps(rents)
 
-    # “Rent reasonableness” is the comps median (your operational meaning)
     ra.rent_reasonableness_comp = summary.median_rent
     db.add(ra)
     db.commit()
@@ -126,7 +188,11 @@ def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = D
 
 
 @router.get("/comps/{property_id}", response_model=list[RentCompOut])
-def list_comps(property_id: int, db: Session = Depends(get_db)):
+def list_comps(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    prop = db.get(Property, property_id)
+    if not prop or prop.org_id != p.org_id:
+        raise HTTPException(status_code=404, detail="property not found")
+
     rows = (
         db.execute(
             select(RentComp)
@@ -140,12 +206,13 @@ def list_comps(property_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/observe", response_model=RentObservationOut)
-def add_rent_observation(payload: RentObservationCreate, db: Session = Depends(get_db)):
+def add_rent_observation(payload: RentObservationCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     prop = db.get(Property, payload.property_id)
-    if not prop:
+    if not prop or prop.org_id != p.org_id:
         raise HTTPException(status_code=404, detail="property not found")
 
     ra = get_or_create_rent_assumption(db, payload.property_id)
+    ra.org_id = p.org_id
 
     strategy = _norm_strategy(payload.strategy)
 
@@ -181,7 +248,10 @@ def list_calibration(
     bedrooms: int | None = Query(default=None),
     strategy: str | None = Query(default=None),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
+    # Calibration is global-ish; keep it accessible but safe.
+    # If you later want per-org calibration, add org_id column and filter here.
     q = select(RentCalibration).order_by(RentCalibration.updated_at.desc())
     if zip:
         q = q.where(RentCalibration.zip == zip)
@@ -198,43 +268,35 @@ def recompute(
     strategy: str = Query(default="section8"),
     payment_standard_pct: float | None = Query(default=None, ge=0.5, le=1.5),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
-    """
-    Computes rent fields using your learning module and persists:
-      - rent_used ALWAYS (underwriting consumes this)
-      - approved_rent_ceiling ONLY when there is no manual override (None/<=0 treated as no override)
+    prop = db.get(Property, property_id)
+    if not prop or prop.org_id != p.org_id:
+        raise HTTPException(status_code=404, detail="property not found")
 
-    payment_standard_pct:
-      - if not provided, defaults to settings.default_payment_standard_pct
-    """
     strategy = _norm_strategy(strategy)
     pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
 
-    try:
-        computed = recompute_rent_fields(
-            db,
-            property_id=property_id,
-            strategy=strategy,
-            payment_standard_pct=pct,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    computed = recompute_rent_fields(
+        db,
+        property_id=property_id,
+        strategy=strategy,
+        payment_standard_pct=pct,
+    )
 
     ra = db.execute(select(RentAssumption).where(RentAssumption.property_id == property_id)).scalar_one_or_none()
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
 
-    # Manual override exists only if >0
-    override = _to_pos_float(ra.approved_rent_ceiling)
+    ra.org_id = p.org_id
 
+    override = _to_pos_float(ra.approved_rent_ceiling)
     computed_ceiling = _to_pos_float(computed.get("approved_rent_ceiling"))
     computed_rent_used = computed.get("rent_used", None)
 
-    # Persist computed ceiling only if no manual override exists
     if override is None and computed_ceiling is not None:
         ra.approved_rent_ceiling = float(computed_ceiling)
 
-    # ALWAYS persist rent_used (can be None if you truly have no data)
     ra.rent_used = float(computed_rent_used) if computed_rent_used is not None else None
 
     db.add(ra)
@@ -260,27 +322,14 @@ def explain_rent(
     payment_standard_pct: float | None = Query(default=None, ge=0.5, le=1.5),
     persist: bool = Query(default=True, description="If true, persist rent_used/approved ceiling when appropriate"),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
-    """
-    Transparent “why” endpoint.
-
-    Operating Truth:
-      - ceiling candidates:
-          payment_standard = FMR * payment_standard_pct
-          rent_reasonableness = comps_median
-      - computed_ceiling = min(candidates)
-      - approved_ceiling = manual_override_if_present_else(computed_ceiling)
-      - section8 rent_used = min(market_rent_estimate, approved_ceiling) (when both exist)
-
-    Notes:
-      - If strategy=market: rent_used = market_rent_estimate (no cap)
-      - If required fields are missing, rent_used may be None (and explanation will tell you why)
-    """
     prop = db.get(Property, property_id)
-    if not prop:
+    if not prop or prop.org_id != p.org_id:
         raise HTTPException(status_code=404, detail="property not found")
 
     ra = get_or_create_rent_assumption(db, property_id)
+    ra.org_id = p.org_id
 
     strategy = _norm_strategy(strategy)
     pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
@@ -288,14 +337,12 @@ def explain_rent(
     ceiling_candidates: list[dict] = []
     caps: list[float] = []
 
-    # Payment standard: FMR * pct
     fmr = _to_pos_float(ra.section8_fmr)
     if fmr is not None:
         ps = float(fmr) * float(pct)
         caps.append(ps)
         ceiling_candidates.append({"type": "payment_standard", "value": ps})
 
-    # Rent reasonableness: comps median
     rr = _to_pos_float(ra.rent_reasonableness_comp)
     if rr is not None:
         caps.append(float(rr))
@@ -319,7 +366,6 @@ def explain_rent(
             rent_used = float(market)
             explanation = "Market strategy uses market_rent_estimate (no Section 8 ceiling cap applied)."
     else:
-        # section8
         if market is None and approved is None:
             rent_used = None
             explanation = "Section 8 strategy: both market_rent_estimate and ceiling inputs are missing; cannot compute rent_used."
@@ -334,13 +380,9 @@ def explain_rent(
             explanation = "Section 8 strategy caps rent by the strictest limit (approved ceiling vs market estimate)."
 
     if persist:
-        # persist rent_used for underwriting if present
         ra.rent_used = float(rent_used) if rent_used is not None else None
-
-        # persist approved ceiling only when no manual override exists
         if manual is None and approved is not None:
             ra.approved_rent_ceiling = float(approved)
-
         db.add(ra)
         db.commit()
 
@@ -367,13 +409,8 @@ def explain_rent_batch(
     limit: int = Query(default=50, ge=1, le=500),
     persist: bool = Query(default=True),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
-    """
-    Batch explain for a snapshot (useful before /evaluate).
-    Pulls deals in the snapshot -> explains rent for their properties.
-
-    Returns counts + errors (per deal/property).
-    """
     strategy = _norm_strategy(strategy)
     pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
 
@@ -386,16 +423,19 @@ def explain_rent_batch(
     for d in deals:
         try:
             pid = int(d.property_id)
-            # Reuse the core logic via a direct call pattern (no HTTP hop)
+            prop = db.get(Property, pid)
+            if not prop or prop.org_id != p.org_id:
+                continue
+
             out = explain_rent(
                 property_id=pid,
                 strategy=strategy,
                 payment_standard_pct=pct,
                 persist=persist,
                 db=db,
+                p=p,
             )
-            # If we got a response, count it as explained (even if rent_used is None)
-            _ = out  # keep lint calm
+            _ = out
             explained += 1
         except Exception as e:
             errors.append(

@@ -29,6 +29,9 @@ from .routers.equity import router as equity_router
 
 # Agents
 from .routers.agents import router as agents_router
+from .routers.auth import router as auth_router
+from .routers.workflow import router as workflow_router
+from .routers.audit import router as audit_router
 
 
 app = FastAPI(title="OneHaven Decision Engine")
@@ -71,3 +74,6 @@ app.include_router(equity_router)
 
 # Agents
 app.include_router(agents_router)
+app.include_router(auth_router)
+app.include_router(workflow_router)
+app.include_router(audit_router)

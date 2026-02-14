@@ -1,3 +1,4 @@
+// frontend/src/components/Shell.tsx
 import React from "react";
 import { NavLink } from "react-router-dom";
 import clsx from "clsx";

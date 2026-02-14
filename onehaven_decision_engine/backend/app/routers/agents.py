@@ -1,4 +1,3 @@
-# backend/app/routers/agents.py
 from __future__ import annotations
 
 import json
@@ -8,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
+from ..auth import get_principal
 from ..db import get_db
-from ..models import AgentRun, AgentMessage, AgentSlotAssignment
+from ..models import AgentRun, AgentMessage, AgentSlotAssignment, WorkflowEvent
 from ..schemas import (
     AgentSpecOut,
     AgentRunCreate,
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 @router.get("", response_model=list[AgentSpecOut])
-def list_agents():
+def list_agents(p=Depends(get_principal)):
     out: list[AgentSpecOut] = []
     for a in AGENTS.values():
         out.append(
@@ -41,19 +41,18 @@ def list_agents():
     return out
 
 
-# -----------------------------
-# Agent Runs
-# -----------------------------
 @router.post("/runs", response_model=AgentRunOut)
-def create_run(payload: AgentRunCreate, db: Session = Depends(get_db)):
+def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     if payload.agent_key not in AGENTS:
         raise HTTPException(status_code=404, detail="unknown agent_key")
 
     run = AgentRun(
+        org_id=p.org_id,
         agent_key=payload.agent_key,
         property_id=payload.property_id,
         payload_json=json.dumps(payload.payload or {}),
         status="created",
+        created_at=datetime.utcnow(),
     )
     db.add(run)
     db.commit()
@@ -67,8 +66,9 @@ def list_runs(
     property_id: int | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
-    q = select(AgentRun).order_by(desc(AgentRun.id))
+    q = select(AgentRun).where(AgentRun.org_id == p.org_id).order_by(desc(AgentRun.id))
     if agent_key:
         q = q.where(AgentRun.agent_key == agent_key)
     if property_id is not None:
@@ -77,16 +77,15 @@ def list_runs(
     return list(rows)
 
 
-# -----------------------------
-# Agent Messages
-# -----------------------------
 @router.post("/messages", response_model=AgentMessageOut)
-def post_message(payload: AgentMessageCreate, db: Session = Depends(get_db)):
+def post_message(payload: AgentMessageCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     msg = AgentMessage(
+        org_id=p.org_id,
         thread_key=payload.thread_key,
         sender=payload.sender,
         recipient=payload.recipient,
         message=payload.message,
+        created_at=datetime.utcnow(),
     )
     db.add(msg)
     db.commit()
@@ -100,9 +99,11 @@ def list_messages(
     recipient: str | None = None,
     limit: int = 200,
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
     q = (
         select(AgentMessage)
+        .where(AgentMessage.org_id == p.org_id)
         .where(AgentMessage.thread_key == thread_key)
         .order_by(AgentMessage.id.asc())
     )
@@ -111,11 +112,8 @@ def list_messages(
     return list(db.scalars(q.limit(limit)).all())
 
 
-# -----------------------------
-# NEW: Slot Specs + Slot Assignments
-# -----------------------------
 @router.get("/slots/specs", response_model=list[AgentSlotSpecOut])
-def slot_specs():
+def slot_specs(p=Depends(get_principal)):
     return [
         AgentSlotSpecOut(
             slot_key=s.slot_key,
@@ -133,22 +131,29 @@ def slot_assignments(
     property_id: int | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=500),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
-    q = select(AgentSlotAssignment).order_by(desc(AgentSlotAssignment.updated_at))
+    q = (
+        select(AgentSlotAssignment)
+        .where(AgentSlotAssignment.org_id == p.org_id)
+        .order_by(desc(AgentSlotAssignment.updated_at))
+    )
     if property_id is not None:
         q = q.where(AgentSlotAssignment.property_id == property_id)
     return list(db.scalars(q.limit(limit)).all())
 
 
 @router.post("/slots/assignments", response_model=AgentSlotAssignmentOut)
-def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Depends(get_db)):
-    # find existing for (slot_key, property_id)
+def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
     existing = db.scalar(
         select(AgentSlotAssignment).where(
+            AgentSlotAssignment.org_id == p.org_id,
             AgentSlotAssignment.slot_key == payload.slot_key,
             AgentSlotAssignment.property_id == payload.property_id,
         ).limit(1)
     )
+
+    now = datetime.utcnow()
 
     if existing:
         if payload.owner_type is not None:
@@ -159,23 +164,63 @@ def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Dep
             existing.status = payload.status
         if payload.notes is not None:
             existing.notes = payload.notes
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = now
         db.add(existing)
+
+        # Phase 6: append-only log event
+        db.add(
+            WorkflowEvent(
+                org_id=p.org_id,
+                property_id=payload.property_id,
+                actor_user_id=p.user_id,
+                event_type="slot_assigned",
+                payload_json=json.dumps(
+                    {
+                        "slot_key": payload.slot_key,
+                        "owner_type": existing.owner_type,
+                        "assignee": existing.assignee,
+                        "status": existing.status,
+                    }
+                ),
+                created_at=now,
+            )
+        )
+
         db.commit()
         db.refresh(existing)
         return existing
 
     row = AgentSlotAssignment(
+        org_id=p.org_id,
         slot_key=payload.slot_key,
         property_id=payload.property_id,
         owner_type=payload.owner_type or "human",
         assignee=payload.assignee,
         status=payload.status or "idle",
         notes=payload.notes,
-        updated_at=datetime.utcnow(),
-        created_at=datetime.utcnow(),
+        updated_at=now,
+        created_at=now,
     )
     db.add(row)
+
+    db.add(
+        WorkflowEvent(
+            org_id=p.org_id,
+            property_id=payload.property_id,
+            actor_user_id=p.user_id,
+            event_type="slot_assigned",
+            payload_json=json.dumps(
+                {
+                    "slot_key": payload.slot_key,
+                    "owner_type": row.owner_type,
+                    "assignee": row.assignee,
+                    "status": row.status,
+                }
+            ),
+            created_at=now,
+        )
+    )
+
     db.commit()
     db.refresh(row)
     return row

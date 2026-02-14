@@ -752,3 +752,77 @@ class AgentSlotAssignmentOut(BaseModel):
     updated_at: datetime
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+class PrincipalOut(BaseModel):
+    org_id: int
+    org_slug: str
+    user_id: int
+    email: str
+    role: str
+
+
+class OrganizationOut(BaseModel):
+    id: int
+    slug: str
+    name: str
+    created_at: datetime
+
+
+class AppUserOut(BaseModel):
+    id: int
+    email: str
+    display_name: Optional[str] = None
+    created_at: datetime
+
+
+class OrgMembershipOut(BaseModel):
+    id: int
+    org_id: int
+    user_id: int
+    role: str
+    created_at: datetime
+
+
+class AuditEventOut(BaseModel):
+    id: int
+    org_id: int
+    actor_user_id: Optional[int] = None
+    action: str
+    entity_type: str
+    entity_id: str
+    before_json: Optional[str] = None
+    after_json: Optional[str] = None
+    created_at: datetime
+
+
+class WorkflowEventCreate(BaseModel):
+    property_id: Optional[int] = None
+    event_type: str
+    payload: Optional[dict[str, Any]] = None
+
+
+class WorkflowEventOut(BaseModel):
+    id: int
+    org_id: int
+    property_id: Optional[int] = None
+    actor_user_id: Optional[int] = None
+    event_type: str
+    payload_json: Optional[str] = None
+    created_at: datetime
+
+
+class PropertyStateUpsert(BaseModel):
+    property_id: int
+    current_stage: Optional[str] = None
+    constraints: Optional[dict[str, Any]] = None
+    outstanding_tasks: Optional[dict[str, Any]] = None
+
+
+class PropertyStateOut(BaseModel):
+    id: int
+    org_id: int
+    property_id: int
+    current_stage: str
+    constraints_json: Optional[str] = None
+    outstanding_tasks_json: Optional[str] = None
+    updated_at: datetime

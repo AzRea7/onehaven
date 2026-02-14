@@ -20,7 +20,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   // Dashboard / properties
-  dashboardProperties: () => request<any[]>(`/dashboard/properties?limit=100`),
+  dashboardProperties: (p0: { limit: number; }) => request<any[]>(`/dashboard/properties?limit=100`),
   propertyView: (id: number) => request<any>(`/properties/${id}/view`),
 
   // Rehab

@@ -1,4 +1,3 @@
-# backend/app/routers/properties.py
 from __future__ import annotations
 
 import json
@@ -7,9 +6,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session, selectinload
 
+from ..auth import get_principal
 from ..db import get_db
 from ..models import Property, JurisdictionRule, Deal, UnderwritingResult, PropertyChecklist
-from ..schemas import PropertyCreate, PropertyOut, JurisdictionRuleOut, PropertyViewOut, DealOut, UnderwritingResultOut, RentExplainOut, ChecklistOut, ChecklistItemOut
+from ..schemas import (
+    PropertyCreate,
+    PropertyOut,
+    JurisdictionRuleOut,
+    PropertyViewOut,
+    DealOut,
+    UnderwritingResultOut,
+    RentExplainOut,
+    ChecklistOut,
+    ChecklistItemOut,
+)
 from ..domain.jurisdiction_scoring import compute_friction
 from ..config import settings
 from ..models import RentAssumption
@@ -18,36 +28,38 @@ router = APIRouter(prefix="/properties", tags=["properties"])
 
 
 @router.post("", response_model=PropertyOut)
-def create_property(payload: PropertyCreate, db: Session = Depends(get_db)):
-    p = Property(**payload.model_dump())
-    db.add(p)
+def create_property(payload: PropertyCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+    row = Property(**payload.model_dump())
+    row.org_id = p.org_id
+    db.add(row)
     db.commit()
-    db.refresh(p)
-    return p
+    db.refresh(row)
+    return row
 
 
 @router.get("/{property_id}", response_model=PropertyOut)
-def get_property(property_id: int, db: Session = Depends(get_db)):
+def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
     stmt = (
         select(Property)
         .where(Property.id == property_id)
+        .where(Property.org_id == p.org_id)
         .options(
             selectinload(Property.rent_assumption),
             selectinload(Property.rent_comps),
         )
     )
-    p = db.execute(stmt).scalar_one_or_none()
-    if not p:
+    row = db.execute(stmt).scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail="Property not found")
 
     jr = db.scalar(
         select(JurisdictionRule).where(
-            JurisdictionRule.city == p.city,
-            JurisdictionRule.state == p.state,
+            JurisdictionRule.city == row.city,
+            JurisdictionRule.state == row.state,
         )
     )
 
-    out = PropertyOut.model_validate(p, from_attributes=True).model_dump()
+    out = PropertyOut.model_validate(row, from_attributes=True).model_dump()
     out["jurisdiction_rule"] = JurisdictionRuleOut.model_validate(jr, from_attributes=True).model_dump() if jr else None
     return out
 
@@ -55,7 +67,6 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
 def _rent_explain_for_view(db: Session, property_id: int, strategy: str) -> RentExplainOut:
     ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == property_id))
     if not ra:
-        # if you want auto-create behavior, you can call your get_or_create here
         raise HTTPException(status_code=404, detail="rent assumption not found")
 
     ps = float(settings.payment_standard_pct)
@@ -70,7 +81,6 @@ def _rent_explain_for_view(db: Session, property_id: int, strategy: str) -> Rent
     if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
         ceiling_candidates.append({"type": "rent_reasonableness", "value": float(ra.rent_reasonableness_comp)})
 
-    # winner logic
     if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
         cap_reason = "override"
     else:
@@ -86,7 +96,6 @@ def _rent_explain_for_view(db: Session, property_id: int, strategy: str) -> Rent
         property_id=property_id,
         strategy=strategy,
         payment_standard_pct=ps,
-        fmr_adjusted=fmr_adjusted,
         market_rent_estimate=ra.market_rent_estimate,
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
@@ -94,38 +103,52 @@ def _rent_explain_for_view(db: Session, property_id: int, strategy: str) -> Rent
         calibrated_market_rent=None,
         rent_used=ra.rent_used,
         ceiling_candidates=ceiling_candidates,
-        cap_reason=cap_reason,
         explanation=None,
     )
 
 
 @router.get("/{property_id}/view", response_model=PropertyViewOut)
-def property_view(property_id: int, db: Session = Depends(get_db)):
+def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
     stmt = (
         select(Property)
         .where(Property.id == property_id)
+        .where(Property.org_id == p.org_id)
         .options(
             selectinload(Property.rent_assumption),
             selectinload(Property.rent_comps),
         )
     )
-    p = db.execute(stmt).scalar_one_or_none()
-    if not p:
+    prop = db.execute(stmt).scalar_one_or_none()
+    if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    # latest deal for property
-    d = db.scalar(select(Deal).where(Deal.property_id == p.id).order_by(desc(Deal.id)).limit(1))
+    d = db.scalar(
+        select(Deal)
+        .where(Deal.property_id == prop.id)
+        .where(Deal.org_id == p.org_id)
+        .order_by(desc(Deal.id))
+        .limit(1)
+    )
     if not d:
         raise HTTPException(status_code=404, detail="No deal found for property")
 
-    jr = db.scalar(select(JurisdictionRule).where(JurisdictionRule.city == p.city, JurisdictionRule.state == p.state))
+    jr = db.scalar(select(JurisdictionRule).where(JurisdictionRule.city == prop.city, JurisdictionRule.state == prop.state))
     friction = compute_friction(jr)
 
-    # latest underwriting result for deal (if you have multiple results per deal, order by id desc)
-    r = db.scalar(select(UnderwritingResult).where(UnderwritingResult.deal_id == d.id).order_by(desc(UnderwritingResult.id)).limit(1))
+    r = db.scalar(
+        select(UnderwritingResult)
+        .where(UnderwritingResult.deal_id == d.id)
+        .where(UnderwritingResult.org_id == p.org_id)
+        .order_by(desc(UnderwritingResult.id))
+        .limit(1)
+    )
 
-    # latest persisted checklist if any
-    chk = db.scalar(select(PropertyChecklist).where(PropertyChecklist.property_id == p.id).order_by(desc(PropertyChecklist.id)).limit(1))
+    chk = db.scalar(
+        select(PropertyChecklist)
+        .where(PropertyChecklist.property_id == prop.id)
+        .order_by(desc(PropertyChecklist.id))
+        .limit(1)
+    )
     checklist_out: ChecklistOut | None = None
     if chk:
         try:
@@ -133,12 +156,12 @@ def property_view(property_id: int, db: Session = Depends(get_db)):
         except Exception:
             parsed = []
         items = [ChecklistItemOut(**x) for x in parsed if isinstance(x, dict)]
-        checklist_out = ChecklistOut(property_id=p.id, city=p.city, state=p.state, items=items)
+        checklist_out = ChecklistOut(property_id=prop.id, city=prop.city, state=prop.state, items=items)
 
-    rent_explain = _rent_explain_for_view(db, property_id=p.id, strategy=d.strategy)
+    rent_explain = _rent_explain_for_view(db, property_id=prop.id, strategy=d.strategy)
 
     return PropertyViewOut(
-        property=PropertyOut.model_validate(p, from_attributes=True),
+        property=PropertyOut.model_validate(prop, from_attributes=True),
         deal=DealOut.model_validate(d, from_attributes=True),
         rent_explain=rent_explain,
         jurisdiction_rule=JurisdictionRuleOut.model_validate(jr, from_attributes=True) if jr else None,

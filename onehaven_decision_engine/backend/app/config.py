@@ -5,24 +5,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # This makes local dev sane: put secrets in backend/.env and docker env_file
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_env: str = "local"
     database_url: str
 
     # ---- Operating Truth / Reproducibility ----
-    # Put this in env: PAYMENT_STANDARD_PCT=1.10 (example)
-    payment_standard_pct: float = 1.00
-
-    # Bump this when your rules change so history doesn't rewrite itself.
-    # Put in env: DECISION_VERSION=2026-02-10.v1
+    payment_standard_pct: float = 1.10
     decision_version: str = "2026-02-10.v1"
 
     # ---- Deal rules defaults ----
     max_price: int = 150_000
     min_bedrooms: int = 2
-
     min_inventory: int | None = None
 
     rent_rule_min_pct: float = 0.013  # 1.3%
@@ -43,17 +37,11 @@ class Settings(BaseSettings):
     dscr_min: float = 1.20
     dscr_penalty_enabled: bool = True
 
-    # ✅ Correct spelling
     rent_calibration_alpha: float = 0.20
-
-    # ✅ Back-compat for old env var / old field name (deprecated)
-    rent_calibration_apha: float | None = None
-
+    rent_calibration_apha: float | None = None  # back-compat
     rent_calibration_min_mult: float = 0.70
     rent_calibration_max_mult: float = 1.30
-
-    # Back-compat (deprecated): if you used this before, keep it but don't rely on it.
-    default_payment_standard_pct: float = 1.00
+    default_payment_standard_pct: float = 1.10
 
     # ---- External APIs ----
     hud_user_token: str | None = None
@@ -61,6 +49,26 @@ class Settings(BaseSettings):
 
     rentcast_api_key: str | None = None
     rentcast_base_url: str = "https://api.rentcast.io/v1"
+
+    # ---- Phase 5: Auth + Tenancy ----
+    # Supported: "clerk" (now), later you can add auth0/cognito
+    auth_provider: str = "clerk"
+    auth_mode: str = "dev"
+    dev_auto_provision: bool = True
+    dev_header_org_slug: str = "X-Org-Slug"
+    dev_header_user_email: str = "X-User-Email"
+    dev_header_user_role: str = "X-User-Role"
+
+    # Clerk JWT verification (set in env for prod)
+    clerk_issuer: str | None = None
+    clerk_jwks_url: str | None = None
+    clerk_audience: str | None = None
+
+    # Local-dev bypass (ONLY honored when app_env == "local")
+    # Use headers:
+    #   X-User-Email: you@domain.com
+    #   X-Org-Slug: onehaven (optional)
+    allow_local_auth_bypass: bool = True
 
     def model_post_init(self, __context) -> None:
         if self.rent_calibration_apha is not None:

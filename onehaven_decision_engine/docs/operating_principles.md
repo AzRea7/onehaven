@@ -1,76 +1,52 @@
-# OneHaven Operating Principles (Internal Constitution)
+# OneHaven Operating Principles (Phase 0 Constitution)
 
-These are not “notes”. They are system laws.
+This document is the “constitution” for OneHaven.  
+Every feature must align with these truths.
 
-## 1) Michigan is landlord-friendly only if compliant
-Compliance is not optional. Non-compliance destroys rent flow and increases downside risk.
+## 1) We optimize for operational truth, not pretty math
+- We are not trying to produce the maximum possible ROI on paper.
+- We are trying to produce deals that survive real-world friction.
 
-System rule:
-- if compliance requirements are unknown → decision must be REVIEW, not PASS.
+## 2) Rent is constrained (always)
+Rent is capped by the minimum of:
+- **Payment standard ceiling** (FMR × payment_standard_pct)
+- **Rent reasonableness** (local comps / median comp)
+- **Unit condition** (inspection + quality affects approval and tenant stability)
 
-## 2) Rent is constrained (ceiling logic)
-Rent is capped by:
-- HUD FMR (by ZIP + bedroom) * payment standard %
-- Rent reasonableness (local comps)
-- Unit condition / inspection readiness
-
-System rule:
-- rent_ceiling = min(payment_standard_rent, median_local_comp) unless an explicit override exists
-- system must store cap_reason = fmr|comps|override|none
-- system must be explainable in the API output
+**Rule:** Any decision must be explainable in terms of these constraints.
 
 ## 3) Inspection is deterministic
-Inspection outcomes are predictable from:
-- year built (pre-1978 paint rules)
-- HQS fail patterns (GFCI, handrails, leaks, windows)
-- jurisdiction/inspector strictness
-- rehab quality
+We treat inspections as a checklist problem:
+- If the unit meets HQS requirements, it passes.
+- Failures are not “random”; they are data.
 
-System rule:
-- generate a checklist BEFORE inspection
-- log failures and resolutions to create an analytics flywheel
+**Rule:** We log fail points and feed them back into rehab templates and scoring.
 
 ## 4) Time kills deals
-Delays destroy IRR and can destroy deals entirely:
-- licensing + registration processing time
-- inspection scheduling
-- reinspections
-- tenant waitlist depth
+Delays are costs:
+- Registration delays
+- Housing authority processing delays
+- Inspection scheduling delays
 
-System rule:
-- time risk must appear in the output via friction scoring + reasons
+**Rule:** Jurisdiction friction must affect scoring and decision output.
 
-## 5) Compliance friction is a cost (not an annoyance)
-Costs include:
-- admin labor
+## 5) Compliance friction is a cost center
+Compliance is not a “note”; it is an input:
+- license requirements
+- recurring inspection frequency
+- typical fail points
+- processing time
 - fees
-- rework
-- time-to-rent delay
 
-System rule:
-- friction must affect score and decision
-- decision cannot be opaque
+## 6) No silent overrides
+If a value is overridden (rent ceiling, assumptions, etc.), it must be:
+- persisted
+- versioned
+- explainable
+- auditable
 
-## 6) Output truthfulness (anti-BS)
-The system must not:
-- PASS when rent is unknown/estimated → must be REVIEW
-- hide missing comps / missing FMR / missing rules
-- silently apply overrides
-
-## 7) “One screen truth” is the product promise
-Property view must answer:
-- is this deal alive?
-- what blocks rent?
-- when does money flow?
-- how risky is this city?
-- what should I do next?
-
-Tabs:
-Deal • Rehab • Compliance • Tenant • Cash • Equity
-
-## 8) Not legal advice
-We provide operational intelligence based on:
-- public rules and datasets
-- jurisdiction policies stored in the system
-- historical outcomes recorded in the system
-- user-entered comps and inspection results
+## 7) Output must be operator-ready
+A “PASS” means:
+- a human can actually move it forward
+- with a clear checklist of the next actions
+- and the biggest risks stated plainly

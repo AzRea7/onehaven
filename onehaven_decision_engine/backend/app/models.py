@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Index,
     UniqueConstraint,
     Date,
     func,
@@ -525,3 +526,76 @@ class AgentSlotAssignment(Base):
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AppUser(Base):
+    __tablename__ = "app_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class OrgMembership(Base):
+    __tablename__ = "org_memberships"
+    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_org_memberships_org_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("app_users.id"), index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="owner")  # owner|operator|analyst
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
+
+    action: Mapped[str] = mapped_column(String(80), nullable=False)         # rent_override_set, checklist_item_done, etc
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)    # rent_assumption, checklist, slot_assignment...
+    entity_id: Mapped[str] = mapped_column(String(80), nullable=False)      # string id (safe across types)
+
+    before_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    after_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+class PropertyState(Base):
+    __tablename__ = "property_states"
+    __table_args__ = (UniqueConstraint("org_id", "property_id", name="uq_property_states_org_property"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True)
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id"), index=True)
+
+    current_stage: Mapped[str] = mapped_column(String(30), nullable=False, default="deal")  # deal/rehab/compliance/tenant/cash/equity
+    constraints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    outstanding_tasks_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class WorkflowEvent(Base):
+    __tablename__ = "workflow_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True)
+
+    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
+
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
