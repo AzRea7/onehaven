@@ -1,11 +1,45 @@
 // frontend/src/lib/api.ts
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 
+type AuthContext = {
+  orgSlug: string;
+  userEmail: string;
+  userRole?: string;
+};
+
+function getAuth(): AuthContext {
+  // Prefer env vars (good for dev / single-tenant demo)
+  const env = (import.meta as any).env || {};
+  const envOrg = env.VITE_ORG_SLUG as string | undefined;
+  const envEmail = env.VITE_USER_EMAIL as string | undefined;
+  const envRole = env.VITE_USER_ROLE as string | undefined;
+
+  if (envOrg && envEmail) {
+    return {
+      orgSlug: envOrg,
+      userEmail: envEmail,
+      userRole: envRole || "owner",
+    };
+  }
+
+  // Fallback to localStorage (good when you add a login/settings UI)
+  const orgSlug = localStorage.getItem("org_slug") || "demo";
+  const userEmail = localStorage.getItem("user_email") || "austin@demo.local";
+  const userRole = localStorage.getItem("user_role") || "owner";
+
+  return { orgSlug, userEmail, userRole };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const auth = getAuth();
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "X-Org-Slug": auth.orgSlug,
+      "X-User-Email": auth.userEmail,
+      ...(auth.userRole ? { "X-User-Role": auth.userRole } : {}),
       ...(init?.headers || {}),
     },
   });
@@ -15,12 +49,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
   }
 
+  // Some endpoints might return empty responses; guard just in case
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.includes("application/json")) {
+    return (await res.text()) as unknown as T;
+  }
+
   return (await res.json()) as T;
 }
 
 export const api = {
   // Dashboard / properties
-  dashboardProperties: (p0: { limit: number; }) => request<any[]>(`/dashboard/properties?limit=100`),
+  dashboardProperties: (_p0: { limit: number }) =>
+    request<any[]>(`/dashboard/properties?limit=100`),
   propertyView: (id: number) => request<any>(`/properties/${id}/view`),
 
   // Rehab
@@ -44,7 +85,7 @@ export const api = {
   valuations: (propertyId: number) =>
     request<any[]>(`/equity/valuations?property_id=${propertyId}&limit=200`),
 
-  // Agents (automation-capable)
+  // Agents
   agents: () => request<any[]>(`/agents`),
   agentRuns: (propertyId: number) =>
     request<any[]>(`/agents/runs?property_id=${propertyId}&limit=200`),
@@ -71,7 +112,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // NEW: Slot Specs + Assignments
+  // Slot Specs + Assignments
   slotSpecs: () => request<any[]>(`/agents/slots/specs`),
   slotAssignments: (propertyId?: number) => {
     const q =

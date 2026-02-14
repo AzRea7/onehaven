@@ -281,6 +281,13 @@ class ChecklistItemOut(BaseModel):
     common_fail: bool = False
     applies_if: Optional[Dict[str, Any]] = None
 
+    # NEW: workflow state (normalized table)
+    status: str = "todo"  # todo|in_progress|done|blocked
+    marked_at: Optional[datetime] = None
+    marked_by: Optional[str] = None
+    proof_url: Optional[str] = None
+    notes: Optional[str] = None
+
 
 class ChecklistOut(BaseModel):
     property_id: int
@@ -289,6 +296,9 @@ class ChecklistOut(BaseModel):
 
     checklist_name: str = "section8_hqs_precheck"
     generated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # keep strategy in response (useful)
+    strategy: str = "section8"
 
     items: List[ChecklistItemOut] = Field(default_factory=list)
 
@@ -312,12 +322,20 @@ class ChecklistTemplateItemOut(ChecklistTemplateItemUpsert):
 
 class PropertyChecklistOut(BaseModel):
     id: int
+    org_id: Optional[int] = None
     property_id: int
     strategy: str
     version: str
     generated_at: datetime
     items: List[ChecklistItemOut]
     model_config = ConfigDict(from_attributes=True)
+
+
+class ChecklistItemUpdateIn(BaseModel):
+    status: Optional[str] = Field(default=None, description="todo|in_progress|done|blocked")
+    proof_url: Optional[str] = None
+    notes: Optional[str] = None
+
 
 
 # -------------------- Rent Comps + Observations + Calibration --------------------

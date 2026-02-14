@@ -36,6 +36,8 @@ from .routers.audit import router as audit_router
 
 app = FastAPI(title="OneHaven Decision Engine")
 
+API_PREFIX = "/api"
+
 # CORS: allow local frontend dev + “OpenClaw-style” dashboard hosting later
 app.add_middleware(
     CORSMiddleware,
@@ -46,34 +48,34 @@ app.add_middleware(
 )
 
 # Core
-app.include_router(health_router)
-app.include_router(meta_router)
-app.include_router(dashboard_router)
+app.include_router(health_router, prefix=API_PREFIX)
+app.include_router(meta_router, prefix=API_PREFIX)
+app.include_router(dashboard_router, prefix=API_PREFIX)
 
 # Decision engine pipeline
-app.include_router(properties_router)
-app.include_router(deals_router)
-app.include_router(jurisdictions_router)
-app.include_router(evaluate_router)
+app.include_router(properties_router, prefix=API_PREFIX)
+app.include_router(deals_router, prefix=API_PREFIX)
+app.include_router(jurisdictions_router, prefix=API_PREFIX)
+app.include_router(evaluate_router, prefix=API_PREFIX)
 
 # Ingest + rent
-app.include_router(imports_router)
-app.include_router(imports_alias_router)
-app.include_router(rent_router)
-app.include_router(rent_enrich_router)
+app.include_router(imports_router, prefix=API_PREFIX)
+app.include_router(imports_alias_router, prefix=API_PREFIX)
+app.include_router(rent_router, prefix=API_PREFIX)
+app.include_router(rent_enrich_router, prefix=API_PREFIX)
 
 # Compliance
-app.include_router(compliance_router)
-app.include_router(inspections_router)
+app.include_router(compliance_router, prefix=API_PREFIX)
+app.include_router(inspections_router, prefix=API_PREFIX)
 
 # Ops
-app.include_router(rehab_router)
-app.include_router(tenants_router)
-app.include_router(cash_router)
-app.include_router(equity_router)
+app.include_router(rehab_router, prefix=API_PREFIX)
+app.include_router(tenants_router, prefix=API_PREFIX)
+app.include_router(cash_router, prefix=API_PREFIX)
+app.include_router(equity_router, prefix=API_PREFIX)
 
 # Agents
-app.include_router(agents_router)
-app.include_router(auth_router)
-app.include_router(workflow_router)
-app.include_router(audit_router)
+app.include_router(agents_router, prefix=API_PREFIX)
+app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(workflow_router, prefix=API_PREFIX)
+app.include_router(audit_router, prefix=API_PREFIX)

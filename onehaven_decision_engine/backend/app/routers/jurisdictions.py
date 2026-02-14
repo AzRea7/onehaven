@@ -1,4 +1,3 @@
-# backend/app/routers/jurisdictions.py
 from __future__ import annotations
 
 import json
@@ -7,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from ..auth import get_principal, require_owner
 from ..db import get_db
 from ..models import JurisdictionRule
 from ..schemas import JurisdictionRuleUpsert, JurisdictionRuleOut
@@ -42,7 +42,10 @@ def _to_out(jr: JurisdictionRule) -> JurisdictionRuleOut:
 
 
 @router.put("", response_model=JurisdictionRuleOut)
-def upsert_jurisdiction(payload: JurisdictionRuleUpsert, db: Session = Depends(get_db)):
+def upsert_jurisdiction(payload: JurisdictionRuleUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
+    # Global table: only owners can change it (prevents truth drift)
+    require_owner(p)
+
     jr = db.scalar(
         select(JurisdictionRule).where(
             JurisdictionRule.city == payload.city,
@@ -71,6 +74,7 @@ def list_jurisdictions(
     city: str | None = Query(default=None),
     state: str = Query(default="MI"),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
     q = select(JurisdictionRule).order_by(JurisdictionRule.city)
     if city:
@@ -80,7 +84,7 @@ def list_jurisdictions(
 
 
 @router.get("/{jurisdiction_id}", response_model=JurisdictionRuleOut)
-def get_jurisdiction(jurisdiction_id: int, db: Session = Depends(get_db)):
+def get_jurisdiction(jurisdiction_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
     jr = db.get(JurisdictionRule, jurisdiction_id)
     if not jr:
         raise HTTPException(status_code=404, detail="jurisdiction not found")

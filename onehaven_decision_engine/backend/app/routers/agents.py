@@ -22,7 +22,6 @@ from ..schemas import (
 )
 from ..domain.agents.registry import AGENTS, SLOTS
 
-
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
@@ -32,10 +31,12 @@ def list_agents(p=Depends(get_principal)):
     for a in AGENTS.values():
         out.append(
             AgentSpecOut(
-                agent_key=getattr(a, "key", None),
-                title=getattr(a, "name", None),
+                agent_key=getattr(a, "key", ""),
+                title=getattr(a, "name", ""),
                 description=getattr(a, "description", None),
-                notes=None,
+                needs_human=bool(getattr(a, "needs_human", False)),
+                category=getattr(a, "category", None),
+                sidebar_slots=[],
             )
         )
     return out
@@ -50,8 +51,9 @@ def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends
         org_id=p.org_id,
         agent_key=payload.agent_key,
         property_id=payload.property_id,
-        payload_json=json.dumps(payload.payload or {}),
-        status="created",
+        status=payload.status or "queued",
+        input_json=payload.input_json,
+        output_json=None,
         created_at=datetime.utcnow(),
     )
     db.add(run)
@@ -167,7 +169,6 @@ def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Dep
         existing.updated_at = now
         db.add(existing)
 
-        # Phase 6: append-only log event
         db.add(
             WorkflowEvent(
                 org_id=p.org_id,

@@ -1,4 +1,3 @@
-# backend/app/models.py
 from __future__ import annotations
 
 from datetime import datetime, date
@@ -60,8 +59,8 @@ class AuditEvent(Base):
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
     actor_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
 
-    action: Mapped[str] = mapped_column(String(80), nullable=False)         # rent_override_set, etc
-    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)    # rent_assumption, slot_assignment, etc
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)
     entity_id: Mapped[str] = mapped_column(String(80), nullable=False)
 
     before_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -78,9 +77,7 @@ class PropertyState(Base):
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
     property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id"), index=True, nullable=False)
 
-    current_stage: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="deal"
-    )  # deal/rehab/compliance/tenant/cash/equity
+    current_stage: Mapped[str] = mapped_column(String(30), nullable=False, default="deal")
     constraints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     outstanding_tasks_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -108,8 +105,6 @@ class Property(Base):
     __tablename__ = "properties"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    # ✅ multitenant scope
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     address: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -137,9 +132,19 @@ class Property(Base):
     rent_observations: Mapped[List["RentObservation"]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )
+
     checklists: Mapped[List["PropertyChecklist"]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )
+    checklist_items: Mapped[List["PropertyChecklistItem"]] = relationship(
+        back_populates="property", cascade="all, delete-orphan"
+    )
+
+    # Phase 4/5
+    rehab_tasks: Mapped[List["RehabTask"]] = relationship(back_populates="property", cascade="all, delete-orphan")
+    leases: Mapped[List["Lease"]] = relationship(back_populates="property", cascade="all, delete-orphan")
+    transactions: Mapped[List["Transaction"]] = relationship(back_populates="property", cascade="all, delete-orphan")
+    valuations: Mapped[List["Valuation"]] = relationship(back_populates="property", cascade="all, delete-orphan")
 
 
 class ImportSnapshot(Base):
@@ -158,15 +163,11 @@ class Deal(Base):
     __table_args__ = (UniqueConstraint("source_fingerprint", name="uq_deals_source_fingerprint"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    # ✅ multitenant scope
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
-    snapshot_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("import_snapshots.id", ondelete="SET NULL"), nullable=True
-    )
+    snapshot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("import_snapshots.id", ondelete="SET NULL"), nullable=True)
     source_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     source_raw_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -175,7 +176,6 @@ class Deal(Base):
     estimated_purchase_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     rehab_estimate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
-    # section8 | market
     strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="section8")
 
     financing_type: Mapped[str] = mapped_column(String(40), nullable=False, default="dscr")
@@ -198,10 +198,7 @@ class RentAssumption(Base):
     __table_args__ = (UniqueConstraint("org_id", "property_id", name="uq_rent_assumptions_org_property"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    # ✅ multitenant scope
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
     market_rent_estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -266,7 +263,6 @@ class RentCalibration(Base):
     __table_args__ = (UniqueConstraint("zip", "bedrooms", "strategy", name="uq_rent_calibration_key"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
     zip: Mapped[str] = mapped_column(String(10), nullable=False)
     bedrooms: Mapped[int] = mapped_column(Integer, nullable=False)
     strategy: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -306,8 +302,6 @@ class UnderwritingResult(Base):
     __tablename__ = "underwriting_results"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    # ✅ multitenant scope
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), nullable=False)
@@ -342,7 +336,7 @@ class UnderwritingResult(Base):
 
 
 # -----------------------------
-# Inspections (existing)
+# Inspections
 # -----------------------------
 class Inspector(Base):
     __tablename__ = "inspectors"
@@ -360,7 +354,6 @@ class Inspection(Base):
     __tablename__ = "inspections"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
     inspector_id: Mapped[Optional[int]] = mapped_column(ForeignKey("inspectors.id", ondelete="SET NULL"), nullable=True)
 
@@ -399,7 +392,7 @@ class InspectionItem(Base):
 
 
 # -----------------------------
-# API usage limiter (existing)
+# API usage limiter
 # -----------------------------
 class ApiUsage(Base):
     __tablename__ = "api_usage"
@@ -437,8 +430,19 @@ class ChecklistTemplateItem(Base):
 
 class PropertyChecklist(Base):
     __tablename__ = "property_checklists"
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id",
+            "property_id",
+            "strategy",
+            "version",
+            name="uq_property_checklists_org_property_strategy_version",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
     strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="section8")
@@ -448,10 +452,147 @@ class PropertyChecklist(Base):
     items_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
     property: Mapped["Property"] = relationship(back_populates="checklists")
+    items: Mapped[List["PropertyChecklistItem"]] = relationship(back_populates="checklist", cascade="all, delete-orphan")
+
+
+class PropertyChecklistItem(Base):
+    __tablename__ = "property_checklist_items"
+    __table_args__ = (UniqueConstraint("org_id", "property_id", "item_code", name="uq_checklist_item_org_property_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    checklist_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("property_checklists.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    item_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    category: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    severity: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    common_fail: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    applies_if_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
+    marked_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
+    marked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    proof_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship(back_populates="checklist_items")
+    checklist: Mapped[Optional["PropertyChecklist"]] = relationship(back_populates="items")
 
 
 # -----------------------------
-# Phase 4/5: rehab, tenants, cash, equity, agents
+# Phase 4/5: rehab, tenants, cash, equity
+# -----------------------------
+class RehabTask(Base):
+    __tablename__ = "rehab_tasks"
+    __table_args__ = (UniqueConstraint("org_id", "property_id", "title", name="uq_rehab_tasks_org_property_title"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str] = mapped_column(String(60), nullable=False, default="rehab")
+    inspection_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")  # todo|in_progress|done|blocked
+    cost_estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    vendor: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship(back_populates="rehab_tasks")
+
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+    __table_args__ = (UniqueConstraint("org_id", "full_name", name="uq_tenants_org_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    phone: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    voucher_status: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    leases: Mapped[List["Lease"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+
+
+class Lease(Base):
+    __tablename__ = "leases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    total_rent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    tenant_portion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    housing_authority_portion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    hap_contract_status: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship(back_populates="leases")
+    tenant: Mapped["Tenant"] = relationship(back_populates="leases")
+
+
+class Transaction(Base):
+    __tablename__ = "transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    txn_date: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    txn_type: Mapped[str] = mapped_column(String(80), nullable=False, default="other")  # income|expense|capex|other
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    memo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship(back_populates="transactions")
+
+
+class Valuation(Base):
+    __tablename__ = "valuations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    as_of: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    estimated_value: Mapped[float] = mapped_column(Float, nullable=False)
+    loan_balance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship(back_populates="valuations")
+
+
+# -----------------------------
+# Inspection analytics / future ops (already in your file)
 # -----------------------------
 class InspectionEvent(Base):
     __tablename__ = "inspection_events"
@@ -473,100 +614,14 @@ class InspectionEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
 
-class RehabTask(Base):
-    __tablename__ = "rehab_tasks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
-
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    category: Mapped[str] = mapped_column(String(50), nullable=False, server_default="rehab")
-    inspection_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
-
-    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="todo")
-
-    cost_estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    vendor: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
-    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-
-
-class Tenant(Base):
-    __tablename__ = "tenants"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    voucher_status: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-
-    leases: Mapped[list["Lease"]] = relationship("Lease", back_populates="tenant")
-
-
-class Lease(Base):
-    __tablename__ = "leases"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
-    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False)
-
-    start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-    total_rent: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
-    tenant_portion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    housing_authority_portion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-
-    hap_contract_status: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-
-    tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="leases")
-
-
-class Transaction(Base):
-    __tablename__ = "transactions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
-
-    txn_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    txn_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
-    memo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-
-
-class Valuation(Base):
-    __tablename__ = "valuations"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
-
-    as_of: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-
-    estimated_value: Mapped[float] = mapped_column(Float, nullable=False)
-    loan_balance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-
-
+# -----------------------------
+# Agents
+# -----------------------------
 class AgentRun(Base):
     __tablename__ = "agent_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    # ✅ multitenant scope
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-
     property_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     agent_key: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -582,8 +637,6 @@ class AgentMessage(Base):
     __tablename__ = "agent_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    # ✅ multitenant scope
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     thread_key: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -597,12 +650,9 @@ class AgentSlotAssignment(Base):
     __tablename__ = "agent_slot_assignments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    # ✅ multitenant scope
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     slot_key: Mapped[str] = mapped_column(String(80), index=True)
-
     property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
 
     owner_type: Mapped[str] = mapped_column(String(20), default="human")

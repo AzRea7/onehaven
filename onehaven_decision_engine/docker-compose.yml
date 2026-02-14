@@ -21,6 +21,8 @@ services:
     working_dir: /app
     env_file:
       - .env
+    volumes:
+      - ./backend:/app
     environment:
       ALEMBIC_CONFIG: /app/app/alembic.ini
       DATABASE_URL: ${DATABASE_URL}
