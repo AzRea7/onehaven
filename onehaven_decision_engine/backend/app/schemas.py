@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
 # -------------------- Imports / Snapshots --------------------
-
 class ImportSnapshotOut(BaseModel):
     id: int
     source: str
@@ -31,7 +30,6 @@ class ImportResultOut(BaseModel):
 
 
 # -------------------- Evaluation / Survivors --------------------
-
 class BatchEvalOut(BaseModel):
     snapshot_id: int
     total_deals: int
@@ -61,7 +59,6 @@ class SurvivorOut(BaseModel):
 
 
 # -------------------- Properties / Deals --------------------
-
 class PropertyCreate(BaseModel):
     address: str
     city: str
@@ -77,6 +74,7 @@ class PropertyCreate(BaseModel):
 
 class PropertyOut(PropertyCreate):
     id: int
+    org_id: Optional[int] = None  # helpful for debugging tenancy
     rent_assumption: Optional["RentAssumptionOut"] = None
     rent_comps: List["RentCompOut"] = Field(default_factory=list)
     model_config = ConfigDict(from_attributes=True)
@@ -88,7 +86,6 @@ class DealCreate(BaseModel):
     estimated_purchase_price: Optional[float] = None
     rehab_estimate: float = 0.0
 
-    # section8 | market
     strategy: str = "section8"
 
     financing_type: str = "dscr"
@@ -104,6 +101,7 @@ class DealCreate(BaseModel):
 
 class DealOut(DealCreate):
     id: int
+    org_id: Optional[int] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -140,7 +138,6 @@ class DealIntakeOut(BaseModel):
 
 
 # -------------------- Rent Assumptions / Jurisdiction --------------------
-
 class RentAssumptionUpsert(BaseModel):
     market_rent_estimate: Optional[float] = None
     section8_fmr: Optional[float] = None
@@ -154,6 +151,7 @@ class RentAssumptionUpsert(BaseModel):
 class RentAssumptionOut(RentAssumptionUpsert):
     id: int
     property_id: int
+    org_id: Optional[int] = None
     created_at: Optional[datetime] = None
 
     rent_used: Optional[float] = None
@@ -184,10 +182,11 @@ class JurisdictionRuleOut(JurisdictionRuleUpsert):
 
 
 # -------------------- Underwriting Results --------------------
-
 class UnderwritingResultOut(BaseModel):
     id: int
     deal_id: int
+    org_id: Optional[int] = None
+
     decision: str
     score: int
     reasons: List[str] = Field(default_factory=list)
@@ -248,6 +247,7 @@ class UnderwritingResultOut(BaseModel):
         return {
             "id": getattr(data, "id"),
             "deal_id": getattr(data, "deal_id"),
+            "org_id": getattr(data, "org_id", None),
             "decision": getattr(data, "decision"),
             "score": getattr(data, "score"),
             "reasons": _load_list(rj),
@@ -272,8 +272,7 @@ class UnderwritingResultOut(BaseModel):
         }
 
 
-# -------------------- Compliance (existing checklist out + new template + persisted checklist) --------------------
-
+# -------------------- Compliance --------------------
 class ChecklistItemOut(BaseModel):
     item_code: str
     category: str
@@ -322,7 +321,6 @@ class PropertyChecklistOut(BaseModel):
 
 
 # -------------------- Rent Comps + Observations + Calibration --------------------
-
 class RentCompCreate(BaseModel):
     rent: float
     source: str = "manual"
@@ -431,7 +429,6 @@ class RentRecomputeOut(BaseModel):
 
 
 # -------------------- Phase 4: Single Property View --------------------
-
 class PropertyViewOut(BaseModel):
     property: PropertyOut
     deal: DealOut
@@ -546,7 +543,7 @@ class TransactionOut(BaseModel):
 
 
 # -----------------------------
-# Equity (Valuations) — MUST MATCH DB: valuations.as_of
+# Equity (Valuations)
 # -----------------------------
 class ValuationCreate(BaseModel):
     property_id: int
@@ -564,12 +561,11 @@ class ValuationOut(BaseModel):
     loan_balance: float | None
     notes: str | None
     created_at: datetime
-
     model_config = ConfigDict(from_attributes=True)
 
 
 # -----------------------------
-# Inspections (existing compliance models: Inspector / Inspection / InspectionItem)
+# Inspections
 # -----------------------------
 class InspectorUpsert(BaseModel):
     name: str
@@ -633,14 +629,8 @@ class AgentRunCreate(BaseModel):
     status: str = "queued"
     input_json: str | None = None
 
-# -----------------------------
-# Agents: catalog / specs (what agents exist + what they do)
-# -----------------------------
+
 class AgentSlotOut(BaseModel):
-    """
-    UI/ops concept: a slot is a place in the sidebar where a human or agent can act.
-    Example: "Tenant Screening", "Inspection Prep", "HAP Packet Submit".
-    """
     key: str
     title: str
     description: str | None = None
@@ -648,35 +638,24 @@ class AgentSlotOut(BaseModel):
 
 
 class AgentSpecOut(BaseModel):
-    """
-    What an 'agent' is, at a product level.
-    This is usually returned by GET /agents/specs so the frontend can render the sidebar.
-    """
     agent_key: str
     title: str
     description: str | None = None
-
-    # If True, this "agent" is really a human workflow slot (or requires human confirmation).
     needs_human: bool = False
-
-    # Optional UI grouping ("Deal Intake", "Compliance", "Tenant", etc.)
     category: str | None = None
-
-    # Optional sidebar placement
     sidebar_slots: list[AgentSlotOut] = Field(default_factory=list)
-
     model_config = ConfigDict(from_attributes=True)
 
 
 class AgentRunOut(BaseModel):
     id: int
+    org_id: Optional[int] = None
     property_id: int | None
     agent_key: str
     status: str
     input_json: str | None
     output_json: str | None
     created_at: datetime
-
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -689,12 +668,14 @@ class AgentMessageCreate(BaseModel):
 
 class AgentMessageOut(BaseModel):
     id: int
+    org_id: Optional[int] = None
     thread_key: str
     sender: str
     message: str
     recipient: str | None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
 
 # -----------------------------
 # Inspection Analytics / Prediction
@@ -724,6 +705,7 @@ class ComplianceStatsOut(BaseModel):
     reinspect_rate: float
     top_fail_points: List[FailPointStat] = Field(default_factory=list)
 
+
 class AgentSlotSpecOut(BaseModel):
     slot_key: str
     title: str
@@ -743,6 +725,7 @@ class AgentSlotAssignmentUpsert(BaseModel):
 
 class AgentSlotAssignmentOut(BaseModel):
     id: int
+    org_id: Optional[int] = None
     slot_key: str
     property_id: int | None
     owner_type: str
@@ -753,6 +736,10 @@ class AgentSlotAssignmentOut(BaseModel):
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
+
+# -----------------------------
+# Principal / RBAC / Audit / Workflow
+# -----------------------------
 class PrincipalOut(BaseModel):
     org_id: int
     org_slug: str
@@ -766,6 +753,7 @@ class OrganizationOut(BaseModel):
     slug: str
     name: str
     created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AppUserOut(BaseModel):
@@ -773,6 +761,7 @@ class AppUserOut(BaseModel):
     email: str
     display_name: Optional[str] = None
     created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrgMembershipOut(BaseModel):
@@ -781,6 +770,7 @@ class OrgMembershipOut(BaseModel):
     user_id: int
     role: str
     created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AuditEventOut(BaseModel):
@@ -793,6 +783,7 @@ class AuditEventOut(BaseModel):
     before_json: Optional[str] = None
     after_json: Optional[str] = None
     created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WorkflowEventCreate(BaseModel):
@@ -809,6 +800,7 @@ class WorkflowEventOut(BaseModel):
     event_type: str
     payload_json: Optional[str] = None
     created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PropertyStateUpsert(BaseModel):
@@ -826,3 +818,4 @@ class PropertyStateOut(BaseModel):
     constraints_json: Optional[str] = None
     outstanding_tasks_json: Optional[str] = None
     updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)

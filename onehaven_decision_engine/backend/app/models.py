@@ -1,3 +1,4 @@
+# backend/app/models.py
 from __future__ import annotations
 
 from datetime import datetime, date
@@ -11,7 +12,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    Index,
     UniqueConstraint,
     Date,
     func,
@@ -21,10 +21,96 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
 
+# -----------------------------
+# Multitenant RBAC tables
+# -----------------------------
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AppUser(Base):
+    __tablename__ = "app_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class OrgMembership(Base):
+    __tablename__ = "org_memberships"
+    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_org_memberships_org_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("app_users.id"), index=True, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="owner")  # owner|operator|analyst
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
+
+    action: Mapped[str] = mapped_column(String(80), nullable=False)         # rent_override_set, etc
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)    # rent_assumption, slot_assignment, etc
+    entity_id: Mapped[str] = mapped_column(String(80), nullable=False)
+
+    before_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    after_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class PropertyState(Base):
+    __tablename__ = "property_states"
+    __table_args__ = (UniqueConstraint("org_id", "property_id", name="uq_property_states_org_property"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id"), index=True, nullable=False)
+
+    current_stage: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="deal"
+    )  # deal/rehab/compliance/tenant/cash/equity
+    constraints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    outstanding_tasks_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class WorkflowEvent(Base):
+    __tablename__ = "workflow_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
+
+    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
+
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+# -----------------------------
+# Core domain: Properties / Deals
+# -----------------------------
 class Property(Base):
     __tablename__ = "properties"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # ✅ multitenant scope
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     address: Mapped[str] = mapped_column(String(255), nullable=False)
     city: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -47,15 +133,24 @@ class Property(Base):
     )
 
     inspections: Mapped[List["Inspection"]] = relationship(back_populates="property", cascade="all, delete-orphan")
-
     rent_comps: Mapped[List["RentComp"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     rent_observations: Mapped[List["RentObservation"]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )
-
     checklists: Mapped[List["PropertyChecklist"]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )
+
+
+class ImportSnapshot(Base):
+    __tablename__ = "import_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    deals: Mapped[List["Deal"]] = relationship(back_populates="snapshot")
 
 
 class Deal(Base):
@@ -63,6 +158,10 @@ class Deal(Base):
     __table_args__ = (UniqueConstraint("source_fingerprint", name="uq_deals_source_fingerprint"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # ✅ multitenant scope
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
     snapshot_id: Mapped[Optional[int]] = mapped_column(
@@ -91,11 +190,18 @@ class Deal(Base):
     snapshot: Mapped[Optional["ImportSnapshot"]] = relationship(back_populates="deals")
 
 
+# -----------------------------
+# Rent
+# -----------------------------
 class RentAssumption(Base):
     __tablename__ = "rent_assumptions"
     __table_args__ = (UniqueConstraint("property_id", name="uq_rent_assumptions_property"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # ✅ multitenant scope
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
     market_rent_estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -169,10 +275,12 @@ class RentCalibration(Base):
     samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     mape: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+# -----------------------------
+# Jurisdiction + Underwriting
+# -----------------------------
 class JurisdictionRule(Base):
     __tablename__ = "jurisdiction_rules"
     __table_args__ = (UniqueConstraint("city", "state", name="uq_jurisdiction_city_state"),)
@@ -188,9 +296,7 @@ class JurisdictionRule(Base):
     processing_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tenant_waitlist_depth: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
 
-    # added in revision 0007_add_deal_strategy
     inspection_frequency: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-
     jurisdiction_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -200,6 +306,10 @@ class UnderwritingResult(Base):
     __tablename__ = "underwriting_results"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # ✅ multitenant scope
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
     deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), nullable=False)
 
     decision: Mapped[str] = mapped_column(String(12), nullable=False)
@@ -231,8 +341,9 @@ class UnderwritingResult(Base):
     deal: Mapped["Deal"] = relationship(back_populates="results")
 
 
-# -------------------- Compliance logging (existing) --------------------
-
+# -----------------------------
+# Inspections (existing)
+# -----------------------------
 class Inspector(Base):
     __tablename__ = "inspectors"
     __table_args__ = (UniqueConstraint("name", "agency", name="uq_inspector_name_agency"),)
@@ -240,7 +351,6 @@ class Inspector(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
     agency: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     inspections: Mapped[List["Inspection"]] = relationship(back_populates="inspector")
@@ -288,19 +398,9 @@ class InspectionItem(Base):
     inspection: Mapped["Inspection"] = relationship(back_populates="items")
 
 
-class ImportSnapshot(Base):
-    __tablename__ = "import_snapshots"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    source: Mapped[str] = mapped_column(String(40), nullable=False)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
-    deals: Mapped[List["Deal"]] = relationship(back_populates="snapshot")
-
-
+# -----------------------------
+# API usage limiter (existing)
+# -----------------------------
 class ApiUsage(Base):
     __tablename__ = "api_usage"
     __table_args__ = (UniqueConstraint("provider", "day", name="uq_api_usage_provider_day"),)
@@ -312,8 +412,9 @@ class ApiUsage(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
-# -------------------- Phase 3: checklist templates + persisted checklists --------------------
-
+# -----------------------------
+# Phase 3: checklist templates + persisted checklists
+# -----------------------------
 class ChecklistTemplateItem(Base):
     __tablename__ = "checklist_template_items"
     __table_args__ = (UniqueConstraint("strategy", "code", "version", name="uq_checklist_template_key"),)
@@ -349,50 +450,47 @@ class PropertyChecklist(Base):
     property: Mapped["Property"] = relationship(back_populates="checklists")
 
 
+# -----------------------------
+# Phase 4/5: rehab, tenants, cash, equity, agents
+# -----------------------------
 class InspectionEvent(Base):
     __tablename__ = "inspection_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
-    )
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
-    inspector_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    inspection_date: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+    inspector_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    inspection_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # scheduled | passed | failed | reinspect
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="scheduled")
 
-    fail_items_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fail_items_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolution_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    days_to_resolve: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    days_to_resolve: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     reinspection_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
 
 class RehabTask(Base):
     __tablename__ = "rehab_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
-    )
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     category: Mapped[str] = mapped_column(String(50), nullable=False, server_default="rehab")
     inspection_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
 
-    # todo | doing | blocked | done
     status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="todo")
 
-    cost_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
-    vendor: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    deadline: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cost_estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    vendor: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
 
 class Tenant(Base):
@@ -400,12 +498,12 @@ class Tenant(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    voucher_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    voucher_status: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     leases: Mapped[list["Lease"]] = relationship("Lease", back_populates="tenant")
 
@@ -414,24 +512,20 @@ class Lease(Base):
     __tablename__ = "leases"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
-    )
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
-    )
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False)
 
-    start_date: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
-    end_date: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+    start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     total_rent: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
-    tenant_portion: Mapped[float | None] = mapped_column(Float, nullable=True)
-    housing_authority_portion: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tenant_portion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    housing_authority_portion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    hap_contract_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hap_contract_status: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="leases")
 
@@ -440,51 +534,48 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
-    )
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
-    txn_date: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
+    txn_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     txn_type: Mapped[str] = mapped_column(String(50), nullable=False)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
-    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    memo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
 
 class Valuation(Base):
     __tablename__ = "valuations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False
-    )
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
-    as_of: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
+    as_of: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     estimated_value: Mapped[float] = mapped_column(Float, nullable=False)
-    loan_balance: Mapped[float | None] = mapped_column(Float, nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    loan_balance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
 
 class AgentRun(Base):
     __tablename__ = "agent_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    property_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # example keys: "s8_intake", "tenant_screen", "inspection_prep"
+    # ✅ multitenant scope
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    property_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     agent_key: Mapped[str] = mapped_column(String(80), nullable=False)
-
-    # queued | running | needs_human | done | failed
     status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="queued")
 
-    input_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    output_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    output_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
 
 class AgentMessage(Base):
@@ -492,110 +583,32 @@ class AgentMessage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    # thread key ties messages to a property workflow:
-    # e.g. "property:123" or "deal:45"
-    thread_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    # ✅ multitenant scope
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    # "human" | "agent:<name>" | "system"
+    thread_key: Mapped[str] = mapped_column(String(120), nullable=False)
     sender: Mapped[str] = mapped_column(String(80), nullable=False)
-    recipient: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    recipient: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
 
 class AgentSlotAssignment(Base):
     __tablename__ = "agent_slot_assignments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    # slot definition key (from domain.agents.registry.SLOTS)
+    # ✅ multitenant scope
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
     slot_key: Mapped[str] = mapped_column(String(80), index=True)
 
-    # optional: tie assignment to a property
-    property_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
+    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
 
-    # "human" | "ai" | "hybrid"
     owner_type: Mapped[str] = mapped_column(String(20), default="human")
-
-    # who is responsible (human name/email, or "system", or agent key)
-    assignee: Mapped[str | None] = mapped_column(String(120), nullable=True)
-
-    # "idle" | "queued" | "in_progress" | "blocked" | "done"
+    assignee: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="idle")
-
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-class Organization(Base):
-    __tablename__ = "organizations"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(160), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
-
-class AppUser(Base):
-    __tablename__ = "app_users"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    email: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
-    display_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
-
-class OrgMembership(Base):
-    __tablename__ = "org_memberships"
-    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_org_memberships_org_user"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("app_users.id"), index=True)
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="owner")  # owner|operator|analyst
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
-
-class AuditEvent(Base):
-    __tablename__ = "audit_events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True)
-    actor_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
-
-    action: Mapped[str] = mapped_column(String(80), nullable=False)         # rent_override_set, checklist_item_done, etc
-    entity_type: Mapped[str] = mapped_column(String(80), nullable=False)    # rent_assumption, checklist, slot_assignment...
-    entity_id: Mapped[str] = mapped_column(String(80), nullable=False)      # string id (safe across types)
-
-    before_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    after_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
-class PropertyState(Base):
-    __tablename__ = "property_states"
-    __table_args__ = (UniqueConstraint("org_id", "property_id", name="uq_property_states_org_property"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True)
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id"), index=True)
-
-    current_stage: Mapped[str] = mapped_column(String(30), nullable=False, default="deal")  # deal/rehab/compliance/tenant/cash/equity
-    constraints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    outstanding_tasks_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
-
-class WorkflowEvent(Base):
-    __tablename__ = "workflow_events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True)
-
-    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
-    actor_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
-
-    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
-    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)

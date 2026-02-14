@@ -1,3 +1,4 @@
+# backend/app/routers/rent.py
 from __future__ import annotations
 
 import json
@@ -11,7 +12,15 @@ from sqlalchemy.orm import Session
 from ..auth import get_principal
 from ..config import settings
 from ..db import get_db
-from ..models import Deal, Property, RentAssumption, RentComp, RentObservation, RentCalibration, AuditEvent
+from ..models import (
+    Deal,
+    Property,
+    RentAssumption,
+    RentComp,
+    RentObservation,
+    RentCalibration,
+    AuditEvent,
+)
 from ..schemas import (
     RentAssumptionOut,
     RentAssumptionUpsert,
@@ -81,8 +90,11 @@ def get_rent_assumption(property_id: int, db: Session = Depends(get_db), p=Depen
         raise HTTPException(status_code=404, detail="property not found")
 
     ra = db.execute(
-        select(RentAssumption).where(RentAssumption.property_id == property_id).where(RentAssumption.org_id == p.org_id)
+        select(RentAssumption)
+        .where(RentAssumption.property_id == property_id)
+        .where(RentAssumption.org_id == p.org_id)
     ).scalar_one_or_none()
+
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
     return ra
@@ -94,7 +106,12 @@ def get_rent_assumption_alias(property_id: int, db: Session = Depends(get_db), p
 
 
 @router.post("/{property_id}", response_model=RentAssumptionOut)
-def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
+def upsert_rent_assumption(
+    property_id: int,
+    payload: RentAssumptionUpsert,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     prop = db.get(Property, property_id)
     if not prop or prop.org_id != p.org_id:
         raise HTTPException(status_code=404, detail="property not found")
@@ -121,7 +138,7 @@ def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: 
         "rent_used": ra.rent_used,
     }
 
-    # Audit only when override changed (this is your "who changed rent ceiling override")
+    # Audit only when override changed
     if before.get("approved_rent_ceiling") != after.get("approved_rent_ceiling"):
         _audit(
             db,
@@ -141,12 +158,22 @@ def upsert_rent_assumption(property_id: int, payload: RentAssumptionUpsert, db: 
 
 
 @router.post("/assumption/{property_id}", response_model=RentAssumptionOut)
-def upsert_rent_assumption_alias(property_id: int, payload: RentAssumptionUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
+def upsert_rent_assumption_alias(
+    property_id: int,
+    payload: RentAssumptionUpsert,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     return upsert_rent_assumption(property_id=property_id, payload=payload, db=db, p=p)
 
 
 @router.post("/comps/{property_id}", response_model=RentCompsSummaryOut)
-def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = Depends(get_db), p=Depends(get_principal)):
+def add_comps_batch(
+    property_id: int,
+    payload: RentCompsBatchIn,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     prop = db.get(Property, property_id)
     if not prop or prop.org_id != p.org_id:
         raise HTTPException(status_code=404, detail="property not found")
@@ -250,8 +277,7 @@ def list_calibration(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    # Calibration is global-ish; keep it accessible but safe.
-    # If you later want per-org calibration, add org_id column and filter here.
+    # If later you want per-org calibration, add org_id to RentCalibration and filter here.
     q = select(RentCalibration).order_by(RentCalibration.updated_at.desc())
     if zip:
         q = q.where(RentCalibration.zip == zip)
@@ -315,6 +341,64 @@ def recompute(
     )
 
 
+# -------------------------------------------------------------------
+# IMPORTANT: /explain/batch MUST be defined before /explain/{property_id}
+# Otherwise FastAPI tries to parse "batch" as property_id (int) -> error.
+# -------------------------------------------------------------------
+@router.get("/explain/batch", response_model=RentExplainBatchOut)
+def explain_rent_batch(
+    snapshot_id: int = Query(...),
+    strategy: str = Query(default="section8"),
+    payment_standard_pct: float | None = Query(default=None, ge=0.5, le=1.5),
+    limit: int = Query(default=50, ge=1, le=500),
+    persist: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    strategy = _norm_strategy(strategy)
+    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
+
+    # Snapshot deals -> but we must enforce org boundary at the property level.
+    deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id).limit(limit)).all()
+
+    attempted = len(deals)
+    explained = 0
+    errors: list[dict] = []
+
+    for d in deals:
+        try:
+            pid = int(d.property_id)
+            prop = db.get(Property, pid)
+            if not prop or prop.org_id != p.org_id:
+                continue
+
+            _ = explain_rent(
+                property_id=pid,
+                strategy=strategy,
+                payment_standard_pct=pct,
+                persist=persist,
+                db=db,
+                p=p,
+            )
+            explained += 1
+        except Exception as e:
+            errors.append(
+                {
+                    "deal_id": getattr(d, "id", None),
+                    "property_id": getattr(d, "property_id", None),
+                    "error": f"{type(e).__name__}: {e}",
+                }
+            )
+
+    return RentExplainBatchOut(
+        snapshot_id=snapshot_id,
+        strategy=strategy,
+        attempted=attempted,
+        explained=explained,
+        errors=errors,
+    )
+
+
 @router.get("/explain/{property_id}", response_model=RentExplainOut)
 def explain_rent(
     property_id: int,
@@ -337,12 +421,14 @@ def explain_rent(
     ceiling_candidates: list[dict] = []
     caps: list[float] = []
 
+    # Payment standard: FMR * pct
     fmr = _to_pos_float(ra.section8_fmr)
     if fmr is not None:
         ps = float(fmr) * float(pct)
         caps.append(ps)
         ceiling_candidates.append({"type": "payment_standard", "value": ps})
 
+    # Rent reasonableness: comps median
     rr = _to_pos_float(ra.rent_reasonableness_comp)
     if rr is not None:
         caps.append(float(rr))
@@ -366,6 +452,7 @@ def explain_rent(
             rent_used = float(market)
             explanation = "Market strategy uses market_rent_estimate (no Section 8 ceiling cap applied)."
     else:
+        # section8
         if market is None and approved is None:
             rent_used = None
             explanation = "Section 8 strategy: both market_rent_estimate and ceiling inputs are missing; cannot compute rent_used."
@@ -398,58 +485,4 @@ def explain_rent(
         rent_used=rent_used,
         ceiling_candidates=ceiling_candidates,
         explanation=explanation,
-    )
-
-
-@router.get("/explain/batch", response_model=RentExplainBatchOut)
-def explain_rent_batch(
-    snapshot_id: int = Query(...),
-    strategy: str = Query(default="section8"),
-    payment_standard_pct: float | None = Query(default=None, ge=0.5, le=1.5),
-    limit: int = Query(default=50, ge=1, le=500),
-    persist: bool = Query(default=True),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    strategy = _norm_strategy(strategy)
-    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
-
-    deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id).limit(limit)).all()
-
-    attempted = len(deals)
-    explained = 0
-    errors: list[dict] = []
-
-    for d in deals:
-        try:
-            pid = int(d.property_id)
-            prop = db.get(Property, pid)
-            if not prop or prop.org_id != p.org_id:
-                continue
-
-            out = explain_rent(
-                property_id=pid,
-                strategy=strategy,
-                payment_standard_pct=pct,
-                persist=persist,
-                db=db,
-                p=p,
-            )
-            _ = out
-            explained += 1
-        except Exception as e:
-            errors.append(
-                {
-                    "deal_id": getattr(d, "id", None),
-                    "property_id": getattr(d, "property_id", None),
-                    "error": f"{type(e).__name__}: {e}",
-                }
-            )
-
-    return RentExplainBatchOut(
-        snapshot_id=snapshot_id,
-        strategy=strategy,
-        attempted=attempted,
-        explained=explained,
-        errors=errors,
     )

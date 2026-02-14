@@ -30,9 +30,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # backend is internal; frontend/nginx is the public entrypoint
-    expose:
-      - "8000"
+    # Publish to host so you can hit localhost:8000 (scripts, curl, browser)
+    ports:
+      - "8000:8000"
     restart: unless-stopped
 
   frontend:
@@ -44,7 +44,6 @@ services:
     ports:
       - "8080:80"
     environment:
-      # optional, but keeps expectations clear
       NODE_ENV: production
     restart: unless-stopped
 
