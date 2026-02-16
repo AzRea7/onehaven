@@ -140,7 +140,6 @@ class Property(Base):
         back_populates="property", cascade="all, delete-orphan"
     )
 
-    # Phase 4/5
     rehab_tasks: Mapped[List["RehabTask"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     leases: Mapped[List["Lease"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="property", cascade="all, delete-orphan")
@@ -151,6 +150,10 @@ class ImportSnapshot(Base):
     __tablename__ = "import_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # NEW: org scoping (Phase 5)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
+
     source: Mapped[str] = mapped_column(String(40), nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -160,14 +163,18 @@ class ImportSnapshot(Base):
 
 class Deal(Base):
     __tablename__ = "deals"
-    __table_args__ = (UniqueConstraint("source_fingerprint", name="uq_deals_source_fingerprint"),)
+
+    # FIX: uniqueness must be per-org (Phase 5)
+    __table_args__ = (UniqueConstraint("org_id", "source_fingerprint", name="uq_deals_org_source_fingerprint"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
 
-    snapshot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("import_snapshots.id", ondelete="SET NULL"), nullable=True)
+    snapshot_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("import_snapshots.id", ondelete="SET NULL"), nullable=True
+    )
     source_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     source_raw_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -279,9 +286,11 @@ class RentCalibration(Base):
 # -----------------------------
 class JurisdictionRule(Base):
     __tablename__ = "jurisdiction_rules"
-    __table_args__ = (UniqueConstraint("city", "state", name="uq_jurisdiction_city_state"),)
+    __table_args__ = (UniqueConstraint("org_id", "city", "state", name="uq_jurisdiction_org_city_state"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=True)
+
     city: Mapped[str] = mapped_column(String(120), nullable=False)
     state: Mapped[str] = mapped_column(String(2), nullable=False, default="MI")
 
@@ -290,12 +299,12 @@ class JurisdictionRule(Base):
     typical_fail_points_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     registration_fee: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     processing_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    tenant_waitlist_depth: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
 
     inspection_frequency: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    jurisdiction_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    tenant_waitlist_depth: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class UnderwritingResult(Base):
@@ -592,7 +601,7 @@ class Valuation(Base):
 
 
 # -----------------------------
-# Inspection analytics / future ops (already in your file)
+# Inspection analytics / future ops
 # -----------------------------
 class InspectionEvent(Base):
     __tablename__ = "inspection_events"

@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start stack
+        working-directory: onehaven_decision_engine
+        run: |
+          cp -n .env.example .env || true
+          docker compose up -d --build
+          # give postgres a moment (compose healthcheck should handle most of it)
+          sleep 5
+
+      - name: Smoke test (pipeline sanity)
+        working-directory: onehaven_decision_engine
+        run: |
+          bash scripts/smoke_test.sh
+
+      - name: Pytest (Operating Truth constitution)
+        working-directory: onehaven_decision_engine/backend
+        run: |
+          docker compose exec -T backend pytest -q
+
+      - name: Shutdown
+        if: always()
+        working-directory: onehaven_decision_engine
+        run: |
+          docker compose down -v

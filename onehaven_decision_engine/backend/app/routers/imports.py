@@ -17,12 +17,28 @@ from ..schemas import ImportResultOut, ImportErrorRow
 from ..domain.importers.zillow import normalize_zillow
 from ..domain.importers.investorlift import normalize_investorlift
 from ..domain.fingerprint import fingerprint
+from ..domain.operating_truth import enforce_property_truth, enforce_deal_truth, TruthViolation
 
 router = APIRouter(prefix="/import", tags=["import"])
 
 
 def _get_or_create_property(db: Session, org_id: int, n) -> Property:
-    # IMPORTANT: org scoped lookup
+    try:
+        enforce_property_truth(
+            {
+                "address": n.address,
+                "city": n.city,
+                "state": n.state,
+                "zip": n.zip,
+                "bedrooms": n.bedrooms,
+                "bathrooms": n.bathrooms,
+                "square_feet": n.square_feet,
+                "year_built": n.year_built,
+            }
+        )
+    except TruthViolation as tv:
+        raise ValueError(tv.message)
+
     p = db.scalar(
         select(Property).where(
             Property.org_id == org_id,
@@ -33,18 +49,27 @@ def _get_or_create_property(db: Session, org_id: int, n) -> Property:
         )
     )
     if p:
+        dirty = False
         if p.bedrooms is None and n.bedrooms is not None:
             p.bedrooms = n.bedrooms
+            dirty = True
         if p.bathrooms is None and n.bathrooms is not None:
             p.bathrooms = n.bathrooms
+            dirty = True
         if p.square_feet is None and n.square_feet is not None:
             p.square_feet = n.square_feet
+            dirty = True
         if p.year_built is None and n.year_built is not None:
             p.year_built = n.year_built
+            dirty = True
         if p.has_garage is False and n.has_garage is True:
             p.has_garage = True
-        db.commit()
-        db.refresh(p)
+            dirty = True
+
+        if dirty:
+            db.add(p)
+            db.commit()
+            db.refresh(p)
         return p
 
     p = Property(
@@ -54,11 +79,10 @@ def _get_or_create_property(db: Session, org_id: int, n) -> Property:
         state=n.state,
         zip=n.zip,
         bedrooms=n.bedrooms,
-        bathrooms=n.bathrooms,
+        bathrooms=n.bathrooms or 1.0,
         square_feet=n.square_feet,
         year_built=n.year_built,
-        has_garage=n.has_garage,
-        property_type=n.property_type,
+        has_garage=bool(n.has_garage),
     )
     db.add(p)
     db.commit()
@@ -76,7 +100,6 @@ def _upsert_rent(db: Session, org_id: int, property_id: int, n) -> None:
         ra = RentAssumption(property_id=property_id, org_id=org_id)
         db.add(ra)
 
-    # Keep org_id correct even if an old row exists
     if getattr(ra, "org_id", None) != org_id:
         ra.org_id = org_id
 
@@ -152,7 +175,7 @@ def _import_rows(
     notes: str | None,
     org_id: int,
 ) -> ImportResultOut:
-    snap = ImportSnapshot(source=source, notes=notes, created_at=datetime.utcnow())
+    snap = ImportSnapshot(org_id=org_id, source=source, notes=notes, created_at=datetime.utcnow())
     db.add(snap)
     db.commit()
     db.refresh(snap)
@@ -168,17 +191,27 @@ def _import_rows(
             n = normalizer(row)
             prop = _get_or_create_property(db, org_id, n)
 
-            # fingerprint is fine to stay global; the actual deal row is org-scoped
             fp = fingerprint(source, prop.address, prop.zip, n.asking_price)
 
             existing = db.scalar(
                 select(Deal)
-                .where(Deal.source_fingerprint == fp)
                 .where(Deal.org_id == org_id)
+                .where(Deal.source_fingerprint == fp)
             )
             if existing:
                 skipped += 1
                 continue
+
+            try:
+                enforce_deal_truth(
+                    {
+                        "asking_price": n.asking_price,
+                        "rehab_estimate": n.rehab_estimate,
+                        "strategy": getattr(n, "strategy", None) or "section8",
+                    }
+                )
+            except TruthViolation as tv:
+                raise ValueError(tv.message)
 
             d = Deal(
                 org_id=org_id,
@@ -200,10 +233,10 @@ def _import_rows(
             db.refresh(d)
 
             _upsert_rent(db, org_id, prop.id, n)
-
             imported += 1
 
         except Exception as e:
+            db.rollback()
             errors.append(ImportErrorRow(row=idx, error=str(e)))
 
     _backfill_inventory_counts_from_snapshot(db, org_id, snap.id)
@@ -222,10 +255,10 @@ def import_zillow(
     notes: Optional[str] = Query(default=None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    p=Depends(get_principal),
+    principal=Depends(get_principal),
 ):
     rows = _read_csv_rows(file)
-    return _import_rows(db, "zillow", rows, notes, org_id=p.org_id)
+    return _import_rows(db, "zillow", rows, notes, org_id=principal.org_id)
 
 
 @router.post("/investorlift", response_model=ImportResultOut)
@@ -233,33 +266,39 @@ def import_investorlift(
     notes: Optional[str] = Query(default=None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    p=Depends(get_principal),
+    principal=Depends(get_principal),
 ):
     rows = _read_csv_rows(file)
-    return _import_rows(db, "investorlift", rows, notes, org_id=p.org_id)
+    return _import_rows(db, "investorlift", rows, notes, org_id=principal.org_id)
 
 
 @router.get("/status")
-def import_status(snapshot_id: int = Query(...), db: Session = Depends(get_db), p=Depends(get_principal)):
-    snap = db.scalar(select(ImportSnapshot).where(ImportSnapshot.id == snapshot_id))
+def import_status(snapshot_id: int = Query(...), db: Session = Depends(get_db), principal=Depends(get_principal)):
+    snap = db.scalar(
+        select(ImportSnapshot)
+        .where(ImportSnapshot.id == snapshot_id)
+        .where(ImportSnapshot.org_id == principal.org_id)
+    )
     if snap is None:
         return {"snapshot_id": snapshot_id, "exists": False}
 
     deal_count = db.scalar(
         select(func.count()).select_from(Deal)
         .where(Deal.snapshot_id == snapshot_id)
-        .where(Deal.org_id == p.org_id)
+        .where(Deal.org_id == principal.org_id)
     ) or 0
 
     distinct_props = db.scalar(
         select(func.count(func.distinct(Deal.property_id)))
+        .select_from(Deal)
         .where(Deal.snapshot_id == snapshot_id)
-        .where(Deal.org_id == p.org_id)
+        .where(Deal.org_id == principal.org_id)
     ) or 0
 
     return {
         "snapshot_id": snapshot_id,
         "exists": True,
+        "org_id": snap.org_id,
         "source": snap.source,
         "notes": snap.notes,
         "created_at": snap.created_at,

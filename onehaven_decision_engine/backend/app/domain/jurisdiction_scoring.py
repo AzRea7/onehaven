@@ -15,7 +15,10 @@ class JurisdictionFriction:
 
 def compute_friction(jr: Optional[JurisdictionRule]) -> JurisdictionFriction:
     if jr is None:
-        return JurisdictionFriction(multiplier=1.0, reasons=["No jurisdiction rules found (neutral)."])
+        return JurisdictionFriction(
+            multiplier=0.95,
+            reasons=["No jurisdiction data for city/state → REVIEW bias (unknown compliance friction)."],
+        )
 
     mult = 1.0
     reasons: list[str] = []
@@ -58,7 +61,6 @@ def compute_friction(jr: Optional[JurisdictionRule]) -> JurisdictionFriction:
         mult -= 0.05
         reasons.append("Tenant waitlist deep/slow (rent-flow delay risk).")
 
-    # clamp
     if mult < 0.70:
         mult = 0.70
     if mult > 1.05:

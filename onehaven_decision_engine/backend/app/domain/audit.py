@@ -17,30 +17,19 @@ def emit_audit(
     actor_user_id: Optional[int],
     action: str,
     entity_type: str,
-    entity_id: Optional[int],
-    meta: dict[str, Any] | None = None,
+    entity_id: str,
+    before: Optional[dict[str, Any]] = None,
+    after: Optional[dict[str, Any]] = None,
 ) -> None:
-    """
-    Lightweight append-only audit log.
-
-    Rules:
-      - never raise (audit should not break main path)
-      - keep meta JSON small + structured
-    """
-    try:
-        row = AuditEvent(
-            org_id=org_id,
-            actor_user_id=actor_user_id,
-            action=action,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            meta_json=json.dumps(meta or {}),
-            created_at=datetime.utcnow(),
-        )
-        db.add(row)
-        db.commit()
-    except Exception:
-        try:
-            db.rollback()
-        except Exception:
-            pass
+    row = AuditEvent(
+        org_id=org_id,
+        actor_user_id=actor_user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=str(entity_id),
+        before_json=json.dumps(before, sort_keys=True, default=str) if before is not None else None,
+        after_json=json.dumps(after, sort_keys=True, default=str) if after is not None else None,
+        created_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()

@@ -1,4 +1,3 @@
-# backend/app/schemas.py
 from __future__ import annotations
 
 import json
@@ -11,8 +10,10 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator
 # -------------------- Imports / Snapshots --------------------
 class ImportSnapshotOut(BaseModel):
     id: int
+    org_id: Optional[int] = None
     source: str
     notes: Optional[str] = None
+    created_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -107,7 +108,6 @@ class DealOut(DealCreate):
 
 
 class DealIntakeIn(BaseModel):
-    # Property fields
     address: str
     city: str
     state: str = "MI"
@@ -119,7 +119,6 @@ class DealIntakeIn(BaseModel):
     has_garage: bool = False
     property_type: str = "single_family"
 
-    # Deal fields
     purchase_price: float
     est_rehab: float = 0.0
     strategy: str = Field(default="section8", description="section8|market")
@@ -178,6 +177,8 @@ class JurisdictionRuleUpsert(BaseModel):
 
 class JurisdictionRuleOut(JurisdictionRuleUpsert):
     id: int
+    org_id: Optional[int] = None
+    updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -208,6 +209,10 @@ class UnderwritingResultOut(BaseModel):
     jurisdiction_reasons: Optional[List[str]] = None
     rent_cap_reason: Optional[str] = None
     fmr_adjusted: Optional[float] = None
+
+    # join-derived (evaluate/results injects these)
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -281,7 +286,6 @@ class ChecklistItemOut(BaseModel):
     common_fail: bool = False
     applies_if: Optional[Dict[str, Any]] = None
 
-    # NEW: workflow state (normalized table)
     status: str = "todo"  # todo|in_progress|done|blocked
     marked_at: Optional[datetime] = None
     marked_by: Optional[str] = None
@@ -297,9 +301,7 @@ class ChecklistOut(BaseModel):
     checklist_name: str = "section8_hqs_precheck"
     generated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # keep strategy in response (useful)
     strategy: str = "section8"
-
     items: List[ChecklistItemOut] = Field(default_factory=list)
 
 
@@ -335,7 +337,6 @@ class ChecklistItemUpdateIn(BaseModel):
     status: Optional[str] = Field(default=None, description="todo|in_progress|done|blocked")
     proof_url: Optional[str] = None
     notes: Optional[str] = None
-
 
 
 # -------------------- Rent Comps + Observations + Calibration --------------------
