@@ -1,5 +1,7 @@
+import React from "react";
 import { motion } from "framer-motion";
 import { TrendingUp, ShieldCheck, Bot, Sparkles } from "lucide-react";
+import { Link } from "react-router-dom";
 import AnimatedBackdrop from "../components/AnimatedBackdrop";
 import GlassCard from "../components/GlassCard";
 import StatPill from "../components/StatPill";
@@ -10,32 +12,66 @@ import {
   BuildStack,
   HoverTilt,
 } from "../components/Artwork";
+import { api } from "../lib/api";
 
-type DecisionRow = {
-  id: number;
-  deal_id: number;
-  decision: "REJECT" | "REVIEW" | "PASS";
-  score: number;
-  reasons: string[];
-  gross_rent_used: number;
-  mortgage_payment: number;
-  operating_expenses: number;
-  noi: number;
-  cash_flow: number;
-  dscr: number;
-  cash_on_cash: number;
+type DashboardRow = {
+  property: {
+    id: number;
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    bedrooms?: number;
+    bathrooms?: number;
+  };
+  deal?: {
+    strategy?: string;
+    asking_price?: number;
+  };
+  last_underwriting_result?: {
+    decision?: "REJECT" | "REVIEW" | "PASS";
+    score?: number;
+    dscr?: number;
+    cash_on_cash?: number;
+    cash_flow?: number;
+    reasons?: string[];
+  };
 };
 
-function toneForDecision(d: DecisionRow["decision"]) {
+function toneForDecision(d?: string) {
   if (d === "PASS") return "good";
   if (d === "REVIEW") return "warn";
   return "bad";
 }
 
-export default function Dashboard({ rows = [] }: { rows?: DecisionRow[] }) {
-  const pass = rows.filter((r) => r.decision === "PASS").length;
-  const review = rows.filter((r) => r.decision === "REVIEW").length;
-  const reject = rows.filter((r) => r.decision === "REJECT").length;
+export default function Dashboard() {
+  const [rows, setRows] = React.useState<DashboardRow[]>([]);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  async function refresh() {
+    try {
+      setErr(null);
+      setLoading(true);
+      const data = await api.dashboardProperties({ limit: 50 });
+      setRows(Array.isArray(data) ? data : []);
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    refresh();
+  }, []);
+
+  const decisions = rows
+    .map((r) => r.last_underwriting_result?.decision)
+    .filter(Boolean) as string[];
+  const pass = decisions.filter((d) => d === "PASS").length;
+  const review = decisions.filter((d) => d === "REVIEW").length;
+  const reject = decisions.filter((d) => d === "REJECT").length;
 
   const top = rows.slice(0, 10);
 
@@ -56,11 +92,25 @@ export default function Dashboard({ rows = [] }: { rows?: DecisionRow[] }) {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={refresh}
+              className="text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10"
+              title="Refresh"
+            >
+              sync
+            </button>
+
             <StatPill label="PASS" value={`${pass}`} tone="good" />
             <StatPill label="REVIEW" value={`${review}`} tone="warn" />
             <StatPill label="REJECT" value={`${reject}`} tone="bad" />
           </div>
         </div>
+
+        {err && (
+          <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
+            {err}
+          </div>
+        )}
 
         {/* hero cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -143,7 +193,7 @@ export default function Dashboard({ rows = [] }: { rows?: DecisionRow[] }) {
           </GlassCard>
         </div>
 
-        {/* “alive” artwork strip (optional but looks sick) */}
+        {/* “alive” artwork strip */}
         <GlassCard hover={false} className="relative overflow-visible">
           <div className="flex items-center justify-between gap-6">
             <div className="space-y-2">
@@ -168,83 +218,84 @@ export default function Dashboard({ rows = [] }: { rows?: DecisionRow[] }) {
           </div>
         </GlassCard>
 
-        {/* top decisions */}
+        {/* top properties */}
         <GlassCard>
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold tracking-tight">
-                Top decisions
+                Recent properties
               </div>
               <div className="text-xs text-zinc-400">
-                PASS/REVIEW/REJECT with reasons (explainability is
-                non-negotiable).
+                Click a property → single-pane view (underwriting + rent +
+                friction + checklist).
               </div>
             </div>
+
+            <Link
+              to="/properties"
+              className="text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10"
+            >
+              View all
+            </Link>
           </div>
 
-          <div className="mt-5 overflow-auto rounded-xl border border-white/10 bg-black/20">
-            <table className="min-w-full text-sm">
-              <thead className="bg-white/[0.03] text-zinc-300">
-                <tr>
-                  <th className="text-left px-4 py-3 font-medium">Deal</th>
-                  <th className="text-left px-4 py-3 font-medium">Decision</th>
-                  <th className="text-left px-4 py-3 font-medium">Score</th>
-                  <th className="text-left px-4 py-3 font-medium">DSCR</th>
-                  <th className="text-left px-4 py-3 font-medium">CoC</th>
-                  <th className="text-left px-4 py-3 font-medium">Reasons</th>
-                </tr>
-              </thead>
+          <div className="mt-5 space-y-2">
+            {loading && <div className="text-sm text-zinc-400">Loading…</div>}
 
-              <tbody className="divide-y divide-white/10">
-                {top.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-5 text-zinc-400" colSpan={6}>
-                      No rows yet. Run ingest/enrich/evaluate, then refresh.
-                    </td>
-                  </tr>
-                ) : (
-                  top.map((r) => {
-                    const tone = toneForDecision(r.decision);
-                    const badge =
-                      tone === "good"
-                        ? "border-green-400/25 bg-green-400/10 text-green-200"
-                        : tone === "warn"
-                          ? "border-yellow-300/25 bg-yellow-300/10 text-yellow-100"
-                          : "border-red-400/25 bg-red-400/10 text-red-200";
+            {!loading && top.length === 0 && (
+              <div className="text-sm text-zinc-400">
+                No rows yet. Run ingest/enrich/evaluate, then refresh.
+              </div>
+            )}
 
-                    return (
-                      <tr
-                        key={r.id}
-                        className="hover:bg-white/[0.02] transition"
+            {top.map((row) => {
+              const p = row.property;
+              const d = row.deal;
+              const r = row.last_underwriting_result;
+
+              const decision = r?.decision ?? "REJECT";
+              const tone = toneForDecision(decision);
+
+              const badge =
+                tone === "good"
+                  ? "border-green-400/25 bg-green-400/10 text-green-200"
+                  : tone === "warn"
+                    ? "border-yellow-300/25 bg-yellow-300/10 text-yellow-100"
+                    : "border-red-400/25 bg-red-400/10 text-red-200";
+
+              return (
+                <Link
+                  key={p.id}
+                  to={`/properties/${p.id}`}
+                  className="block rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.16] transition p-3"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-100">
+                        {p.address}
+                      </div>
+                      <div className="text-xs text-zinc-400 mt-1">
+                        {p.city}, {p.state} {p.zip}
+                        {p.bedrooms != null ? ` · ${p.bedrooms}bd` : ""}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-1">
+                      <span
+                        className={`inline-flex rounded-full border px-3 py-1 text-xs ${badge}`}
                       >
-                        <td className="px-4 py-4 text-zinc-200">
-                          #{r.deal_id}
-                        </td>
-                        <td className="px-4 py-4">
-                          <span
-                            className={`inline-flex rounded-full border px-3 py-1 text-xs ${badge}`}
-                          >
-                            {r.decision}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-zinc-200">
-                          {r.score?.toFixed?.(1) ?? r.score}
-                        </td>
-                        <td className="px-4 py-4 text-zinc-200">
-                          {r.dscr?.toFixed?.(2) ?? r.dscr}
-                        </td>
-                        <td className="px-4 py-4 text-zinc-200">
-                          {r.cash_on_cash?.toFixed?.(3) ?? r.cash_on_cash}
-                        </td>
-                        <td className="px-4 py-4 text-zinc-400">
-                          {(r.reasons || []).slice(0, 3).join(" • ")}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                        {decision}
+                        {r?.score != null ? ` · ${r.score}` : ""}
+                      </span>
+                      <div className="text-[11px] text-zinc-400">
+                        {(d?.strategy || "section8").toUpperCase()}
+                        {r?.dscr != null ? ` · DSCR ${r.dscr.toFixed(2)}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </GlassCard>
       </div>

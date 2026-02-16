@@ -1,11 +1,12 @@
-// frontend/src/components/Shell.tsx
 import React from "react";
 import { NavLink } from "react-router-dom";
 import clsx from "clsx";
 import AuroraBackground from "./AuroraBackground";
+import AgentSlots from "./AgentSlots";
 
 const nav = [
   { to: "/dashboard", label: "Dashboard" },
+  { to: "/properties", label: "Properties" },
   { to: "/agents", label: "Agents" },
   { to: "/constitution", label: "Operating Truth" },
 ];
@@ -18,7 +19,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
         <div className="relative h-full w-full flex overflow-hidden">
           {/* Sidebar */}
-          <aside className="w-72 p-5 flex flex-col gap-5 border-r border-white/10 bg-black/45 backdrop-blur-xl">
+          <aside className="w-80 p-5 flex flex-col gap-5 border-r border-white/10 bg-black/45 backdrop-blur-xl overflow-y-auto">
             <div className="gradient-border rounded-2xl glass p-4">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-xl bg-white/[0.06] border border-white/[0.10]" />
@@ -51,6 +52,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 </NavLink>
               ))}
             </nav>
+
+            {/* ✅ Makes the sidebar feel operational (OpenClaw vibe) */}
+            <AgentSlots />
 
             <div className="mt-auto text-xs text-zinc-500 leading-relaxed">
               Built for ruthless deal clarity.
