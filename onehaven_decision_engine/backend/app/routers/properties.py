@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, or_
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth import get_principal
@@ -25,6 +25,42 @@ from ..config import settings
 from ..models import RentAssumption
 
 router = APIRouter(prefix="/properties", tags=["properties"])
+
+
+def _norm_city(s: str) -> str:
+    return (s or "").strip().title()
+
+
+def _norm_state(s: str) -> str:
+    return (s or "MI").strip().upper()
+
+
+def _pick_jurisdiction_rule(db: Session, org_id: int, city: str, state: str) -> JurisdictionRule | None:
+    """
+    Precedence:
+      1) org-specific rule (JurisdictionRule.org_id == org_id)
+      2) global rule (JurisdictionRule.org_id IS NULL)
+    """
+    city = _norm_city(city)
+    state = _norm_state(state)
+
+    jr = db.scalar(
+        select(JurisdictionRule).where(
+            JurisdictionRule.org_id == org_id,
+            JurisdictionRule.city == city,
+            JurisdictionRule.state == state,
+        )
+    )
+    if jr:
+        return jr
+
+    return db.scalar(
+        select(JurisdictionRule).where(
+            JurisdictionRule.org_id.is_(None),
+            JurisdictionRule.city == city,
+            JurisdictionRule.state == state,
+        )
+    )
 
 
 @router.post("", response_model=PropertyOut)
@@ -52,15 +88,12 @@ def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_
     if not row:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    jr = db.scalar(
-        select(JurisdictionRule).where(
-            JurisdictionRule.city == row.city,
-            JurisdictionRule.state == row.state,
-        )
-    )
+    jr = _pick_jurisdiction_rule(db, org_id=p.org_id, city=row.city, state=row.state)
 
     out = PropertyOut.model_validate(row, from_attributes=True).model_dump()
-    out["jurisdiction_rule"] = JurisdictionRuleOut.model_validate(jr, from_attributes=True).model_dump() if jr else None
+    out["jurisdiction_rule"] = (
+        JurisdictionRuleOut.model_validate(jr, from_attributes=True).model_dump() if jr else None
+    )
     return out
 
 
@@ -103,6 +136,7 @@ def _rent_explain_for_view(db: Session, property_id: int, strategy: str) -> Rent
         calibrated_market_rent=None,
         rent_used=ra.rent_used,
         ceiling_candidates=ceiling_candidates,
+        cap_reason=cap_reason,
         explanation=None,
     )
 
@@ -132,7 +166,7 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
     if not d:
         raise HTTPException(status_code=404, detail="No deal found for property")
 
-    jr = db.scalar(select(JurisdictionRule).where(JurisdictionRule.city == prop.city, JurisdictionRule.state == prop.state))
+    jr = _pick_jurisdiction_rule(db, org_id=p.org_id, city=prop.city, state=prop.state)
     friction = compute_friction(jr)
 
     r = db.scalar(
@@ -165,7 +199,10 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
         deal=DealOut.model_validate(d, from_attributes=True),
         rent_explain=rent_explain,
         jurisdiction_rule=JurisdictionRuleOut.model_validate(jr, from_attributes=True) if jr else None,
-        jurisdiction_friction={"multiplier": getattr(friction, "multiplier", 1.0), "reasons": getattr(friction, "reasons", [])},
+        jurisdiction_friction={
+            "multiplier": getattr(friction, "multiplier", 1.0),
+            "reasons": getattr(friction, "reasons", []),
+        },
         last_underwriting_result=UnderwritingResultOut.model_validate(r) if r else None,
         checklist=checklist_out,
     )

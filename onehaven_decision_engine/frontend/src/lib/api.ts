@@ -8,7 +8,6 @@ type AuthContext = {
 };
 
 function getAuth(): AuthContext {
-  // Prefer env vars (good for dev / single-tenant demo)
   const env = (import.meta as any).env || {};
   const envOrg = env.VITE_ORG_SLUG as string | undefined;
   const envEmail = env.VITE_USER_EMAIL as string | undefined;
@@ -22,7 +21,6 @@ function getAuth(): AuthContext {
     };
   }
 
-  // Fallback to localStorage (good when you add a login/settings UI)
   const orgSlug = localStorage.getItem("org_slug") || "demo";
   const userEmail = localStorage.getItem("user_email") || "austin@demo.local";
   const userRole = localStorage.getItem("user_role") || "owner";
@@ -49,7 +47,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
   }
 
-  // Some endpoints might return empty responses; guard just in case
   const ct = res.headers.get("content-type") || "";
   if (!ct.includes("application/json")) {
     return (await res.text()) as unknown as T;
@@ -62,7 +59,65 @@ export const api = {
   // Dashboard / properties
   dashboardProperties: (_p0: { limit: number }) =>
     request<any[]>(`/dashboard/properties?limit=100`),
+
+  // Existing property “view”
   propertyView: (id: number) => request<any>(`/properties/${id}/view`),
+
+  // Deal creation (Phase 1)
+  createDeal: (payload: {
+    property_id: number;
+    asking_price: number;
+    rehab_estimate?: number;
+    strategy?: string;
+    estimated_purchase_price?: number | null;
+    financing_type?: string;
+    interest_rate?: number;
+    term_years?: number;
+    down_payment_pct?: number;
+  }) =>
+    request<any>(`/deals`, {
+      method: "POST",
+      body: JSON.stringify({
+        property_id: payload.property_id,
+        asking_price: payload.asking_price,
+        rehab_estimate: payload.rehab_estimate ?? 0,
+        strategy: payload.strategy ?? "section8",
+        estimated_purchase_price: payload.estimated_purchase_price ?? null,
+        financing_type: payload.financing_type ?? "dscr",
+        interest_rate: payload.interest_rate ?? 0.07,
+        term_years: payload.term_years ?? 30,
+        down_payment_pct: payload.down_payment_pct ?? 0.2,
+      }),
+    }),
+
+  // Rent pipeline actions (Phase 3)
+  enrichProperty: (propertyId: number, strategy: string = "section8") =>
+    request<any>(
+      `/rent/enrich?property_id=${propertyId}&strategy=${encodeURIComponent(strategy)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
+  explainProperty: (
+    propertyId: number,
+    strategy: string = "section8",
+    persist: boolean = true,
+  ) =>
+    request<any>(
+      `/rent/explain?property_id=${propertyId}&strategy=${encodeURIComponent(strategy)}&persist=${persist ? "true" : "false"}`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+
+  evaluateProperty: (propertyId: number, strategy: string = "section8") =>
+    request<any>(
+      `/evaluate/property/${propertyId}?strategy=${encodeURIComponent(strategy)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
 
   // Rehab
   rehabTasks: (propertyId: number) =>
