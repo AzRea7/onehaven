@@ -95,7 +95,7 @@ export default function Dashboard() {
   React.useEffect(() => {
     refresh(false);
 
-    // Less frequent + background refresh avoids “UI pulse”
+    // Background refresh avoids UI pulsing
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") refresh(true);
     }, 45_000);
@@ -117,6 +117,7 @@ export default function Dashboard() {
     const top = (rows || [])
       .filter((r) => r?.property?.id != null)
       .slice(0, 10);
+
     return { pass, review, reject, top };
   }, [rows]);
 
@@ -128,7 +129,7 @@ export default function Dashboard() {
         <PageHero
           eyebrow="OneHaven"
           title="Build the wall. Filter the deals. Enforce the truth."
-          subtitle="Your system is a machine: Deal → Underwrite → Rehab → Compliance → Tenant → Cash → Equity. The UI should feel like a cockpit — not a spreadsheet."
+          subtitle="Deal → Underwrite → Rehab → Compliance → Tenant → Cash → Equity. The UI should feel like a cockpit — not a spreadsheet."
           right={
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="h-[220px] w-[220px] md:h-[240px] md:w-[240px] opacity-95">

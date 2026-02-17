@@ -229,16 +229,32 @@ def generate_checklist(
     if persist:
         now = datetime.utcnow()
 
-        row = PropertyChecklist(
-            org_id=p.org_id,
-            property_id=property_id,
-            strategy=strategy,
-            version=version,
-            generated_at=out.generated_at,
-            items_json=json.dumps([i.model_dump() for i in items]),
+        # ✅ UPSERT to satisfy uq_property_checklists_org_property_strategy_version
+        row = db.scalar(
+            select(PropertyChecklist).where(
+                PropertyChecklist.org_id == p.org_id,
+                PropertyChecklist.property_id == property_id,
+                PropertyChecklist.strategy == strategy,
+                PropertyChecklist.version == version,
+            )
         )
-        db.add(row)
-        db.flush()
+
+        if not row:
+            row = PropertyChecklist(
+                org_id=p.org_id,
+                property_id=property_id,
+                strategy=strategy,
+                version=version,
+                generated_at=out.generated_at,
+                items_json=json.dumps([i.model_dump() for i in items]),
+            )
+            db.add(row)
+            db.flush()
+        else:
+            row.generated_at = out.generated_at
+            row.items_json = json.dumps([i.model_dump() for i in items])
+            db.add(row)
+            db.flush()
 
         for i in items:
             existing = db.scalar(
@@ -279,8 +295,8 @@ def generate_checklist(
 
         db.commit()
 
-        # merge normalized state back in (after commit)
         out.items = _merge_state(db, org_id=p.org_id, property_id=property_id, items=out.items)
+
 
     return out
 
@@ -352,8 +368,13 @@ def update_checklist_item(
 
     now = datetime.utcnow()
 
+    # ✅ Normalize + validate status values (supports your UI: failed)
     if payload.status is not None:
-        row.status = payload.status
+        s = (payload.status or "").strip().lower()
+        allowed = {"todo", "in_progress", "done", "blocked", "failed"}
+        if s not in allowed:
+            raise HTTPException(status_code=400, detail=f"invalid status: {payload.status}")
+        row.status = s
         row.marked_by_user_id = p.user_id
         row.marked_at = now
 

@@ -34,7 +34,6 @@ function getAuth(): AuthContext {
  * - {items: [...]}
  * - {rows: [...]}
  * - {data: [...]}
- * - {detail: "..."} or other object
  *
  * To prevent "n.map is not a function", always normalize.
  */
@@ -117,10 +116,6 @@ async function request<T>(
   }
 }
 
-/**
- * Helper: request that MUST be an array (normalize always).
- * This is the main fix for "n.map is not a function".
- */
 async function requestArray<T = any>(
   path: string,
   init?:
@@ -198,12 +193,31 @@ export const api = {
       { method: "POST", body: JSON.stringify({}) },
     ),
 
-  // Checklist / Compliance (matches your backend)
+  // ✅ Checklist / Compliance
   checklistLatest: (propertyId: number, signal?: AbortSignal) =>
     request<any>(`/compliance/checklist/${propertyId}/latest`, {
       cacheTtlMs: 1_000,
       signal,
     }),
+
+  // ✅ Generate checklist (persisted by default)
+  generateChecklist: (
+    propertyId: number,
+    opts?: { strategy?: string; version?: string; persist?: boolean },
+  ) => {
+    const strategy = opts?.strategy ?? "section8";
+    const version = opts?.version ?? "v1";
+    const persist = opts?.persist ?? true;
+
+    return request<any>(
+      `/compliance/checklist/${propertyId}?strategy=${encodeURIComponent(
+        strategy,
+      )}&version=${encodeURIComponent(version)}&persist=${
+        persist ? "true" : "false"
+      }`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
 
   updateChecklistItem: (
     propertyId: number,
@@ -243,20 +257,14 @@ export const api = {
   txns: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/cash/transactions?property_id=${propertyId}&limit=1000`,
-      {
-        cacheTtlMs: 2_000,
-        signal,
-      },
+      { cacheTtlMs: 2_000, signal },
     ),
 
   // Equity
   valuations: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/equity/valuations?property_id=${propertyId}&limit=200`,
-      {
-        cacheTtlMs: 2_000,
-        signal,
-      },
+      { cacheTtlMs: 2_000, signal },
     ),
 
   // Agents

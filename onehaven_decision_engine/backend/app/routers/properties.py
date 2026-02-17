@@ -1,3 +1,4 @@
+# backend/app/routers/properties.py
 from __future__ import annotations
 
 import json
@@ -32,6 +33,10 @@ from ..schemas import (
     RentExplainOut,
     ChecklistOut,
     ChecklistItemOut,
+    RehabTaskOut,
+    LeaseOut,
+    TransactionOut,
+    ValuationOut,
 )
 from ..domain.jurisdiction_scoring import compute_friction
 from ..config import settings
@@ -104,18 +109,19 @@ def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_
     return out
 
 
-def _rent_explain_for_view(db: Session, property_id: int, strategy: str) -> RentExplainOut:
-    ra = db.scalar(select(RentAssumption).where(RentAssumption.property_id == property_id))
+def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strategy: str) -> RentExplainOut:
+    ra = db.scalar(
+        select(RentAssumption).where(
+            RentAssumption.org_id == org_id,
+            RentAssumption.property_id == property_id,
+        )
+    )
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
 
     ps = float(settings.payment_standard_pct)
 
-    fmr_adjusted = (
-        (float(ra.section8_fmr) * ps)
-        if (ra.section8_fmr is not None and float(ra.section8_fmr) > 0)
-        else None
-    )
+    fmr_adjusted = (float(ra.section8_fmr) * ps) if (ra.section8_fmr is not None and float(ra.section8_fmr) > 0) else None
 
     cap_reason = "none"
     ceiling_candidates: list[dict] = []
@@ -149,24 +155,19 @@ def _rent_explain_for_view(db: Session, property_id: int, strategy: str) -> Rent
         ceiling_candidates=ceiling_candidates,
         cap_reason=cap_reason,
         explanation=None,
+        fmr_adjusted=fmr_adjusted,
     )
 
 
 def _merge_checklist_state(db: Session, org_id: int, property_id: int, items: list[ChecklistItemOut]) -> list[ChecklistItemOut]:
-    """
-    Your system stores checklist state in PropertyChecklistItem.
-    PropertyChecklist.items_json is a snapshot; the normalized table is the truth for status/proof/notes/marked_by.
-    """
     state_rows = db.scalars(
         select(PropertyChecklistItem).where(
             PropertyChecklistItem.org_id == org_id,
             PropertyChecklistItem.property_id == property_id,
         )
     ).all()
-
     by_code: dict[str, PropertyChecklistItem] = {r.item_code: r for r in state_rows}
 
-    # resolve user emails
     user_ids = {r.marked_by_user_id for r in state_rows if r.marked_by_user_id}
     users_by_id: dict[int, str] = {}
     if user_ids:
@@ -222,7 +223,7 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
 
     chk = db.scalar(
         select(PropertyChecklist)
-        .where(PropertyChecklist.property_id == prop.id)
+        .where(PropertyChecklist.org_id == p.org_id, PropertyChecklist.property_id == prop.id)
         .order_by(desc(PropertyChecklist.id))
         .limit(1)
     )
@@ -236,10 +237,9 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
 
         items = [ChecklistItemOut(**x) for x in parsed if isinstance(x, dict)]
         items = _merge_checklist_state(db, org_id=p.org_id, property_id=prop.id, items=items)
-
         checklist_out = ChecklistOut(property_id=prop.id, city=prop.city, state=prop.state, items=items)
 
-    rent_explain = _rent_explain_for_view(db, property_id=prop.id, strategy=d.strategy)
+    rent_explain = _rent_explain_for_view(db, org_id=p.org_id, property_id=prop.id, strategy=d.strategy)
 
     return PropertyViewOut(
         property=PropertyOut.model_validate(prop, from_attributes=True),
@@ -258,14 +258,12 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
 @router.get("/{property_id}/bundle", response_model=dict)
 def property_bundle(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
     """
-    Phase 4 “single-pane truth” payload:
+    Single-pane truth payload:
       - view (underwriting + rent explain + friction + checklist)
       - rehab tasks
       - leases
       - transactions
       - valuations
-
-    Frontend loads this once and renders tabs instantly.
     """
     view = property_view(property_id=property_id, db=db, p=p)
 
@@ -297,12 +295,10 @@ def property_bundle(property_id: int, db: Session = Depends(get_db), p=Depends(g
         .limit(300)
     ).all()
 
-    # Keep it schema-light for now (fast MVP).
-    # If you later want strict DTOs, replace __dict__ with explicit fields.
     return {
-        "view": view.model_dump() if hasattr(view, "model_dump") else view,
-        "rehab_tasks": [r.__dict__ for r in rehab],
-        "leases": [l.__dict__ for l in leases],
-        "transactions": [t.__dict__ for t in txns],
-        "valuations": [v.__dict__ for v in vals],
+      "view": view.model_dump() if hasattr(view, "model_dump") else view,
+      "rehab_tasks": [RehabTaskOut.model_validate(x, from_attributes=True).model_dump() for x in rehab],
+      "leases": [LeaseOut.model_validate(x, from_attributes=True).model_dump() for x in leases],
+      "transactions": [TransactionOut.model_validate(x, from_attributes=True).model_dump() for x in txns],
+      "valuations": [ValuationOut.model_validate(x, from_attributes=True).model_dump() for x in vals],
     }

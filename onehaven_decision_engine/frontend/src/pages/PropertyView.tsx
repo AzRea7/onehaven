@@ -215,6 +215,10 @@ export default function PropertyView() {
   }
 
   React.useEffect(() => {
+    if (!Number.isFinite(propertyId)) {
+      setErr("Invalid property id.");
+      return;
+    }
     loadAll();
     return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -273,10 +277,23 @@ export default function PropertyView() {
     setChecklist(latest);
   }
 
+  async function generateChecklist() {
+    await doAction("Generating checklist…", async () => {
+      await api.generateChecklist(propertyId, {
+        strategy: d?.strategy || "section8",
+        persist: true,
+      });
+    });
+  }
+
   const checklistItems = checklist?.items ?? v?.checklist?.items ?? [];
 
   const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
-  const heroSub = `${p?.city ?? "—"}, ${p?.state ?? "—"} ${p?.zip ?? ""} · ${p?.bedrooms ?? "—"}bd · Strategy: ${((d?.strategy || "section8") as string).toUpperCase()} · Decision: ${r?.decision ?? "—"} · Score: ${r?.score ?? "—"} · DSCR: ${r?.dscr?.toFixed?.(2) ?? "—"}`;
+  const heroSub = `${p?.city ?? "—"}, ${p?.state ?? "—"} ${p?.zip ?? ""} · ${
+    p?.bedrooms ?? "—"
+  }bd · Strategy: ${((d?.strategy || "section8") as string).toUpperCase()} · Decision: ${
+    r?.decision ?? "—"
+  } · Score: ${r?.score ?? "—"} · DSCR: ${r?.dscr?.toFixed?.(2) ?? "—"}`;
 
   return (
     <div className="relative space-y-5">
@@ -345,7 +362,6 @@ export default function PropertyView() {
         </div>
       )}
 
-      {/* Tabs: softer, OpenClaw-like pill group */}
       <div className="gradient-border rounded-2xl p-[1px]">
         <div className="glass rounded-2xl p-2 flex gap-2 flex-wrap">
           {tabs.map((t) => (
@@ -365,6 +381,7 @@ export default function PropertyView() {
         </div>
       </div>
 
+      {/* Deal */}
       {tab === "Deal" && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -491,6 +508,7 @@ export default function PropertyView() {
         </div>
       )}
 
+      {/* Rehab */}
       {tab === "Rehab" && (
         <Panel title="Rehab Tasks">
           {rehab.length === 0 ? (
@@ -527,6 +545,7 @@ export default function PropertyView() {
         </Panel>
       )}
 
+      {/* Compliance */}
       {tab === "Compliance" && (
         <Panel title="Compliance / Checklist">
           <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -534,23 +553,33 @@ export default function PropertyView() {
               Checklist items are editable (status/proof/notes) and write audit
               + workflow events.
             </div>
-            <button
-              onClick={() =>
-                refreshChecklist().catch((e) => setErr(String(e?.message || e)))
-              }
-              className="oh-btn"
-            >
-              refresh checklist
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() =>
+                  refreshChecklist().catch((e) =>
+                    setErr(String(e?.message || e)),
+                  )
+                }
+                className="oh-btn"
+              >
+                refresh
+              </button>
+              <button
+                onClick={generateChecklist}
+                className="oh-btn oh-btn-primary"
+                disabled={!!busy || !d}
+              >
+                generate
+              </button>
+            </div>
           </div>
 
           <div className="mt-4 space-y-2">
             {checklistItems.length === 0 ? (
               <div className="text-sm text-zinc-400">
-                No checklist found yet. Generate one via backend endpoint:
-                <span className="oh-kbd ml-2">
-                  POST /api/compliance/checklist/{propertyId}?persist=true
-                </span>
+                No checklist found yet. Click{" "}
+                <span className="text-zinc-200 font-semibold">generate</span> to
+                create one.
               </div>
             ) : (
               checklistItems.map((it: any) => (
@@ -578,6 +607,7 @@ export default function PropertyView() {
         </Panel>
       )}
 
+      {/* Tenant */}
       {tab === "Tenant" && (
         <Panel title="Leases">
           {leases.length === 0 ? (
@@ -613,6 +643,7 @@ export default function PropertyView() {
         </Panel>
       )}
 
+      {/* Cash */}
       {tab === "Cash" && (
         <Panel title="Transactions">
           {txns.length === 0 ? (
@@ -645,6 +676,7 @@ export default function PropertyView() {
         </Panel>
       )}
 
+      {/* Equity */}
       {tab === "Equity" && (
         <Panel title="Valuations">
           {vals.length === 0 ? (

@@ -4,12 +4,15 @@
 
 :root {
   color-scheme: dark;
-  --tint-a: 255 88 122;
-  --tint-b: 120 90 255;
-  --tint-c: 35 255 200;
+
+  /* brand tints */
+  --tint-a: 255 88 122;   /* pink */
+  --tint-b: 120 90 255;   /* violet */
+  --tint-c: 35 255 200;   /* mint */
 }
 
 html, body, #root { height: 100%; }
+
 body {
   background: #05060a;
   color: rgb(244 244 245);
@@ -17,7 +20,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Single background stack: no masks, no grids */
+/* Single background stack: no heavy masks / no grids */
 #root {
   position: relative;
   isolation: isolate;
@@ -29,6 +32,7 @@ body {
 }
 
 @layer components {
+  /* Panels/cards used across app */
   .glass {
     @apply bg-white/[0.03] border border-white/[0.10] backdrop-blur-lg;
     box-shadow:
@@ -36,7 +40,7 @@ body {
       0 18px 60px rgba(0,0,0,0.45);
   }
 
-  /* Thicker border, but cheaper */
+  /* Used by most cards; adds nice hover border without full-screen GPU murder */
   .gradient-border {
     position: relative;
   }
@@ -57,7 +61,7 @@ body {
     background-size: 200% 200%;
     animation: borderShift 8s linear infinite;
 
-    /* border-only mask (this is still OK; it’s local to the card, not full-screen) */
+    /* border-only mask (local to card) */
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
@@ -70,6 +74,7 @@ body {
     filter: brightness(1.04) saturate(1.15);
   }
 
+  /* Optional tilt helper (if you use it) */
   .hover-tilt {
     transform:
       perspective(900px)
@@ -79,9 +84,51 @@ body {
     transition: transform 140ms ease-out;
     will-change: transform;
   }
+
+  /* “OneHaven UI” helpers used in your pages */
+  .oh-panel {
+    @apply rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-lg;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.04),
+      0 18px 60px rgba(0,0,0,0.45);
+  }
+
+  .oh-panel-solid {
+    @apply rounded-2xl border backdrop-blur-lg;
+  }
+
+  .oh-badge {
+    @apply text-[11px] px-3 py-1 rounded-full border border-white/10 bg-white/5 text-zinc-200;
+  }
+
+  .oh-btn {
+    @apply text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition;
+  }
+
+  .oh-btn-primary {
+    @apply border-white/15 bg-white/[0.08] hover:bg-white/[0.12];
+  }
+
+  .oh-btn-good {
+    @apply border-green-400/25 bg-green-400/10 hover:bg-green-400/15 text-green-100;
+  }
+  .oh-btn-warn {
+    @apply border-yellow-300/25 bg-yellow-300/10 hover:bg-yellow-300/15 text-yellow-100;
+  }
+  .oh-btn-bad {
+    @apply border-red-400/25 bg-red-400/10 hover:bg-red-400/15 text-red-100;
+  }
+
+  .oh-input {
+    @apply w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-zinc-100 outline-none;
+  }
+
+  .oh-textarea {
+    @apply w-full min-h-[90px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-zinc-100 outline-none;
+  }
 }
 
-/* cheap noise (static) */
+/* cheap static noise */
 .noise {
   position: absolute;
   inset: 0;
@@ -97,20 +144,18 @@ body {
   100% { background-position: 100% 50%; }
 }
 
-/* scrollbars */
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 999px; }
-*::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }
-
-
 @keyframes floatSoft {
   0% { transform: translate3d(0,0,0); }
   50% { transform: translate3d(0,-10px,0); }
   100% { transform: translate3d(0,0,0); }
 }
 
-
 .oh-hero-art {
   transform: translate3d(0,0,0);
   will-change: transform, opacity;
 }
+
+/* scrollbars */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }

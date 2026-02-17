@@ -1,15 +1,16 @@
 # backend/app/routers/dashboard.py
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
+from ..auth import get_principal
 from ..db import get_db
 from ..models import Property, Deal
-from .properties import property_view  # reuse your existing “single source of truth” builder
+from .properties import property_view  # reuse “single source of truth”
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -21,15 +22,17 @@ def dashboard_properties(
     strategy: Optional[str] = Query(default=None, description="section8|market"),
     limit: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
     """
-    Returns a list of PropertyView objects (as dicts) for UI dashboards.
+    Returns list of PropertyView objects (dicts) for UI dashboards.
 
-    Why dicts instead of a strict schema?
-    - PropertyViewOut is already defined and returned by /properties/{id}/view
-    - This endpoint simply aggregates that “truth” across many properties.
+    Key invariants:
+    - Tenant scoped: only properties in p.org_id
+    - Uses property_view() as the single truth builder
+    - Resilient: skip rows that fail
     """
-    q = select(Property.id).order_by(desc(Property.id))
+    q = select(Property.id).where(Property.org_id == p.org_id).order_by(desc(Property.id))
 
     if city:
         q = q.where(Property.city == city, Property.state == state)
@@ -41,16 +44,21 @@ def dashboard_properties(
     out: list[dict] = []
     for pid in prop_ids:
         try:
-            view = property_view(property_id=pid, db=db)  # returns PropertyViewOut
+            view = property_view(property_id=pid, db=db, p=p)  # ✅ pass principal
             v = view.model_dump() if hasattr(view, "model_dump") else dict(view)
+
             if strategy:
-                # Filter by latest deal strategy if requested
-                d = db.scalar(select(Deal).where(Deal.property_id == pid).order_by(desc(Deal.id)).limit(1))
+                d = db.scalar(
+                    select(Deal)
+                    .where(Deal.org_id == p.org_id, Deal.property_id == pid)
+                    .order_by(desc(Deal.id))
+                    .limit(1)
+                )
                 if not d or (d.strategy or "").strip().lower() != strategy.strip().lower():
                     continue
+
             out.append(v)
         except Exception:
-            # Dashboard should be resilient; skip broken rows rather than fail whole page
             continue
 
     return out
