@@ -20,6 +20,7 @@ from ..models import (
     RentObservation,
     RentCalibration,
     AuditEvent,
+    RentExplainRun,  # ✅ Phase 3 artifact
 )
 from ..schemas import (
     RentAssumptionOut,
@@ -40,6 +41,7 @@ from ..domain.rent_learning import (
     update_calibration_from_observation,
     recompute_rent_fields,
 )
+from ..domain.events import emit_workflow_event
 
 router = APIRouter(prefix="/rent", tags=["rent"])
 
@@ -81,6 +83,31 @@ def _audit(
         created_at=datetime.utcnow(),
     )
     db.add(ev)
+
+
+def _persist_rent_explain_run(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    strategy: str,
+    cap_reason: str,
+    payment_standard_pct_used: float,
+    explain_payload: dict,
+) -> RentExplainRun:
+    run = RentExplainRun(
+        org_id=org_id,
+        property_id=property_id,
+        strategy=strategy,
+        cap_reason=cap_reason,
+        explain_json=json.dumps(explain_payload, sort_keys=True),
+        decision_version=str(getattr(settings, "decision_version", "unknown")),
+        payment_standard_pct_used=float(payment_standard_pct_used),
+        created_at=datetime.utcnow(),
+    )
+    db.add(run)
+    db.flush()  # so run.id exists before commit
+    return run
 
 
 @router.get("/{property_id}", response_model=RentAssumptionOut)
@@ -138,7 +165,6 @@ def upsert_rent_assumption(
         "rent_used": ra.rent_used,
     }
 
-    # Audit only when override changed
     if before.get("approved_rent_ceiling") != after.get("approved_rent_ceiling"):
         _audit(
             db,
@@ -277,7 +303,6 @@ def list_calibration(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    # If later you want per-org calibration, add org_id to RentCalibration and filter here.
     q = select(RentCalibration).order_by(RentCalibration.updated_at.desc())
     if zip:
         q = q.where(RentCalibration.zip == zip)
@@ -310,11 +335,9 @@ def recompute(
         payment_standard_pct=pct,
     )
 
-    ra = db.execute(select(RentAssumption).where(RentAssumption.property_id == property_id)).scalar_one_or_none()
+    ra = db.execute(select(RentAssumption).where(RentAssumption.property_id == property_id, RentAssumption.org_id == p.org_id)).scalar_one_or_none()
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
-
-    ra.org_id = p.org_id
 
     override = _to_pos_float(ra.approved_rent_ceiling)
     computed_ceiling = _to_pos_float(computed.get("approved_rent_ceiling"))
@@ -342,8 +365,7 @@ def recompute(
 
 
 # -------------------------------------------------------------------
-# IMPORTANT: /explain/batch MUST be defined before /explain/{property_id}
-# Otherwise FastAPI tries to parse "batch" as property_id (int) -> error.
+# /explain/batch MUST be defined before /explain/{property_id}
 # -------------------------------------------------------------------
 @router.get("/explain/batch", response_model=RentExplainBatchOut)
 def explain_rent_batch(
@@ -358,8 +380,12 @@ def explain_rent_batch(
     strategy = _norm_strategy(strategy)
     pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
 
-    # Snapshot deals -> but we must enforce org boundary at the property level.
-    deals = db.scalars(select(Deal).where(Deal.snapshot_id == snapshot_id).limit(limit)).all()
+    # ✅ Phase 0: deals must be org-scoped at query time (not filtered after)
+    deals = db.scalars(
+        select(Deal)
+        .where(Deal.snapshot_id == snapshot_id, Deal.org_id == p.org_id)
+        .limit(limit)
+    ).all()
 
     attempted = len(deals)
     explained = 0
@@ -421,14 +447,12 @@ def explain_rent(
     ceiling_candidates: list[dict] = []
     caps: list[float] = []
 
-    # Payment standard: FMR * pct
     fmr = _to_pos_float(ra.section8_fmr)
     if fmr is not None:
         ps = float(fmr) * float(pct)
         caps.append(ps)
         ceiling_candidates.append({"type": "payment_standard", "value": ps})
 
-    # Rent reasonableness: comps median
     rr = _to_pos_float(ra.rent_reasonableness_comp)
     if rr is not None:
         caps.append(float(rr))
@@ -443,6 +467,7 @@ def explain_rent(
 
     rent_used: Optional[float]
     explanation: str
+    cap_reason: str = "none"
 
     if strategy == "market":
         if market is None:
@@ -452,27 +477,64 @@ def explain_rent(
             rent_used = float(market)
             explanation = "Market strategy uses market_rent_estimate (no Section 8 ceiling cap applied)."
     else:
-        # section8
         if market is None and approved is None:
             rent_used = None
             explanation = "Section 8 strategy: both market_rent_estimate and ceiling inputs are missing; cannot compute rent_used."
         elif market is None:
             rent_used = float(approved)  # type: ignore[arg-type]
+            cap_reason = "ceiling_only"
             explanation = "Section 8 strategy: market_rent_estimate missing; using approved ceiling only."
         elif approved is None:
             rent_used = float(market)
+            cap_reason = "market_only"
             explanation = "Section 8 strategy: ceiling missing; using market_rent_estimate only."
         else:
             rent_used = float(min(float(market), float(approved)))
+            cap_reason = "capped" if float(market) > float(approved) else "uncapped"
             explanation = "Section 8 strategy caps rent by the strictest limit (approved ceiling vs market estimate)."
+
+    # ✅ Phase 3 DoD: persist immutable explain artifact ALWAYS
+    explain_payload = {
+        "property_id": property_id,
+        "strategy": strategy,
+        "payment_standard_pct": float(pct),
+        "market_rent_estimate": market,
+        "section8_fmr": ra.section8_fmr,
+        "rent_reasonableness_comp": ra.rent_reasonableness_comp,
+        "approved_rent_ceiling": approved,
+        "rent_used": rent_used,
+        "ceiling_candidates": ceiling_candidates,
+        "explanation": explanation,
+        "cap_reason": cap_reason,
+    }
+    run = _persist_rent_explain_run(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        strategy=strategy,
+        cap_reason=cap_reason,
+        payment_standard_pct_used=float(pct),
+        explain_payload=explain_payload,
+    )
 
     if persist:
         ra.rent_used = float(rent_used) if rent_used is not None else None
         if manual is None and approved is not None:
             ra.approved_rent_ceiling = float(approved)
         db.add(ra)
-        db.commit()
 
+    emit_workflow_event(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="rent_explained",
+        payload={"property_id": property_id, "run_id": run.id, "strategy": strategy},
+    )
+
+    db.commit()
+
+    # If your RentExplainOut supports run_id/created_at, great.
+    # If it doesn't, remove those two fields from the return call.
     return RentExplainOut(
         property_id=property_id,
         strategy=strategy,
@@ -485,4 +547,6 @@ def explain_rent(
         rent_used=rent_used,
         ceiling_candidates=ceiling_candidates,
         explanation=explanation,
+        run_id=run.id,               # ✅ new
+        created_at=run.created_at,   # ✅ new
     )

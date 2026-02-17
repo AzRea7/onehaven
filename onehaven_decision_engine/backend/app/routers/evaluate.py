@@ -14,7 +14,11 @@ from ..schemas import BatchEvalOut, UnderwritingResultOut
 from ..domain.decision_engine import score_and_decide
 from ..domain.underwriting import underwrite
 from ..domain.jurisdiction_scoring import compute_friction
+from ..domain.events import emit_workflow_event
 from ..config import settings
+
+# ✅ Phase 3: enforce explain artifact creation
+from .rent import explain_rent
 
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
@@ -153,6 +157,18 @@ def evaluate_snapshot(
 
             deal_strategy = _norm_strategy(strategy or getattr(d, "strategy", None) or "section8")
 
+            # ✅ Phase 3 DoD: force explain artifact creation (RentExplainRun)
+            # This will also create a RentAssumption if it doesn't exist (via get_or_create inside rent.py).
+            explain_out = explain_rent(
+                property_id=int(p.id),
+                strategy=deal_strategy,
+                payment_standard_pct=float(ps),
+                persist=True,
+                db=db,
+                p=principal,
+            )
+            rent_explain_run_id = getattr(explain_out, "run_id", None)
+
             gross_rent, estimated, rent_notes, computed_ceiling, cap_reason, fmr_adjusted = _rent_used_for_underwriting(
                 strategy=deal_strategy,
                 d=d,
@@ -160,13 +176,12 @@ def evaluate_snapshot(
                 payment_standard_pct=ps,
             )
 
+            # keep RA aligned with used rent
             if ra is not None:
                 ra.rent_used = float(gross_rent)
-
                 override_ok = _to_pos_float(getattr(ra, "approved_rent_ceiling", None)) is not None
                 if (not override_ok) and (computed_ceiling is not None):
                     ra.approved_rent_ceiling = float(computed_ceiling)
-
                 db.add(ra)
 
             purchase_price = float(getattr(d, "estimated_purchase_price", None) or getattr(d, "asking_price", 0.0) or 0.0)
@@ -276,6 +291,25 @@ def evaluate_snapshot(
             existing.rent_cap_reason = str(cap_reason or "none")
             existing.fmr_adjusted = float(fmr_adjusted) if fmr_adjusted is not None else None
 
+            # ✅ if the model has this field, persist it
+            if rent_explain_run_id is not None and hasattr(existing, "rent_explain_run_id"):
+                setattr(existing, "rent_explain_run_id", int(rent_explain_run_id))
+
+            db.commit()
+
+            emit_workflow_event(
+                db,
+                org_id=principal.org_id,
+                actor_user_id=principal.user_id,
+                event_type="deal_evaluated",
+                payload={
+                    "deal_id": d.id,
+                    "property_id": d.property_id,
+                    "decision": decision,
+                    "score": int(score),
+                    "rent_explain_run_id": rent_explain_run_id,
+                },
+            )
             db.commit()
 
             if decision == "PASS":
@@ -288,6 +322,15 @@ def evaluate_snapshot(
         except Exception as e:
             db.rollback()
             errors.append(f"deal_id={getattr(d, 'id', '?')}: {type(e).__name__}: {e}")
+
+    emit_workflow_event(
+        db,
+        org_id=principal.org_id,
+        actor_user_id=principal.user_id,
+        event_type="snapshot_evaluated",
+        payload={"snapshot_id": snapshot_id, "total": len(deals), "pass": pass_count, "review": review_count, "reject": reject_count},
+    )
+    db.commit()
 
     return BatchEvalOut(
         snapshot_id=snapshot_id,
@@ -367,6 +410,9 @@ def evaluate_results(
             "bedrooms": getattr(p, "bedrooms", None),
             "bathrooms": getattr(p, "bathrooms", None),
         }
+        # optionally expose explain run id if your schema supports it
+        if hasattr(r, "rent_explain_run_id"):
+            payload["rent_explain_run_id"] = getattr(r, "rent_explain_run_id")
         out.append(UnderwritingResultOut.model_validate(payload))
 
     return out

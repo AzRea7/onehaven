@@ -9,12 +9,24 @@ from ..db import get_db
 from ..models import Tenant, Lease, Property
 from ..schemas import TenantCreate, TenantOut, LeaseCreate, LeaseOut
 from ..domain.audit import emit_audit
+from ..domain.events import emit_workflow_event
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 
+def _get_property_or_404(db: Session, *, org_id: int, property_id: int) -> Property:
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == org_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+    return prop
+
+
 @router.post("", response_model=TenantOut)
 def create_tenant(payload: TenantCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+    # Phase 0: if tenant is tied to a property, prove property is in-org
+    if getattr(payload, "property_id", None) is not None:
+        _get_property_or_404(db, org_id=p.org_id, property_id=int(payload.property_id))
+
     row = Tenant(**payload.model_dump(), org_id=p.org_id)
     db.add(row)
     db.commit()
@@ -30,8 +42,16 @@ def create_tenant(payload: TenantCreate, db: Session = Depends(get_db), p=Depend
         before=None,
         after=row.model_dump(),
     )
-    db.commit()
 
+    emit_workflow_event(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="tenant_created",
+        payload={"tenant_id": row.id, "property_id": getattr(row, "property_id", None)},
+    )
+
+    db.commit()
     return row
 
 
@@ -52,9 +72,13 @@ def list_tenants(
 
 @router.post("/leases", response_model=LeaseOut)
 def create_lease(payload: LeaseCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.get(Property, payload.property_id)
-    if not prop or prop.org_id != p.org_id:
-        raise HTTPException(status_code=404, detail="property not found")
+    # Phase 0: property must be in-org
+    _get_property_or_404(db, org_id=p.org_id, property_id=int(payload.property_id))
+
+    # Phase 0: tenant must be in-org (and ideally belongs to same property if you enforce that)
+    tenant = db.scalar(select(Tenant).where(Tenant.id == payload.tenant_id, Tenant.org_id == p.org_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="tenant not found")
 
     row = Lease(**payload.model_dump(), org_id=p.org_id)
     db.add(row)
@@ -71,8 +95,16 @@ def create_lease(payload: LeaseCreate, db: Session = Depends(get_db), p=Depends(
         before=None,
         after=row.model_dump(),
     )
-    db.commit()
 
+    emit_workflow_event(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="lease_created",
+        payload={"lease_id": row.id, "property_id": row.property_id, "tenant_id": row.tenant_id},
+    )
+
+    db.commit()
     return row
 
 
@@ -86,9 +118,16 @@ def list_leases(
 ):
     q = select(Lease).where(Lease.org_id == p.org_id)
 
+    # Phase 0: if a property is targeted, prove it's owned by org.
     if property_id is not None:
+        _get_property_or_404(db, org_id=p.org_id, property_id=int(property_id))
         q = q.where(Lease.property_id == property_id)
+
     if tenant_id is not None:
+        # Phase 0: tenant must be in-org if used as a filter
+        t = db.scalar(select(Tenant).where(Tenant.id == tenant_id, Tenant.org_id == p.org_id))
+        if not t:
+            raise HTTPException(status_code=404, detail="tenant not found")
         q = q.where(Lease.tenant_id == tenant_id)
 
     q = q.order_by(desc(Lease.id)).limit(limit)

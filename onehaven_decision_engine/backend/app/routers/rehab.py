@@ -10,15 +10,22 @@ from ..auth import get_principal
 from ..db import get_db
 from ..models import Property, RehabTask
 from ..schemas import RehabTaskCreate, RehabTaskOut
+from ..domain.audit import emit_audit
+from ..domain.events import emit_workflow_event
 
 router = APIRouter(prefix="/rehab", tags=["rehab"])
 
 
-@router.post("/tasks", response_model=RehabTaskOut)
-def create_task(payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.scalar(select(Property).where(Property.id == payload.property_id, Property.org_id == p.org_id))
+def _get_property_or_404(db: Session, *, org_id: int, property_id: int) -> Property:
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == org_id))
     if not prop:
         raise HTTPException(status_code=404, detail="property not found")
+    return prop
+
+
+@router.post("/tasks", response_model=RehabTaskOut)
+def create_task(payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+    _get_property_or_404(db, org_id=p.org_id, property_id=payload.property_id)
 
     row = RehabTask(
         org_id=p.org_id,
@@ -36,6 +43,26 @@ def create_task(payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depen
     db.add(row)
     db.commit()
     db.refresh(row)
+
+    emit_audit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        action="rehab_task.create",
+        entity_type="RehabTask",
+        entity_id=str(row.id),
+        before=None,
+        after=row.model_dump(),
+    )
+    emit_workflow_event(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="rehab_task_created",
+        payload={"task_id": row.id, "property_id": row.property_id, "status": row.status},
+    )
+    db.commit()
+
     return row
 
 
@@ -45,9 +72,7 @@ def list_tasks(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="property not found")
+    _get_property_or_404(db, org_id=p.org_id, property_id=property_id)
 
     rows = db.scalars(
         select(RehabTask)
@@ -59,16 +84,16 @@ def list_tasks(
 
 @router.patch("/tasks/{task_id}", response_model=RehabTaskOut)
 def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    # payload uses RehabTaskCreate to keep it simple; we’ll treat fields as full update.
     row = db.scalar(select(RehabTask).where(RehabTask.id == task_id, RehabTask.org_id == p.org_id))
     if not row:
         raise HTTPException(status_code=404, detail="rehab task not found")
 
+    before = row.model_dump()
+    old_status = getattr(row, "status", None)
+
     # if property_id changes, validate org ownership
     if payload.property_id != row.property_id:
-        prop = db.scalar(select(Property).where(Property.id == payload.property_id, Property.org_id == p.org_id))
-        if not prop:
-            raise HTTPException(status_code=404, detail="property not found")
+        _get_property_or_404(db, org_id=p.org_id, property_id=payload.property_id)
         row.property_id = payload.property_id
 
     row.title = payload.title
@@ -83,6 +108,37 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
     db.add(row)
     db.commit()
     db.refresh(row)
+
+    emit_audit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        action="rehab_task.update",
+        entity_type="RehabTask",
+        entity_id=str(row.id),
+        before=before,
+        after=row.model_dump(),
+    )
+
+    # Phase 5: emit distinct signal if status changed
+    if old_status != row.status:
+        emit_workflow_event(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            event_type="rehab_task_status_changed",
+            payload={"task_id": row.id, "property_id": row.property_id, "from": old_status, "to": row.status},
+        )
+    else:
+        emit_workflow_event(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            event_type="rehab_task_updated",
+            payload={"task_id": row.id, "property_id": row.property_id},
+        )
+
+    db.commit()
     return row
 
 
@@ -92,6 +148,29 @@ def delete_task(task_id: int, db: Session = Depends(get_db), p=Depends(get_princ
     if not row:
         raise HTTPException(status_code=404, detail="rehab task not found")
 
+    before = row.model_dump()
+    prop_id = row.property_id
+
     db.delete(row)
+    db.commit()
+
+    emit_audit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        action="rehab_task.delete",
+        entity_type="RehabTask",
+        entity_id=str(task_id),
+        before=before,
+        after=None,
+    )
+    emit_workflow_event(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="rehab_task_deleted",
+        payload={"task_id": task_id, "property_id": prop_id},
+    )
+
     db.commit()
     return {"ok": True}

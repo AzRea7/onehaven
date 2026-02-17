@@ -952,3 +952,22 @@ class ValuationOut(ValuationIn):
     org_id: int
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+class RentExplainOut(BaseModel):
+    # existing fields (keep them if you already have them)
+    rent_used: float
+    fmr: Optional[float] = None
+    payment_standard: Optional[float] = None
+    rr_comps_median: Optional[float] = None
+    rr_comps_count: Optional[int] = None
+    cap_reason: Optional[str] = None
+    explain: dict[str, Any] = {}
+
+    # ✅ new: always returned when explain persists
+    run_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ... keep everything else below ...
