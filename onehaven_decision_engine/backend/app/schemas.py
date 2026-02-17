@@ -838,3 +838,117 @@ class PropertyStateOut(BaseModel):
     outstanding_tasks_json: Optional[str] = None
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+class JurisdictionRuleIn(BaseModel):
+    city: str
+    state: str = "MI"
+    rental_license_required: bool = False
+    inspection_authority: Optional[str] = None
+    typical_fail_points: list[str] = Field(default_factory=list)
+    registration_fee: Optional[float] = None
+    processing_days: Optional[int] = None
+    inspection_frequency: Optional[str] = None
+    tenant_waitlist_depth: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class JurisdictionRuleOut(JurisdictionRuleIn):
+    id: int
+    org_id: Optional[int] = None
+    updated_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RentExplainRunOut(BaseModel):
+    id: int
+    org_id: int
+    property_id: int
+    strategy: str
+    cap_reason: Optional[str] = None
+    explain: dict[str, Any] = Field(default_factory=dict)
+    decision_version: str
+    payment_standard_pct_used: Optional[float] = None
+    created_at: datetime
+
+
+class RehabTaskIn(BaseModel):
+    property_id: int
+    title: str
+    category: str = "rehab"
+    inspection_relevant: bool = True
+    status: str = "todo"  # todo|in_progress|done|blocked
+    cost_estimate: Optional[float] = None
+    vendor: Optional[str] = None
+    deadline: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class RehabTaskOut(RehabTaskIn):
+    id: int
+    org_id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TenantIn(BaseModel):
+    full_name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    voucher_status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TenantOut(TenantIn):
+    id: int
+    org_id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LeaseIn(BaseModel):
+    property_id: int
+    tenant_id: int
+    start_date: datetime
+    end_date: Optional[datetime] = None
+    total_rent: float = 0.0
+    tenant_portion: Optional[float] = None
+    housing_authority_portion: Optional[float] = None
+    hap_contract_status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class LeaseOut(LeaseIn):
+    id: int
+    org_id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TransactionIn(BaseModel):
+    property_id: int
+    txn_date: datetime
+    txn_type: str = "other"  # income|expense|capex|other
+    amount: float
+    memo: Optional[str] = None
+
+
+class TransactionOut(TransactionIn):
+    id: int
+    org_id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ValuationIn(BaseModel):
+    property_id: int
+    as_of: datetime
+    estimated_value: float
+    loan_balance: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class ValuationOut(ValuationIn):
+    id: int
+    org_id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)

@@ -1,30 +1,30 @@
+// frontend/src/App.tsx
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import Shell from "./components/Shell";
 import Dashboard from "./pages/Dashboard";
-import Properties from "./pages/Property";
-import PropertyView from "./pages/PropertyView";
+import Property from "./pages/Property";
 import Agents from "./pages/Agents";
 import Constitution from "./pages/Constitution";
+import PropertyView from "./pages/PropertyView";
+import DealIntake from "./pages/DealIntake";
+import Jurisdictions from "./pages/Jurisdictions";
 
 export default function App() {
   return (
     <Shell>
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
-
         <Route path="/dashboard" element={<Dashboard />} />
 
-        {/* properties list */}
-        <Route path="/properties" element={<Properties />} />
+        <Route path="/deal-intake" element={<DealIntake />} />
+        <Route path="/jurisdictions" element={<Jurisdictions />} />
 
-        {/* property single-pane */}
+        <Route path="/property/:id" element={<Property />} />
         <Route path="/properties/:id" element={<PropertyView />} />
 
         <Route path="/agents" element={<Agents />} />
         <Route path="/constitution" element={<Constitution />} />
-
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Shell>
   );

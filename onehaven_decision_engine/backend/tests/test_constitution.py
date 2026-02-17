@@ -1,52 +1,62 @@
-# backend/tests/test_constitution.py
+# backend/app/tests/test_constitution.py
 from __future__ import annotations
 
-from app.domain.decision_engine import DealContext, evaluate_deal_rules
-from app.config import settings
+import pytest
+from fastapi import HTTPException
+
+from app.domain.operating_truth_enforcement import DealIntakeFacts, enforce_constitution_for_deal_intake
 
 
-def test_missing_rent_penalty():
-    ctx = DealContext(
-        asking_price=120_000,
+def test_reject_over_max_price(monkeypatch):
+    # hardwire max_price for deterministic test
+    from app import config
+    monkeypatch.setattr(config.settings, "max_price", 150_000, raising=False)
+
+    facts = DealIntakeFacts(
+        address="1 Main St",
+        city="Detroit",
+        state="MI",
+        zip="48201",
         bedrooms=3,
-        has_garage=False,
-        strategy="section8",
-        rent_market=None,
-        rent_ceiling=None,
-    )
-    dec = evaluate_deal_rules(ctx)
-    assert dec.decision in {"REVIEW", "PASS", "REJECT"}
-    assert "Missing rent inputs" in " ".join(dec.reasons)
-    assert dec.score <= 30  # base 50 - 20 penalty (and maybe other adjustments)
-
-
-def test_over_max_price_reject(monkeypatch):
-    monkeypatch.setattr(settings, "max_price", 150_000, raising=False)
-    ctx = DealContext(
+        bathrooms=1.0,
         asking_price=200_000,
-        bedrooms=3,
-        has_garage=False,
-        strategy="section8",
-        rent_market=2000,
-        rent_ceiling=1800,
     )
-    dec = evaluate_deal_rules(ctx)
-    assert dec.decision == "REJECT"
-    assert dec.score == 0
-    assert "exceeds max" in " ".join(dec.reasons).lower()
+    with pytest.raises(HTTPException) as e:
+        enforce_constitution_for_deal_intake(facts)
+    assert "exceeds max_price" in str(e.value.detail)
 
 
-def test_under_min_bedrooms_reject(monkeypatch):
-    monkeypatch.setattr(settings, "min_bedrooms", 2, raising=False)
-    ctx = DealContext(
-        asking_price=120_000,
+def test_reject_under_min_bedrooms(monkeypatch):
+    from app import config
+    monkeypatch.setattr(config.settings, "min_bedrooms", 2, raising=False)
+
+    facts = DealIntakeFacts(
+        address="1 Main St",
+        city="Detroit",
+        state="MI",
+        zip="48201",
         bedrooms=1,
-        has_garage=False,
-        strategy="section8",
-        rent_market=2000,
-        rent_ceiling=1800,
+        bathrooms=1.0,
+        asking_price=100_000,
     )
-    dec = evaluate_deal_rules(ctx)
-    assert dec.decision == "REJECT"
-    assert dec.score == 0
-    assert "below minimum" in " ".join(dec.reasons).lower()
+    with pytest.raises(HTTPException) as e:
+        enforce_constitution_for_deal_intake(facts)
+    assert "below min_bedrooms" in str(e.value.detail)
+
+
+def test_accept_valid_deal(monkeypatch):
+    from app import config
+    monkeypatch.setattr(config.settings, "max_price", 150_000, raising=False)
+    monkeypatch.setattr(config.settings, "min_bedrooms", 2, raising=False)
+
+    facts = DealIntakeFacts(
+        address="55 Logic Ave",
+        city="Royal Oak",
+        state="MI",
+        zip="48067",
+        bedrooms=3,
+        bathrooms=1.5,
+        asking_price=149_999,
+    )
+    # should not raise
+    enforce_constitution_for_deal_intake(facts)

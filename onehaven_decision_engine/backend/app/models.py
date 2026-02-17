@@ -14,6 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Date,
     func,
+    JSON,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -671,3 +672,22 @@ class AgentSlotAssignment(Base):
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class RentExplainRun(Base):
+    __tablename__ = "rent_explain_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="section8")
+
+    # “auditable artifact”
+    cap_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    explain_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    decision_version: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    payment_standard_pct_used: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
