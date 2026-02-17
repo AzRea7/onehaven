@@ -1,49 +1,55 @@
+// frontend/src/pages/Property.tsx
 import React from "react";
 import { api } from "../lib/api";
 import { Link } from "react-router-dom";
+import PageHero from "../components/PageHero";
+import BrickBuilder from "../components/BrickBuilder";
 
 export default function Properties() {
   const [rows, setRows] = React.useState<any[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
 
-  async function refresh() {
+  async function refresh(background = false) {
     try {
       setErr(null);
-      setLoading(true);
+      if (!background) setLoading(true);
       const out = await api.dashboardProperties({ limit: 50 });
-      setRows(out);
+      setRows(Array.isArray(out) ? out : []);
     } catch (e: any) {
       setErr(String(e.message || e));
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }
 
   React.useEffect(() => {
-    refresh();
+    refresh(false);
   }, []);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between">
-        <div>
-          <div className="text-2xl font-semibold tracking-tight">
-            Properties
+    <div className="space-y-6">
+      <PageHero
+        eyebrow="Portfolio"
+        title="Properties are the substrate."
+        subtitle="Each card is a single-pane view into Deal → Underwrite → Compliance → Cash → Equity. Make the machine obvious."
+        right={
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="h-[200px] w-[200px] md:h-[230px] md:w-[230px] opacity-95">
+              <BrickBuilder className="h-full w-full" />
+            </div>
           </div>
-          <div className="text-sm text-zinc-400 mt-1">
-            “One source of truth” views (Deal → Compliance → Cash → Equity).
-          </div>
-        </div>
-
-        <button
-          onClick={refresh}
-          className="text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10"
-          title="Refresh"
-        >
-          sync
-        </button>
-      </div>
+        }
+        actions={
+          <button
+            onClick={() => refresh(false)}
+            className="text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10"
+            title="Refresh"
+          >
+            sync
+          </button>
+        }
+      />
 
       {err && (
         <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">

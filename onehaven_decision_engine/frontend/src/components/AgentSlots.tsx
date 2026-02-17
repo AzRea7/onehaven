@@ -1,6 +1,7 @@
+// frontend/src/components/AgentSlots.tsx
 import React from "react";
 import { api } from "../lib/api";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 
 function statusTone(status: string) {
   const s = (status || "idle").toLowerCase();
@@ -39,11 +40,33 @@ type Props = {
   propertyOnly?: boolean;
 };
 
+function asArray<T = any>(x: any): T[] {
+  if (Array.isArray(x)) return x;
+  if (x && Array.isArray(x.items)) return x.items;
+  if (x && Array.isArray(x.rows)) return x.rows;
+  if (x && Array.isArray(x.data)) return x.data;
+  return [];
+}
+
+/**
+ * Performance goals:
+ * - Avoid “n.map is not a function” by normalizing all list responses.
+ * - Avoid UI freezing by:
+ *   - removing per-row stagger animations
+ *   - aborting in-flight requests on refresh/unmount
+ *   - not fetching global+property assignments redundantly unless needed
+ *   - memoizing derived maps
+ */
 export default function AgentSlots({ propertyId, propertyOnly }: Props) {
+  const prefersReducedMotion = useReducedMotion();
+
   const [specs, setSpecs] = React.useState<SlotSpec[]>([]);
   const [assignments, setAssignments] = React.useState<SlotAssign[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
   const [busyKey, setBusyKey] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+
+  const abortRef = React.useRef<AbortController | null>(null);
 
   const [editing, setEditing] = React.useState<null | {
     slot_key: string;
@@ -53,75 +76,114 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
     owner_type: string;
   }>(null);
 
+  const shouldFetchGlobalAssignments = React.useMemo(() => {
+    // If you’re in a property view, you still want to show “effective”
+    // assignments (property overrides global). So fetch both unless propertyOnly=true.
+    if (propertyId != null) return !propertyOnly;
+    // If no propertyId, you’re basically in “global board” mode.
+    return true;
+  }, [propertyId, propertyOnly]);
+
   async function refresh() {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
     try {
       setErr(null);
-      const [s, aGlobal, aProp] = await Promise.all([
-        api.slotSpecs(),
-        api.slotAssignments(undefined), // global + any property if backend returns all
-        propertyId != null
-          ? api.slotAssignments(propertyId)
-          : Promise.resolve([]),
-      ]);
+      setLoading(true);
 
-      // Merge; keep both so we can prefer property assignment over global.
-      // De-dupe by id.
-      const merged = [...(aProp as any[]), ...(aGlobal as any[])].filter(
-        Boolean,
-      );
+      const tasks: Promise<any>[] = [];
+      tasks.push(api.slotSpecs()); // cached in api.ts already
+
+      if (shouldFetchGlobalAssignments) {
+        tasks.push(api.slotAssignments(undefined, ac.signal));
+      } else {
+        tasks.push(Promise.resolve([]));
+      }
+
+      if (propertyId != null) {
+        tasks.push(api.slotAssignments(propertyId, ac.signal));
+      } else {
+        tasks.push(Promise.resolve([]));
+      }
+
+      const [sRaw, aGlobalRaw, aPropRaw] = await Promise.all(tasks);
+
+      const s = asArray<SlotSpec>(sRaw);
+      const aGlobal = asArray<SlotAssign>(aGlobalRaw);
+      const aProp = asArray<SlotAssign>(aPropRaw);
+
+      // Merge; property assignment should win when we compute "effective"
+      const merged = [...aProp, ...aGlobal].filter(Boolean);
+
+      // De-dupe by id (stable)
       const seen = new Set<number>();
       const dedup = merged.filter((x) => {
-        if (!x?.id) return true;
-        if (seen.has(x.id)) return false;
-        seen.add(x.id);
+        const id = Number(x?.id);
+        if (!Number.isFinite(id) || id <= 0) return true; // keep weird rows
+        if (seen.has(id)) return false;
+        seen.add(id);
         return true;
       });
 
       setSpecs(s);
-      setAssignments(dedup as SlotAssign[]);
+      setAssignments(dedup);
     } catch (e: any) {
-      setErr(String(e.message || e));
+      if (String(e?.name) === "AbortError") return;
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
     }
   }
 
   React.useEffect(() => {
     refresh();
+    return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propertyId]);
+  }, [propertyId, propertyOnly]);
 
-  // Choose the “effective” assignment per slot_key:
+  // Effective assignment per slot_key:
   // property assignment wins; otherwise global (property_id == null).
-  const byKey = new Map<string, SlotAssign>();
-  for (const a of assignments) {
-    if (!a?.slot_key) continue;
-    const existing = byKey.get(a.slot_key);
+  const byKey = React.useMemo(() => {
+    const m = new Map<string, SlotAssign>();
 
-    const aIsProp = propertyId != null && a.property_id === propertyId;
-    const aIsGlobal = a.property_id == null;
+    for (const a of asArray<SlotAssign>(assignments)) {
+      if (!a?.slot_key) continue;
 
-    if (!existing) {
+      const existing = m.get(a.slot_key);
+
+      const aIsProp = propertyId != null && a.property_id === propertyId;
+      const aIsGlobal = a.property_id == null;
+
+      // If propertyOnly, ignore globals entirely when in property view
       if (propertyOnly && propertyId != null && !aIsProp) continue;
-      byKey.set(a.slot_key, a);
-      continue;
+
+      if (!existing) {
+        m.set(a.slot_key, a);
+        continue;
+      }
+
+      const eIsProp = propertyId != null && existing.property_id === propertyId;
+      const eIsGlobal = existing.property_id == null;
+
+      // If we already have property assignment, keep it.
+      if (eIsProp) continue;
+
+      // Prefer property assignment over global
+      if (aIsProp) {
+        m.set(a.slot_key, a);
+        continue;
+      }
+
+      // Otherwise keep existing (stable)
+      if (!eIsGlobal && aIsGlobal) {
+        m.set(a.slot_key, a);
+      }
     }
 
-    const eIsProp = propertyId != null && existing.property_id === propertyId;
-    const eIsGlobal = existing.property_id == null;
-
-    // If we already have property assignment, keep it.
-    if (eIsProp) continue;
-
-    // Prefer property assignment over global
-    if (aIsProp) {
-      byKey.set(a.slot_key, a);
-      continue;
-    }
-
-    // Otherwise keep existing (stable)
-    if (!eIsGlobal && aIsGlobal) {
-      byKey.set(a.slot_key, a);
-    }
-  }
+    return m;
+  }, [assignments, propertyId, propertyOnly]);
 
   function openEdit(spec: SlotSpec) {
     const a = byKey.get(spec.slot_key);
@@ -142,6 +204,7 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
 
   async function saveEdit() {
     if (!editing) return;
+
     try {
       setErr(null);
       setBusyKey(editing.slot_key);
@@ -159,14 +222,17 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
       };
 
       await api.upsertSlotAssignment(payload);
+
       setEditing(null);
       await refresh();
     } catch (e: any) {
-      setErr(String(e.message || e));
+      setErr(String(e?.message || e));
     } finally {
       setBusyKey(null);
     }
   }
+
+  const safeSpecs = asArray<SlotSpec>(specs);
 
   return (
     <div className="gradient-border rounded-2xl glass p-3">
@@ -174,18 +240,21 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
         <div className="text-xs font-semibold tracking-wide text-zinc-200">
           Agent Slots
         </div>
+
         <div className="flex items-center gap-2">
           {propertyId != null && (
             <span className="text-[10px] px-2 py-1 rounded-lg border border-white/10 bg-white/5 text-zinc-300">
               property #{propertyId}
             </span>
           )}
+
           <button
             onClick={refresh}
             className="text-[11px] px-2 py-1 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10"
             title="Refresh"
+            disabled={loading}
           >
-            sync
+            {loading ? "syncing…" : "sync"}
           </button>
         </div>
       </div>
@@ -201,7 +270,13 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
       )}
 
       <div className="mt-3 space-y-2">
-        {specs.map((s, idx) => {
+        {safeSpecs.length === 0 && !loading && (
+          <div className="text-[11px] text-zinc-400">
+            No slot specs found yet.
+          </div>
+        )}
+
+        {safeSpecs.map((s) => {
           const a = byKey.get(s.slot_key);
           const status = a?.status ?? s.default_status ?? "idle";
           const assignee =
@@ -216,12 +291,19 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
             return null;
           }
 
+          const RowWrap: any = prefersReducedMotion ? "div" : motion.div;
+          const rowProps = prefersReducedMotion
+            ? {}
+            : {
+                initial: { opacity: 0, y: 4 },
+                animate: { opacity: 1, y: 0 },
+                transition: { duration: 0.18 },
+              };
+
           return (
-            <motion.div
+            <RowWrap
               key={s.slot_key}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25, delay: idx * 0.02 }}
+              {...rowProps}
               className="rounded-xl border border-white/10 bg-white/[0.03] p-2"
             >
               <div className="flex items-start justify-between gap-2">
@@ -261,7 +343,7 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
                   <span className="text-[10px] text-zinc-400">{assignee}</span>
                 </div>
               </div>
-            </motion.div>
+            </RowWrap>
           );
         })}
       </div>

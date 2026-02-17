@@ -1,7 +1,10 @@
+// frontend/src/pages/PropertyView.tsx
 import React from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api";
 import AgentSlots from "../components/AgentSlots";
+import PageHero from "../components/PageHero";
+import BrickBuilder from "../components/BrickBuilder";
 
 const tabs = [
   "Deal",
@@ -18,78 +21,211 @@ function money(v: any) {
   return `$${Math.round(Number(v)).toLocaleString()}`;
 }
 
+function Panel({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="oh-panel p-5">
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mt-3 space-y-2">{children}</div>
+    </div>
+  );
+}
+
+function Row({ k, v }: { k: string; v: any }) {
+  return (
+    <div className="flex items-center justify-between gap-4 text-sm">
+      <div className="text-zinc-500">{k}</div>
+      <div className="text-zinc-200 font-medium">{v}</div>
+    </div>
+  );
+}
+
+function ChecklistItemCard({
+  item,
+  onUpdate,
+  busy,
+}: {
+  item: any;
+  onUpdate: (patch: {
+    status?: string | null;
+    proof_url?: string | null;
+    notes?: string | null;
+  }) => Promise<void>;
+  busy: boolean;
+}) {
+  const status = (item?.status || "todo").toLowerCase();
+  const border =
+    status === "done"
+      ? "border-green-400/20 bg-green-400/5"
+      : status === "failed"
+        ? "border-red-400/20 bg-red-400/5"
+        : status === "blocked"
+          ? "border-yellow-300/20 bg-yellow-300/5"
+          : status === "in_progress"
+            ? "border-white/20 bg-white/5"
+            : "border-white/10 bg-white/[0.03]";
+
+  return (
+    <div className={`rounded-2xl border ${border} p-4`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-zinc-100">
+            {item?.description || item?.title || item?.item_code}
+          </div>
+          <div className="text-xs text-zinc-400 mt-1">
+            {item?.category ? `${item.category} · ` : ""}
+            <span className="text-zinc-200">{item?.item_code}</span>
+            {" · "}
+            status: <span className="text-zinc-200">{status}</span>
+            {item?.marked_by ? ` · by ${item.marked_by}` : ""}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            disabled={busy}
+            onClick={() => onUpdate({ status: "in_progress" })}
+            className="oh-btn"
+          >
+            working
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => onUpdate({ status: "done" })}
+            className="oh-btn oh-btn-good"
+          >
+            done
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => onUpdate({ status: "failed" })}
+            className="oh-btn oh-btn-bad"
+          >
+            fail
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => onUpdate({ status: "blocked" })}
+            className="oh-btn oh-btn-warn"
+          >
+            blocked
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="text-[11px] text-zinc-500">Proof URL</div>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              defaultValue={item?.proof_url || ""}
+              placeholder="https://..."
+              className="oh-input"
+              onBlur={(e) => {
+                const val = e.target.value.trim();
+                onUpdate({ proof_url: val ? val : null }).catch(() => {});
+              }}
+              disabled={busy}
+            />
+            {item?.proof_url ? (
+              <a
+                href={item.proof_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs underline text-zinc-200"
+              >
+                open
+              </a>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="text-[11px] text-zinc-500">Notes</div>
+          <textarea
+            defaultValue={item?.notes || ""}
+            placeholder="What changed? What remains?"
+            className="oh-textarea"
+            onBlur={(e) => {
+              const val = e.target.value.trim();
+              onUpdate({ notes: val ? val : null }).catch(() => {});
+            }}
+            disabled={busy}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PropertyView() {
   const { id } = useParams();
   const propertyId = Number(id);
 
   const [tab, setTab] = React.useState<Tab>("Deal");
-
-  const [v, setV] = React.useState<any | null>(null);
+  const [bundle, setBundle] = React.useState<any | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
 
-  // Tab data
-  const [rehab, setRehab] = React.useState<any[] | null>(null);
-  const [leases, setLeases] = React.useState<any[] | null>(null);
-  const [txns, setTxns] = React.useState<any[] | null>(null);
-  const [vals, setVals] = React.useState<any[] | null>(null);
+  const [checklist, setChecklist] = React.useState<any | null>(null);
+  const [checkBusyCode, setCheckBusyCode] = React.useState<string | null>(null);
 
-  async function loadView() {
-    try {
-      setErr(null);
-      const out = await api.propertyView(propertyId);
-      setV(out);
-    } catch (e: any) {
-      // Keep error, but don't blank page
-      setV(null);
-      setErr(String(e.message || e));
-    }
-  }
+  const abortRef = React.useRef<AbortController | null>(null);
 
-  React.useEffect(() => {
-    loadView();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propertyId]);
-
-  // Load tab-specific data when tab changes
-  React.useEffect(() => {
-    async function run() {
-      try {
-        if (tab === "Rehab") {
-          setRehab(null);
-          setRehab(await api.rehabTasks(propertyId));
-        } else if (tab === "Tenant") {
-          setLeases(null);
-          setLeases(await api.leases(propertyId));
-        } else if (tab === "Cash") {
-          setTxns(null);
-          setTxns(await api.txns(propertyId));
-        } else if (tab === "Equity") {
-          setVals(null);
-          setVals(await api.valuations(propertyId));
-        }
-      } catch (e: any) {
-        setErr(String(e.message || e));
-      }
-    }
-    run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, propertyId]);
-
+  const v = bundle?.view;
   const p = v?.property;
   const d = v?.deal;
   const r = v?.last_underwriting_result;
   const rent = v?.rent_explain;
   const friction = v?.jurisdiction_friction;
 
+  const rehab = bundle?.rehab_tasks || [];
+  const leases = bundle?.leases || [];
+  const txns = bundle?.transactions || [];
+  const vals = bundle?.valuations || [];
+
   const noDeal = err?.toLowerCase().includes("no deal found for property");
+
+  async function loadAll() {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    try {
+      setErr(null);
+      const out = await api.propertyBundle(propertyId, ac.signal);
+      setBundle(out);
+
+      try {
+        const latest = await api.checklistLatest(propertyId, ac.signal);
+        setChecklist(latest);
+      } catch {
+        setChecklist(null);
+      }
+    } catch (e: any) {
+      if (String(e?.name) === "AbortError") return;
+      setBundle(null);
+      setErr(String(e.message || e));
+    }
+  }
+
+  React.useEffect(() => {
+    loadAll();
+    return () => abortRef.current?.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propertyId]);
 
   async function doAction(label: string, fn: () => Promise<any>) {
     try {
       setBusy(label);
       setErr(null);
       await fn();
-      await loadView();
+      await loadAll();
     } catch (e: any) {
       setErr(String(e.message || e));
     } finally {
@@ -107,7 +243,6 @@ export default function PropertyView() {
     }
 
     await doAction("Creating deal…", async () => {
-      // Your backend already has /deals in repo (Phase 1). If your route is different, adjust here.
       await api.createDeal({
         property_id: propertyId,
         asking_price: asking,
@@ -122,83 +257,79 @@ export default function PropertyView() {
       api.enrichProperty(propertyId, d?.strategy || "section8"),
     );
   }
-
   async function explain() {
     await doAction("Explaining rent…", () =>
       api.explainProperty(propertyId, d?.strategy || "section8", true),
     );
   }
-
   async function evaluate() {
     await doAction("Evaluating…", () =>
       api.evaluateProperty(propertyId, d?.strategy || "section8"),
     );
   }
 
+  async function refreshChecklist() {
+    const latest = await api.checklistLatest(propertyId);
+    setChecklist(latest);
+  }
+
+  const checklistItems = checklist?.items ?? v?.checklist?.items ?? [];
+
+  const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
+  const heroSub = `${p?.city ?? "—"}, ${p?.state ?? "—"} ${p?.zip ?? ""} · ${p?.bedrooms ?? "—"}bd · Strategy: ${((d?.strategy || "section8") as string).toUpperCase()} · Decision: ${r?.decision ?? "—"} · Score: ${r?.score ?? "—"} · DSCR: ${r?.dscr?.toFixed?.(2) ?? "—"}`;
+
   return (
-    <div className="space-y-4">
-      <div className="oh-panel p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-xl font-semibold tracking-tight">
-              {p?.address ?? `Property ${propertyId}`}
-            </div>
-            <div className="text-sm text-zinc-400 mt-1">
-              {p?.city ?? "—"}, {p?.state ?? "—"} {p?.zip ?? ""} ·{" "}
-              {p?.bedrooms ?? "—"}bd · Strategy:{" "}
-              <span className="oh-kbd">
-                {((d?.strategy || "section8") as string).toUpperCase()}
-              </span>
-            </div>
-          </div>
-
-          <div className="text-right">
-            <div className="text-xs text-zinc-500">Latest decision</div>
-            <div className="text-lg font-semibold">{r?.decision ?? "—"}</div>
-            <div className="text-xs text-zinc-500 mt-1">
-              Score: {r?.score ?? "—"} · DSCR: {r?.dscr?.toFixed?.(2) ?? "—"}
-            </div>
-
-            <div className="mt-3 flex items-center justify-end gap-2">
-              <button
-                onClick={createDealQuick}
-                className="text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10"
-                disabled={!!busy}
-                title="Create a deal if missing"
-              >
-                {busy?.includes("Creating") ? "creating…" : "+ deal"}
-              </button>
-
-              <button
-                onClick={enrich}
-                className="text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10"
-                disabled={!!busy || !d}
-                title="Rent enrich"
-              >
-                enrich
-              </button>
-
-              <button
-                onClick={explain}
-                className="text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10"
-                disabled={!!busy || !d}
-                title="Rent explain (persisted)"
-              >
-                explain
-              </button>
-
-              <button
-                onClick={evaluate}
-                className="text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/10 hover:bg-white/15"
-                disabled={!!busy || !d}
-                title="Evaluate"
-              >
-                evaluate
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="relative space-y-5">
+      <PageHero
+        eyebrow="Property"
+        title={heroTitle}
+        subtitle={heroSub}
+        right={<BrickBuilder />}
+        actions={
+          <>
+            <button
+              onClick={loadAll}
+              className="oh-btn"
+              disabled={!!busy}
+              title="Refresh"
+            >
+              sync
+            </button>
+            <button
+              onClick={createDealQuick}
+              className="oh-btn"
+              disabled={!!busy}
+              title="Create a deal if missing"
+            >
+              {busy?.includes("Creating") ? "creating…" : "+ deal"}
+            </button>
+            <button
+              onClick={enrich}
+              className="oh-btn"
+              disabled={!!busy || !d}
+              title="Rent enrich"
+            >
+              enrich
+            </button>
+            <button
+              onClick={explain}
+              className="oh-btn"
+              disabled={!!busy || !d}
+              title="Rent explain (persisted)"
+            >
+              explain
+            </button>
+            <button
+              onClick={evaluate}
+              className="oh-btn oh-btn-primary"
+              disabled={!!busy || !d}
+              title="Evaluate"
+            >
+              evaluate
+            </button>
+          </>
+        }
+      />
 
       {busy && (
         <div className="oh-panel-solid p-4 border-white/10 bg-white/5 text-zinc-200">
@@ -214,21 +345,24 @@ export default function PropertyView() {
         </div>
       )}
 
-      <div className="flex gap-2 flex-wrap">
-        {tabs.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={[
-              "px-3 py-2 rounded-xl border text-sm transition",
-              tab === t
-                ? "bg-white/[0.06] text-zinc-100 border-white/[0.16]"
-                : "text-zinc-300 border-white/10 hover:bg-white/[0.04] hover:border-white/[0.14]",
-            ].join(" ")}
-          >
-            {t}
-          </button>
-        ))}
+      {/* Tabs: softer, OpenClaw-like pill group */}
+      <div className="gradient-border rounded-2xl p-[1px]">
+        <div className="glass rounded-2xl p-2 flex gap-2 flex-wrap">
+          {tabs.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={[
+                "px-3 py-2 rounded-xl border text-sm transition",
+                tab === t
+                  ? "bg-white/[0.07] text-zinc-100 border-white/[0.18] shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
+                  : "text-zinc-300 border-white/10 hover:bg-white/[0.04] hover:border-white/[0.14]",
+              ].join(" ")}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
       </div>
 
       {tab === "Deal" && (
@@ -348,9 +482,9 @@ export default function PropertyView() {
             <AgentSlots propertyId={propertyId} />
             <Panel title="What’s next">
               <div className="text-sm text-zinc-300 leading-relaxed">
-                Phase 4 completion = every tab loads real data, and agent slots
-                drive workflow actions. This screen now runs the full pipeline
-                (enrich → explain → evaluate) and shows the result.
+                This is the “single pane” truth view. Next realism leap: slot
+                actions that create WorkflowEvents + RehabTasks automatically
+                (so the UI becomes the operating system, not a dashboard).
               </div>
             </Panel>
           </div>
@@ -359,18 +493,14 @@ export default function PropertyView() {
 
       {tab === "Rehab" && (
         <Panel title="Rehab Tasks">
-          {!rehab && (
-            <div className="text-sm text-zinc-400">Loading rehab tasks…</div>
-          )}
-          {rehab && rehab.length === 0 && (
+          {rehab.length === 0 ? (
             <div className="text-sm text-zinc-400">No rehab tasks yet.</div>
-          )}
-          {rehab && rehab.length > 0 && (
+          ) : (
             <div className="space-y-2">
               {rehab.map((t: any) => (
                 <div
                   key={t.id}
-                  className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
                 >
                   <div className="flex items-center justify-between">
                     <div className="font-semibold text-zinc-100">{t.title}</div>
@@ -399,38 +529,65 @@ export default function PropertyView() {
 
       {tab === "Compliance" && (
         <Panel title="Compliance / Checklist">
-          <div className="text-sm text-zinc-300 leading-relaxed">
-            Your backend is already generating/storing checklist JSON via{" "}
-            <span className="oh-kbd">PropertyChecklist</span>. Next UI step is
-            to expose checklist item updates (status/proof/notes) through a
-            PATCH endpoint.
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-sm text-zinc-300">
+              Checklist items are editable (status/proof/notes) and write audit
+              + workflow events.
+            </div>
+            <button
+              onClick={() =>
+                refreshChecklist().catch((e) => setErr(String(e?.message || e)))
+              }
+              className="oh-btn"
+            >
+              refresh checklist
+            </button>
           </div>
 
-          <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-3">
-            <div className="text-xs text-zinc-500">Checklist snapshot</div>
-            <div className="text-sm text-zinc-200 mt-2">
-              {v?.checklist?.items?.length != null
-                ? `${v.checklist.items.length} items`
-                : "—"}
-            </div>
+          <div className="mt-4 space-y-2">
+            {checklistItems.length === 0 ? (
+              <div className="text-sm text-zinc-400">
+                No checklist found yet. Generate one via backend endpoint:
+                <span className="oh-kbd ml-2">
+                  POST /api/compliance/checklist/{propertyId}?persist=true
+                </span>
+              </div>
+            ) : (
+              checklistItems.map((it: any) => (
+                <ChecklistItemCard
+                  key={it.item_code}
+                  item={it}
+                  busy={checkBusyCode === it.item_code}
+                  onUpdate={async (patch) => {
+                    try {
+                      setCheckBusyCode(it.item_code);
+                      await api.updateChecklistItem(
+                        propertyId,
+                        it.item_code,
+                        patch,
+                      );
+                      await refreshChecklist();
+                    } finally {
+                      setCheckBusyCode(null);
+                    }
+                  }}
+                />
+              ))
+            )}
           </div>
         </Panel>
       )}
 
       {tab === "Tenant" && (
         <Panel title="Leases">
-          {!leases && (
-            <div className="text-sm text-zinc-400">Loading leases…</div>
-          )}
-          {leases && leases.length === 0 && (
+          {leases.length === 0 ? (
             <div className="text-sm text-zinc-400">No leases yet.</div>
-          )}
-          {leases && leases.length > 0 && (
+          ) : (
             <div className="space-y-2">
               {leases.map((l: any) => (
                 <div
                   key={l.id}
-                  className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
                 >
                   <div className="flex items-center justify-between">
                     <div className="font-semibold text-zinc-100">
@@ -458,18 +615,14 @@ export default function PropertyView() {
 
       {tab === "Cash" && (
         <Panel title="Transactions">
-          {!txns && (
-            <div className="text-sm text-zinc-400">Loading transactions…</div>
-          )}
-          {txns && txns.length === 0 && (
+          {txns.length === 0 ? (
             <div className="text-sm text-zinc-400">No transactions yet.</div>
-          )}
-          {txns && txns.length > 0 && (
+          ) : (
             <div className="space-y-2">
               {txns.map((t: any) => (
                 <div
                   key={t.id}
-                  className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
                 >
                   <div className="flex items-center justify-between">
                     <div className="text-zinc-100 font-semibold">
@@ -494,30 +647,27 @@ export default function PropertyView() {
 
       {tab === "Equity" && (
         <Panel title="Valuations">
-          {!vals && (
-            <div className="text-sm text-zinc-400">Loading valuations…</div>
-          )}
-          {vals && vals.length === 0 && (
+          {vals.length === 0 ? (
             <div className="text-sm text-zinc-400">No valuations yet.</div>
-          )}
-          {vals && vals.length > 0 && (
+          ) : (
             <div className="space-y-2">
-              {vals.map((v: any) => (
+              {vals.map((v2: any) => (
                 <div
-                  key={v.id}
-                  className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                  key={v2.id}
+                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
                 >
                   <div className="flex items-center justify-between">
                     <div className="text-zinc-100 font-semibold">
-                      {v.as_of ? new Date(v.as_of).toLocaleDateString() : "—"}
+                      {v2.as_of ? new Date(v2.as_of).toLocaleDateString() : "—"}
                     </div>
                     <div className="text-zinc-200 font-semibold">
-                      {money(v.estimated_value)}
+                      {money(v2.estimated_value)}
                     </div>
                   </div>
                   <div className="text-xs text-zinc-400 mt-1">
-                    Loan: {v.loan_balance != null ? money(v.loan_balance) : "—"}{" "}
-                    {v.notes ? `· ${v.notes}` : ""}
+                    Loan:{" "}
+                    {v2.loan_balance != null ? money(v2.loan_balance) : "—"}{" "}
+                    {v2.notes ? `· ${v2.notes}` : ""}
                   </div>
                 </div>
               ))}
@@ -525,30 +675,6 @@ export default function PropertyView() {
           )}
         </Panel>
       )}
-    </div>
-  );
-}
-
-function Panel({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="oh-panel p-5">
-      <div className="text-sm font-semibold">{title}</div>
-      <div className="mt-3 space-y-2">{children}</div>
-    </div>
-  );
-}
-
-function Row({ k, v }: { k: string; v: any }) {
-  return (
-    <div className="flex items-center justify-between gap-4 text-sm">
-      <div className="text-zinc-500">{k}</div>
-      <div className="text-zinc-200 font-medium">{v}</div>
     </div>
   );
 }

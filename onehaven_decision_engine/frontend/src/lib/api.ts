@@ -28,40 +28,123 @@ function getAuth(): AuthContext {
   return { orgSlug, userEmail, userRole };
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Some endpoints may return:
+ * - Array directly
+ * - {items: [...]}
+ * - {rows: [...]}
+ * - {data: [...]}
+ * - {detail: "..."} or other object
+ *
+ * To prevent "n.map is not a function", always normalize.
+ */
+function asArray<T = any>(x: any): T[] {
+  if (Array.isArray(x)) return x;
+  if (x && Array.isArray(x.items)) return x.items;
+  if (x && Array.isArray(x.rows)) return x.rows;
+  if (x && Array.isArray(x.data)) return x.data;
+  return [];
+}
+
+type CacheEntry = { at: number; value: any };
+const memCache = new Map<string, CacheEntry>();
+const inflight = new Map<string, Promise<any>>();
+
+function cacheKey(method: string, path: string, body?: any) {
+  return `${method}:${path}:${body ?? ""}`;
+}
+
+async function request<T>(
+  path: string,
+  init?:
+    | (RequestInit & { cacheTtlMs?: number; signal?: AbortSignal })
+    | undefined,
+): Promise<T> {
   const auth = getAuth();
+  const method = (init?.method || "GET").toUpperCase();
+  const ttl = init?.cacheTtlMs ?? (method === "GET" ? 4_000 : 0);
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Org-Slug": auth.orgSlug,
-      "X-User-Email": auth.userEmail,
-      ...(auth.userRole ? { "X-User-Role": auth.userRole } : {}),
-      ...(init?.headers || {}),
-    },
-  });
+  const bodyKey = typeof init?.body === "string" ? init?.body : undefined;
+  const key = cacheKey(method, path, bodyKey);
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+  // GET cache
+  if (method === "GET" && ttl > 0) {
+    const hit = memCache.get(key);
+    if (hit && Date.now() - hit.at < ttl) return hit.value as T;
   }
 
-  const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) {
-    return (await res.text()) as unknown as T;
+  // GET inflight dedupe
+  if (method === "GET") {
+    const pending = inflight.get(key);
+    if (pending) return (await pending) as T;
   }
 
-  return (await res.json()) as T;
+  const run = (async () => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Org-Slug": auth.orgSlug,
+        "X-User-Email": auth.userEmail,
+        ...(auth.userRole ? { "X-User-Role": auth.userRole } : {}),
+        ...(init?.headers || {}),
+      },
+      signal: init?.signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    }
+
+    const ct = res.headers.get("content-type") || "";
+    const data = ct.includes("application/json")
+      ? await res.json()
+      : await res.text();
+
+    if (method === "GET" && ttl > 0) {
+      memCache.set(key, { at: Date.now(), value: data });
+    }
+    return data as T;
+  })();
+
+  if (method === "GET") inflight.set(key, run);
+
+  try {
+    return await run;
+  } finally {
+    if (method === "GET") inflight.delete(key);
+  }
+}
+
+/**
+ * Helper: request that MUST be an array (normalize always).
+ * This is the main fix for "n.map is not a function".
+ */
+async function requestArray<T = any>(
+  path: string,
+  init?:
+    | (RequestInit & { cacheTtlMs?: number; signal?: AbortSignal })
+    | undefined,
+): Promise<T[]> {
+  const data = await request<any>(path, init);
+  return asArray<T>(data);
 }
 
 export const api = {
   // Dashboard / properties
-  dashboardProperties: (_p0: { limit: number }) =>
-    request<any[]>(`/dashboard/properties?limit=100`),
+  dashboardProperties: (p: { limit: number; signal?: AbortSignal }) =>
+    requestArray<any>(`/dashboard/properties?limit=${p.limit ?? 100}`, {
+      cacheTtlMs: 3_000,
+      signal: p.signal,
+    }),
 
-  // Existing property “view”
-  propertyView: (id: number) => request<any>(`/properties/${id}/view`),
+  // Property “view” and “bundle”
+  propertyView: (id: number, signal?: AbortSignal) =>
+    request<any>(`/properties/${id}/view`, { cacheTtlMs: 2_000, signal }),
+
+  propertyBundle: (id: number, signal?: AbortSignal) =>
+    request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
 
   // Deal creation (Phase 1)
   createDeal: (payload: {
@@ -94,10 +177,7 @@ export const api = {
   enrichProperty: (propertyId: number, strategy: string = "section8") =>
     request<any>(
       `/rent/enrich?property_id=${propertyId}&strategy=${encodeURIComponent(strategy)}`,
-      {
-        method: "POST",
-        body: JSON.stringify({}),
-      },
+      { method: "POST", body: JSON.stringify({}) },
     ),
 
   explainProperty: (
@@ -106,22 +186,46 @@ export const api = {
     persist: boolean = true,
   ) =>
     request<any>(
-      `/rent/explain?property_id=${propertyId}&strategy=${encodeURIComponent(strategy)}&persist=${persist ? "true" : "false"}`,
+      `/rent/explain?property_id=${propertyId}&strategy=${encodeURIComponent(
+        strategy,
+      )}&persist=${persist ? "true" : "false"}`,
       { method: "POST", body: JSON.stringify({}) },
     ),
 
   evaluateProperty: (propertyId: number, strategy: string = "section8") =>
     request<any>(
       `/evaluate/property/${propertyId}?strategy=${encodeURIComponent(strategy)}`,
-      {
-        method: "POST",
-        body: JSON.stringify({}),
-      },
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+
+  // Checklist / Compliance (matches your backend)
+  checklistLatest: (propertyId: number, signal?: AbortSignal) =>
+    request<any>(`/compliance/checklist/${propertyId}/latest`, {
+      cacheTtlMs: 1_000,
+      signal,
+    }),
+
+  updateChecklistItem: (
+    propertyId: number,
+    itemCode: string,
+    payload: {
+      status?: string | null;
+      proof_url?: string | null;
+      notes?: string | null;
+    },
+  ) =>
+    request<any>(
+      `/compliance/checklist/${propertyId}/items/${encodeURIComponent(itemCode)}`,
+      { method: "PATCH", body: JSON.stringify(payload) },
     ),
 
   // Rehab
-  rehabTasks: (propertyId: number) =>
-    request<any[]>(`/rehab/tasks?property_id=${propertyId}&limit=500`),
+  rehabTasks: (propertyId: number, signal?: AbortSignal) =>
+    requestArray<any>(`/rehab/tasks?property_id=${propertyId}&limit=500`, {
+      cacheTtlMs: 2_000,
+      signal,
+    }),
+
   createRehabTask: (payload: any) =>
     request<any>(`/rehab/tasks`, {
       method: "POST",
@@ -129,21 +233,40 @@ export const api = {
     }),
 
   // Tenants / leases
-  leases: (propertyId: number) =>
-    request<any[]>(`/tenants/leases?property_id=${propertyId}&limit=200`),
+  leases: (propertyId: number, signal?: AbortSignal) =>
+    requestArray<any>(`/tenants/leases?property_id=${propertyId}&limit=200`, {
+      cacheTtlMs: 2_000,
+      signal,
+    }),
 
   // Cash
-  txns: (propertyId: number) =>
-    request<any[]>(`/cash/transactions?property_id=${propertyId}&limit=1000`),
+  txns: (propertyId: number, signal?: AbortSignal) =>
+    requestArray<any>(
+      `/cash/transactions?property_id=${propertyId}&limit=1000`,
+      {
+        cacheTtlMs: 2_000,
+        signal,
+      },
+    ),
 
   // Equity
-  valuations: (propertyId: number) =>
-    request<any[]>(`/equity/valuations?property_id=${propertyId}&limit=200`),
+  valuations: (propertyId: number, signal?: AbortSignal) =>
+    requestArray<any>(
+      `/equity/valuations?property_id=${propertyId}&limit=200`,
+      {
+        cacheTtlMs: 2_000,
+        signal,
+      },
+    ),
 
   // Agents
-  agents: () => request<any[]>(`/agents`),
+  agents: () => requestArray<any>(`/agents`, { cacheTtlMs: 4_000 }),
+
   agentRuns: (propertyId: number) =>
-    request<any[]>(`/agents/runs?property_id=${propertyId}&limit=200`),
+    requestArray<any>(`/agents/runs?property_id=${propertyId}&limit=200`, {
+      cacheTtlMs: 2_000,
+    }),
+
   createAgentRun: (payload: any) =>
     request<any>(`/agents/runs`, {
       method: "POST",
@@ -152,8 +275,9 @@ export const api = {
 
   // Messages
   messages: (threadKey: string) =>
-    request<any[]>(
+    requestArray<any>(
       `/agents/messages?thread_key=${encodeURIComponent(threadKey)}&limit=200`,
+      { cacheTtlMs: 500 },
     ),
 
   postMessage: (payload: {
@@ -168,14 +292,20 @@ export const api = {
     }),
 
   // Slot Specs + Assignments
-  slotSpecs: () => request<any[]>(`/agents/slots/specs`),
-  slotAssignments: (propertyId?: number) => {
+  slotSpecs: () =>
+    requestArray<any>(`/agents/slots/specs`, { cacheTtlMs: 10_000 }),
+
+  slotAssignments: (propertyId?: number, signal?: AbortSignal) => {
     const q =
       propertyId != null
         ? `?property_id=${propertyId}&limit=200`
         : `?limit=200`;
-    return request<any[]>(`/agents/slots/assignments${q}`);
+    return requestArray<any>(`/agents/slots/assignments${q}`, {
+      cacheTtlMs: 2_000,
+      signal,
+    });
   },
+
   upsertSlotAssignment: (payload: {
     slot_key: string;
     property_id?: number | null;

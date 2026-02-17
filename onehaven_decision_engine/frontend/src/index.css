@@ -38,3 +38,16 @@ html, body, #root {
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 999px; }
 *::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }
+
+
+@keyframes floatSoft {
+  0% { transform: translate3d(0,0,0); }
+  50% { transform: translate3d(0,-10px,0); }
+  100% { transform: translate3d(0,0,0); }
+}
+
+
+.oh-hero-art {
+  transform: translate3d(0,0,0);
+  will-change: transform, opacity;
+}

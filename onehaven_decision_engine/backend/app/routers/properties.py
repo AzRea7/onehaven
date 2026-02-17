@@ -3,12 +3,25 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, desc, or_
+from sqlalchemy import select, desc
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Property, JurisdictionRule, Deal, UnderwritingResult, PropertyChecklist
+from ..models import (
+    Property,
+    JurisdictionRule,
+    Deal,
+    UnderwritingResult,
+    PropertyChecklist,
+    PropertyChecklistItem,
+    AppUser,
+    RentAssumption,
+    RehabTask,
+    Lease,
+    Transaction,
+    Valuation,
+)
 from ..schemas import (
     PropertyCreate,
     PropertyOut,
@@ -22,7 +35,6 @@ from ..schemas import (
 )
 from ..domain.jurisdiction_scoring import compute_friction
 from ..config import settings
-from ..models import RentAssumption
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 
@@ -79,10 +91,7 @@ def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_
         select(Property)
         .where(Property.id == property_id)
         .where(Property.org_id == p.org_id)
-        .options(
-            selectinload(Property.rent_assumption),
-            selectinload(Property.rent_comps),
-        )
+        .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
     )
     row = db.execute(stmt).scalar_one_or_none()
     if not row:
@@ -91,9 +100,7 @@ def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_
     jr = _pick_jurisdiction_rule(db, org_id=p.org_id, city=row.city, state=row.state)
 
     out = PropertyOut.model_validate(row, from_attributes=True).model_dump()
-    out["jurisdiction_rule"] = (
-        JurisdictionRuleOut.model_validate(jr, from_attributes=True).model_dump() if jr else None
-    )
+    out["jurisdiction_rule"] = JurisdictionRuleOut.model_validate(jr, from_attributes=True).model_dump() if jr else None
     return out
 
 
@@ -104,7 +111,11 @@ def _rent_explain_for_view(db: Session, property_id: int, strategy: str) -> Rent
 
     ps = float(settings.payment_standard_pct)
 
-    fmr_adjusted = (float(ra.section8_fmr) * ps) if (ra.section8_fmr is not None and float(ra.section8_fmr) > 0) else None
+    fmr_adjusted = (
+        (float(ra.section8_fmr) * ps)
+        if (ra.section8_fmr is not None and float(ra.section8_fmr) > 0)
+        else None
+    )
 
     cap_reason = "none"
     ceiling_candidates: list[dict] = []
@@ -141,16 +152,48 @@ def _rent_explain_for_view(db: Session, property_id: int, strategy: str) -> Rent
     )
 
 
+def _merge_checklist_state(db: Session, org_id: int, property_id: int, items: list[ChecklistItemOut]) -> list[ChecklistItemOut]:
+    """
+    Your system stores checklist state in PropertyChecklistItem.
+    PropertyChecklist.items_json is a snapshot; the normalized table is the truth for status/proof/notes/marked_by.
+    """
+    state_rows = db.scalars(
+        select(PropertyChecklistItem).where(
+            PropertyChecklistItem.org_id == org_id,
+            PropertyChecklistItem.property_id == property_id,
+        )
+    ).all()
+
+    by_code: dict[str, PropertyChecklistItem] = {r.item_code: r for r in state_rows}
+
+    # resolve user emails
+    user_ids = {r.marked_by_user_id for r in state_rows if r.marked_by_user_id}
+    users_by_id: dict[int, str] = {}
+    if user_ids:
+        for u in db.scalars(select(AppUser).where(AppUser.id.in_(list(user_ids)))).all():
+            users_by_id[u.id] = u.email
+
+    out: list[ChecklistItemOut] = []
+    for i in items:
+        s = by_code.get(i.item_code)
+        if s:
+            i.status = s.status
+            i.marked_at = s.marked_at
+            i.proof_url = s.proof_url
+            i.notes = s.notes
+            if s.marked_by_user_id:
+                i.marked_by = users_by_id.get(s.marked_by_user_id)
+        out.append(i)
+    return out
+
+
 @router.get("/{property_id}/view", response_model=PropertyViewOut)
 def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
     stmt = (
         select(Property)
         .where(Property.id == property_id)
         .where(Property.org_id == p.org_id)
-        .options(
-            selectinload(Property.rent_assumption),
-            selectinload(Property.rent_comps),
-        )
+        .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
     )
     prop = db.execute(stmt).scalar_one_or_none()
     if not prop:
@@ -183,13 +226,17 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
         .order_by(desc(PropertyChecklist.id))
         .limit(1)
     )
+
     checklist_out: ChecklistOut | None = None
     if chk:
         try:
             parsed = json.loads(chk.items_json or "[]")
         except Exception:
             parsed = []
+
         items = [ChecklistItemOut(**x) for x in parsed if isinstance(x, dict)]
+        items = _merge_checklist_state(db, org_id=p.org_id, property_id=prop.id, items=items)
+
         checklist_out = ChecklistOut(property_id=prop.id, city=prop.city, state=prop.state, items=items)
 
     rent_explain = _rent_explain_for_view(db, property_id=prop.id, strategy=d.strategy)
@@ -206,3 +253,56 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
         last_underwriting_result=UnderwritingResultOut.model_validate(r) if r else None,
         checklist=checklist_out,
     )
+
+
+@router.get("/{property_id}/bundle", response_model=dict)
+def property_bundle(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    """
+    Phase 4 “single-pane truth” payload:
+      - view (underwriting + rent explain + friction + checklist)
+      - rehab tasks
+      - leases
+      - transactions
+      - valuations
+
+    Frontend loads this once and renders tabs instantly.
+    """
+    view = property_view(property_id=property_id, db=db, p=p)
+
+    rehab = db.scalars(
+        select(RehabTask)
+        .where(RehabTask.org_id == p.org_id, RehabTask.property_id == property_id)
+        .order_by(desc(RehabTask.id))
+        .limit(500)
+    ).all()
+
+    leases = db.scalars(
+        select(Lease)
+        .where(Lease.org_id == p.org_id, Lease.property_id == property_id)
+        .order_by(desc(Lease.id))
+        .limit(300)
+    ).all()
+
+    txns = db.scalars(
+        select(Transaction)
+        .where(Transaction.org_id == p.org_id, Transaction.property_id == property_id)
+        .order_by(desc(Transaction.id))
+        .limit(1000)
+    ).all()
+
+    vals = db.scalars(
+        select(Valuation)
+        .where(Valuation.org_id == p.org_id, Valuation.property_id == property_id)
+        .order_by(desc(Valuation.id))
+        .limit(300)
+    ).all()
+
+    # Keep it schema-light for now (fast MVP).
+    # If you later want strict DTOs, replace __dict__ with explicit fields.
+    return {
+        "view": view.model_dump() if hasattr(view, "model_dump") else view,
+        "rehab_tasks": [r.__dict__ for r in rehab],
+        "leases": [l.__dict__ for l in leases],
+        "transactions": [t.__dict__ for t in txns],
+        "valuations": [v.__dict__ for v in vals],
+    }
