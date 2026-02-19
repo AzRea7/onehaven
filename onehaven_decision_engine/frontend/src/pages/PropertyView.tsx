@@ -21,16 +21,35 @@ function money(v: any) {
   return `$${Math.round(Number(v)).toLocaleString()}`;
 }
 
+function pct01(v: any) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${Math.round(n * 100)}%`;
+}
+
+function Badge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/5 text-zinc-200">
+      {children}
+    </span>
+  );
+}
+
 function Panel({
   title,
+  right,
   children,
 }: {
   title: string;
+  right?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="oh-panel p-5">
-      <div className="text-sm font-semibold">{title}</div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold">{title}</div>
+        {right ? <div>{right}</div> : null}
+      </div>
       <div className="mt-3 space-y-2">{children}</div>
     </div>
   );
@@ -40,7 +59,16 @@ function Row({ k, v }: { k: string; v: any }) {
   return (
     <div className="flex items-center justify-between gap-4 text-sm">
       <div className="text-zinc-500">{k}</div>
-      <div className="text-zinc-200 font-medium">{v}</div>
+      <div className="text-zinc-200 font-medium text-right">{v}</div>
+    </div>
+  );
+}
+
+function ProgressBar({ value }: { value: number }) {
+  const pct = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+  return (
+    <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+      <div className="h-2 bg-white/60" style={{ width: `${pct * 100}%` }} />
     </div>
   );
 }
@@ -169,6 +197,8 @@ export default function PropertyView() {
 
   const [tab, setTab] = React.useState<Tab>("Deal");
   const [bundle, setBundle] = React.useState<any | null>(null);
+  const [ops, setOps] = React.useState<any | null>(null);
+
   const [err, setErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
 
@@ -198,8 +228,15 @@ export default function PropertyView() {
 
     try {
       setErr(null);
-      const out = await api.propertyBundle(propertyId, ac.signal);
+
+      // Load bundle + ops in parallel (ops is the loop-closer)
+      const [out, opsOut] = await Promise.all([
+        api.propertyBundle(propertyId, ac.signal),
+        api.opsPropertySummary(propertyId, 90, ac.signal).catch(() => null),
+      ]);
+
       setBundle(out);
+      setOps(opsOut);
 
       try {
         const latest = await api.checklistLatest(propertyId, ac.signal);
@@ -210,6 +247,7 @@ export default function PropertyView() {
     } catch (e: any) {
       if (String(e?.name) === "AbortError") return;
       setBundle(null);
+      setOps(null);
       setErr(String(e.message || e));
     }
   }
@@ -273,14 +311,11 @@ export default function PropertyView() {
     await doAction("Evaluating…", async () => {
       const strategy = d?.strategy || "section8";
 
-      // 1) If your api.ts still has evaluateProperty at runtime (older versions),
-      // call it safely without TypeScript failing the build.
       const maybeEvalProperty = (api as any).evaluateProperty;
       if (typeof maybeEvalProperty === "function") {
         return await maybeEvalProperty(propertyId, strategy);
       }
 
-      // 2) Otherwise, try evaluateRun if we can find a snapshot id.
       const snapshotId =
         (bundle as any)?.snapshot_id ??
         (bundle as any)?.view?.snapshot_id ??
@@ -291,7 +326,6 @@ export default function PropertyView() {
         return await api.evaluateRun(Number(snapshotId), strategy);
       }
 
-      // 3) If neither path is possible, show a real error message.
       throw new Error(
         "No evaluation method available. api.evaluateProperty is missing and no snapshot_id was found in the bundle/view. Add evaluateProperty back to api.ts OR include snapshot_id in propertyBundle response.",
       );
@@ -312,6 +346,12 @@ export default function PropertyView() {
     });
   }
 
+  async function generateRehabFromGaps() {
+    await doAction("Generating rehab tasks from gaps…", async () => {
+      await api.opsGenerateRehabTasks(propertyId);
+    });
+  }
+
   const checklistItems = checklist?.items ?? v?.checklist?.items ?? [];
 
   const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
@@ -320,6 +360,17 @@ export default function PropertyView() {
   }bd · Strategy: ${((d?.strategy || "section8") as string).toUpperCase()} · Decision: ${
     r?.decision ?? "—"
   } · Score: ${r?.score ?? "—"} · DSCR: ${r?.dscr?.toFixed?.(2) ?? "—"}`;
+
+  // Ops-derived bits (safe defaults)
+  const stage = ops?.stage || "deal";
+  const cp = ops?.checklist_progress || {};
+  const insp = ops?.inspection || {};
+  const cash30 = ops?.cash?.last_30_days || {};
+  const cash90 = ops?.cash?.last_90_days || ops?.cash?.last_90_days || {};
+  const equity = ops?.equity || null;
+  const nextActions: string[] = Array.isArray(ops?.next_actions)
+    ? ops.next_actions
+    : [];
 
   return (
     <div className="relative space-y-5">
@@ -387,6 +438,132 @@ export default function PropertyView() {
             : err}
         </div>
       )}
+
+      {/* ✅ NEW: Reality Loop Panel (Phase 3/4 closer) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="lg:col-span-2">
+          <Panel
+            title="Reality Loop (auto-derived)"
+            right={
+              <div className="flex flex-wrap items-center gap-2 justify-end">
+                <Badge>Stage: {String(stage).toUpperCase()}</Badge>
+                {cp?.total != null ? (
+                  <Badge>
+                    Checklist: {cp.done ?? 0}/{cp.total ?? 0} (
+                    {pct01(cp.pct_done)})
+                  </Badge>
+                ) : null}
+                {insp?.latest ? (
+                  <Badge>
+                    Inspection: {insp.latest.passed ? "PASSED" : "NOT PASSED"} ·
+                    fails {insp.open_failed_items ?? 0}
+                  </Badge>
+                ) : (
+                  <Badge>Inspection: NONE</Badge>
+                )}
+              </div>
+            }
+          >
+            <div className="space-y-3">
+              <div>
+                <Row
+                  k="Checklist progress"
+                  v={`${cp.done ?? 0}/${cp.total ?? 0} (${pct01(cp.pct_done)})`}
+                />
+                <div className="mt-2">
+                  <ProgressBar value={Number(cp.pct_done || 0)} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="text-xs text-zinc-500">Cash rollup (30d)</div>
+                  <div className="mt-2 space-y-1">
+                    <Row k="Income" v={money(cash30.income)} />
+                    <Row k="Expense" v={money(cash30.expense)} />
+                    <Row k="Capex" v={money(cash30.capex)} />
+                    <Row k="Net" v={money(cash30.net)} />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="text-xs text-zinc-500">Equity snapshot</div>
+                  <div className="mt-2 space-y-1">
+                    <Row
+                      k="As of"
+                      v={
+                        equity?.as_of ? String(equity.as_of).slice(0, 10) : "—"
+                      }
+                    />
+                    <Row
+                      k="Value"
+                      v={equity ? money(equity.estimated_value) : "—"}
+                    />
+                    <Row
+                      k="Loan"
+                      v={equity ? money(equity.loan_balance) : "—"}
+                    />
+                    <Row
+                      k="Equity"
+                      v={equity ? money(equity.estimated_equity) : "—"}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={generateChecklist}
+                  className="oh-btn oh-btn-primary"
+                  disabled={!!busy || !d}
+                  title="Generate and persist checklist"
+                >
+                  checklist generate
+                </button>
+                <button
+                  onClick={generateRehabFromGaps}
+                  className="oh-btn"
+                  disabled={!!busy}
+                  title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
+                >
+                  rehab from gaps
+                </button>
+              </div>
+
+              <div className="pt-2">
+                <div className="text-xs text-zinc-500 mb-2">Next actions</div>
+                {nextActions.length ? (
+                  <div className="space-y-2">
+                    {nextActions.slice(0, 8).map((a, i) => (
+                      <div
+                        key={i}
+                        className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-zinc-200"
+                      >
+                        {a}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-zinc-400">
+                    No blockers detected.
+                  </div>
+                )}
+              </div>
+            </div>
+          </Panel>
+        </div>
+
+        <div className="space-y-3">
+          <AgentSlots propertyId={propertyId} />
+          <Panel title="Ops intent">
+            <div className="text-sm text-zinc-300 leading-relaxed">
+              This panel is the loop-closer: it turns backend truth into UI
+              truth (readiness + next actions), so agents and humans work the
+              same queue.
+            </div>
+          </Panel>
+        </div>
+      </div>
 
       <div className="gradient-border rounded-2xl p-[1px]">
         <div className="glass rounded-2xl p-2 flex gap-2 flex-wrap">
@@ -522,12 +699,11 @@ export default function PropertyView() {
           </div>
 
           <div className="space-y-3">
-            <AgentSlots propertyId={propertyId} />
             <Panel title="What’s next">
               <div className="text-sm text-zinc-300 leading-relaxed">
-                This is the “single pane” truth view. Next realism leap: slot
-                actions that create WorkflowEvents + RehabTasks automatically
-                (so the UI becomes the operating system, not a dashboard).
+                Now that Ops Summary is present, the next step is to let a slot
+                “accept” a Next Action and persist that as a WorkflowEvent +
+                assignment.
               </div>
             </Panel>
           </div>
@@ -536,7 +712,19 @@ export default function PropertyView() {
 
       {/* Rehab */}
       {tab === "Rehab" && (
-        <Panel title="Rehab Tasks">
+        <Panel
+          title="Rehab Tasks"
+          right={
+            <button
+              onClick={generateRehabFromGaps}
+              className="oh-btn"
+              disabled={!!busy}
+              title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
+            >
+              rehab from gaps
+            </button>
+          }
+        >
           {rehab.length === 0 ? (
             <div className="text-sm text-zinc-400">No rehab tasks yet.</div>
           ) : (
@@ -597,6 +785,14 @@ export default function PropertyView() {
               >
                 generate
               </button>
+              <button
+                onClick={generateRehabFromGaps}
+                className="oh-btn"
+                disabled={!!busy}
+                title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
+              >
+                rehab from gaps
+              </button>
             </div>
           </div>
 
@@ -622,6 +818,11 @@ export default function PropertyView() {
                         patch,
                       );
                       await refreshChecklist();
+                      // refresh ops too (since checklist progress changes stage/next-actions)
+                      const opsOut = await api
+                        .opsPropertySummary(propertyId, 90)
+                        .catch(() => null);
+                      setOps(opsOut);
                     } finally {
                       setCheckBusyCode(null);
                     }

@@ -33,6 +33,7 @@ from .routers.auth import router as auth_router
 from .routers.workflow import router as workflow_router
 from .routers.audit import router as audit_router
 
+from .routers.ops import router as ops_router   
 
 app = FastAPI(title="OneHaven Decision Engine")
 
@@ -79,3 +80,5 @@ app.include_router(agents_router, prefix=API_PREFIX)
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(workflow_router, prefix=API_PREFIX)
 app.include_router(audit_router, prefix=API_PREFIX)
+
+app.include_router(ops_router, prefix=API_PREFIX)

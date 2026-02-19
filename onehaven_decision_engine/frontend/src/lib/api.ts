@@ -152,6 +152,27 @@ export const api = {
   propertyBundle: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
 
+  // ✅ NEW: Ops summary (closing loops)
+  opsPropertySummary: (
+    propertyId: number,
+    cashDays: number = 90,
+    signal?: AbortSignal,
+  ) =>
+    request<any>(
+      `/ops/property/${propertyId}/summary${qs({ cash_days: cashDays })}`,
+      {
+        cacheTtlMs: 800,
+        signal,
+      },
+    ),
+
+  // ✅ NEW: Generate rehab tasks from checklist gaps + unresolved inspection fails
+  opsGenerateRehabTasks: (propertyId: number) =>
+    request<any>(`/ops/property/${propertyId}/generate_rehab_tasks`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
   // Deal creation (Phase 1) - existing
   createDeal: (payload: {
     property_id: number;
@@ -180,8 +201,6 @@ export const api = {
     }),
 
   // ✅ Deal Intake (Phase 1) - used by DealIntake.tsx
-  // Your backend typically has an intake endpoint like /intake/deal or /intake.
-  // This version tries /intake/deal first; if your backend uses a different path, adjust here.
   intakeDeal: (payload: any) =>
     request<any>(`/intake/deal`, {
       method: "POST",
@@ -211,8 +230,7 @@ export const api = {
       { method: "GET", cacheTtlMs: 0 },
     ),
 
-  // ✅ Evaluate snapshot/run results already use POST /evaluate/run or /evaluate/snapshot
-  // Your previous api.ts had /evaluate/property/{id}; your backend excerpt shows /evaluate/run and /evaluate/results.
+  // ✅ Evaluate snapshot/run results
   evaluateRun: (snapshotId: number, strategy: string = "section8") =>
     request<any>(`/evaluate/run${qs({ snapshot_id: snapshotId, strategy })}`, {
       method: "POST",
@@ -405,10 +423,7 @@ export const api = {
 
   // --------------------------
   // ✅ Phase 2 - Jurisdictions
-  // (matches your backend jurisdictions.py routes)
   // --------------------------
-
-  // List rules; includeGlobal=true => scope=all
   listJurisdictionRules: (includeGlobal: boolean, state: string = "MI") => {
     const scope = includeGlobal ? "all" : "org";
     return requestArray<any>(`/jurisdictions/rules${qs({ scope, state })}`, {
@@ -416,27 +431,19 @@ export const api = {
     });
   },
 
-  // Seed baseline defaults (your backend file didn’t show a seed route,
-  // so we provide a compatible call to a common seed endpoint.
-  // If you add /jurisdictions/seed, keep this.
   seedJurisdictionDefaults: () =>
     request<any>(`/jurisdictions/seed`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
 
-  // Create org override via the existing upsert endpoint
   createJurisdictionRule: (payload: any) =>
     request<any>(`/jurisdictions/rule${qs({ scope: "org" })}`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  // Delete org override via existing delete endpoint (needs city/state)
   deleteJurisdictionRule: (idOrPayload: any) => {
-    // Your UI passes id, but backend delete uses city/state.
-    // So: if caller gives a number, they must supply city/state by looking it up.
-    // We keep it robust by requiring payload {city,state} OR passing rule object.
     if (typeof idOrPayload === "number") {
       throw new Error(
         "deleteJurisdictionRule requires {city, state} or a rule object; UI should pass the rule.",
