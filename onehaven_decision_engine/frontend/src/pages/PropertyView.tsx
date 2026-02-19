@@ -266,10 +266,36 @@ export default function PropertyView() {
       api.explainProperty(propertyId, d?.strategy || "section8", true),
     );
   }
+
+  // ✅ FIX: evaluateProperty no longer exists on typed api.
+  // Use runtime fallback to keep compatibility with older backend routes.
   async function evaluate() {
-    await doAction("Evaluating…", () =>
-      api.evaluateProperty(propertyId, d?.strategy || "section8"),
-    );
+    await doAction("Evaluating…", async () => {
+      const strategy = d?.strategy || "section8";
+
+      // 1) If your api.ts still has evaluateProperty at runtime (older versions),
+      // call it safely without TypeScript failing the build.
+      const maybeEvalProperty = (api as any).evaluateProperty;
+      if (typeof maybeEvalProperty === "function") {
+        return await maybeEvalProperty(propertyId, strategy);
+      }
+
+      // 2) Otherwise, try evaluateRun if we can find a snapshot id.
+      const snapshotId =
+        (bundle as any)?.snapshot_id ??
+        (bundle as any)?.view?.snapshot_id ??
+        (bundle as any)?.view?.latest_snapshot_id ??
+        null;
+
+      if (snapshotId != null) {
+        return await api.evaluateRun(Number(snapshotId), strategy);
+      }
+
+      // 3) If neither path is possible, show a real error message.
+      throw new Error(
+        "No evaluation method available. api.evaluateProperty is missing and no snapshot_id was found in the bundle/view. Add evaluateProperty back to api.ts OR include snapshot_id in propertyBundle response.",
+      );
+    });
   }
 
   async function refreshChecklist() {
