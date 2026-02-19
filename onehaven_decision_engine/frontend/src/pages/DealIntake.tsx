@@ -59,6 +59,9 @@ export default function DealIntake() {
     }
   }
 
+  const createdDealId = ok?.id ?? ok?.deal_id ?? null;
+  const createdPropertyId = ok?.property_id ?? ok?.property?.id ?? null;
+
   return (
     <div className="space-y-6">
       <PageHero
@@ -158,9 +161,11 @@ export default function DealIntake() {
           </button>
 
           {err && <div className="text-sm text-red-300 break-all">{err}</div>}
+
           {ok && (
             <div className="text-sm text-emerald-300">
-              Created deal #{ok.id} for property #{ok.property_id}
+              Created deal #{createdDealId ?? "?"} for property #
+              {createdPropertyId ?? "?"}
             </div>
           )}
         </div>

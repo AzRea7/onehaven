@@ -126,6 +126,17 @@ async function requestArray<T = any>(
   return asArray<T>(data);
 }
 
+// Helpers for querystring
+function qs(params: Record<string, any>) {
+  const sp = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null) return;
+    sp.set(k, String(v));
+  });
+  const s = sp.toString();
+  return s ? `?${s}` : "";
+}
+
 export const api = {
   // Dashboard / properties
   dashboardProperties: (p: { limit: number; signal?: AbortSignal }) =>
@@ -141,7 +152,7 @@ export const api = {
   propertyBundle: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
 
-  // Deal creation (Phase 1)
+  // Deal creation (Phase 1) - existing
   createDeal: (payload: {
     property_id: number;
     asking_price: number;
@@ -168,29 +179,58 @@ export const api = {
       }),
     }),
 
+  // ✅ Deal Intake (Phase 1) - used by DealIntake.tsx
+  // Your backend typically has an intake endpoint like /intake/deal or /intake.
+  // This version tries /intake/deal first; if your backend uses a different path, adjust here.
+  intakeDeal: (payload: any) =>
+    request<any>(`/intake/deal`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   // Rent pipeline actions (Phase 3)
   enrichProperty: (propertyId: number, strategy: string = "section8") =>
-    request<any>(
-      `/rent/enrich?property_id=${propertyId}&strategy=${encodeURIComponent(strategy)}`,
-      { method: "POST", body: JSON.stringify({}) },
-    ),
+    request<any>(`/rent/enrich${qs({ property_id: propertyId, strategy })}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
 
+  // ✅ FIXED: backend route is GET /rent/explain/{property_id}
   explainProperty: (
     propertyId: number,
     strategy: string = "section8",
     persist: boolean = true,
+    payment_standard_pct?: number,
   ) =>
     request<any>(
-      `/rent/explain?property_id=${propertyId}&strategy=${encodeURIComponent(
+      `/rent/explain/${propertyId}${qs({
         strategy,
-      )}&persist=${persist ? "true" : "false"}`,
-      { method: "POST", body: JSON.stringify({}) },
+        persist: persist ? "true" : "false",
+        payment_standard_pct,
+      })}`,
+      { method: "GET", cacheTtlMs: 0 },
     ),
 
-  evaluateProperty: (propertyId: number, strategy: string = "section8") =>
-    request<any>(
-      `/evaluate/property/${propertyId}?strategy=${encodeURIComponent(strategy)}`,
-      { method: "POST", body: JSON.stringify({}) },
+  // ✅ Evaluate snapshot/run results already use POST /evaluate/run or /evaluate/snapshot
+  // Your previous api.ts had /evaluate/property/{id}; your backend excerpt shows /evaluate/run and /evaluate/results.
+  evaluateRun: (snapshotId: number, strategy: string = "section8") =>
+    request<any>(`/evaluate/run${qs({ snapshot_id: snapshotId, strategy })}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  evaluateResults: (params: {
+    snapshot_id?: number;
+    decision?: string;
+    limit?: number;
+  }) =>
+    requestArray<any>(
+      `/evaluate/results${qs({
+        snapshot_id: params.snapshot_id,
+        decision: params.decision,
+        limit: params.limit ?? 100,
+      })}`,
+      { cacheTtlMs: 1_000 },
     ),
 
   // ✅ Checklist / Compliance
@@ -210,11 +250,11 @@ export const api = {
     const persist = opts?.persist ?? true;
 
     return request<any>(
-      `/compliance/checklist/${propertyId}?strategy=${encodeURIComponent(
+      `/compliance/checklist/${propertyId}${qs({
         strategy,
-      )}&version=${encodeURIComponent(version)}&persist=${
-        persist ? "true" : "false"
-      }`,
+        version,
+        persist: persist ? "true" : "false",
+      })}`,
       { method: "POST", body: JSON.stringify({}) },
     );
   },
@@ -235,10 +275,13 @@ export const api = {
 
   // Rehab
   rehabTasks: (propertyId: number, signal?: AbortSignal) =>
-    requestArray<any>(`/rehab/tasks?property_id=${propertyId}&limit=500`, {
-      cacheTtlMs: 2_000,
-      signal,
-    }),
+    requestArray<any>(
+      `/rehab/tasks${qs({ property_id: propertyId, limit: 500 })}`,
+      {
+        cacheTtlMs: 2_000,
+        signal,
+      },
+    ),
 
   createRehabTask: (payload: any) =>
     request<any>(`/rehab/tasks`, {
@@ -246,34 +289,67 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  updateRehabTask: (taskId: number, payload: any) =>
+    request<any>(`/rehab/tasks/${taskId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteRehabTask: (taskId: number) =>
+    request<any>(`/rehab/tasks/${taskId}`, { method: "DELETE" }),
+
   // Tenants / leases
   leases: (propertyId: number, signal?: AbortSignal) =>
-    requestArray<any>(`/tenants/leases?property_id=${propertyId}&limit=200`, {
-      cacheTtlMs: 2_000,
-      signal,
+    requestArray<any>(
+      `/tenants/leases${qs({ property_id: propertyId, limit: 200 })}`,
+      {
+        cacheTtlMs: 2_000,
+        signal,
+      },
+    ),
+
+  createLease: (payload: any) =>
+    request<any>(`/tenants/leases`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 
   // Cash
   txns: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
-      `/cash/transactions?property_id=${propertyId}&limit=1000`,
+      `/cash/transactions${qs({ property_id: propertyId, limit: 1000 })}`,
       { cacheTtlMs: 2_000, signal },
     ),
+
+  createTxn: (payload: any) =>
+    request<any>(`/cash/transactions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   // Equity
   valuations: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
-      `/equity/valuations?property_id=${propertyId}&limit=200`,
+      `/equity/valuations${qs({ property_id: propertyId, limit: 200 })}`,
       { cacheTtlMs: 2_000, signal },
     ),
+
+  createValuation: (payload: any) =>
+    request<any>(`/equity/valuations`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   // Agents
   agents: () => requestArray<any>(`/agents`, { cacheTtlMs: 4_000 }),
 
   agentRuns: (propertyId: number) =>
-    requestArray<any>(`/agents/runs?property_id=${propertyId}&limit=200`, {
-      cacheTtlMs: 2_000,
-    }),
+    requestArray<any>(
+      `/agents/runs${qs({ property_id: propertyId, limit: 200 })}`,
+      {
+        cacheTtlMs: 2_000,
+      },
+    ),
 
   createAgentRun: (payload: any) =>
     request<any>(`/agents/runs`, {
@@ -284,7 +360,7 @@ export const api = {
   // Messages
   messages: (threadKey: string) =>
     requestArray<any>(
-      `/agents/messages?thread_key=${encodeURIComponent(threadKey)}&limit=200`,
+      `/agents/messages${qs({ thread_key: threadKey, limit: 200 })}`,
       { cacheTtlMs: 500 },
     ),
 
@@ -326,4 +402,54 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  // --------------------------
+  // ✅ Phase 2 - Jurisdictions
+  // (matches your backend jurisdictions.py routes)
+  // --------------------------
+
+  // List rules; includeGlobal=true => scope=all
+  listJurisdictionRules: (includeGlobal: boolean, state: string = "MI") => {
+    const scope = includeGlobal ? "all" : "org";
+    return requestArray<any>(`/jurisdictions/rules${qs({ scope, state })}`, {
+      cacheTtlMs: 2_000,
+    });
+  },
+
+  // Seed baseline defaults (your backend file didn’t show a seed route,
+  // so we provide a compatible call to a common seed endpoint.
+  // If you add /jurisdictions/seed, keep this.
+  seedJurisdictionDefaults: () =>
+    request<any>(`/jurisdictions/seed`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  // Create org override via the existing upsert endpoint
+  createJurisdictionRule: (payload: any) =>
+    request<any>(`/jurisdictions/rule${qs({ scope: "org" })}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // Delete org override via existing delete endpoint (needs city/state)
+  deleteJurisdictionRule: (idOrPayload: any) => {
+    // Your UI passes id, but backend delete uses city/state.
+    // So: if caller gives a number, they must supply city/state by looking it up.
+    // We keep it robust by requiring payload {city,state} OR passing rule object.
+    if (typeof idOrPayload === "number") {
+      throw new Error(
+        "deleteJurisdictionRule requires {city, state} or a rule object; UI should pass the rule.",
+      );
+    }
+    const city = idOrPayload.city;
+    const state = idOrPayload.state || "MI";
+    if (!city) throw new Error("deleteJurisdictionRule missing city");
+    return request<any>(
+      `/jurisdictions/rule${qs({ city, state, scope: "org" })}`,
+      {
+        method: "DELETE",
+      },
+    );
+  },
 };

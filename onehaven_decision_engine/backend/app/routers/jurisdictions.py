@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Literal, Any
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, or_, desc
@@ -244,164 +244,86 @@ def delete_rule(
 
 
 # --------------------------
-# New clean CRUD endpoints
+# ✅ NEW: Seed endpoint for Phase 2 operability
 # --------------------------
-@router.get("/rules/{rule_id}", response_model=dict)
-def get_rule(rule_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    row = db.scalar(select(JurisdictionRule).where(JurisdictionRule.id == rule_id))
-    if not row:
-        raise HTTPException(status_code=404, detail="rule not found")
-
-    # org safety: you can read global OR your org
-    if row.org_id is not None and row.org_id != p.org_id:
-        raise HTTPException(status_code=403, detail="forbidden")
-
-    return _row_to_dict(row)
-
-
-@router.post("/rules", response_model=dict)
-def create_rule(
-    payload: dict,
-    global_rule: bool = Query(default=False),
+@router.post("/seed", response_model=dict)
+def seed_michigan_defaults(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
+    _owner=Depends(require_owner),
 ):
     """
-    Create a jurisdiction rule.
-    - default org-scoped (operator+)
-    - global_rule=true => global (owner-only)
+    Creates a small set of global (org_id=NULL) MI defaults if missing.
+    Safe to run multiple times.
     """
-    if global_rule:
-        require_owner(p)
-        org_id = None
-    else:
-        require_operator(p)
-        org_id = p.org_id
-
-    city = _norm_city(payload.get("city") or "")
-    state = _norm_state(payload.get("state") or "MI")
-    if not city:
-        raise HTTPException(status_code=400, detail="city required")
-
-    existing = db.scalar(
-        select(JurisdictionRule).where(
-            (JurisdictionRule.org_id.is_(None) if org_id is None else JurisdictionRule.org_id == org_id),
-            JurisdictionRule.city == city,
-            JurisdictionRule.state == state,
-        )
-    )
-    if existing:
-        raise HTTPException(status_code=409, detail="rule already exists in this scope")
-
     now = datetime.utcnow()
-    row = JurisdictionRule(
-        org_id=org_id,
-        city=city,
-        state=state,
-        updated_at=now,
-        created_at=now,
-        rental_license_required=bool(payload.get("rental_license_required") or False),
-        inspection_authority=payload.get("inspection_authority"),
-        inspection_frequency=payload.get("inspection_frequency"),
-        typical_fail_points_json=payload.get("typical_fail_points_json") or "[]",
-        processing_days=payload.get("processing_days"),
-        tenant_waitlist_depth=payload.get("tenant_waitlist_depth"),
-        notes=payload.get("notes"),
-    )
-    db.add(row)
+
+    defaults = [
+        dict(
+            city="Detroit",
+            state="MI",
+            rental_license_required=True,
+            inspection_authority="City of Detroit",
+            inspection_frequency="annual",
+            typical_fail_points_json='["GFCI missing","handrails","peeling paint","smoke/CO detectors","broken windows"]',
+            processing_days=21,
+            tenant_waitlist_depth="high",
+            notes="Baseline default. Override per neighborhood/authority if needed.",
+        ),
+        dict(
+            city="Pontiac",
+            state="MI",
+            rental_license_required=True,
+            inspection_authority="City of Pontiac",
+            inspection_frequency="annual",
+            typical_fail_points_json='["GFCI missing","peeling paint","egress issues","utilities not secured"]',
+            processing_days=14,
+            tenant_waitlist_depth="medium",
+            notes="Baseline default. Confirm local registration/fees.",
+        ),
+        dict(
+            city="Royal Oak",
+            state="MI",
+            rental_license_required=True,
+            inspection_authority="City of Royal Oak",
+            inspection_frequency="periodic",
+            typical_fail_points_json='["handrails","GFCI missing","smoke/CO detectors","egress"]',
+            processing_days=10,
+            tenant_waitlist_depth="medium",
+            notes="Baseline default. Verify frequency by rental license type.",
+        ),
+    ]
+
+    created = 0
+    for d in defaults:
+        city = _norm_city(d["city"])
+        state = _norm_state(d["state"])
+        exists = db.scalar(
+          select(JurisdictionRule).where(
+              JurisdictionRule.org_id.is_(None),
+              JurisdictionRule.city == city,
+              JurisdictionRule.state == state,
+          )
+        )
+        if exists:
+            continue
+
+        row = JurisdictionRule(
+            org_id=None,
+            city=city,
+            state=state,
+            rental_license_required=bool(d.get("rental_license_required", False)),
+            inspection_authority=d.get("inspection_authority"),
+            inspection_frequency=d.get("inspection_frequency"),
+            typical_fail_points_json=d.get("typical_fail_points_json") or "[]",
+            processing_days=d.get("processing_days"),
+            tenant_waitlist_depth=d.get("tenant_waitlist_depth"),
+            notes=d.get("notes"),
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+        created += 1
+
     db.commit()
-    db.refresh(row)
-
-    emit_audit(
-        db,
-        org_id=p.org_id,
-        actor_user_id=p.user_id,
-        action="jurisdiction_rule.create",
-        entity_type="JurisdictionRule",
-        entity_id=str(row.id),
-        before=None,
-        after=_row_to_dict(row),
-    )
-    db.commit()
-    return _row_to_dict(row)
-
-
-@router.patch("/rules/{rule_id}", response_model=dict)
-def update_rule(rule_id: int, payload: dict, db: Session = Depends(get_db), p=Depends(get_principal)):
-    row = db.scalar(select(JurisdictionRule).where(JurisdictionRule.id == rule_id))
-    if not row:
-        raise HTTPException(status_code=404, detail="rule not found")
-
-    if row.org_id is None:
-        require_owner(p)
-    else:
-        require_operator(p)
-        if row.org_id != p.org_id:
-            raise HTTPException(status_code=403, detail="forbidden")
-
-    before = _row_to_dict(row)
-
-    if "city" in payload:
-        row.city = _norm_city(payload.get("city") or row.city)
-    if "state" in payload:
-        row.state = _norm_state(payload.get("state") or row.state)
-
-    for k in [
-        "rental_license_required",
-        "inspection_authority",
-        "inspection_frequency",
-        "typical_fail_points_json",
-        "processing_days",
-        "tenant_waitlist_depth",
-        "notes",
-    ]:
-        if k in payload and hasattr(row, k):
-            setattr(row, k, payload.get(k))
-
-    row.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(row)
-
-    emit_audit(
-        db,
-        org_id=p.org_id,
-        actor_user_id=p.user_id,
-        action="jurisdiction_rule.update",
-        entity_type="JurisdictionRule",
-        entity_id=str(row.id),
-        before=before,
-        after=_row_to_dict(row),
-    )
-    db.commit()
-    return _row_to_dict(row)
-
-
-@router.delete("/rules/{rule_id}", response_model=dict)
-def delete_rule_by_id(rule_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    row = db.scalar(select(JurisdictionRule).where(JurisdictionRule.id == rule_id))
-    if not row:
-        raise HTTPException(status_code=404, detail="rule not found")
-
-    if row.org_id is None:
-        require_owner(p)
-    else:
-        require_operator(p)
-        if row.org_id != p.org_id:
-            raise HTTPException(status_code=403, detail="forbidden")
-
-    before = _row_to_dict(row)
-    db.delete(row)
-    db.commit()
-
-    emit_audit(
-        db,
-        org_id=p.org_id,
-        actor_user_id=p.user_id,
-        action="jurisdiction_rule.delete",
-        entity_type="JurisdictionRule",
-        entity_id=str(rule_id),
-        before=before,
-        after=None,
-    )
-    db.commit()
-    return {"ok": True}
+    return {"ok": True, "created": created}

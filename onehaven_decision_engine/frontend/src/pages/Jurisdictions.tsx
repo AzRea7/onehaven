@@ -6,6 +6,24 @@ import GlassCard from "../components/GlassCard";
 
 type Rule = any;
 
+function parseMaybeJsonArray(v: any): string[] {
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      // fall through
+    }
+    // allow comma-separated fallback
+    return v
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 export default function Jurisdictions() {
   const [rules, setRules] = React.useState<Rule[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
@@ -26,7 +44,7 @@ export default function Jurisdictions() {
 
   async function refresh() {
     setErr(null);
-    const out = await api.listJurisdictionRules(true);
+    const out = await api.listJurisdictionRules(true, "MI");
     setRules(Array.isArray(out) ? out : []);
   }
 
@@ -51,20 +69,28 @@ export default function Jurisdictions() {
     setBusy(true);
     setErr(null);
     try {
+      const points = draft.typical_fail_points
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
       const payload = {
-        ...draft,
+        city: draft.city,
+        state: draft.state,
+        rental_license_required: draft.rental_license_required,
         inspection_authority: draft.inspection_authority || null,
-        typical_fail_points: draft.typical_fail_points
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        inspection_frequency: draft.inspection_frequency || null,
+        typical_fail_points_json: JSON.stringify(points),
         registration_fee: draft.registration_fee
           ? Number(draft.registration_fee)
           : null,
         processing_days: draft.processing_days
           ? Number(draft.processing_days)
           : null,
+        tenant_waitlist_depth: draft.tenant_waitlist_depth || null,
+        notes: draft.notes || null,
       };
+
       await api.createJurisdictionRule(payload);
       setDraft((s) => ({ ...s, city: "" }));
       await refresh();
@@ -75,11 +101,11 @@ export default function Jurisdictions() {
     }
   }
 
-  async function del(id: number) {
+  async function del(rule: Rule) {
     setBusy(true);
     setErr(null);
     try {
-      await api.deleteJurisdictionRule(id);
+      await api.deleteJurisdictionRule(rule); // pass rule (city/state)
       await refresh();
     } catch (e: any) {
       setErr(String(e.message || e));
@@ -161,42 +187,44 @@ export default function Jurisdictions() {
       </GlassCard>
 
       <div className="grid grid-cols-1 gap-3">
-        {rules.map((r) => (
-          <GlassCard key={r.id}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-lg font-semibold">
-                  {r.city}, {r.state}{" "}
-                  <span className="text-xs text-white/50">
-                    {r.org_id ? "(Org override)" : "(Global default)"}
-                  </span>
+        {rules.map((r) => {
+          const failPoints = parseMaybeJsonArray(
+            r.typical_fail_points_json ?? r.typical_fail_points,
+          );
+          return (
+            <GlassCard key={r.id}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-lg font-semibold">
+                    {r.city}, {r.state}{" "}
+                    <span className="text-xs text-white/50">
+                      {r.org_id ? "(Org override)" : "(Global default)"}
+                    </span>
+                  </div>
+                  <div className="text-sm text-white/70">
+                    License: {String(!!r.rental_license_required)} • Processing
+                    days: {r.processing_days ?? "—"} • Frequency:{" "}
+                    {r.inspection_frequency ?? "—"}
+                  </div>
                 </div>
-                <div className="text-sm text-white/70">
-                  License: {String(r.rental_license_required)} • Processing
-                  days: {r.processing_days ?? "—"} • Frequency:{" "}
-                  {r.inspection_frequency ?? "—"}
-                </div>
+
+                {r.org_id && (
+                  <button
+                    onClick={() => del(r)}
+                    disabled={busy}
+                    className="rounded-xl px-3 py-1 bg-red-500/15 border border-red-500/25 hover:bg-red-500/20 text-red-200"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
 
-              {r.org_id && (
-                <button
-                  onClick={() => del(r.id)}
-                  disabled={busy}
-                  className="rounded-xl px-3 py-1 bg-red-500/15 border border-red-500/25 hover:bg-red-500/20 text-red-200"
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-
-            <div className="mt-3 text-sm text-white/70">
-              Fail points:{" "}
-              {Array.isArray(r.typical_fail_points_json)
-                ? r.typical_fail_points_json.join(", ")
-                : r.typical_fail_points_json || r.typical_fail_points || "—"}
-            </div>
-          </GlassCard>
-        ))}
+              <div className="mt-3 text-sm text-white/70">
+                Fail points: {failPoints.length ? failPoints.join(", ") : "—"}
+              </div>
+            </GlassCard>
+          );
+        })}
       </div>
     </div>
   );

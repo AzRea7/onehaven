@@ -1,3 +1,4 @@
+# backend/app/routers/cash.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,24 +8,20 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Transaction, Property
+from ..models import Transaction
 from ..schemas import TransactionCreate, TransactionOut
 from ..domain.audit import emit_audit
-from ..domain.events import emit_workflow_event
+
+from ..services.ownership import must_get_property
+from ..services.events_facade import wf
+from ..services.property_state_machine import advance_stage_if_needed
 
 router = APIRouter(prefix="/cash", tags=["cash"])
 
 
-def _get_property_or_404(db: Session, *, org_id: int, property_id: int) -> Property:
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="property not found")
-    return prop
-
-
 @router.post("/transactions", response_model=TransactionOut)
 def create_txn(payload: TransactionCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    _get_property_or_404(db, org_id=p.org_id, property_id=payload.property_id)
+    must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
 
     data = payload.model_dump()
     data["org_id"] = p.org_id
@@ -45,15 +42,19 @@ def create_txn(payload: TransactionCreate, db: Session = Depends(get_db), p=Depe
         before=None,
         after=row.model_dump(),
     )
-    emit_workflow_event(
+    wf(
         db,
         org_id=p.org_id,
         actor_user_id=p.user_id,
-        event_type="transaction_created",
-        payload={"transaction_id": row.id, "property_id": row.property_id, "txn_type": row.txn_type, "amount": row.amount},
+        event_type="transaction.created",
+        property_id=row.property_id,
+        payload={"transaction_id": row.id, "txn_type": row.txn_type, "amount": row.amount},
     )
-    db.commit()
 
+    # Phase 4: cash activity pushes you into cash stage
+    advance_stage_if_needed(db, org_id=p.org_id, property_id=row.property_id, suggested_stage="cash")
+
+    db.commit()
     return row
 
 
@@ -68,7 +69,7 @@ def list_txns(
     q = select(Transaction).where(Transaction.org_id == p.org_id)
 
     if property_id is not None:
-        _get_property_or_404(db, org_id=p.org_id, property_id=int(property_id))
+        must_get_property(db, org_id=p.org_id, property_id=property_id)
         q = q.where(Transaction.property_id == property_id)
 
     if txn_type:
@@ -76,3 +77,78 @@ def list_txns(
 
     q = q.order_by(desc(Transaction.txn_date)).limit(limit)
     return list(db.scalars(q).all())
+
+
+@router.patch("/transactions/{transaction_id}", response_model=TransactionOut)
+def update_txn(
+    transaction_id: int,
+    payload: TransactionCreate,  # full-update for simplicity
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    row = db.scalar(select(Transaction).where(Transaction.id == transaction_id, Transaction.org_id == p.org_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="transaction not found")
+
+    before = row.model_dump()
+
+    must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
+
+    data = payload.model_dump()
+    for k, v in data.items():
+        setattr(row, k, v)
+
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    emit_audit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        action="transaction.update",
+        entity_type="Transaction",
+        entity_id=str(row.id),
+        before=before,
+        after=row.model_dump(),
+    )
+    wf(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="transaction.updated",
+        property_id=row.property_id,
+        payload={"transaction_id": row.id, "txn_type": row.txn_type, "amount": row.amount},
+    )
+    db.commit()
+    return row
+
+
+@router.delete("/transactions/{transaction_id}")
+def delete_txn(transaction_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    row = db.scalar(select(Transaction).where(Transaction.id == transaction_id, Transaction.org_id == p.org_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="transaction not found")
+
+    emit_audit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        action="transaction.delete",
+        entity_type="Transaction",
+        entity_id=str(row.id),
+        before=row.model_dump(),
+        after=None,
+    )
+    wf(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="transaction.deleted",
+        property_id=row.property_id,
+        payload={"transaction_id": row.id},
+    )
+
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
