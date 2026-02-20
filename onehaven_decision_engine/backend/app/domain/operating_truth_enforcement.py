@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from fastapi import HTTPException
 
@@ -22,11 +21,9 @@ class DealIntakeFacts:
 
 def enforce_constitution_for_deal_intake(f: DealIntakeFacts) -> None:
     """
-    This is Phase 0: Operating Truth = laws in code.
+    Phase 0: Operating Truth = laws in code.
     Every entry point must call this (intake, create deal, imports, future edits).
     """
-
-    # --- core “laws” ---
     if f.asking_price > settings.max_price:
         raise HTTPException(
             status_code=422,
@@ -39,12 +36,37 @@ def enforce_constitution_for_deal_intake(f: DealIntakeFacts) -> None:
             detail=f"Constitution: bedrooms {f.bedrooms} below min_bedrooms {settings.min_bedrooms}",
         )
 
-    # sanity
     if not f.address.strip() or not f.city.strip() or not f.zip.strip():
         raise HTTPException(status_code=422, detail="Missing address/city/zip")
 
     if f.bathrooms <= 0:
         raise HTTPException(status_code=422, detail="bathrooms must be > 0")
+
+
+def enforce_constitution_for_property_and_price(
+    *,
+    address: str,
+    city: str,
+    state: str,
+    zip: str,
+    bedrooms: int,
+    bathrooms: float,
+    asking_price: float,
+) -> None:
+    """
+    Convenience helper for create/edit paths (keeps routers clean).
+    """
+    enforce_constitution_for_deal_intake(
+        DealIntakeFacts(
+            address=address,
+            city=city,
+            state=state,
+            zip=zip,
+            bedrooms=int(bedrooms),
+            bathrooms=float(bathrooms),
+            asking_price=float(asking_price),
+        )
+    )
 
 
 def enforce_rent_assumption_required(*, has_rent_assumption: bool) -> None:

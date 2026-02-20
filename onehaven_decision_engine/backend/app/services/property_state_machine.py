@@ -6,40 +6,36 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, date
 from typing import Optional, Any, Dict, List, Tuple
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, desc
 from sqlalchemy.orm import Session
 
 from ..models import (
+    Property,
     PropertyState,
     Deal,
     UnderwritingResult,
-    ComplianceChecklist,
-    ComplianceChecklistItem,
+    PropertyChecklistItem,
     Inspection,
     InspectionItem,
     RehabTask,
     Lease,
-    CashTransaction,
+    Transaction,
     Valuation,
 )
 
 # -----------------------------------------------------------------------------
-# Property State Machine (Phase 4 loop-closer)
+# Property State Machine (Phase 3/4 loop closer)
 # -----------------------------------------------------------------------------
-# Goal:
-#   Maintain a single row per property that answers:
-#     - What "stage" is this property in right now?
-#     - What constraints prevent advancing?
-#     - What tasks are outstanding (at a high level)?
+# Single source of truth row per property:
+#   - current_stage
+#   - constraints_json
+#   - outstanding_tasks_json
 #
-# This file intentionally does NOT enforce business rules in routes directly.
-# It provides a consistent derived "truth" row that routes /ops and UI can use.
+# Derived deterministically from persisted artifacts:
+# underwriting -> checklist -> inspection -> rehab -> lease -> cash -> valuation
 # -----------------------------------------------------------------------------
 
 STAGE_ORDER = ["deal", "rehab", "compliance", "tenant", "cash", "equity"]
-
-# If you later want finer states, keep current_stage coarse and add
-# constraints/outstanding detail. Don’t explode stage enums too early.
 
 
 def _utcnow() -> datetime:
@@ -78,24 +74,24 @@ def _dumps_json(x: Optional[dict]) -> str:
 @dataclass(frozen=True)
 class ChecklistProgress:
     total: int
-    done: int
-    failed: int
-    blocked: int
+    todo: int
     in_progress: int
+    blocked: int
+    failed: int
+    done: int
 
     @property
     def pct_done(self) -> float:
-        if self.total <= 0:
-            return 0.0
-        return float(self.done) / float(self.total)
+        return 0.0 if self.total <= 0 else float(self.done) / float(self.total)
 
     def as_dict(self) -> dict:
         return {
             "total": self.total,
-            "done": self.done,
-            "failed": self.failed,
-            "blocked": self.blocked,
+            "todo": self.todo,
             "in_progress": self.in_progress,
+            "blocked": self.blocked,
+            "failed": self.failed,
+            "done": self.done,
             "pct_done": self.pct_done,
         }
 
@@ -114,59 +110,7 @@ class InspectionStatus:
         }
 
 
-@dataclass(frozen=True)
-class LeaseStatus:
-    has_active_lease: bool
-    active_lease_id: Optional[int]
-
-    def as_dict(self) -> dict:
-        return {
-            "has_active_lease": self.has_active_lease,
-            "active_lease_id": self.active_lease_id,
-        }
-
-
-@dataclass(frozen=True)
-class CashStatus:
-    last_txn_at: Optional[datetime]
-    last_30d_net: Optional[float]
-    last_90d_net: Optional[float]
-
-    def as_dict(self) -> dict:
-        return {
-            "last_txn_at": self.last_txn_at.isoformat() if self.last_txn_at else None,
-            "last_30d_net": self.last_30d_net,
-            "last_90d_net": self.last_90d_net,
-        }
-
-
-@dataclass(frozen=True)
-class EquityStatus:
-    latest_valuation_at: Optional[date]
-    estimated_value: Optional[float]
-    loan_balance: Optional[float]
-    estimated_equity: Optional[float]
-
-    def as_dict(self) -> dict:
-        return {
-            "latest_valuation_at": self.latest_valuation_at.isoformat()
-            if self.latest_valuation_at
-            else None,
-            "estimated_value": self.estimated_value,
-            "loan_balance": self.loan_balance,
-            "estimated_equity": self.estimated_equity,
-        }
-
-
-# -----------------------------------------------------------------------------
-# Core row helpers
-# -----------------------------------------------------------------------------
-
-
 def ensure_state_row(db: Session, *, org_id: int, property_id: int) -> PropertyState:
-    """
-    Ensure a PropertyState row exists. Default stage is 'deal'.
-    """
     row = db.scalar(
         select(PropertyState).where(
             PropertyState.org_id == org_id,
@@ -202,8 +146,8 @@ def advance_stage_if_needed(
     """
     Conservative stage advance:
       - never moves backward
-      - only updates to a higher-ranked stage
-      - can update constraints/tasks in place
+      - only updates to higher-ranked stage
+      - always updates constraints/tasks if provided
     """
     row = ensure_state_row(db, org_id=org_id, property_id=property_id)
 
@@ -215,7 +159,6 @@ def advance_stage_if_needed(
 
     if constraints is not None:
         row.constraints_json = _dumps_json(constraints)
-
     if outstanding_tasks is not None:
         row.outstanding_tasks_json = _dumps_json(outstanding_tasks)
 
@@ -226,279 +169,161 @@ def advance_stage_if_needed(
 
 
 # -----------------------------------------------------------------------------
-# Derivation logic (this is the “closing loops” piece)
+# Derivation helpers
 # -----------------------------------------------------------------------------
 
-
 def _get_latest_deal(db: Session, *, org_id: int, property_id: int) -> Optional[Deal]:
-    # If your schema allows multiple deals per property, choose latest by id.
     return db.scalar(
         select(Deal)
         .where(and_(Deal.org_id == org_id, Deal.property_id == property_id))
-        .order_by(Deal.id.desc())
+        .order_by(desc(Deal.id))
         .limit(1)
     )
 
 
-def _get_latest_underwriting(
-    db: Session, *, org_id: int, property_id: int
-) -> Optional[UnderwritingResult]:
+def _get_latest_underwriting(db: Session, *, org_id: int, property_id: int) -> Optional[UnderwritingResult]:
+    # UnderwritingResult references deal_id, so join through Deal
     return db.scalar(
         select(UnderwritingResult)
-        .where(
-            and_(
-                UnderwritingResult.org_id == org_id,
-                UnderwritingResult.property_id == property_id,
-            )
-        )
-        .order_by(UnderwritingResult.id.desc())
+        .join(Deal, Deal.id == UnderwritingResult.deal_id)
+        .where(UnderwritingResult.org_id == org_id, Deal.property_id == property_id)
+        .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
         .limit(1)
     )
 
 
-def _get_latest_checklist(
-    db: Session, *, org_id: int, property_id: int
-) -> Optional[ComplianceChecklist]:
-    return db.scalar(
-        select(ComplianceChecklist)
-        .where(
-            and_(
-                ComplianceChecklist.org_id == org_id,
-                ComplianceChecklist.property_id == property_id,
-            )
+def _compute_checklist_progress(db: Session, *, org_id: int, property_id: int) -> ChecklistProgress:
+    rows = db.scalars(
+        select(PropertyChecklistItem.status).where(
+            PropertyChecklistItem.org_id == org_id,
+            PropertyChecklistItem.property_id == property_id,
         )
-        .order_by(ComplianceChecklist.id.desc())
-        .limit(1)
-    )
-
-
-def _compute_checklist_progress(
-    db: Session, *, org_id: int, checklist_id: int
-) -> ChecklistProgress:
-    items: List[Tuple[str, int]] = db.execute(
-        select(
-            func.lower(ComplianceChecklistItem.status).label("st"),
-            func.count(ComplianceChecklistItem.id),
-        )
-        .where(
-            and_(
-                ComplianceChecklistItem.org_id == org_id,
-                ComplianceChecklistItem.checklist_id == checklist_id,
-            )
-        )
-        .group_by(func.lower(ComplianceChecklistItem.status))
     ).all()
 
-    counts = {st or "todo": int(c) for (st, c) in items}
-    # Treat null/unknown as todo
-    total = sum(counts.values())
-    done = counts.get("done", 0)
-    failed = counts.get("failed", 0)
-    blocked = counts.get("blocked", 0)
-    in_progress = counts.get("in_progress", 0) + counts.get("in progress", 0)
+    total = len(rows)
+    todo = inprog = blocked = failed = done = 0
+    for s in rows:
+        st = (s or "todo").lower().strip()
+        if st == "done":
+            done += 1
+        elif st == "failed":
+            failed += 1
+        elif st == "blocked":
+            blocked += 1
+        elif st == "in_progress":
+            inprog += 1
+        else:
+            todo += 1
 
     return ChecklistProgress(
-        total=total, done=done, failed=failed, blocked=blocked, in_progress=in_progress
+        total=total,
+        todo=todo,
+        in_progress=inprog,
+        blocked=blocked,
+        failed=failed,
+        done=done,
     )
 
 
-def _get_latest_inspection(
-    db: Session, *, org_id: int, property_id: int
-) -> Optional[Inspection]:
+def _get_latest_inspection(db: Session, *, property_id: int) -> Optional[Inspection]:
     return db.scalar(
         select(Inspection)
-        .where(and_(Inspection.org_id == org_id, Inspection.property_id == property_id))
-        .order_by(Inspection.id.desc())
+        .where(Inspection.property_id == property_id)
+        .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
         .limit(1)
     )
 
 
-def _compute_inspection_status(
-    db: Session, *, org_id: int, inspection: Optional[Inspection]
-) -> InspectionStatus:
-    if not inspection:
-        return InspectionStatus(exists=False, latest_passed=False, open_failed_items=0)
-
-    # Interpret "passed" field robustly (some schemas use outcome/status)
-    passed = bool(getattr(inspection, "passed", False))
-    # Count unresolved failed items (status == failed and not resolved)
-    # Adapt to your schema fields:
-    #  - InspectionItem.status: failed/done/etc.
-    #  - InspectionItem.resolved_at or is_resolved
-    # If your model differs, adjust here.
-    q = select(func.count(InspectionItem.id)).where(
-        and_(
-            InspectionItem.org_id == org_id,
-            InspectionItem.inspection_id == inspection.id,
-            func.lower(InspectionItem.status) == "failed",
-            # Try both styles; if column missing, SQLAlchemy will throw at import time.
-            # If your schema does not have resolved_at, remove this and use your field.
-            getattr(InspectionItem, "resolved_at", None) == None,  # noqa: E711
-        )
-    )
-
-    open_failed = 0
-    try:
-        open_failed = int(db.scalar(q) or 0)
-    except Exception:
-        # Fallback if resolved_at isn't present in your schema: just count failed
-        open_failed = int(
-            db.scalar(
-                select(func.count(InspectionItem.id)).where(
-                    and_(
-                        InspectionItem.org_id == org_id,
-                        InspectionItem.inspection_id == inspection.id,
-                        func.lower(InspectionItem.status) == "failed",
-                    )
-                )
-            )
-            or 0
-        )
-
-    # If there are open failed items, treat as not passed even if inspection.passed is True
-    if open_failed > 0:
-        passed = False
-
-    return InspectionStatus(exists=True, latest_passed=passed, open_failed_items=open_failed)
-
-
-def _compute_rehab_open_count(db: Session, *, org_id: int, property_id: int) -> int:
-    # Assume RehabTask.status has values like todo/in_progress/done/blocked
-    # Open = not done
+def _open_failed_inspection_items(db: Session, *, property_id: int) -> int:
     return int(
         db.scalar(
-            select(func.count(RehabTask.id)).where(
-                and_(
-                    RehabTask.org_id == org_id,
-                    RehabTask.property_id == property_id,
-                    func.lower(RehabTask.status) != "done",
-                )
+            select(func.count(InspectionItem.id))
+            .select_from(InspectionItem)
+            .join(Inspection, Inspection.id == InspectionItem.inspection_id)
+            .where(
+                Inspection.property_id == property_id,
+                InspectionItem.failed.is_(True),
+                InspectionItem.resolved_at.is_(None),
             )
         )
         or 0
     )
 
 
-def _compute_lease_status(
-    db: Session, *, org_id: int, property_id: int
-) -> LeaseStatus:
-    # Active lease: start_date <= today and (end_date is null or end_date >= today)
-    today = date.today()
+def _compute_inspection_status(db: Session, *, property_id: int) -> InspectionStatus:
+    insp = _get_latest_inspection(db, property_id=property_id)
+    if not insp:
+        return InspectionStatus(exists=False, latest_passed=False, open_failed_items=0)
+
+    open_failed = _open_failed_inspection_items(db, property_id=property_id)
+    passed = bool(getattr(insp, "passed", False))
+    # If there are open failed items, treat as not passed regardless of 'passed'
+    if open_failed > 0:
+        passed = False
+
+    return InspectionStatus(exists=True, latest_passed=passed, open_failed_items=open_failed)
+
+
+def _rehab_open_count(db: Session, *, org_id: int, property_id: int) -> int:
+    return int(
+        db.scalar(
+            select(func.count(RehabTask.id)).where(
+                RehabTask.org_id == org_id,
+                RehabTask.property_id == property_id,
+                func.lower(RehabTask.status) != "done",
+            )
+        )
+        or 0
+    )
+
+
+def _has_active_lease(db: Session, *, org_id: int, property_id: int) -> bool:
+    now = _utcnow()
+    # If Lease.start_date is date type, comparing to datetime can be funky; normalize to date
+    today = now.date()
     lease = db.scalar(
         select(Lease)
         .where(
-            and_(
-                Lease.org_id == org_id,
-                Lease.property_id == property_id,
-                Lease.start_date <= today,
-                (Lease.end_date == None) | (Lease.end_date >= today),  # noqa: E711
-            )
+            Lease.org_id == org_id,
+            Lease.property_id == property_id,
+            Lease.start_date <= today,
+            func.coalesce(Lease.end_date, today + timedelta(days=3650)) >= today,
         )
-        .order_by(Lease.id.desc())
+        .order_by(desc(Lease.start_date), desc(Lease.id))
         .limit(1)
     )
-    return LeaseStatus(has_active_lease=lease is not None, active_lease_id=getattr(lease, "id", None))
+    return lease is not None
 
 
-def _sum_cash_window(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-    days: int,
-) -> Optional[float]:
-    # Interpret CashTransaction.amount signed:
-    # - If you store expenses as negative amounts already, just sum.
-    # - If you store txn_type and amount always positive, you should adjust here.
-    start = _utcnow() - timedelta(days=days)
-    # Many schemas use txn_date date not datetime; comparing with datetime still works in PG.
-    total = db.scalar(
-        select(func.coalesce(func.sum(CashTransaction.amount), 0.0)).where(
-            and_(
-                CashTransaction.org_id == org_id,
-                CashTransaction.property_id == property_id,
-                CashTransaction.txn_date >= start.date(),
-            )
+def _last_txn_date(db: Session, *, org_id: int, property_id: int) -> Optional[date]:
+    # Transaction.txn_date in your ops.py usage
+    return db.scalar(
+        select(func.max(Transaction.txn_date)).where(
+            Transaction.org_id == org_id,
+            Transaction.property_id == property_id,
         )
     )
-    try:
-        return float(total)
-    except Exception:
-        return None
 
 
-def _compute_cash_status(
-    db: Session, *, org_id: int, property_id: int
-) -> CashStatus:
-    last_txn_at = db.scalar(
-        select(func.max(CashTransaction.txn_date)).where(
-            and_(
-                CashTransaction.org_id == org_id,
-                CashTransaction.property_id == property_id,
-            )
-        )
-    )
-    # last_txn_at might be a date; normalize to datetime-ish for consistent serialization
-    if isinstance(last_txn_at, date) and not isinstance(last_txn_at, datetime):
-        last_txn_at_dt = datetime.combine(last_txn_at, datetime.min.time())
-    else:
-        last_txn_at_dt = last_txn_at
-
-    last_30 = _sum_cash_window(db, org_id=org_id, property_id=property_id, days=30)
-    last_90 = _sum_cash_window(db, org_id=org_id, property_id=property_id, days=90)
-    return CashStatus(last_txn_at=last_txn_at_dt, last_30d_net=last_30, last_90d_net=last_90)
-
-
-def _compute_equity_status(
-    db: Session, *, org_id: int, property_id: int
-) -> EquityStatus:
-    v = db.scalar(
+def _latest_valuation(db: Session, *, org_id: int, property_id: int) -> Optional[Valuation]:
+    return db.scalar(
         select(Valuation)
-        .where(and_(Valuation.org_id == org_id, Valuation.property_id == property_id))
-        .order_by(Valuation.id.desc())
+        .where(Valuation.org_id == org_id, Valuation.property_id == property_id)
+        .order_by(desc(Valuation.as_of), desc(Valuation.id))
         .limit(1)
     )
-    if not v:
-        return EquityStatus(
-            latest_valuation_at=None,
-            estimated_value=None,
-            loan_balance=None,
-            estimated_equity=None,
-        )
 
-    as_of = getattr(v, "as_of", None)
-    if isinstance(as_of, datetime):
-        as_of_d = as_of.date()
-    else:
-        as_of_d = as_of if isinstance(as_of, date) else None
 
-    est_value = getattr(v, "estimated_value", None)
-    loan = getattr(v, "loan_balance", None)
-
-    eq = None
-    try:
-        if est_value is not None and loan is not None:
-            eq = float(est_value) - float(loan)
-    except Exception:
-        eq = None
-
-    return EquityStatus(
-        latest_valuation_at=as_of_d,
-        estimated_value=float(est_value) if est_value is not None else None,
-        loan_balance=float(loan) if loan is not None else None,
-        estimated_equity=eq,
-    )
-
+# -----------------------------------------------------------------------------
+# Main derivation
+# -----------------------------------------------------------------------------
 
 def derive_stage_and_constraints(
     db: Session, *, org_id: int, property_id: int
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any], List[str]]:
     """
-    Derive:
-      - suggested_stage: one of STAGE_ORDER
-      - constraints: machine-readable blockers
-      - outstanding_tasks: machine-readable "work left"
-      - next_actions: human-readable short actions (UI-friendly)
+    Returns:
+      (suggested_stage, constraints_dict, tasks_dict, next_actions_human)
     """
     next_actions: List[str] = []
     constraints: Dict[str, Any] = {}
@@ -507,152 +332,105 @@ def derive_stage_and_constraints(
     deal = _get_latest_deal(db, org_id=org_id, property_id=property_id)
     uw = _get_latest_underwriting(db, org_id=org_id, property_id=property_id)
 
-    checklist = _get_latest_checklist(db, org_id=org_id, property_id=property_id)
-    cp = None
-    if checklist:
-        cp = _compute_checklist_progress(db, org_id=org_id, checklist_id=checklist.id)
+    checklist = _compute_checklist_progress(db, org_id=org_id, property_id=property_id)
+    insp = _compute_inspection_status(db, property_id=property_id)
+    rehab_open = _rehab_open_count(db, org_id=org_id, property_id=property_id)
+    has_lease = _has_active_lease(db, org_id=org_id, property_id=property_id)
+    last_txn = _last_txn_date(db, org_id=org_id, property_id=property_id)
+    val = _latest_valuation(db, org_id=org_id, property_id=property_id)
 
-    inspection = _get_latest_inspection(db, org_id=org_id, property_id=property_id)
-    insp = _compute_inspection_status(db, org_id=org_id, inspection=inspection)
-
-    rehab_open = _compute_rehab_open_count(db, org_id=org_id, property_id=property_id)
-    lease_status = _compute_lease_status(db, org_id=org_id, property_id=property_id)
-    cash_status = _compute_cash_status(db, org_id=org_id, property_id=property_id)
-    equity_status = _compute_equity_status(db, org_id=org_id, property_id=property_id)
-
-    # ---------------------------------------------------------
-    # Stage logic (coarse, conservative)
-    #
-    # The idea:
-    #   Deal stage: no deal or underwriting not run.
-    #   Rehab stage: deal exists, but rehab tasks exist and not done.
-    #   Compliance stage: rehab is basically done, but checklist/inspection not passed.
-    #   Tenant stage: compliance passed but no active lease.
-    #   Cash stage: active lease but no/low transaction reality.
-    #   Equity stage: cash stable and valuations exist.
-    # ---------------------------------------------------------
-
-    # 1) Deal prerequisites
+    # Stage 1: deal prerequisites
     if not deal:
         constraints["missing_deal"] = True
-        next_actions.append("Create a deal for this property.")
-        suggested = "deal"
         tasks["deal"] = {"missing": True}
-        return suggested, constraints, tasks, next_actions
-
-    # Underwriting is not a hard prerequisite for leaving "deal", but it is a practical one.
-    if not uw:
-        constraints["missing_underwriting"] = True
-        next_actions.append("Run evaluate to generate underwriting result.")
-        suggested = "deal"
-        tasks["deal"] = {"needs_underwriting": True}
-        return suggested, constraints, tasks, next_actions
-
-    # If underwriting says REJECT, keep stage at deal (you can override later if you want a "dead" stage)
-    decision = str(getattr(uw, "decision", "") or "").upper()
-    if decision == "REJECT":
-        constraints["rejected_by_underwriting"] = True
-        next_actions.append("Underwriting rejected this deal. Adjust inputs or archive.")
-        tasks["deal"] = {"rejected": True}
+        next_actions.append("Create a deal for this property.")
         return "deal", constraints, tasks, next_actions
 
-    # 2) Rehab stage if rehab tasks exist and are not done
+    if not uw:
+        constraints["missing_underwriting"] = True
+        tasks["deal"] = {"needs_underwriting": True}
+        next_actions.append("Run evaluate to generate underwriting result.")
+        return "deal", constraints, tasks, next_actions
+
+    decision = str(getattr(uw, "decision", "") or "").upper().strip()
+    if decision == "REJECT":
+        constraints["rejected_by_underwriting"] = True
+        tasks["deal"] = {"rejected": True}
+        next_actions.append("Underwriting rejected this deal. Adjust inputs or archive.")
+        return "deal", constraints, tasks, next_actions
+
+    # Stage 2: rehab if rehab tasks open
     if rehab_open > 0:
         tasks["rehab"] = {"open_tasks": rehab_open}
         next_actions.append(f"Complete rehab tasks ({rehab_open} open).")
-        # Even if compliance exists, we don’t advance past rehab until rehab is done.
-        suggested = "rehab"
-        return suggested, constraints, tasks, next_actions
+        return "rehab", constraints, tasks, next_actions
 
-    # 3) Compliance stage until checklist is mostly done and inspection passes
-    if not checklist:
+    # Stage 3: compliance until checklist + inspection pass
+    # If checklist doesn't exist yet, your model represents “no items” as total==0
+    if checklist.total == 0:
         constraints["missing_checklist"] = True
-        next_actions.append("Generate a compliance checklist.")
         tasks["compliance"] = {"needs_checklist": True}
+        next_actions.append("Generate compliance checklist (no checklist items found).")
         return "compliance", constraints, tasks, next_actions
 
-    if cp:
-        tasks["compliance"] = {
-            "checklist": cp.as_dict(),
-            "inspection": insp.as_dict(),
-        }
+    tasks["compliance"] = {
+        "checklist": checklist.as_dict(),
+        "inspection": insp.as_dict(),
+    }
 
-        # Hard blockers:
-        if cp.failed > 0:
-            constraints["checklist_failed_items"] = cp.failed
-            next_actions.append(f"Resolve failed checklist items ({cp.failed}).")
-        if cp.blocked > 0:
-            constraints["checklist_blocked_items"] = cp.blocked
-            next_actions.append(f"Unblock checklist items ({cp.blocked}).")
-        if cp.pct_done < 0.95:
-            # 95% threshold: you can change this (or make it config-driven).
-            constraints["checklist_incomplete"] = cp.as_dict()
-            remaining = max(0, cp.total - cp.done)
-            next_actions.append(f"Work checklist to completion ({remaining} remaining).")
+    if checklist.failed > 0:
+        constraints["checklist_failed_items"] = checklist.failed
+        next_actions.append(f"Resolve failed checklist items ({checklist.failed}).")
 
-    # Inspection reality:
-    # - If there are open failed inspection items, stay in compliance
-    # - If no inspection exists, prompt schedule
+    if checklist.blocked > 0:
+        constraints["checklist_blocked_items"] = checklist.blocked
+        next_actions.append(f"Unblock checklist items ({checklist.blocked}).")
+
+    # 95% threshold matches your previous intent; adjust later if you want strict 100%
+    if checklist.pct_done < 0.95:
+        constraints["checklist_incomplete"] = checklist.as_dict()
+        remaining = max(0, checklist.total - checklist.done)
+        next_actions.append(f"Work checklist to completion ({remaining} remaining).")
+
     if not insp.exists:
         constraints["missing_inspection"] = True
-        next_actions.append("Schedule an inspection (none recorded yet).")
+        next_actions.append("Create first inspection record (or schedule inspection).")
         return "compliance", constraints, tasks, next_actions
 
     if not insp.latest_passed:
         constraints["inspection_not_passed"] = insp.as_dict()
         if insp.open_failed_items > 0:
-            next_actions.append(
-                f"Fix inspection fail points ({insp.open_failed_items} open)."
-            )
+            next_actions.append(f"Resolve {insp.open_failed_items} inspection fail items.")
         else:
-            next_actions.append("Reinspect: latest inspection not marked passed.")
+            next_actions.append("Mark inspection passed or schedule reinspect.")
         return "compliance", constraints, tasks, next_actions
 
-    # If we got here, compliance is effectively "ready".
-    # 4) Tenant stage until there is an active lease
-    if not lease_status.has_active_lease:
+    # Stage 4: tenant until active lease exists
+    if not has_lease:
         constraints["missing_active_lease"] = True
-        next_actions.append("Create/activate a lease (no active lease).")
         tasks["tenant"] = {"needs_lease": True}
+        next_actions.append("Create/activate a lease (no active lease).")
         return "tenant", constraints, tasks, next_actions
 
-    # 5) Cash stage until we see transaction reality (or you can require rent payments)
-    # For now: if no txns in last 90 days, remain in cash with action.
-    tasks["cash"] = {"cash_status": cash_status.as_dict()}
-    if cash_status.last_txn_at is None:
+    # Stage 5: cash until transactions exist
+    tasks["cash"] = {"last_txn_date": last_txn.isoformat() if last_txn else None}
+    if last_txn is None:
         constraints["no_transactions"] = True
         next_actions.append("Add transactions (rent, expenses) to start cash tracking.")
         return "cash", constraints, tasks, next_actions
 
-    # 6) Equity stage requires at least one valuation
-    tasks["equity"] = {"equity_status": equity_status.as_dict()}
-    if equity_status.latest_valuation_at is None:
+    # Stage 6: equity until valuations exist
+    tasks["equity"] = {"has_valuation": val is not None}
+    if val is None:
         constraints["missing_valuation"] = True
-        next_actions.append("Add a valuation to track equity.")
+        next_actions.append("Add a valuation snapshot to track equity.")
         return "equity", constraints, tasks, next_actions
 
-    # If valuations exist and lease exists and transactions exist, you're at equity stage.
     return "equity", constraints, tasks, next_actions
 
 
-def sync_property_state(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-) -> PropertyState:
-    """
-    Public API:
-      - derive stage/constraints/tasks
-      - advance stage conservatively (never backwards)
-      - persist constraints/tasks
-    This is what your /ops endpoints should call.
-    """
-    suggested, constraints, tasks, _next_actions = derive_stage_and_constraints(
-        db, org_id=org_id, property_id=property_id
-    )
-
-    # Always update constraints/tasks, stage advances only if higher
+def sync_property_state(db: Session, *, org_id: int, property_id: int) -> PropertyState:
+    suggested, constraints, tasks, _ = derive_stage_and_constraints(db, org_id=org_id, property_id=property_id)
     row = advance_stage_if_needed(
         db,
         org_id=org_id,
@@ -672,32 +450,37 @@ def get_state_payload(
     recompute: bool = True,
 ) -> Dict[str, Any]:
     """
-    Helper for ops endpoints:
-      - returns a JSON-friendly payload of current stage + constraints + tasks
-      - can recompute (sync) first for freshness
+    UI-friendly payload: includes next_actions.
     """
     row = sync_property_state(db, org_id=org_id, property_id=property_id) if recompute else ensure_state_row(
         db, org_id=org_id, property_id=property_id
     )
 
-    constraints = _loads_json(getattr(row, "constraints_json", None))
-    tasks = _loads_json(getattr(row, "outstanding_tasks_json", None))
-
-    # Also return human next_actions derived from current signals (UI-friendly)
     suggested, constraints_live, tasks_live, next_actions = derive_stage_and_constraints(
         db, org_id=org_id, property_id=property_id
     )
 
-    # If recompute=False, these may differ; recompute=True keeps them aligned.
-    # We choose to trust the "live" next_actions always.
     return {
         "property_id": property_id,
         "current_stage": _clamp_stage(getattr(row, "current_stage", "deal")),
         "suggested_stage": suggested,
-        "constraints": constraints if not recompute else constraints_live,
-        "outstanding_tasks": tasks if not recompute else tasks_live,
+        "constraints": constraints_live if recompute else _loads_json(getattr(row, "constraints_json", None)),
+        "outstanding_tasks": tasks_live if recompute else _loads_json(getattr(row, "outstanding_tasks_json", None)),
         "next_actions": next_actions,
-        "updated_at": getattr(row, "updated_at", None).isoformat()
-        if getattr(row, "updated_at", None)
-        else None,
+        "updated_at": getattr(row, "updated_at", None).isoformat() if getattr(row, "updated_at", None) else None,
     }
+
+
+# -----------------------------------------------------------------------------
+# Backward-compatible function used by ops.py
+# -----------------------------------------------------------------------------
+
+def compute_and_persist_stage(db: Session, *, org_id: int, property: Property) -> PropertyState:
+    """
+    This is the exact function ops.py imports.
+    It recomputes and persists stage/constraints/tasks.
+    """
+    row = sync_property_state(db, org_id=org_id, property_id=property.id)
+    db.commit()
+    db.refresh(row)
+    return row

@@ -1,3 +1,4 @@
+# backend/app/routers/deals.py
 from __future__ import annotations
 
 import json
@@ -20,6 +21,7 @@ from ..schemas import (
     DealIntakeOut,
     PropertyOut,
 )
+from ..domain.operating_truth_enforcement import enforce_constitution_for_property_and_price
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 
@@ -92,7 +94,17 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_p
     if strategy not in {"section8", "market"}:
         raise HTTPException(status_code=400, detail="strategy must be 'section8' or 'market'")
 
-    # Resolve snapshot
+    # ✅ Phase 0 enforcement at intake boundary
+    enforce_constitution_for_property_and_price(
+        address=payload.address.strip(),
+        city=payload.city.strip(),
+        state=(payload.state or "MI").strip(),
+        zip=payload.zip.strip(),
+        bedrooms=int(payload.bedrooms),
+        bathrooms=float(payload.bathrooms),
+        asking_price=float(payload.purchase_price),
+    )
+
     snap_id = payload.snapshot_id
     if snap_id is None:
         snap_id = _get_or_create_manual_snapshot(db).id
@@ -101,7 +113,6 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_p
         if not snap:
             raise HTTPException(status_code=400, detail="Invalid snapshot_id")
 
-    # Create Property (ORG-SCOPED)
     prop = Property(
         org_id=p.org_id,
         address=payload.address.strip(),
@@ -120,7 +131,6 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_p
     db.commit()
     db.refresh(prop)
 
-    # Create Deal (ORG-SCOPED)
     d = Deal(
         org_id=p.org_id,
         property_id=prop.id,
@@ -139,7 +149,6 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_p
     db.commit()
     db.refresh(d)
 
-    # RentAssumption stub (ORG-SCOPED)
     ra = db.scalar(
         select(RentAssumption)
         .where(RentAssumption.property_id == prop.id)
@@ -170,10 +179,63 @@ def create_deal(payload: DealCreate, db: Session = Depends(get_db), p=Depends(ge
     if data.get("snapshot_id") is None:
         data["snapshot_id"] = _get_or_create_manual_snapshot(db).id
 
-    data["org_id"] = p.org_id
+    # ✅ Phase 0 enforcement at create boundary
+    enforce_constitution_for_property_and_price(
+        address=prop.address,
+        city=prop.city,
+        state=prop.state,
+        zip=prop.zip,
+        bedrooms=int(prop.bedrooms),
+        bathrooms=float(prop.bathrooms),
+        asking_price=float(data.get("asking_price") or data.get("estimated_purchase_price") or 0.0),
+    )
 
+    data["org_id"] = p.org_id
     d = Deal(**data)
     db.add(d)
+    db.commit()
+    db.refresh(d)
+    return d
+
+
+@router.put("/{deal_id}", response_model=DealOut)
+def update_deal(deal_id: int, payload: DealCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+    d = db.get(Deal, deal_id)
+    if not d or d.org_id != p.org_id:
+        raise HTTPException(status_code=404, detail="Deal not found")
+
+    prop = db.get(Property, payload.property_id)
+    if not prop or prop.org_id != p.org_id:
+        raise HTTPException(status_code=400, detail="Invalid property_id")
+
+    data = payload.model_dump()
+    data["strategy"] = (data.get("strategy") or "section8").strip().lower()
+    if data["strategy"] not in {"section8", "market"}:
+        raise HTTPException(status_code=400, detail="strategy must be 'section8' or 'market'")
+
+    # ✅ Phase 0 enforcement at edit boundary
+    enforce_constitution_for_property_and_price(
+        address=prop.address,
+        city=prop.city,
+        state=prop.state,
+        zip=prop.zip,
+        bedrooms=int(prop.bedrooms),
+        bathrooms=float(prop.bathrooms),
+        asking_price=float(data.get("asking_price") or data.get("estimated_purchase_price") or 0.0),
+    )
+
+    # Apply changes
+    d.property_id = int(data["property_id"])
+    d.asking_price = float(data.get("asking_price") or d.asking_price or 0.0)
+    d.estimated_purchase_price = float(data.get("estimated_purchase_price") or d.estimated_purchase_price or 0.0)
+    d.rehab_estimate = float(data.get("rehab_estimate") or d.rehab_estimate or 0.0)
+    d.strategy = data["strategy"]
+    d.financing_type = (data.get("financing_type") or d.financing_type or "dscr").strip()
+    d.interest_rate = float(data.get("interest_rate") or d.interest_rate or 0.0)
+    d.term_years = int(data.get("term_years") or d.term_years or 30)
+    d.down_payment_pct = float(data.get("down_payment_pct") or d.down_payment_pct or 0.0)
+    d.snapshot_id = int(data.get("snapshot_id") or d.snapshot_id or _get_or_create_manual_snapshot(db).id)
+
     db.commit()
     db.refresh(d)
     return d

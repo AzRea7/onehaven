@@ -1,4 +1,4 @@
-# onehaven_decision_engine/backend/app/routers/ops.py
+# backend/app/routers/ops.py
 from __future__ import annotations
 
 import json
@@ -24,6 +24,7 @@ from ..models import (
     Transaction,
     Valuation,
     WorkflowEvent,
+    Deal,
 )
 from ..services.property_state_machine import compute_and_persist_stage
 
@@ -98,13 +99,11 @@ def _checklist_progress(db: Session, *, org_id: int, property_id: int) -> Checkl
 
 def _latest_inspection(db: Session, *, property_id: int) -> Optional[Inspection]:
     return db.scalar(
-        select(Inspection).where(Inspection.property_id == property_id).order_by(desc(Inspection.inspection_date))
+        select(Inspection).where(Inspection.property_id == property_id).order_by(desc(Inspection.inspection_date), desc(Inspection.id))
     )
 
 
 def _open_failed_inspection_items(db: Session, *, property_id: int) -> int:
-    # Count unresolved failed items across all inspections for this property.
-    # A "resolved" item is failed=False OR has resolved_at set.
     return int(
         db.scalar(
             select(func.count(InspectionItem.id))
@@ -121,8 +120,7 @@ def _open_failed_inspection_items(db: Session, *, property_id: int) -> int:
 
 
 def _active_lease(db: Session, *, org_id: int, property_id: int) -> Optional[Lease]:
-    now = _now_utc()
-    # Active lease: started and not ended (or end in future)
+    now = _now_utc().date()
     return db.scalar(
         select(Lease)
         .where(
@@ -131,12 +129,12 @@ def _active_lease(db: Session, *, org_id: int, property_id: int) -> Optional[Lea
             Lease.start_date <= now,
             func.coalesce(Lease.end_date, now + timedelta(days=3650)) >= now,
         )
-        .order_by(desc(Lease.start_date))
+        .order_by(desc(Lease.start_date), desc(Lease.id))
     )
 
 
 def _cash_rollup(db: Session, *, org_id: int, property_id: int, days: int) -> dict[str, float]:
-    since = _now_utc() - timedelta(days=days)
+    since = _now_utc().date() - timedelta(days=days)
     txns = db.scalars(
         select(Transaction).where(
             Transaction.org_id == org_id,
@@ -149,7 +147,6 @@ def _cash_rollup(db: Session, *, org_id: int, property_id: int, days: int) -> di
     for t in txns:
         b = _txn_bucket(t.txn_type)
         out[b] += float(t.amount or 0.0)
-    # net: income - expense - capex (ignore other)
     out["net"] = out["income"] - out["expense"] - out["capex"]
     return out
 
@@ -158,26 +155,16 @@ def _latest_valuation(db: Session, *, org_id: int, property_id: int) -> Optional
     return db.scalar(
         select(Valuation)
         .where(Valuation.org_id == org_id, Valuation.property_id == property_id)
-        .order_by(desc(Valuation.as_of))
+        .order_by(desc(Valuation.as_of), desc(Valuation.id))
     )
 
 
 def _latest_underwriting(db: Session, *, org_id: int, property_id: int) -> Optional[UnderwritingResult]:
-    # Find latest deal underwriting for this property (via deals join in SQL, but underwriting_results has deal_id only).
-    # Cheapest approach without changing schema: look up deal ids from property.
-    deal_ids = db.scalars(
-        select(UnderwritingResult.deal_id)
-        .join_from(UnderwritingResult, Property, Property.id == Property.id)
-    ).all()  # noop; keep simple fallback below
-
-    # Real approach: just query underwriting_results joined to deals (models exist)
-    from ..models import Deal  # local import to avoid circulars
-
     return db.scalar(
         select(UnderwritingResult)
         .join(Deal, Deal.id == UnderwritingResult.deal_id)
         .where(UnderwritingResult.org_id == org_id, Deal.property_id == property_id)
-        .order_by(desc(UnderwritingResult.created_at))
+        .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
     )
 
 
@@ -218,7 +205,6 @@ def _next_actions(
 ) -> list[str]:
     actions: list[str] = []
 
-    # Phase 3 closure: compliance + inspection readiness
     if checklist.total == 0:
         actions.append("Generate compliance checklist (Phase 3 start).")
     else:
@@ -233,21 +219,17 @@ def _next_actions(
         if open_failed_items > 0:
             actions.append(f"Resolve {open_failed_items} unresolved failed inspection items.")
 
-    # Rehab closure
     if rehab.get("total", 0) == 0 and (checklist.total > 0 and checklist.done < checklist.total):
         actions.append("Generate rehab tasks from checklist gaps.")
     if rehab.get("todo", 0) + rehab.get("in_progress", 0) + rehab.get("blocked", 0) > 0:
         actions.append("Finish rehab tasks blocking readiness.")
 
-    # Lease closure
     if active_lease is None and stage in {"compliance", "tenant", "cash", "equity"}:
         actions.append("Create lease once inspection passes + unit is ready.")
 
-    # Equity closure
     if latest_val is None and stage in {"cash", "equity"}:
         actions.append("Add a valuation snapshot to unlock equity storytelling.")
 
-    # Keep list sane
     return actions[:10]
 
 
@@ -262,7 +244,6 @@ def property_ops_summary(
     if not prop:
         raise HTTPException(status_code=404, detail="property not found")
 
-    # Compute + persist stage (state machine becomes evidence-driven)
     stage_row: PropertyState = compute_and_persist_stage(db, org_id=p.org_id, property=prop)
     stage = _stage_label(stage_row.current_stage)
 
@@ -356,8 +337,12 @@ def property_ops_summary(
                 "start_date": active_lease.start_date.isoformat(),
                 "end_date": active_lease.end_date.isoformat() if active_lease.end_date else None,
                 "total_rent": float(active_lease.total_rent),
-                "tenant_portion": float(active_lease.tenant_portion or 0.0) if active_lease.tenant_portion is not None else None,
-                "housing_authority_portion": float(active_lease.housing_authority_portion or 0.0) if active_lease.housing_authority_portion is not None else None,
+                "tenant_portion": float(active_lease.tenant_portion or 0.0)
+                if active_lease.tenant_portion is not None
+                else None,
+                "housing_authority_portion": float(active_lease.housing_authority_portion or 0.0)
+                if active_lease.housing_authority_portion is not None
+                else None,
             }
             if active_lease
             else None
@@ -379,13 +364,6 @@ def generate_rehab_tasks_from_gaps(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Close the Phase-3 -> Phase-4 loop:
-      checklist gaps + unresolved inspection fails -> rehab tasks
-
-    This intentionally uses existing tables (rehab_tasks, checklist_items, inspection_items).
-    No migration required.
-    """
     require_operator(p)
 
     prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
@@ -394,7 +372,6 @@ def generate_rehab_tasks_from_gaps(
 
     created: list[dict[str, Any]] = []
 
-    # 1) checklist gaps -> tasks
     gaps = db.scalars(
         select(PropertyChecklistItem).where(
             PropertyChecklistItem.org_id == p.org_id,
@@ -403,7 +380,6 @@ def generate_rehab_tasks_from_gaps(
         )
     ).all()
 
-    # 2) unresolved inspection fails -> tasks
     fail_items = db.scalars(
         select(InspectionItem)
         .join(Inspection, Inspection.id == InspectionItem.inspection_id)
@@ -414,9 +390,11 @@ def generate_rehab_tasks_from_gaps(
         )
     ).all()
 
-    # Prevent duplicates by title
     existing_titles = set(
-        t.title for t in db.scalars(select(RehabTask).where(RehabTask.org_id == p.org_id, RehabTask.property_id == property_id)).all()
+        t.title
+        for t in db.scalars(
+            select(RehabTask).where(RehabTask.org_id == p.org_id, RehabTask.property_id == property_id)
+        ).all()
     )
 
     def _add_task(title: str, *, category: str, inspection_relevant: bool, notes: Optional[str]) -> None:
@@ -451,7 +429,6 @@ def generate_rehab_tasks_from_gaps(
         notes = (" ".join([loc, detail])).strip() or None
         _add_task(title, category="inspection", inspection_relevant=True, notes=notes)
 
-    # Workflow event for traceability
     evt = WorkflowEvent(
         org_id=p.org_id,
         property_id=property_id,
@@ -462,9 +439,7 @@ def generate_rehab_tasks_from_gaps(
     )
     db.add(evt)
 
-    # Stage recompute
     compute_and_persist_stage(db, org_id=p.org_id, property=prop)
-
     db.commit()
 
     return {"created": created, "count": len(created)}

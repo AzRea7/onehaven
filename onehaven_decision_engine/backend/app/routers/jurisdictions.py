@@ -5,12 +5,12 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, or_, desc
+from sqlalchemy import select, or_, desc, func
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_owner, require_operator
 from ..db import get_db
-from ..models import JurisdictionRule
+from ..models import JurisdictionRule, Property
 from ..domain.audit import emit_audit
 
 router = APIRouter(prefix="/jurisdictions", tags=["jurisdictions"])
@@ -46,9 +46,6 @@ def _row_to_dict(r: JurisdictionRule) -> dict:
     }
 
 
-# --------------------------
-# Existing endpoints (kept)
-# --------------------------
 @router.get("/rules", response_model=list[dict])
 def list_rules(
     city: Optional[str] = Query(default=None),
@@ -57,10 +54,6 @@ def list_rules(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Returns rules visible to this org.
-    Precedence: org-specific override > global.
-    """
     state = _norm_state(state)
     city_norm = _norm_city(city) if city else None
 
@@ -89,9 +82,6 @@ def get_effective_rule(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Return the single “effective” rule: org override if exists, else global, else 404.
-    """
     city = _norm_city(city)
     state = _norm_state(state)
 
@@ -126,10 +116,6 @@ def upsert_rule(
     _owner=Depends(require_owner),
     scope: str = Query(default="org", description="org|global"),
 ):
-    """
-    Existing upsert endpoint (kept for backward compatibility).
-    Default scope is org-only. To write global rules: ?scope=global (owner-only).
-    """
     city = _norm_city(payload.get("city") or "")
     state = _norm_state(payload.get("state") or "MI")
     if not city:
@@ -206,9 +192,6 @@ def delete_rule(
     p=Depends(get_principal),
     _owner=Depends(require_owner),
 ):
-    """
-    Existing delete endpoint (kept for backward compatibility).
-    """
     city = _norm_city(city)
     state = _norm_state(state)
     org_id = None if scope == "global" else p.org_id
@@ -243,19 +226,12 @@ def delete_rule(
     return {"ok": True, "deleted_id": rid}
 
 
-# --------------------------
-# ✅ NEW: Seed endpoint for Phase 2 operability
-# --------------------------
 @router.post("/seed", response_model=dict)
 def seed_michigan_defaults(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
     _owner=Depends(require_owner),
 ):
-    """
-    Creates a small set of global (org_id=NULL) MI defaults if missing.
-    Safe to run multiple times.
-    """
     now = datetime.utcnow()
 
     defaults = [
@@ -299,11 +275,11 @@ def seed_michigan_defaults(
         city = _norm_city(d["city"])
         state = _norm_state(d["state"])
         exists = db.scalar(
-          select(JurisdictionRule).where(
-              JurisdictionRule.org_id.is_(None),
-              JurisdictionRule.city == city,
-              JurisdictionRule.state == state,
-          )
+            select(JurisdictionRule).where(
+                JurisdictionRule.org_id.is_(None),
+                JurisdictionRule.city == city,
+                JurisdictionRule.state == state,
+            )
         )
         if exists:
             continue
@@ -327,3 +303,62 @@ def seed_michigan_defaults(
 
     db.commit()
     return {"ok": True, "created": created}
+
+
+# ✅ NEW: Phase 2 completeness endpoint
+@router.get("/coverage", response_model=dict)
+def coverage(
+    state: str = Query(default="MI"),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    """
+    Shows which (city,state) pairs exist in your org's portfolio but lack an org-specific rule.
+    Also indicates whether a global fallback exists.
+    """
+    state = _norm_state(state)
+
+    pairs = db.execute(
+        select(func.lower(Property.city).label("city_lc"), Property.state)
+        .where(Property.org_id == p.org_id, Property.state == state)
+        .group_by(func.lower(Property.city), Property.state)
+    ).all()
+
+    rows = []
+    for city_lc, st in pairs:
+        # Normalize for matching your saved city/titlecase format:
+        city = _norm_city(city_lc)
+
+        org_rule = db.scalar(
+            select(JurisdictionRule).where(
+                JurisdictionRule.org_id == p.org_id,
+                JurisdictionRule.city == city,
+                JurisdictionRule.state == st,
+            )
+        )
+        global_rule = db.scalar(
+            select(JurisdictionRule).where(
+                JurisdictionRule.org_id.is_(None),
+                JurisdictionRule.city == city,
+                JurisdictionRule.state == st,
+            )
+        )
+
+        provenance = "org" if org_rule else ("global" if global_rule else "missing")
+        rows.append(
+            {
+                "city": city,
+                "state": st,
+                "has_org_rule": bool(org_rule),
+                "has_global_fallback": bool(global_rule),
+                "provenance": provenance,
+            }
+        )
+
+    missing = [r for r in rows if r["provenance"] == "missing"]
+    return {
+        "state": state,
+        "total_pairs": len(rows),
+        "missing_rules": len(missing),
+        "rows": sorted(rows, key=lambda r: (r["provenance"], r["city"])),
+    }

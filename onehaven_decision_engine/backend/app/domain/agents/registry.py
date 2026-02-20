@@ -2,47 +2,56 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict
 
 
-# -----------------------------
-# Agent "Specs" (automation-capable)
-# -----------------------------
 @dataclass(frozen=True)
 class AgentSpec:
     key: str
     name: str
     description: str
     default_payload_schema: dict[str, Any]
+    # ✅ Execution seam (future)
+    deterministic: bool = True
+    llm_capable: bool = False
+    category: str | None = None
+    needs_human: bool = False
 
 
-# NOTE: keep these lightweight: "specs" are contracts.
-# Execution comes later (Phase: orchestration).
 AGENTS: Dict[str, AgentSpec] = {
     "deal_intake": AgentSpec(
         key="deal_intake",
         name="Deal Intake Scanner",
         description="Normalizes property inputs and flags missing/unsafe data before underwriting.",
         default_payload_schema={"property_id": "int", "source": "zillow|investorlift|manual"},
+        deterministic=True,
+        llm_capable=True,  # future
+        category="intake",
+        needs_human=False,
     ),
     "rent_reasonableness": AgentSpec(
         key="rent_reasonableness",
         name="Rent Reasonableness Packager",
         description="Organizes comps and generates a rent reasonableness narrative for HA packets.",
         default_payload_schema={"property_id": "int", "zip": "str", "bedrooms": "int"},
+        deterministic=True,
+        llm_capable=True,  # future
+        category="rent",
+        needs_human=True,
     ),
     "hqs_precheck": AgentSpec(
         key="hqs_precheck",
         name="HQS Pre-Inspection Checklist",
         description="Generates checklist and highlights predicted fail points from history (when available).",
         default_payload_schema={"property_id": "int", "strategy": "section8"},
+        deterministic=True,
+        llm_capable=True,  # future
+        category="compliance",
+        needs_human=True,
     ),
 }
 
 
-# -----------------------------
-# Human/AI Workflow Slots (sidebar stations)
-# -----------------------------
 @dataclass(frozen=True)
 class AgentSlotSpec:
     slot_key: str
@@ -52,8 +61,6 @@ class AgentSlotSpec:
     default_status: str  # "idle" | "queued" | "in_progress" | "blocked" | "done"
 
 
-# These are your "Section 8 process stations".
-# They map 1:1 to operational steps that must be done right.
 SLOTS: list[AgentSlotSpec] = [
     AgentSlotSpec(
         slot_key="s8_realtor_intake",

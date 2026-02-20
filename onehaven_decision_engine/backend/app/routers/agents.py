@@ -1,3 +1,4 @@
+# backend/app/routers/agents.py
 from __future__ import annotations
 
 import json
@@ -21,6 +22,7 @@ from ..schemas import (
     AgentSlotAssignmentOut,
 )
 from ..domain.agents.registry import AGENTS, SLOTS
+from ..services.agent_engine import create_and_execute_run
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -42,24 +44,76 @@ def list_agents(p=Depends(get_principal)):
     return out
 
 
+# ✅ Alias with raw metadata for future UI use
+@router.get("/registry", response_model=dict)
+def registry(p=Depends(get_principal)):
+    return {
+        "agents": [
+            {
+                "agent_key": a.key,
+                "title": a.name,
+                "description": a.description,
+                "category": getattr(a, "category", None),
+                "needs_human": bool(getattr(a, "needs_human", False)),
+                "deterministic": bool(getattr(a, "deterministic", True)),
+                "llm_capable": bool(getattr(a, "llm_capable", False)),
+                "default_payload_schema": a.default_payload_schema,
+            }
+            for a in AGENTS.values()
+        ],
+        "slots": [
+            {
+                "slot_key": s.slot_key,
+                "title": s.title,
+                "description": s.description,
+                "owner_type": s.owner_type,
+                "default_status": s.default_status,
+            }
+            for s in SLOTS
+        ],
+    }
+
+
 @router.post("/runs", response_model=AgentRunOut)
 def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+    """
+    Phase 5: creating a run now executes deterministically and writes output_json + a thread message.
+    """
     if payload.agent_key not in AGENTS:
         raise HTTPException(status_code=404, detail="unknown agent_key")
 
-    run = AgentRun(
-        org_id=p.org_id,
-        agent_key=payload.agent_key,
-        property_id=payload.property_id,
-        status=payload.status or "queued",
-        input_json=payload.input_json,
-        output_json=None,
-        created_at=datetime.utcnow(),
-    )
-    db.add(run)
-    db.commit()
-    db.refresh(run)
-    return run
+    try:
+        run = create_and_execute_run(
+            db,
+            org_id=p.org_id,
+            agent_key=payload.agent_key,
+            property_id=payload.property_id,
+            input_json=payload.input_json,
+        )
+        return run
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/runs/execute", response_model=AgentRunOut)
+def create_and_execute(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+    """
+    Optional explicit execute endpoint (useful if you later decouple create vs execute).
+    """
+    if payload.agent_key not in AGENTS:
+        raise HTTPException(status_code=404, detail="unknown agent_key")
+
+    try:
+        run = create_and_execute_run(
+            db,
+            org_id=p.org_id,
+            agent_key=payload.agent_key,
+            property_id=payload.property_id,
+            input_json=payload.input_json,
+        )
+        return run
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/runs", response_model=list[AgentRunOut])
