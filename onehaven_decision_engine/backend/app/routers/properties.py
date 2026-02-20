@@ -31,6 +31,7 @@ from ..schemas import (
     DealOut,
     UnderwritingResultOut,
     RentExplainOut,
+    CeilingCandidate,
     ChecklistOut,
     ChecklistItemOut,
     RehabTaskOut,
@@ -124,12 +125,12 @@ def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strate
     fmr_adjusted = (float(ra.section8_fmr) * ps) if (ra.section8_fmr is not None and float(ra.section8_fmr) > 0) else None
 
     cap_reason = "none"
-    ceiling_candidates: list[dict] = []
+    ceiling_candidates: list[CeilingCandidate] = []
 
     if fmr_adjusted is not None:
-        ceiling_candidates.append({"type": "payment_standard", "value": fmr_adjusted})
+        ceiling_candidates.append(CeilingCandidate(type="payment_standard", value=float(fmr_adjusted)))
     if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-        ceiling_candidates.append({"type": "rent_reasonableness", "value": float(ra.rent_reasonableness_comp)})
+        ceiling_candidates.append(CeilingCandidate(type="rent_reasonableness", value=float(ra.rent_reasonableness_comp)))
 
     if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
         cap_reason = "override"
@@ -156,6 +157,8 @@ def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strate
         cap_reason=cap_reason,
         explanation=None,
         fmr_adjusted=fmr_adjusted,
+        run_id=None,
+        created_at=None,
     )
 
 
@@ -296,9 +299,9 @@ def property_bundle(property_id: int, db: Session = Depends(get_db), p=Depends(g
     ).all()
 
     return {
-      "view": view.model_dump() if hasattr(view, "model_dump") else view,
-      "rehab_tasks": [RehabTaskOut.model_validate(x, from_attributes=True).model_dump() for x in rehab],
-      "leases": [LeaseOut.model_validate(x, from_attributes=True).model_dump() for x in leases],
-      "transactions": [TransactionOut.model_validate(x, from_attributes=True).model_dump() for x in txns],
-      "valuations": [ValuationOut.model_validate(x, from_attributes=True).model_dump() for x in vals],
+        "view": view.model_dump() if hasattr(view, "model_dump") else view,
+        "rehab_tasks": [RehabTaskOut.model_validate(x, from_attributes=True).model_dump() for x in rehab],
+        "leases": [LeaseOut.model_validate(x, from_attributes=True).model_dump() for x in leases],
+        "transactions": [TransactionOut.model_validate(x, from_attributes=True).model_dump() for x in txns],
+        "valuations": [ValuationOut.model_validate(x, from_attributes=True).model_dump() for x in vals],
     }
