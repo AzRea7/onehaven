@@ -5,21 +5,21 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import AgentRun, AgentMessage, AgentSlotAssignment, WorkflowEvent
+from ..models import AgentMessage, AgentRun, AgentSlotAssignment, WorkflowEvent
 from ..schemas import (
-    AgentSpecOut,
-    AgentRunCreate,
-    AgentRunOut,
     AgentMessageCreate,
     AgentMessageOut,
-    AgentSlotSpecOut,
-    AgentSlotAssignmentUpsert,
+    AgentRunCreate,
+    AgentRunOut,
     AgentSlotAssignmentOut,
+    AgentSlotAssignmentUpsert,
+    AgentSlotSpecOut,
+    AgentSpecOut,
 )
 from ..domain.agents.registry import AGENTS, SLOTS
 from ..services.agent_engine import create_and_execute_run
@@ -44,9 +44,9 @@ def list_agents(p=Depends(get_principal)):
     return out
 
 
-# ✅ Alias with raw metadata for future UI use
 @router.get("/registry", response_model=dict)
 def registry(p=Depends(get_principal)):
+    # Raw metadata for UI + future agent tooling
     return {
         "agents": [
             {
@@ -57,7 +57,7 @@ def registry(p=Depends(get_principal)):
                 "needs_human": bool(getattr(a, "needs_human", False)),
                 "deterministic": bool(getattr(a, "deterministic", True)),
                 "llm_capable": bool(getattr(a, "llm_capable", False)),
-                "default_payload_schema": a.default_payload_schema,
+                "default_payload_schema": getattr(a, "default_payload_schema", {}) or {},
             }
             for a in AGENTS.values()
         ],
@@ -77,7 +77,9 @@ def registry(p=Depends(get_principal)):
 @router.post("/runs", response_model=AgentRunOut)
 def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     """
-    Phase 5: creating a run now executes deterministically and writes output_json + a thread message.
+    Creating a run executes deterministically (for now) and writes:
+      - agent_runs.output_json
+      - a thread message (agent_messages) in agent_engine
     """
     if payload.agent_key not in AGENTS:
         raise HTTPException(status_code=404, detail="unknown agent_key")
@@ -98,7 +100,7 @@ def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends
 @router.post("/runs/execute", response_model=AgentRunOut)
 def create_and_execute(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     """
-    Optional explicit execute endpoint (useful if you later decouple create vs execute).
+    Explicit execute endpoint (kept for future decouple: create vs execute).
     """
     if payload.agent_key not in AGENTS:
         raise HTTPException(status_code=404, detail="unknown agent_key")
@@ -129,8 +131,7 @@ def list_runs(
         q = q.where(AgentRun.agent_key == agent_key)
     if property_id is not None:
         q = q.where(AgentRun.property_id == property_id)
-    rows = db.scalars(q.limit(limit)).all()
-    return list(rows)
+    return list(db.scalars(q.limit(limit)).all())
 
 
 @router.post("/messages", response_model=AgentMessageOut)
@@ -189,10 +190,8 @@ def slot_assignments(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    q = (
-        select(AgentSlotAssignment)
-        .where(AgentSlotAssignment.org_id == p.org_id)
-        .order_by(desc(AgentSlotAssignment.updated_at))
+    q = select(AgentSlotAssignment).where(AgentSlotAssignment.org_id == p.org_id).order_by(
+        desc(AgentSlotAssignment.updated_at)
     )
     if property_id is not None:
         q = q.where(AgentSlotAssignment.property_id == property_id)
@@ -202,14 +201,30 @@ def slot_assignments(
 @router.post("/slots/assignments", response_model=AgentSlotAssignmentOut)
 def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
     existing = db.scalar(
-        select(AgentSlotAssignment).where(
+        select(AgentSlotAssignment)
+        .where(
             AgentSlotAssignment.org_id == p.org_id,
             AgentSlotAssignment.slot_key == payload.slot_key,
             AgentSlotAssignment.property_id == payload.property_id,
-        ).limit(1)
+        )
+        .limit(1)
     )
 
     now = datetime.utcnow()
+
+    def _emit_event(owner_type: str, assignee: str | None, status: str):
+        db.add(
+            WorkflowEvent(
+                org_id=p.org_id,
+                property_id=payload.property_id,
+                actor_user_id=p.user_id,
+                event_type="slot_assigned",
+                payload_json=json.dumps(
+                    {"slot_key": payload.slot_key, "owner_type": owner_type, "assignee": assignee, "status": status}
+                ),
+                created_at=now,
+            )
+        )
 
     if existing:
         if payload.owner_type is not None:
@@ -223,24 +238,7 @@ def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Dep
         existing.updated_at = now
         db.add(existing)
 
-        db.add(
-            WorkflowEvent(
-                org_id=p.org_id,
-                property_id=payload.property_id,
-                actor_user_id=p.user_id,
-                event_type="slot_assigned",
-                payload_json=json.dumps(
-                    {
-                        "slot_key": payload.slot_key,
-                        "owner_type": existing.owner_type,
-                        "assignee": existing.assignee,
-                        "status": existing.status,
-                    }
-                ),
-                created_at=now,
-            )
-        )
-
+        _emit_event(existing.owner_type, existing.assignee, existing.status)
         db.commit()
         db.refresh(existing)
         return existing
@@ -257,25 +255,7 @@ def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Dep
         created_at=now,
     )
     db.add(row)
-
-    db.add(
-        WorkflowEvent(
-            org_id=p.org_id,
-            property_id=payload.property_id,
-            actor_user_id=p.user_id,
-            event_type="slot_assigned",
-            payload_json=json.dumps(
-                {
-                    "slot_key": payload.slot_key,
-                    "owner_type": row.owner_type,
-                    "assignee": row.assignee,
-                    "status": row.status,
-                }
-            ),
-            created_at=now,
-        )
-    )
-
+    _emit_event(row.owner_type, row.assignee, row.status)
     db.commit()
     db.refresh(row)
     return row

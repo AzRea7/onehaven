@@ -1,10 +1,12 @@
+# backend/app/models.py
 from __future__ import annotations
 
-from datetime import datetime, date
-from typing import Optional, List
+from datetime import date, datetime
+from typing import List, Optional
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -12,9 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    Date,
     func,
-    JSON,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -152,7 +152,7 @@ class ImportSnapshot(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    # NEW: org scoping (Phase 5)
+    # org scoping (Phase 5)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
 
     source: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -165,7 +165,6 @@ class ImportSnapshot(Base):
 class Deal(Base):
     __tablename__ = "deals"
 
-    # FIX: uniqueness must be per-org (Phase 5)
     __table_args__ = (UniqueConstraint("org_id", "source_fingerprint", name="uq_deals_org_source_fingerprint"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -472,8 +471,12 @@ class PropertyChecklistItem(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
-    checklist_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("property_checklists.id", ondelete="CASCADE"), nullable=True, index=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    checklist_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("property_checklists.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     item_code: Mapped[str] = mapped_column(String(80), nullable=False)
     category: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -505,7 +508,9 @@ class RehabTask(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[str] = mapped_column(String(60), nullable=False, default="rehab")
@@ -546,7 +551,9 @@ class Lease(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
 
     start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -571,7 +578,9 @@ class Transaction(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     txn_date: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     txn_type: Mapped[str] = mapped_column(String(80), nullable=False, default="other")  # income|expense|capex|other
@@ -589,7 +598,9 @@ class Valuation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     as_of: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     estimated_value: Mapped[float] = mapped_column(Float, nullable=False)
@@ -632,7 +643,7 @@ class AgentRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-    property_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
 
     agent_key: Mapped[str] = mapped_column(String(80), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="queued")
@@ -673,6 +684,7 @@ class AgentSlotAssignment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
 class RentExplainRun(Base):
     __tablename__ = "rent_explain_runs"
 
@@ -683,7 +695,6 @@ class RentExplainRun(Base):
 
     strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="section8")
 
-    # “auditable artifact”
     cap_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     explain_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
@@ -691,3 +702,4 @@ class RentExplainRun(Base):
     payment_standard_pct_used: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    

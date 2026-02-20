@@ -1,35 +1,36 @@
+# backend/app/routers/compliance.py
 from __future__ import annotations
 
 import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
-from sqlalchemy import select, desc
 
 from ..auth import get_principal, require_owner
 from ..db import get_db
 from ..models import (
-    Property,
+    AppUser,
+    AuditEvent,
     ChecklistTemplateItem,
+    Property,
     PropertyChecklist,
     PropertyChecklistItem,
-    AuditEvent,
     WorkflowEvent,
-    AppUser,
 )
 from ..schemas import (
-    ChecklistOut,
     ChecklistItemOut,
-    ChecklistTemplateItemUpsert,
-    ChecklistTemplateItemOut,
-    PropertyChecklistOut,
     ChecklistItemUpdateIn,
+    ChecklistOut,
+    ChecklistTemplateItemOut,
+    ChecklistTemplateItemUpsert,
+    PropertyChecklistOut,
 )
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
-
+# Fallback template (used only if DB templates not present)
 _SECTION8_TEMPLATE: list[dict] = [
     {"category": "Electrical", "item_code": "GFCI", "description": "GFCI protection near sinks / wet areas", "severity": 3, "common_fail": True},
     {"category": "Electrical", "item_code": "OUTLET_COVERS", "description": "Missing/broken outlet/switch covers", "severity": 2, "common_fail": True},
@@ -159,7 +160,6 @@ def list_templates(
 
 @router.put("/templates", response_model=ChecklistTemplateItemOut)
 def upsert_template(payload: ChecklistTemplateItemUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
-    # global-by-design right now: only owners can mutate
     require_owner(p)
 
     row = db.scalar(
@@ -229,7 +229,7 @@ def generate_checklist(
     if persist:
         now = datetime.utcnow()
 
-        # ✅ UPSERT to satisfy uq_property_checklists_org_property_strategy_version
+        # UPSERT to satisfy uq_property_checklists_org_property_strategy_version
         row = db.scalar(
             select(PropertyChecklist).where(
                 PropertyChecklist.org_id == p.org_id,
@@ -294,9 +294,7 @@ def generate_checklist(
                 db.add(existing)
 
         db.commit()
-
         out.items = _merge_state(db, org_id=p.org_id, property_id=property_id, items=out.items)
-
 
     return out
 
@@ -368,7 +366,6 @@ def update_checklist_item(
 
     now = datetime.utcnow()
 
-    # ✅ Normalize + validate status values (supports your UI: failed)
     if payload.status is not None:
         s = (payload.status or "").strip().lower()
         allowed = {"todo", "in_progress", "done", "blocked", "failed"}

@@ -1,17 +1,17 @@
 # backend/app/routers/dashboard.py
 from __future__ import annotations
 
-from typing import Optional, Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Property, Deal
-from .properties import property_view  # reuse “single source of truth”
+from ..models import Deal, Property
 from ..services.property_state_machine import get_state_payload
+from .properties import property_view  # reuse “single source of truth”
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -52,6 +52,7 @@ def dashboard_properties(
 
             out.append(v)
         except Exception:
+            # Dashboard should be resilient; one broken row must not kill the list.
             continue
 
     return out
@@ -65,9 +66,7 @@ def portfolio_rollup(
     p=Depends(get_principal),
 ):
     """
-    Phase 4 completion: portfolio-level stats that your dashboard cards can show.
-
-    We compute stage per property deterministically using property_state_machine.
+    Portfolio-level stats for top dashboard cards.
     """
     prop_ids = [
         r[0]
@@ -86,7 +85,7 @@ def portfolio_rollup(
         st = get_state_payload(db, org_id=p.org_id, property_id=pid, recompute=True)
         stage = str(st.get("current_stage") or "deal")
         stage_counts[stage] = stage_counts.get(stage, 0) + 1
-        if (st.get("next_actions") or []):
+        if st.get("next_actions") or []:
             has_next_action += 1
 
     return {
@@ -104,7 +103,7 @@ def next_actions(
     p=Depends(get_principal),
 ):
     """
-    Phase 4 completion: global queue of what to do next.
+    Global queue of what to do next.
     """
     prop_ids = [
         r[0]
@@ -140,5 +139,5 @@ def next_actions(
 
     # Simple prioritization: compliance > rehab > tenant > cash > equity > deal
     order = {"compliance": 0, "rehab": 1, "tenant": 2, "cash": 3, "equity": 4, "deal": 5}
-    rows = sorted(rows, key=lambda r: (order.get(r["stage"], 9), r["city"], r["address"]))[:limit]
+    rows = sorted(rows, key=lambda r: (order.get(str(r.get("stage") or ""), 9), r["city"], r["address"]))[:limit]
     return {"rows": rows, "count": len(rows)}

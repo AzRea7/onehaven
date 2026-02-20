@@ -3,37 +3,25 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, date
-from typing import Optional, Any, Dict, List, Tuple
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import Session
 
 from ..models import (
-    Property,
-    PropertyState,
     Deal,
-    UnderwritingResult,
-    PropertyChecklistItem,
     Inspection,
     InspectionItem,
-    RehabTask,
     Lease,
+    Property,
+    PropertyChecklistItem,
+    PropertyState,
+    RehabTask,
     Transaction,
+    UnderwritingResult,
     Valuation,
 )
-
-# -----------------------------------------------------------------------------
-# Property State Machine (Phase 3/4 loop closer)
-# -----------------------------------------------------------------------------
-# Single source of truth row per property:
-#   - current_stage
-#   - constraints_json
-#   - outstanding_tasks_json
-#
-# Derived deterministically from persisted artifacts:
-# underwriting -> checklist -> inspection -> rehab -> lease -> cash -> valuation
-# -----------------------------------------------------------------------------
 
 STAGE_ORDER = ["deal", "rehab", "compliance", "tenant", "cash", "equity"]
 
@@ -171,7 +159,6 @@ def advance_stage_if_needed(
 # -----------------------------------------------------------------------------
 # Derivation helpers
 # -----------------------------------------------------------------------------
-
 def _get_latest_deal(db: Session, *, org_id: int, property_id: int) -> Optional[Deal]:
     return db.scalar(
         select(Deal)
@@ -182,7 +169,6 @@ def _get_latest_deal(db: Session, *, org_id: int, property_id: int) -> Optional[
 
 
 def _get_latest_underwriting(db: Session, *, org_id: int, property_id: int) -> Optional[UnderwritingResult]:
-    # UnderwritingResult references deal_id, so join through Deal
     return db.scalar(
         select(UnderwritingResult)
         .join(Deal, Deal.id == UnderwritingResult.deal_id)
@@ -215,14 +201,7 @@ def _compute_checklist_progress(db: Session, *, org_id: int, property_id: int) -
         else:
             todo += 1
 
-    return ChecklistProgress(
-        total=total,
-        todo=todo,
-        in_progress=inprog,
-        blocked=blocked,
-        failed=failed,
-        done=done,
-    )
+    return ChecklistProgress(total=total, todo=todo, in_progress=inprog, blocked=blocked, failed=failed, done=done)
 
 
 def _get_latest_inspection(db: Session, *, property_id: int) -> Optional[Inspection]:
@@ -257,7 +236,6 @@ def _compute_inspection_status(db: Session, *, property_id: int) -> InspectionSt
 
     open_failed = _open_failed_inspection_items(db, property_id=property_id)
     passed = bool(getattr(insp, "passed", False))
-    # If there are open failed items, treat as not passed regardless of 'passed'
     if open_failed > 0:
         passed = False
 
@@ -278,16 +256,22 @@ def _rehab_open_count(db: Session, *, org_id: int, property_id: int) -> int:
 
 
 def _has_active_lease(db: Session, *, org_id: int, property_id: int) -> bool:
+    """
+    IMPORTANT FIX:
+    - Lease.start_date / end_date are DateTime in models.
+    - The previous version compared them to a date(), which can break on some DBs/drivers.
+    We compare using datetime bounds instead.
+    """
     now = _utcnow()
-    # If Lease.start_date is date type, comparing to datetime can be funky; normalize to date
-    today = now.date()
+    far_future = now + timedelta(days=3650)
+
     lease = db.scalar(
         select(Lease)
         .where(
             Lease.org_id == org_id,
             Lease.property_id == property_id,
-            Lease.start_date <= today,
-            func.coalesce(Lease.end_date, today + timedelta(days=3650)) >= today,
+            Lease.start_date <= now,
+            func.coalesce(Lease.end_date, far_future) >= now,
         )
         .order_by(desc(Lease.start_date), desc(Lease.id))
         .limit(1)
@@ -295,8 +279,7 @@ def _has_active_lease(db: Session, *, org_id: int, property_id: int) -> bool:
     return lease is not None
 
 
-def _last_txn_date(db: Session, *, org_id: int, property_id: int) -> Optional[date]:
-    # Transaction.txn_date in your ops.py usage
+def _last_txn_date(db: Session, *, org_id: int, property_id: int) -> Optional[datetime]:
     return db.scalar(
         select(func.max(Transaction.txn_date)).where(
             Transaction.org_id == org_id,
@@ -317,7 +300,6 @@ def _latest_valuation(db: Session, *, org_id: int, property_id: int) -> Optional
 # -----------------------------------------------------------------------------
 # Main derivation
 # -----------------------------------------------------------------------------
-
 def derive_stage_and_constraints(
     db: Session, *, org_id: int, property_id: int
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any], List[str]]:
@@ -366,17 +348,13 @@ def derive_stage_and_constraints(
         return "rehab", constraints, tasks, next_actions
 
     # Stage 3: compliance until checklist + inspection pass
-    # If checklist doesn't exist yet, your model represents “no items” as total==0
     if checklist.total == 0:
         constraints["missing_checklist"] = True
         tasks["compliance"] = {"needs_checklist": True}
         next_actions.append("Generate compliance checklist (no checklist items found).")
         return "compliance", constraints, tasks, next_actions
 
-    tasks["compliance"] = {
-        "checklist": checklist.as_dict(),
-        "inspection": insp.as_dict(),
-    }
+    tasks["compliance"] = {"checklist": checklist.as_dict(), "inspection": insp.as_dict()}
 
     if checklist.failed > 0:
         constraints["checklist_failed_items"] = checklist.failed
@@ -386,7 +364,6 @@ def derive_stage_and_constraints(
         constraints["checklist_blocked_items"] = checklist.blocked
         next_actions.append(f"Unblock checklist items ({checklist.blocked}).")
 
-    # 95% threshold matches your previous intent; adjust later if you want strict 100%
     if checklist.pct_done < 0.95:
         constraints["checklist_incomplete"] = checklist.as_dict()
         remaining = max(0, checklist.total - checklist.done)
@@ -431,7 +408,7 @@ def derive_stage_and_constraints(
 
 def sync_property_state(db: Session, *, org_id: int, property_id: int) -> PropertyState:
     suggested, constraints, tasks, _ = derive_stage_and_constraints(db, org_id=org_id, property_id=property_id)
-    row = advance_stage_if_needed(
+    return advance_stage_if_needed(
         db,
         org_id=org_id,
         property_id=property_id,
@@ -439,7 +416,6 @@ def sync_property_state(db: Session, *, org_id: int, property_id: int) -> Proper
         constraints=constraints,
         outstanding_tasks=tasks,
     )
-    return row
 
 
 def get_state_payload(
@@ -474,7 +450,6 @@ def get_state_payload(
 # -----------------------------------------------------------------------------
 # Backward-compatible function used by ops.py
 # -----------------------------------------------------------------------------
-
 def compute_and_persist_stage(db: Session, *, org_id: int, property: Property) -> PropertyState:
     """
     This is the exact function ops.py imports.

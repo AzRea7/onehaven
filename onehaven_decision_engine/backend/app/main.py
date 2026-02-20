@@ -4,6 +4,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .config import settings
+
 from .routers.health import router as health_router
 from .routers.meta import router as meta_router
 from .routers.dashboard import router as dashboard_router
@@ -33,16 +35,36 @@ from .routers.auth import router as auth_router
 from .routers.workflow import router as workflow_router
 from .routers.audit import router as audit_router
 
-from .routers.ops import router as ops_router   
-
-app = FastAPI(title="OneHaven Decision Engine")
+from .routers.ops import router as ops_router
 
 API_PREFIX = "/api"
 
-# CORS: allow local frontend dev + “OpenClaw-style” dashboard hosting later
+
+def _cors_origins() -> list[str]:
+    """
+    You can tighten this later (env-based).
+    We accept either:
+      - settings.cors_allow_origins = ["http://localhost:5173", ...]
+      - settings.cors_allow_origins = "*"  (string)
+    """
+    val = getattr(settings, "cors_allow_origins", ["*"])
+    if isinstance(val, str):
+        v = val.strip()
+        return ["*"] if v == "*" else [x.strip() for x in v.split(",") if x.strip()]
+    if isinstance(val, list) and val:
+        return val
+    return ["*"]
+
+
+app = FastAPI(
+    title="OneHaven Decision Engine",
+    version=getattr(settings, "decision_version", "dev"),
+)
+
+# CORS: local frontend dev + future dashboard hosting
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten later (env-based)
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -74,11 +96,10 @@ app.include_router(rehab_router, prefix=API_PREFIX)
 app.include_router(tenants_router, prefix=API_PREFIX)
 app.include_router(cash_router, prefix=API_PREFIX)
 app.include_router(equity_router, prefix=API_PREFIX)
+app.include_router(ops_router, prefix=API_PREFIX)
 
-# Agents
-app.include_router(agents_router, prefix=API_PREFIX)
+# Agents + audit/workflow
 app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(agents_router, prefix=API_PREFIX)
 app.include_router(workflow_router, prefix=API_PREFIX)
 app.include_router(audit_router, prefix=API_PREFIX)
-
-app.include_router(ops_router, prefix=API_PREFIX)
