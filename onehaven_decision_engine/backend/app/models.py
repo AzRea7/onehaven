@@ -303,9 +303,11 @@ class JurisdictionRule(Base):
     inspection_frequency: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     tenant_waitlist_depth: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
+    # ✅ column exists after patched migration 0018 runs
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 class UnderwritingResult(Base):
     __tablename__ = "underwriting_results"
@@ -702,4 +704,3 @@ class RentExplainRun(Base):
     payment_standard_pct_used: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    

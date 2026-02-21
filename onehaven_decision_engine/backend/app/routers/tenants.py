@@ -14,6 +14,7 @@ from ..domain.audit import emit_audit
 from ..services.ownership import must_get_property, must_get_tenant, must_get_lease
 from ..services.events_facade import wf
 from ..services.property_state_machine import advance_stage_if_needed
+from ..services.lease_rules import ensure_no_lease_overlap
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
@@ -111,6 +112,16 @@ def create_lease(payload: LeaseCreate, db: Session = Depends(get_db), p=Depends(
     _ = must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
     _ = must_get_tenant(db, org_id=p.org_id, tenant_id=payload.tenant_id)
 
+    # Phase 4 DoD: block overlapping leases
+    ensure_no_lease_overlap(
+        db,
+        org_id=p.org_id,
+        property_id=payload.property_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        exclude_lease_id=None,
+    )
+
     row = Lease(**payload.model_dump(), org_id=p.org_id)
     db.add(row)
     db.commit()
@@ -178,6 +189,16 @@ def update_lease(
     # if property/tenant changes, validate ownership
     must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
     must_get_tenant(db, org_id=p.org_id, tenant_id=payload.tenant_id)
+
+    # Phase 4 DoD: block overlapping leases (excluding self)
+    ensure_no_lease_overlap(
+        db,
+        org_id=p.org_id,
+        property_id=payload.property_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        exclude_lease_id=row.id,
+    )
 
     for k, v in payload.model_dump().items():
         setattr(row, k, v)

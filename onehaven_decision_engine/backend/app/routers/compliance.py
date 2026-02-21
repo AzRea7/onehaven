@@ -18,6 +18,7 @@ from ..models import (
     PropertyChecklist,
     PropertyChecklistItem,
     WorkflowEvent,
+    Inspection,
 )
 from ..schemas import (
     ChecklistItemOut,
@@ -332,6 +333,49 @@ def get_latest_checklist(property_id: int, db: Session = Depends(get_db), p=Depe
         generated_at=row.generated_at,
         items=items,
     )
+
+@router.get("/status/{property_id}", response_model=dict)
+def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    """
+    Phase 3 DoD completion rule:
+      pass = checklist >= 95% done AND no failed items AND latest inspection passed
+    """
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    items = db.scalars(
+        select(PropertyChecklistItem).where(
+            PropertyChecklistItem.org_id == p.org_id,
+            PropertyChecklistItem.property_id == property_id,
+        )
+    ).all()
+
+    total = len(items)
+    done = sum(1 for x in items if (x.status or "").lower() == "done")
+    failed = sum(1 for x in items if (x.status or "").lower() == "failed")
+
+    pct_done = (done / total) if total else 0.0
+
+    latest_insp = db.scalar(
+        select(Inspection)
+        .where(Inspection.property_id == property_id)
+        .order_by(desc(Inspection.id))
+        .limit(1)
+    )
+    latest_inspection_passed = bool(latest_insp.passed) if latest_insp else False
+
+    passed = (pct_done >= 0.95) and (failed == 0) and latest_inspection_passed
+
+    return {
+        "property_id": property_id,
+        "checklist_total": total,
+        "checklist_done": done,
+        "checklist_failed": failed,
+        "pct_done": round(pct_done, 4),
+        "latest_inspection_passed": latest_inspection_passed,
+        "passed": passed,
+    }
 
 
 @router.patch("/checklist/{property_id}/items/{item_code}", response_model=ChecklistItemOut)

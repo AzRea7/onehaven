@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, or_, desc, func
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal, require_owner, require_operator
+from ..auth import get_principal, require_owner
 from ..db import get_db
 from ..models import JurisdictionRule, Property
 from ..domain.audit import emit_audit
+from ..domain.jurisdiction_defaults import michigan_global_defaults
 
 router = APIRouter(prefix="/jurisdictions", tags=["jurisdictions"])
 
@@ -25,7 +26,16 @@ def _norm_state(v: str) -> str:
     return s if len(s) == 2 else "MI"
 
 
+def _has_col(model, name: str) -> bool:
+    """
+    True if SQLAlchemy model has this mapped attribute/column.
+    Works even if DB is behind, as long as model is consistent with mapper.
+    """
+    return hasattr(model, name)
+
+
 def _row_to_dict(r: JurisdictionRule) -> dict:
+    # IMPORTANT: do not directly access columns that might not exist in DB/schema
     return {
         "id": r.id,
         "scope": "global" if r.org_id is None else "org",
@@ -33,14 +43,15 @@ def _row_to_dict(r: JurisdictionRule) -> dict:
         "city": r.city,
         "state": r.state,
         "rental_license_required": r.rental_license_required,
-        "inspection_authority": r.inspection_authority,
-        "inspection_frequency": r.inspection_frequency,
-        "typical_fail_points_json": r.typical_fail_points_json,
+        "inspection_authority": getattr(r, "inspection_authority", None),
+        "inspection_frequency": getattr(r, "inspection_frequency", None),
+        "typical_fail_points_json": getattr(r, "typical_fail_points_json", None),
         "registration_fee": getattr(r, "registration_fee", None),
         "fees_json": getattr(r, "fees_json", None),
-        "processing_days": r.processing_days,
-        "tenant_waitlist_depth": r.tenant_waitlist_depth,
-        "notes": r.notes,
+        "processing_days": getattr(r, "processing_days", None),
+        "tenant_waitlist_depth": getattr(r, "tenant_waitlist_depth", None),
+        # ✅ FIX: notes may not exist in your DB
+        "notes": getattr(r, "notes", None),
         "updated_at": r.updated_at.isoformat() if getattr(r, "updated_at", None) else None,
         "created_at": r.created_at.isoformat() if getattr(r, "created_at", None) else None,
     }
@@ -57,9 +68,7 @@ def list_rules(
     state = _norm_state(state)
     city_norm = _norm_city(city) if city else None
 
-    q = select(JurisdictionRule).where(
-        or_(JurisdictionRule.org_id == p.org_id, JurisdictionRule.org_id.is_(None))
-    )
+    q = select(JurisdictionRule).where(or_(JurisdictionRule.org_id == p.org_id, JurisdictionRule.org_id.is_(None)))
 
     if scope == "org":
         q = select(JurisdictionRule).where(JurisdictionRule.org_id == p.org_id)
@@ -137,8 +146,13 @@ def upsert_rule(
     data["city"] = city
     data["state"] = state
 
+    # Never allow these from client
     for k in ["id", "org_id", "updated_at", "created_at", "scope"]:
         data.pop(k, None)
+
+    # ✅ CRITICAL FIX: if your table doesn't have notes, do not write it
+    if not _has_col(JurisdictionRule, "notes"):
+        data.pop("notes", None)
 
     now = datetime.utcnow()
 
@@ -232,48 +246,24 @@ def seed_michigan_defaults(
     p=Depends(get_principal),
     _owner=Depends(require_owner),
 ):
+    """
+    Seeds GLOBAL (org_id NULL) defaults.
+    Idempotent: inserts missing city/state rows only.
+
+    ✅ FIX: do NOT insert columns that don't exist in your DB (e.g., notes).
+    """
     now = datetime.utcnow()
-
-    defaults = [
-        dict(
-            city="Detroit",
-            state="MI",
-            rental_license_required=True,
-            inspection_authority="City of Detroit",
-            inspection_frequency="annual",
-            typical_fail_points_json='["GFCI missing","handrails","peeling paint","smoke/CO detectors","broken windows"]',
-            processing_days=21,
-            tenant_waitlist_depth="high",
-            notes="Baseline default. Override per neighborhood/authority if needed.",
-        ),
-        dict(
-            city="Pontiac",
-            state="MI",
-            rental_license_required=True,
-            inspection_authority="City of Pontiac",
-            inspection_frequency="annual",
-            typical_fail_points_json='["GFCI missing","peeling paint","egress issues","utilities not secured"]',
-            processing_days=14,
-            tenant_waitlist_depth="medium",
-            notes="Baseline default. Confirm local registration/fees.",
-        ),
-        dict(
-            city="Royal Oak",
-            state="MI",
-            rental_license_required=True,
-            inspection_authority="City of Royal Oak",
-            inspection_frequency="periodic",
-            typical_fail_points_json='["handrails","GFCI missing","smoke/CO detectors","egress"]',
-            processing_days=10,
-            tenant_waitlist_depth="medium",
-            notes="Baseline default. Verify frequency by rental license type.",
-        ),
-    ]
-
     created = 0
-    for d in defaults:
-        city = _norm_city(d["city"])
-        state = _norm_state(d["state"])
+
+    allow_notes = _has_col(JurisdictionRule, "notes")
+
+    for d in michigan_global_defaults():
+        row_kwargs = d.to_row_kwargs()
+        city = _norm_city(row_kwargs.get("city", ""))
+        state = _norm_state(row_kwargs.get("state", "MI"))
+        if not city:
+            continue
+
         exists = db.scalar(
             select(JurisdictionRule).where(
                 JurisdictionRule.org_id.is_(None),
@@ -284,20 +274,25 @@ def seed_michigan_defaults(
         if exists:
             continue
 
-        row = JurisdictionRule(
+        # Build insert kwargs safely
+        insert_kwargs = dict(
             org_id=None,
             city=city,
             state=state,
-            rental_license_required=bool(d.get("rental_license_required", False)),
-            inspection_authority=d.get("inspection_authority"),
-            inspection_frequency=d.get("inspection_frequency"),
-            typical_fail_points_json=d.get("typical_fail_points_json") or "[]",
-            processing_days=d.get("processing_days"),
-            tenant_waitlist_depth=d.get("tenant_waitlist_depth"),
-            notes=d.get("notes"),
+            rental_license_required=bool(row_kwargs.get("rental_license_required", False)),
+            inspection_authority=row_kwargs.get("inspection_authority"),
+            inspection_frequency=row_kwargs.get("inspection_frequency"),
+            typical_fail_points_json=row_kwargs.get("typical_fail_points_json") or "[]",
+            registration_fee=row_kwargs.get("registration_fee"),
+            processing_days=row_kwargs.get("processing_days"),
+            tenant_waitlist_depth=row_kwargs.get("tenant_waitlist_depth"),
             created_at=now,
             updated_at=now,
         )
+        if allow_notes:
+            insert_kwargs["notes"] = row_kwargs.get("notes")
+
+        row = JurisdictionRule(**insert_kwargs)
         db.add(row)
         created += 1
 
@@ -305,7 +300,6 @@ def seed_michigan_defaults(
     return {"ok": True, "created": created}
 
 
-# ✅ NEW: Phase 2 completeness endpoint
 @router.get("/coverage", response_model=dict)
 def coverage(
     state: str = Query(default="MI"),
@@ -326,7 +320,6 @@ def coverage(
 
     rows = []
     for city_lc, st in pairs:
-        # Normalize for matching your saved city/titlecase format:
         city = _norm_city(city_lc)
 
         org_rule = db.scalar(

@@ -1,7 +1,8 @@
 # backend/app/routers/equity.py
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from ..domain.audit import emit_audit
 
 from ..services.events_facade import wf
 from ..services.property_state_machine import advance_stage_if_needed
+from ..services.ownership import must_get_property
 
 router = APIRouter(prefix="/equity", tags=["equity"])
 
@@ -154,3 +156,41 @@ def delete_valuation(valuation_id: int, db: Session = Depends(get_db), p=Depends
     db.delete(row)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/valuation/suggestions", response_model=dict)
+def valuation_suggestions(
+    property_id: int,
+    cadence: str = Query(default="quarterly", description="quarterly|monthly"),
+    count: int = Query(default=4, ge=1, le=24),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    """
+    Phase 4: valuation cadence suggestions for portfolio hygiene.
+    Default: quarterly.
+    """
+    must_get_property(db, org_id=p.org_id, property_id=property_id)
+
+    latest = db.scalar(
+        select(Valuation)
+        .where(Valuation.org_id == p.org_id, Valuation.property_id == property_id)
+        .order_by(desc(Valuation.as_of), desc(Valuation.id))
+        .limit(1)
+    )
+
+    base = latest.as_of if latest else datetime.utcnow()
+
+    step_days = 90 if cadence == "quarterly" else 30
+    suggestions = []
+    dt = base
+    for _ in range(count):
+        dt = dt + timedelta(days=step_days)
+        suggestions.append({"suggested_as_of": dt.isoformat()})
+
+    return {
+        "property_id": property_id,
+        "cadence": cadence,
+        "latest_valuation_as_of": latest.as_of.isoformat() if latest else None,
+        "suggestions": suggestions,
+    }

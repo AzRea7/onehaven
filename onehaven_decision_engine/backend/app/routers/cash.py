@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Transaction
+from ..models import Transaction, Lease
 from ..schemas import TransactionCreate, TransactionOut
 from ..domain.audit import emit_audit
 
@@ -152,3 +153,93 @@ def delete_txn(transaction_id: int, db: Session = Depends(get_db), p=Depends(get
     db.delete(row)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/rollup", response_model=dict)
+def cash_rollup(
+    property_id: int,
+    year: int = Query(..., ge=2000, le=2200),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    """
+    Phase 4: portfolio-grade cash rollups (simple v1).
+    Returns months with:
+      - expected rent (leases)
+      - collected income (transactions)
+      - expenses/capex (transactions)
+      - net + delta vs expected
+    """
+    must_get_property(db, org_id=p.org_id, property_id=property_id)
+
+    leases = db.scalars(
+        select(Lease).where(Lease.org_id == p.org_id, Lease.property_id == property_id)
+    ).all()
+
+    txns = db.scalars(
+        select(Transaction).where(Transaction.org_id == p.org_id, Transaction.property_id == property_id)
+    ).all()
+
+    expected = {f"{year}-{m:02d}": 0.0 for m in range(1, 13)}
+    collected = {f"{year}-{m:02d}": 0.0 for m in range(1, 13)}
+    expenses = {f"{year}-{m:02d}": 0.0 for m in range(1, 13)}
+
+    def month_start(y: int, m: int) -> datetime:
+        return datetime(y, m, 1)
+
+    def next_month_start(y: int, m: int) -> datetime:
+        if m == 12:
+            return datetime(y + 1, 1, 1)
+        return datetime(y, m + 1, 1)
+
+    # Expected rent: if a lease overlaps a month, add total_rent for that month (v1)
+    for l in leases:
+        start = l.start_date
+        end = l.end_date or datetime(2100, 1, 1)
+
+        for m in range(1, 13):
+            ms = month_start(year, m)
+            me = next_month_start(year, m)
+            overlaps = (start < me) and (ms < end)
+            if overlaps:
+                expected[f"{year}-{m:02d}"] += float(l.total_rent or 0.0)
+
+    # Collected + expenses from transactions
+    for t in txns:
+        d = t.txn_date or datetime.utcnow()
+        if d.year != year:
+            continue
+
+        key = f"{d.year}-{d.month:02d}"
+        typ = (t.txn_type or "other").lower()
+        amt = float(t.amount or 0.0)
+
+        if typ in {"income", "rent"}:
+            collected[key] += amt
+        elif typ in {"expense", "capex"}:
+            expenses[key] += abs(amt) if amt < 0 else amt
+        else:
+            # heuristic: positive => income, negative => expense
+            if amt >= 0:
+                collected[key] += amt
+            else:
+                expenses[key] += abs(amt)
+
+    months = []
+    for m in range(1, 13):
+        key = f"{year}-{m:02d}"
+        exp = expected[key]
+        col = collected[key]
+        expn = expenses[key]
+        months.append(
+            {
+                "month": key,
+                "expected_rent": round(exp, 2),
+                "collected_income": round(col, 2),
+                "expenses": round(expn, 2),
+                "net": round(col - expn, 2),
+                "delta_vs_expected": round(col - exp, 2),
+            }
+        )
+
+    return {"property_id": property_id, "year": year, "months": months}
