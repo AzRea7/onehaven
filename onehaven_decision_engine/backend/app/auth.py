@@ -1,3 +1,4 @@
+# onehaven_decision_engine/backend/app/auth.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .db import get_db
 from .models import Organization, AppUser, OrgMembership
+from .services.jurisdiction_rules_service import ensure_seeded_for_org
 
 
 @dataclass(frozen=True)
@@ -51,9 +53,8 @@ def get_principal(
       Requires X-Org-Slug + X-User-Email.
       Auto-provisions org + user + membership when dev_auto_provision=True.
 
-    Why this exists:
-      Phase 5 requires multi-tenant + roles, but you don't want auth vendor lock-in
-      blocking local iteration. This is a clean seam: swap later to Clerk/Auth0/Cognito.
+    Phase-2 DoD hook:
+      When org is created in dev, ensure jurisdiction defaults exist for that org.
     """
     if settings.auth_mode != "dev":
         raise HTTPException(status_code=500, detail="Non-dev auth mode not configured yet")
@@ -79,11 +80,13 @@ def get_principal(
 
     now = datetime.utcnow()
 
+    org_created = False
     if org is None:
         org = Organization(slug=org_slug, name=org_slug, created_at=now)
         db.add(org)
         db.commit()
         db.refresh(org)
+        org_created = True
 
     if user is None:
         user = AppUser(email=email, display_name=email.split("@")[0], created_at=now)
@@ -103,8 +106,14 @@ def get_principal(
         db.commit()
         db.refresh(mem)
 
-    # If header role differs, we do NOT auto-escalate membership in code.
-    # That prevents accidental privilege bumps from a random client.
+    # Phase 2 DoD: on org creation, seed org-scoped jurisdiction rules (admin starts non-empty).
+    if org_created:
+        try:
+            ensure_seeded_for_org(db, org_id=int(org.id))
+        except Exception:
+            # Never break auth on seed hiccup; worst case: admin sees empty and can seed manually.
+            db.rollback()
+
     effective_role = mem.role
 
     return Principal(

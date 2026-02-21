@@ -1,26 +1,31 @@
-# backend/app/services/events_facade.py
+# onehaven_decision_engine/backend/app/services/events_facade.py
 from __future__ import annotations
 
-from typing import Optional, Any
+import json
+from datetime import datetime
+from typing import Any, Optional
+
 from sqlalchemy.orm import Session
 
-from ..domain.events import emit_workflow_event
+from ..models import WorkflowEvent
 
 
-def wf(
+def emit(
     db: Session,
     *,
     org_id: int,
+    property_id: Optional[int],
     actor_user_id: Optional[int],
     event_type: str,
-    property_id: Optional[int] = None,
     payload: Optional[dict[str, Any]] = None,
-) -> None:
-    emit_workflow_event(
-        db,
+) -> WorkflowEvent:
+    row = WorkflowEvent(
         org_id=org_id,
-        actor_user_id=actor_user_id,
-        event_type=event_type,
         property_id=property_id,
-        payload=payload or {},
+        actor_user_id=actor_user_id,
+        event_type=str(event_type),
+        payload_json=json.dumps(payload or {}),
+        created_at=datetime.utcnow(),
     )
+    db.add(row)
+    return row

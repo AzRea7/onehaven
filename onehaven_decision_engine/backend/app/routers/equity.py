@@ -51,7 +51,7 @@ def create_valuation(payload: ValuationCreate, db: Session = Depends(get_db), p=
         actor_user_id=p.user_id,
         event_type="valuation.created",
         property_id=row.property_id,
-        payload={"valuation_id": row.id, "as_of": str(row.as_of), "value": row.value},
+        payload={"valuation_id": row.id, "as_of": str(row.as_of), "estimated_value": row.estimated_value},
     )
 
     advance_stage_if_needed(db, org_id=p.org_id, property_id=row.property_id, suggested_stage="equity")
@@ -70,7 +70,6 @@ def list_valuations(
     q = select(Valuation).where(Valuation.org_id == p.org_id)
 
     if property_id is not None:
-        # verify property belongs to org (hard boundary)
         prop = db.get(Property, property_id)
         if not prop or prop.org_id != p.org_id:
             raise HTTPException(status_code=404, detail="property not found")
@@ -122,7 +121,7 @@ def update_valuation(
         actor_user_id=p.user_id,
         event_type="valuation.updated",
         property_id=row.property_id,
-        payload={"valuation_id": row.id, "value": row.value},
+        payload={"valuation_id": row.id, "estimated_value": row.estimated_value},
     )
     db.commit()
     return row

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import AgentMessage, AgentRun, AgentSlotAssignment, WorkflowEvent
+from ..models import AgentMessage, AgentRun, AgentSlotAssignment, WorkflowEvent, Property
 from ..schemas import (
     AgentMessageCreate,
     AgentMessageOut,
@@ -20,6 +20,7 @@ from ..schemas import (
     AgentSlotAssignmentUpsert,
     AgentSlotSpecOut,
     AgentSpecOut,
+    AgentSlotOut,
 )
 from ..domain.agents.registry import AGENTS, SLOTS
 from ..services.agent_engine import create_and_execute_run
@@ -38,6 +39,7 @@ def list_agents(p=Depends(get_principal)):
                 description=getattr(a, "description", None),
                 needs_human=bool(getattr(a, "needs_human", False)),
                 category=getattr(a, "category", None),
+                # keep stable shape for UI; slots are declared separately in /registry
                 sidebar_slots=[],
             )
         )
@@ -84,6 +86,12 @@ def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends
     if payload.agent_key not in AGENTS:
         raise HTTPException(status_code=404, detail="unknown agent_key")
 
+    # optional property_id must belong to org
+    if payload.property_id is not None:
+        prop = db.scalar(select(Property).where(Property.id == payload.property_id, Property.org_id == p.org_id))
+        if not prop:
+            raise HTTPException(status_code=404, detail="property not found")
+
     try:
         run = create_and_execute_run(
             db,
@@ -102,20 +110,7 @@ def create_and_execute(payload: AgentRunCreate, db: Session = Depends(get_db), p
     """
     Explicit execute endpoint (kept for future decouple: create vs execute).
     """
-    if payload.agent_key not in AGENTS:
-        raise HTTPException(status_code=404, detail="unknown agent_key")
-
-    try:
-        run = create_and_execute_run(
-            db,
-            org_id=p.org_id,
-            agent_key=payload.agent_key,
-            property_id=payload.property_id,
-            input_json=payload.input_json,
-        )
-        return run
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    return create_run(payload=payload, db=db, p=p)
 
 
 @router.get("/runs", response_model=list[AgentRunOut])
@@ -136,6 +131,7 @@ def list_runs(
 
 @router.post("/messages", response_model=AgentMessageOut)
 def post_message(payload: AgentMessageCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+    # lightweight: just store; permissions are org-scoped by principal
     msg = AgentMessage(
         org_id=p.org_id,
         thread_key=payload.thread_key,
@@ -194,12 +190,23 @@ def slot_assignments(
         desc(AgentSlotAssignment.updated_at)
     )
     if property_id is not None:
+        # hard boundary: if property_id provided, it must belong to org
+        prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
+        if not prop:
+            raise HTTPException(status_code=404, detail="property not found")
         q = q.where(AgentSlotAssignment.property_id == property_id)
+
     return list(db.scalars(q.limit(limit)).all())
 
 
 @router.post("/slots/assignments", response_model=AgentSlotAssignmentOut)
 def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
+    # If a property_id is specified, enforce org boundary
+    if payload.property_id is not None:
+        prop = db.scalar(select(Property).where(Property.id == payload.property_id, Property.org_id == p.org_id))
+        if not prop:
+            raise HTTPException(status_code=404, detail="property not found")
+
     existing = db.scalar(
         select(AgentSlotAssignment)
         .where(

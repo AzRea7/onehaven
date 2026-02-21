@@ -1,3 +1,4 @@
+# backend/app/domain/underwriting.py
 from __future__ import annotations
 
 import math
@@ -58,7 +59,7 @@ def _finite(x: float, *, fallback: float) -> float:
 
 
 def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> UnderwritingOutputs:
-    # NOTE: keep your original behavior: down payment based on ALL-IN cost
+    # down payment based on ALL-IN cost (purchase + rehab)
     all_in_cost = float(inp.purchase_price) + float(inp.rehab)
     down_payment = all_in_cost * float(inp.down_payment_pct)
     loan_amount = max(all_in_cost - down_payment, 0.0)
@@ -78,41 +79,26 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
     noi = effective_gross - operating_expenses
     cash_flow = noi - mortgage_payment
 
-    # DSCR: clamp instead of infinity
-    if mortgage_payment > 1e-6:
-        dscr = noi / mortgage_payment
-    else:
-        dscr = 999.0  # finite sentinel
-
+    dscr = noi / mortgage_payment if mortgage_payment > 1e-6 else 999.0
     cash_invested = max(down_payment, 0.0)
     annual_cash_flow = cash_flow * 12.0
+    cash_on_cash = annual_cash_flow / cash_invested if cash_invested > 1e-6 else 999.0
 
-    if cash_invested > 1e-6:
-        cash_on_cash = annual_cash_flow / cash_invested
-    else:
-        cash_on_cash = 999.0  # finite sentinel
-
-    # cash_flow = rent * a - b, where:
-    # a = (1-vacancy) - (maintenance+management+capex), b = fixed_opex + mortgage
+    # break-even rent:
+    # cash_flow = rent * a - b
     a = (1.0 - float(inp.vacancy_rate)) - (
         float(inp.maintenance_rate) + float(inp.management_rate) + float(inp.capex_rate)
     )
     b = fixed_opex + mortgage_payment
 
-    if a > 1e-6:
-        break_even_rent = b / a
-    else:
-        break_even_rent = 999999.0
+    break_even_rent = (b / a) if a > 1e-6 else 999999.0
 
     required_annual_cash_flow = float(target_roi) * cash_invested
     required_monthly_cash_flow = required_annual_cash_flow / 12.0
+    min_rent_for_target_roi = (
+        (fixed_opex + mortgage_payment + required_monthly_cash_flow) / a if a > 1e-6 else 999999.0
+    )
 
-    if a > 1e-6:
-        min_rent_for_target_roi = (fixed_opex + mortgage_payment + required_monthly_cash_flow) / a
-    else:
-        min_rent_for_target_roi = 999999.0
-
-    # Ensure finite values everywhere
     dscr = _finite(dscr, fallback=0.0)
     cash_on_cash = _finite(cash_on_cash, fallback=0.0)
     break_even_rent = _finite(break_even_rent, fallback=0.0)
@@ -132,11 +118,10 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
 
 def underwrite(
     *,
-    # ✅ NEW: accept purchase_price (what evaluate.py uses)
+    # New callers should pass purchase_price
     purchase_price: Optional[float] = None,
-    # ✅ Back-compat: old name (your existing code used asking_price)
+    # Back-compat old name
     asking_price: Optional[float] = None,
-
     down_payment_pct: float,
     interest_rate: float,
     term_years: int,
@@ -149,8 +134,8 @@ def underwrite(
     """
     Backward compatible wrapper.
 
-    - New callers should pass purchase_price=...
-    - Old callers can pass asking_price=...
+    - New callers: purchase_price=...
+    - Old callers: asking_price=...
     """
     vacancy_rate = float(getattr(settings, "vacancy_rate", 0.05))
     maintenance_rate = float(getattr(settings, "maintenance_rate", 0.10))
@@ -168,7 +153,6 @@ def underwrite(
         getattr(settings, "utilities_monthly_default", 0.0)
     )
 
-    # ✅ choose canonical price
     if purchase_price is not None:
         pp = float(purchase_price)
     elif asking_price is not None:
@@ -183,12 +167,13 @@ def underwrite(
         interest_rate=float(interest_rate),
         term_years=int(term_years),
         gross_rent=float(gross_rent),
-        vacancy_rate=vacancy_rate,
-        maintenance_rate=maintenance_rate,
-        management_rate=management_rate,
-        capex_rate=capex_rate,
+        vacancy_rate=float(vacancy_rate),
+        maintenance_rate=float(maintenance_rate),
+        management_rate=float(management_rate),
+        capex_rate=float(capex_rate),
         insurance_monthly=float(insurance_monthly),
         taxes_monthly=float(taxes_monthly),
         utilities_monthly=float(utilities_monthly),
     )
-    return run_underwriting(inp, target_roi=target_roi)
+
+    return run_underwriting(inp, target_roi=float(target_roi))

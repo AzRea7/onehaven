@@ -1,3 +1,5 @@
+# backend/app/schemas.py
+# (only the changed/needed portion is shown here as a FULL FILE replacement; safe drop-in)
 from __future__ import annotations
 
 import json
@@ -260,7 +262,6 @@ class RentExplainOut(BaseModel):
     cap_reason: Optional[str] = None  # fmr|comps|override|none
     explanation: Optional[str] = None
 
-    # ✅ when /rent/explain persists a run, backend may attach these
     run_id: Optional[int] = None
     created_at: Optional[datetime] = None
 
@@ -337,6 +338,9 @@ class UnderwritingResultOut(BaseModel):
     bedrooms: Optional[int] = None
     bathrooms: Optional[float] = None
 
+    # Optional if your model later adds it
+    rent_explain_run_id: Optional[int] = None
+
     model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="before")
@@ -372,14 +376,13 @@ class UnderwritingResultOut(BaseModel):
         rj = getattr(data, "reasons_json", "[]")
         jurj = getattr(data, "jurisdiction_reasons_json", None)
 
-        return {
+        payload = {
             "id": getattr(data, "id"),
             "deal_id": getattr(data, "deal_id"),
             "org_id": getattr(data, "org_id", None),
             "decision": getattr(data, "decision"),
             "score": getattr(data, "score"),
             "reasons": _load_list(rj),
-
             "gross_rent_used": getattr(data, "gross_rent_used"),
             "mortgage_payment": getattr(data, "mortgage_payment"),
             "operating_expenses": getattr(data, "operating_expenses"),
@@ -387,10 +390,8 @@ class UnderwritingResultOut(BaseModel):
             "cash_flow": getattr(data, "cash_flow"),
             "dscr": getattr(data, "dscr"),
             "cash_on_cash": getattr(data, "cash_on_cash"),
-
             "break_even_rent": getattr(data, "break_even_rent"),
             "min_rent_for_target_roi": getattr(data, "min_rent_for_target_roi"),
-
             "decision_version": getattr(data, "decision_version", None),
             "payment_standard_pct_used": getattr(data, "payment_standard_pct_used", None),
             "jurisdiction_multiplier": getattr(data, "jurisdiction_multiplier", None),
@@ -398,6 +399,9 @@ class UnderwritingResultOut(BaseModel):
             "rent_cap_reason": getattr(data, "rent_cap_reason", None),
             "fmr_adjusted": getattr(data, "fmr_adjusted", None),
         }
+        if hasattr(data, "rent_explain_run_id"):
+            payload["rent_explain_run_id"] = getattr(data, "rent_explain_run_id")
+        return payload
 
 
 # --------------------
@@ -411,7 +415,7 @@ class ChecklistItemOut(BaseModel):
     common_fail: bool = False
     applies_if: Optional[Dict[str, Any]] = None
 
-    status: str = "todo"  # todo|in_progress|done|failed|blocked
+    status: str = "todo"
     marked_at: Optional[datetime] = None
     marked_by: Optional[str] = None
     proof_url: Optional[str] = None
