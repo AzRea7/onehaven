@@ -1,5 +1,6 @@
 # onehaven_decision_engine/backend/app/routers/agent_runs.py
 from __future__ import annotations
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -132,19 +133,73 @@ def reject_run(
     principal=Depends(get_principal),
 ):
     require_owner(principal)
-    r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
+
+    r = db.scalar(
+        select(AgentRun).where(
+            AgentRun.id == int(run_id),
+            AgentRun.org_id == principal.org_id,
+        )
+    )
     if r is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
 
-    # deterministic reject path
+    # If it's already terminal, don't mutate history (idempotent behavior)
+    if r.status in {"done", "failed"}:
+        return {
+            "ok": True,
+            "run_id": int(r.id),
+            "status": r.status,
+            "approval_status": getattr(r, "approval_status", None),
+            "last_error": getattr(r, "last_error", None),
+        }
+
+    # Deterministic reject path:
+    # - "blocked" => owner rejected proposed mutations
+    # - "queued/running" => treat as cancellation + rejection (still auditable)
     r.status = "failed"
     r.approval_status = "rejected"
     r.last_error = f"rejected: {reason}"
+
+    # Safety: clear proposed actions so nothing can be applied later by accident
+    if hasattr(r, "proposed_actions_json"):
+        r.proposed_actions_json = None
+
+    # Stamp finished_at for consistency with other terminal transitions
+    if hasattr(r, "finished_at"):
+        r.finished_at = datetime.utcnow()
+
     db.add(r)
+
+    # Emit workflow event for audit trail
+    db.add(
+        WorkflowEvent(
+            org_id=principal.org_id,
+            property_id=r.property_id,
+            actor_user_id=principal.user_id,
+            event_type="agent_run_rejected",
+            payload_json=json.dumps(
+                {
+                    "run_id": int(r.id),
+                    "agent_key": str(r.agent_key),
+                    "reason": reason,
+                    "prev_status": str(getattr(r, "status", None)),
+                }
+            ),
+            created_at=datetime.utcnow(),
+        )
+    )
+
     db.commit()
     db.refresh(r)
-    return {"ok": True, "run_id": int(r.id), "status": r.status, "approval_status": r.approval_status}
 
+    return {
+        "ok": True,
+        "run_id": int(r.id),
+        "status": r.status,
+        "approval_status": r.approval_status,
+        "last_error": r.last_error,
+        "finished_at": r.finished_at if hasattr(r, "finished_at") else None,
+    }
 
 @router.post("/{run_id}/apply")
 def apply_run(

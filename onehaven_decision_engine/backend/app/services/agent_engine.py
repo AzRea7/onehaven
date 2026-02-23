@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timedelta
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -47,7 +47,6 @@ def create_run(
 ) -> AgentRun:
     now = _now()
 
-    # If idempotency_key is supplied and exists, return existing run
     if idempotency_key:
         existing = db.scalar(
             select(AgentRun)
@@ -81,6 +80,46 @@ def create_run(
     db.commit()
     db.refresh(r)
     return r
+
+
+def create_and_execute_run(
+    db: Session,
+    *,
+    org_id: int,
+    actor_user_id: Optional[int],
+    agent_key: str,
+    property_id: Optional[int],
+    input_payload: dict[str, Any] | None,
+    idempotency_key: Optional[str] = None,
+    dispatch: bool = True,
+) -> dict[str, Any]:
+    """
+    Convenience API expected by routers/agents.py.
+
+    - create run (idempotent)
+    - dispatch to worker (preferred) OR execute synchronously (dev)
+    """
+    r = create_run(
+        db,
+        org_id=org_id,
+        actor_user_id=actor_user_id,
+        agent_key=agent_key,
+        property_id=property_id,
+        input_payload=input_payload,
+        idempotency_key=idempotency_key,
+    )
+
+    if dispatch:
+        # avoid import cycles at boot
+        from app.workers.agent_tasks import execute_agent_run  # import-outside-toplevel
+
+        if r.status == "queued":
+            execute_agent_run.delay(org_id=org_id, run_id=int(r.id))
+
+        return {"ok": True, "mode": "async", "run_id": int(r.id), "status": r.status}
+
+    res = execute_run_now(db, org_id=org_id, run_id=int(r.id), attempt_number=1)
+    return {"ok": True, "mode": "sync", "run_id": int(r.id), "result": res}
 
 
 def mark_approved(
@@ -125,10 +164,6 @@ def apply_approved(
     actor_user_id: int,
     run_id: int,
 ) -> dict[str, Any]:
-    """
-    Applies proposed_actions_json for a run that is approval_status=approved.
-    This is the piece that converts “agents as suggestions” into “agents as SaaS ops”.
-    """
     r = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == org_id))
     if r is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
@@ -158,6 +193,11 @@ def apply_approved(
             created_at=_now(),
         )
     )
+
+    r.status = "done"
+    r.finished_at = _now()
+    db.add(r)
+
     db.commit()
 
     return {"ok": True, "applied": applied, "skipped": skipped, "run_id": r.id}
@@ -171,19 +211,10 @@ def execute_run_now(
     attempt_number: int = 1,
     force_fail: Optional[str] = None,
 ) -> dict[str, Any]:
-    """
-    Executes a queued run with:
-    - idempotency (status gate + idempotency_key unique)
-    - retries (worker controlled)
-    - timeout/stuck semantics
-    - contract enforcement
-    - approval semantics for mutation agents
-    """
     r = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == org_id))
     if r is None:
         return {"ok": False, "status": "not_found", "run_id": run_id}
 
-    # idempotency: already terminal => return stored output
     if r.status in {"done", "failed", "blocked"}:
         return {"ok": True, "status": r.status, "run_id": r.id, "output": _loads(r.output_json, {})}
 
@@ -206,7 +237,6 @@ def execute_run_now(
             db.commit()
             return {"ok": False, "status": "failed", "run_id": r.id, "error": r.last_error}
 
-    # transition => running
     r.status = "running"
     r.started_at = r.started_at or _now()
     r.heartbeat_at = _now()
@@ -245,11 +275,9 @@ def execute_run_now(
         return {"ok": False, "status": "failed", "run_id": r.id, "error": r.last_error}
 
     actions = output.get("actions") if isinstance(output, dict) else None
-    has_actions = isinstance(actions, list) and len(actions) > 0
-    if has_actions:
+    if isinstance(actions, list) and actions:
         r.proposed_actions_json = _dumps(actions)
 
-    # recommend-only => done immediately
     if contract.mode == "recommend_only":
         r.status = "done"
         r.finished_at = _now()
@@ -258,7 +286,6 @@ def execute_run_now(
         db.commit()
         return {"ok": True, "status": "done", "run_id": r.id, "output": output}
 
-    # mutation modes => require approval unless you enable autonomous later
     r.status = "blocked"
     r.finished_at = _now()
     r.approval_status = "pending"

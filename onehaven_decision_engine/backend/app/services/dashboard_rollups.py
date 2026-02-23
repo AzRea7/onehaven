@@ -1,228 +1,234 @@
-# backend/app/services/dashboard_rollups.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Optional
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from ..models import Lease, Property, RehabTask, Transaction, Valuation, PropertyChecklistItem, Inspection
+from app.models import (
+    Property,
+    Deal,
+    UnderwritingResult,
+    RehabTask,
+    Lease,
+    Transaction,
+    Valuation,
+    PropertyState,
+)
 
 
-@dataclass(frozen=True)
-class PortfolioRollup:
-    properties: int
-    compliance_counts: dict[str, int]
-    rehab_open_tasks: int
-    rehab_blocked_tasks: int
-    cash_last_30_net: float
-    rent_expected_last_30: float
-    rent_collected_last_30: float
-    valuation_due: int
+def _dt(v: Any) -> Optional[datetime]:
+    return v if isinstance(v, datetime) else None
 
 
-def _today_utc_date() -> date:
-    return datetime.utcnow().date()
-
-
-def _last_30_window() -> tuple[date, date]:
-    end = _today_utc_date()
-    start = end - timedelta(days=30)
-    return start, end
-
-
-def _active_lease_monthly_rent(db: Session, *, org_id: int, property_id: int, as_of: date) -> float:
-    """
-    Uses your leases table as the source of expected rent.
-
-    Assumptions consistent with your schema/migrations:
-    - Lease.start_date exists
-    - Lease.end_date may be null
-    - Lease.total_rent is a monthly rent number (common in your repo naming)
-    """
-    lease = db.scalar(
-        select(Lease)
-        .where(Lease.org_id == org_id, Lease.property_id == property_id)
-        .where(Lease.start_date <= as_of)
-        .where((Lease.end_date.is_(None)) | (Lease.end_date >= as_of))
-        .order_by(desc(Lease.id))
-        .limit(1)
-    )
-    if not lease:
-        return 0.0
+def _num(v: Any) -> float:
     try:
-        return float(lease.total_rent or 0.0)
+        return float(v)
     except Exception:
         return 0.0
 
 
-def _rent_collected_last_30(db: Session, *, org_id: int, property_id: int, start: date, end: date) -> float:
-    """
-    Transactions are the source of collected rent.
-    This assumes:
-    - Transaction.txn_date exists
-    - Transaction.txn_type exists (you already index it in migrations)
-    - Transaction.amount exists
-    """
-    s = db.scalar(
-        select(func.coalesce(func.sum(Transaction.amount), 0.0))
-        .where(Transaction.org_id == org_id, Transaction.property_id == property_id)
-        .where(Transaction.txn_date >= start, Transaction.txn_date <= end)
-        .where(func.lower(Transaction.txn_type) == "rent")
-    )
+def _as_int(v: Any, default: int = 0) -> int:
     try:
-        return float(s or 0.0)
+        return int(v)
     except Exception:
-        return 0.0
+        return default
 
 
-def _net_last_30(db: Session, *, org_id: int, start: date, end: date) -> float:
+def compute_rollups(
+    db: Session,
+    *,
+    org_id: int,
+    days: int = 90,
+    limit: int = 50,
+) -> dict[str, Any]:
     """
-    Portfolio net = sum(amount) over last 30 days.
-    Your system can treat expenses as negative rows or separate txn_type conventions.
-    We do not guess sign; we sum amounts exactly as stored.
+    Dashboard rollups (Phase 4 ops visibility) used by routers/dashboard.py.
+
+    Design goals:
+    - Deterministic.
+    - Defensive against partial schemas.
+    - Cheap-ish queries (no N+1).
+    - Returns a simple dict for JSON response.
+
+    The dashboard page typically wants:
+      - portfolio counts
+      - recent activity
+      - rehab backlog summary
+      - cashflow snapshot (last N days)
+      - equity snapshot (latest valuations)
+      - stage distribution (if PropertyState exists)
     """
-    s = db.scalar(
-        select(func.coalesce(func.sum(Transaction.amount), 0.0))
-        .where(Transaction.org_id == org_id)
-        .where(Transaction.txn_date >= start, Transaction.txn_date <= end)
-    )
+    now = datetime.utcnow()
+    since = now - timedelta(days=int(days))
+
+    # --- Property counts ---
+    property_count = db.scalar(
+        select(func.count()).select_from(Property).where(Property.org_id == org_id)
+    ) or 0
+
+    # --- Deals ---
+    deal_count = db.scalar(
+        select(func.count()).select_from(Deal).where(Deal.org_id == org_id)
+    ) or 0
+
+    # --- Latest underwriting results (count by decision) ---
+    # If your schema doesn’t have decision field, this still won’t crash; we just return empty buckets.
+    decision_buckets: dict[str, int] = {}
     try:
-        return float(s or 0.0)
-    except Exception:
-        return 0.0
-
-
-def _valuation_is_due(db: Session, *, org_id: int, property_id: int, as_of: date, cadence_days: int = 180) -> bool:
-    """
-    Enforced valuation cadence (Phase 4 DoD):
-    - If no valuation exists -> due
-    - If latest valuation.as_of older than cadence_days -> due
-    """
-    v = db.scalar(
-        select(Valuation)
-        .where(Valuation.org_id == org_id, Valuation.property_id == property_id)
-        .order_by(desc(Valuation.as_of))
-        .limit(1)
-    )
-    if not v or not getattr(v, "as_of", None):
-        return True
-    try:
-        last = v.as_of
-        if isinstance(last, datetime):
-            last = last.date()
-        age = (as_of - last).days
-        return age >= cadence_days
-    except Exception:
-        return True
-
-
-def compute_portfolio_rollup(db: Session, *, org_id: int, state: str = "MI", limit: int = 2000) -> dict[str, Any]:
-    """
-    Phase 4: portfolio-grade rollups (single source of truth inputs):
-    - compliance status distribution
-    - rehab open/blocked
-    - cash last 30 net
-    - expected vs collected rent last 30
-    - valuation cadence due count
-    """
-    prop_ids = [
-        r[0]
-        for r in db.execute(
-            select(Property.id)
-            .where(Property.org_id == org_id, Property.state == state)
-            .order_by(desc(Property.id))
-            .limit(limit)
+        rows = db.execute(
+            select(UnderwritingResult.decision, func.count())
+            .where(UnderwritingResult.org_id == org_id)
+            .group_by(UnderwritingResult.decision)
         ).all()
-    ]
+        decision_buckets = {str(k): int(v) for (k, v) in rows if k is not None}
+    except Exception:
+        decision_buckets = {}
 
-    start, end = _last_30_window()
-
-    # Compliance counts
-    # We define compliance as:
-    # - "passed" if latest inspection passed AND no failed checklist items
-    # - "failing" if latest inspection failed OR any failed items
-    # - "unknown" if no inspection + no checklist items
-    compliance = {"passed": 0, "failing": 0, "unknown": 0}
+    # --- Rehab backlog ---
+    rehab_total = db.scalar(
+        select(func.count())
+        .select_from(RehabTask)
+        .where(RehabTask.org_id == org_id)
+    ) or 0
 
     rehab_open = 0
-    rehab_blocked = 0
+    rehab_cost_open = 0.0
+    try:
+        rehab_open = db.scalar(
+            select(func.count())
+            .select_from(RehabTask)
+            .where(RehabTask.org_id == org_id)
+            .where(RehabTask.status.in_(["todo", "in_progress"]))
+        ) or 0
 
-    rent_expected = 0.0
-    rent_collected = 0.0
+        rehab_cost_open = _num(
+            db.scalar(
+                select(func.coalesce(func.sum(RehabTask.cost_estimate), 0.0))
+                .where(RehabTask.org_id == org_id)
+                .where(RehabTask.status.in_(["todo", "in_progress"]))
+            )
+        )
+    except Exception:
+        rehab_open = 0
+        rehab_cost_open = 0.0
 
-    valuation_due = 0
-    as_of = _today_utc_date()
+    # --- Cashflow in the last N days ---
+    txn_count = 0
+    net_cash = 0.0
+    try:
+        txn_count = db.scalar(
+            select(func.count())
+            .select_from(Transaction)
+            .where(Transaction.org_id == org_id)
+            .where(Transaction.occurred_at >= since)
+        ) or 0
 
-    for pid in prop_ids:
-        # ---- Compliance ----
-        latest_insp = db.scalar(
-            select(Inspection)
-            .where(Inspection.org_id == org_id, Inspection.property_id == pid)
-            .order_by(desc(Inspection.id))
+        # Convention:
+        # - income positive
+        # - expense negative
+        # If your data uses separate type fields, you can refine later.
+        net_cash = _num(
+            db.scalar(
+                select(func.coalesce(func.sum(Transaction.amount), 0.0))
+                .where(Transaction.org_id == org_id)
+                .where(Transaction.occurred_at >= since)
+            )
+        )
+    except Exception:
+        txn_count = 0
+        net_cash = 0.0
+
+    # --- Equity snapshot: latest valuation per property ---
+    # Simple version: count valuations and latest valuation overall.
+    valuation_count = 0
+    latest_valuation = None
+    try:
+        valuation_count = db.scalar(
+            select(func.count())
+            .select_from(Valuation)
+            .where(Valuation.org_id == org_id)
+        ) or 0
+
+        latest_valuation = db.scalar(
+            select(Valuation)
+            .where(Valuation.org_id == org_id)
+            .order_by(Valuation.as_of.desc(), Valuation.id.desc())
             .limit(1)
         )
-        failed_items = db.scalar(
-            select(func.count())
-            .select_from(PropertyChecklistItem)
-            .where(PropertyChecklistItem.org_id == org_id, PropertyChecklistItem.property_id == pid)
-            .where(func.lower(PropertyChecklistItem.status) == "failed")
+    except Exception:
+        valuation_count = 0
+        latest_valuation = None
+
+    latest_valuation_out = None
+    if latest_valuation is not None:
+        latest_valuation_out = {
+            "property_id": getattr(latest_valuation, "property_id", None),
+            "as_of": getattr(latest_valuation, "as_of", None),
+            "value": getattr(latest_valuation, "value", None),
+            "source": getattr(latest_valuation, "source", None),
+        }
+
+    # --- Stage distribution (if PropertyState exists) ---
+    stage_buckets: dict[str, int] = {}
+    try:
+        stage_rows = db.execute(
+            select(PropertyState.current_stage, func.count())
+            .where(PropertyState.org_id == org_id)
+            .group_by(PropertyState.current_stage)
+        ).all()
+        stage_buckets = {str(k): int(v) for (k, v) in stage_rows if k is not None}
+    except Exception:
+        stage_buckets = {}
+
+    # --- Recent properties list (used in dashboard tiles/cards) ---
+    props = db.scalars(
+        select(Property)
+        .where(Property.org_id == org_id)
+        .order_by(Property.id.desc())
+        .limit(int(limit))
+    ).all()
+
+    property_rows = []
+    for p in props:
+        property_rows.append(
+            {
+                "id": getattr(p, "id", None),
+                "address": getattr(p, "address", None),
+                "city": getattr(p, "city", None),
+                "state": getattr(p, "state", None),
+                "zip": getattr(p, "zip", None),
+                "bedrooms": getattr(p, "bedrooms", None),
+                "bathrooms": getattr(p, "bathrooms", None),
+                "sqft": getattr(p, "sqft", None),
+                "created_at": getattr(p, "created_at", None),
+            }
         )
-
-        has_any_checklist = db.scalar(
-            select(func.count())
-            .select_from(PropertyChecklistItem)
-            .where(PropertyChecklistItem.org_id == org_id, PropertyChecklistItem.property_id == pid)
-        )
-
-        insp_pass = bool(getattr(latest_insp, "passed", False)) if latest_insp else False
-
-        if (has_any_checklist or 0) == 0 and not latest_insp:
-            compliance["unknown"] += 1
-        elif insp_pass and (failed_items or 0) == 0:
-            compliance["passed"] += 1
-        else:
-            compliance["failing"] += 1
-
-        # ---- Rehab tasks ----
-        open_count = db.scalar(
-            select(func.count())
-            .select_from(RehabTask)
-            .where(RehabTask.org_id == org_id, RehabTask.property_id == pid)
-            .where(func.lower(RehabTask.status).in_(["todo", "in_progress"]))
-        )
-        blocked_count = db.scalar(
-            select(func.count())
-            .select_from(RehabTask)
-            .where(RehabTask.org_id == org_id, RehabTask.property_id == pid)
-            .where(func.lower(RehabTask.status) == "blocked")
-        )
-        rehab_open += int(open_count or 0)
-        rehab_blocked += int(blocked_count or 0)
-
-        # ---- Cash reconciliation ----
-        monthly = _active_lease_monthly_rent(db, org_id=org_id, property_id=pid, as_of=as_of)
-        rent_expected += float(monthly or 0.0)  # "expected this month-ish"
-        rent_collected += _rent_collected_last_30(db, org_id=org_id, property_id=pid, start=start, end=end)
-
-        # ---- Valuation cadence ----
-        if _valuation_is_due(db, org_id=org_id, property_id=pid, as_of=as_of, cadence_days=180):
-            valuation_due += 1
-
-    net_30 = _net_last_30(db, org_id=org_id, start=start, end=end)
 
     return {
-        "properties": len(prop_ids),
-        "compliance_counts": compliance,
-        "rehab": {"open_tasks": rehab_open, "blocked_tasks": rehab_blocked},
-        "cash": {
-            "net_last_30": round(float(net_30 or 0.0), 2),
-            "rent_expected_proxy": round(float(rent_expected or 0.0), 2),
-            "rent_collected_last_30": round(float(rent_collected or 0.0), 2),
-            "rent_gap": round(float((rent_expected or 0.0) - (rent_collected or 0.0)), 2),
+        "ok": True,
+        "as_of": now.isoformat(),
+        "window_days": int(days),
+        "counts": {
+            "properties": int(property_count),
+            "deals": int(deal_count),
+            "rehab_tasks_total": int(rehab_total),
+            "rehab_tasks_open": int(rehab_open),
+            "transactions_window": int(txn_count),
+            "valuations": int(valuation_count),
         },
-        "equity": {"valuation_due_count": int(valuation_due)},
-        "window": {"start": str(start), "end": str(end)},
+        "buckets": {
+            "decisions": decision_buckets,
+            "stages": stage_buckets,
+        },
+        "sums": {
+            "rehab_open_cost_estimate": rehab_cost_open,
+            "net_cash_window": net_cash,
+        },
+        "latest": {
+            "valuation": latest_valuation_out,
+        },
+        "properties": property_rows,
     }

@@ -156,3 +156,10 @@ class HudFmrRecord(Base):
     source: Mapped[str] = mapped_column(String(80), nullable=False, default="hud_user_api")
     fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     raw_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+# -------------------------------------------------------------------
+# Compatibility aliases (older imports)
+# -------------------------------------------------------------------
+# Some modules still import `HqsAddendum`. The canonical model is `HqsAddendumRule`.
+HqsAddendum = HqsAddendumRule

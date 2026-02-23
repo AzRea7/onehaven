@@ -1,6 +1,7 @@
 # onehaven_decision_engine/backend/app/domain/agents/registry.py
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -90,10 +91,21 @@ def agent_rent_reasonableness(
     ctx = _property_context(db, org_id, property_id)
     p = ctx["property"]
     if p is None:
-        return {"agent_key": "rent_reasonableness", "summary": "No property found.", "facts": {"property_id": property_id}, "actions": []}
+        return {
+            "agent_key": "rent_reasonableness",
+            "summary": "No property found.",
+            "facts": {"property_id": property_id},
+            "actions": [],
+        }
 
     bedrooms = int(getattr(p, "bedrooms", 0) or 0)
-    fmr = get_or_fetch_fmr(db, org_id=org_id, area_name=(p.city or "UNKNOWN"), state=(p.state or "MI"), bedrooms=bedrooms)
+    fmr = get_or_fetch_fmr(
+        db,
+        org_id=org_id,
+        area_name=(p.city or "UNKNOWN"),
+        state=(p.state or "MI"),
+        bedrooms=bedrooms,
+    )
     fmr_val = float(getattr(fmr, "fmr", 0.0) or 0.0)
 
     factors = ["location", "quality", "size", "unit_type", "age", "amenities", "services", "utilities"]
@@ -120,7 +132,11 @@ def agent_rent_reasonableness(
                 "op": "create",
                 "payload": {
                     "event_type": "rent_reasonableness_computed",
-                    "payload": {"recommended_gross_rent": recommended, "factors": factors, "fmr": fmr_val},
+                    "payload": {
+                        "recommended_gross_rent": recommended,
+                        "factors": factors,
+                        "fmr": fmr_val,
+                    },
                 },
                 "reason": "Persist a traceable rent reasonableness artifact.",
             }
@@ -138,7 +154,12 @@ def agent_hqs_precheck(
     ctx = _property_context(db, org_id, property_id)
     p = ctx["property"]
     if p is None:
-        return {"agent_key": "hqs_precheck", "summary": "No property found.", "facts": {"property_id": property_id}, "actions": []}
+        return {
+            "agent_key": "hqs_precheck",
+            "summary": "No property found.",
+            "facts": {"property_id": property_id},
+            "actions": [],
+        }
 
     lib = get_effective_hqs_items(db, org_id=org_id, prop=p)
     items = lib.get("items") or []
@@ -179,7 +200,12 @@ def agent_packet_builder(
     ctx = _property_context(db, org_id, property_id)
     p = ctx["property"]
     if p is None:
-        return {"agent_key": "packet_builder", "summary": "No property found.", "facts": {"property_id": property_id}, "actions": []}
+        return {
+            "agent_key": "packet_builder",
+            "summary": "No property found.",
+            "facts": {"property_id": property_id},
+            "actions": [],
+        }
 
     jp = db.scalar(
         select(JurisdictionProfile).where(
@@ -196,12 +222,19 @@ def agent_packet_builder(
     return {
         "agent_key": "packet_builder",
         "summary": "Builds a jurisdiction-specific Section 8 packet checklist (RFTA/HAP onboarding artifacts).",
-        "facts": {"property_id": property_id, "jurisdiction_profile_found": jp is not None, "packet_checklist": checklist},
+        "facts": {
+            "property_id": property_id,
+            "jurisdiction_profile_found": jp is not None,
+            "packet_checklist": checklist,
+        },
         "actions": [
             {
                 "entity_type": "WorkflowEvent",
                 "op": "create",
-                "payload": {"event_type": "packet_checklist_generated", "payload": {"packet_checklist": checklist or []}},
+                "payload": {
+                    "event_type": "packet_checklist_generated",
+                    "payload": {"packet_checklist": checklist or []},
+                },
                 "reason": "Persist packet checklist so ops can track completion.",
             }
         ],
@@ -223,7 +256,10 @@ def agent_timeline_nudger(
             {
                 "entity_type": "WorkflowEvent",
                 "op": "create",
-                "payload": {"event_type": "timeline_nudge", "payload": {"property_id": property_id}},
+                "payload": {
+                    "event_type": "timeline_nudge",
+                    "payload": {"property_id": property_id},
+                },
                 "reason": "Keeps ops loop moving (no silent stalls).",
             }
         ],
@@ -237,3 +273,56 @@ AGENTS = {
     "packet_builder": agent_packet_builder,
     "timeline_nudger": agent_timeline_nudger,
 }
+
+
+# -------------------------------------------------------------------
+# Slot specs: what the UI shows + what can be assigned to humans/agents
+# -------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SlotSpec:
+    slot_key: str
+    title: str
+    description: str
+    default_agent_key: str
+    default_payload_schema: dict[str, Any]
+
+
+# This is what routers/agents.py imports.
+SLOTS = [
+    SlotSpec(
+        slot_key="deal_intake",
+        title="Deal Intake",
+        description="Validate required deal/property fields and produce next steps.",
+        default_agent_key="deal_intake",
+        default_payload_schema={"property_id": "number"},
+    ),
+    SlotSpec(
+        slot_key="rent_reasonableness",
+        title="Rent Reasonableness",
+        description="Compute rent reasonableness baseline from HUD FMR cache + factors checklist.",
+        default_agent_key="rent_reasonableness",
+        default_payload_schema={"property_id": "number"},
+    ),
+    SlotSpec(
+        slot_key="hqs_precheck",
+        title="HQS Precheck",
+        description="Generate HQS readiness precheck and propose rehab tasks for likely failures.",
+        default_agent_key="hqs_precheck",
+        default_payload_schema={"property_id": "number"},
+    ),
+    SlotSpec(
+        slot_key="packet_builder",
+        title="Packet Builder",
+        description="Generate jurisdiction profile packet checklist (RFTA/HAP onboarding).",
+        default_agent_key="packet_builder",
+        default_payload_schema={"property_id": "number"},
+    ),
+    SlotSpec(
+        slot_key="timeline_nudger",
+        title="Timeline Nudger",
+        description="Create workflow continuity events to prevent stalls.",
+        default_agent_key="timeline_nudger",
+        default_payload_schema={"property_id": "number"},
+    ),
+]

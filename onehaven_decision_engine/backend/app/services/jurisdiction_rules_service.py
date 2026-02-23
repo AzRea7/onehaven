@@ -1,4 +1,3 @@
-# onehaven_decision_engine/backend/app/services/jurisdiction_rules_service.py
 from __future__ import annotations
 
 import json
@@ -28,7 +27,7 @@ def ensure_seeded_for_org(db: Session, *, org_id: int) -> dict[str, Any]:
     Strategy:
       - If org already has any rules: do nothing.
       - Else: copy the global defaults (org_id IS NULL) into org-scoped rows.
-      - If global defaults don't exist (should, via 0018), we build from python defaults_for_michigan().
+      - If global defaults don't exist, build from python defaults_for_michigan().
     """
     existing = db.scalar(
         select(JurisdictionRule.id).where(JurisdictionRule.org_id == org_id).limit(1)
@@ -36,7 +35,12 @@ def ensure_seeded_for_org(db: Session, *, org_id: int) -> dict[str, Any]:
     if existing is not None:
         return {"seeded": False, "reason": "org already has jurisdiction rules"}
 
-    globals_ = db.execute(select(JurisdictionRule).where(JurisdictionRule.org_id.is_(None))).scalars().all()
+    globals_ = (
+        db.execute(select(JurisdictionRule).where(JurisdictionRule.org_id.is_(None)))
+        .scalars()
+        .all()
+    )
+
     created = 0
     now = datetime.utcnow()
 
@@ -60,10 +64,11 @@ def ensure_seeded_for_org(db: Session, *, org_id: int) -> dict[str, Any]:
             created += 1
     else:
         for d in defaults_for_michigan():
+            # d is JurisdictionDefault dataclass
             row = JurisdictionRule(
                 org_id=org_id,
                 city=_norm_city(d.city),
-                state="MI",
+                state=_norm_state(getattr(d, "state", "MI")),
                 rental_license_required=bool(d.rental_license_required),
                 inspection_authority=d.inspection_authority,
                 inspection_frequency=d.inspection_frequency,
