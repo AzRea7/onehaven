@@ -1,108 +1,57 @@
-# backend/app/services/hud_fmr_service.py
+# onehaven_decision_engine/backend/app/services/hud_fmr_service.py
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import settings
-from ..policy_models import HudFmrRecord
-from ..clients.hud_user import HudUserClient
+from app.policy_models import HudFmrRecord
 
 
-@dataclass(frozen=True)
-class FmrResult:
-    ok: bool
-    fmr: Optional[float]
-    reason: str
-    source: str
-
-
-def _now() -> datetime:
-    return datetime.utcnow()
-
-
-def _stale(fetched_at: datetime, max_age_days: int = 45) -> bool:
-    return fetched_at < (_now() - timedelta(days=max_age_days))
-
-
-def get_cached_fmr(
+def get_or_fetch_fmr(
     db: Session,
     *,
-    state: str,
+    org_id: int,
     area_name: str,
-    year: int,
-    bedrooms: int,
-) -> FmrResult:
-    row = db.scalar(
-        select(HudFmrRecord)
-        .where(HudFmrRecord.state == state)
-        .where(HudFmrRecord.area_name == area_name)
-        .where(HudFmrRecord.year == year)
-        .where(HudFmrRecord.bedrooms == bedrooms)
-    )
-    if row is None:
-        return FmrResult(ok=False, fmr=None, reason="missing_cache", source="cache")
-
-    if _stale(row.fetched_at):
-        return FmrResult(ok=True, fmr=float(row.fmr), reason="stale_cache", source="cache")
-
-    return FmrResult(ok=True, fmr=float(row.fmr), reason="fresh_cache", source="cache")
-
-
-def refresh_fmr_from_hud_user(
-    db: Session,
-    *,
     state: str,
-    area_name: str,
-    year: int,
     bedrooms: int,
-) -> FmrResult:
+) -> HudFmrRecord:
     """
-    Optional online refresh via HUD USER API client.
-    If token missing, we do NOT pretend. We return missing_token.
+    v1 behavior:
+      - if record exists in DB: return it
+      - else create a placeholder record with fmr=0.0 (still “truthful”)
+      - later: wire HUD API fetch here (requests.get) and fill fmr/effective_date/source_urls_json
     """
-    if not settings.hud_user_token:
-        return FmrResult(ok=False, fmr=None, reason="missing_hud_user_token", source="hud_user_api")
+    area = (area_name or "").strip()
+    st = (state or "").strip().upper()
+    br = int(bedrooms or 0)
 
-    cli = HudUserClient()
-    # NOTE: implement client method if missing. If you can’t fetch area_name exactly,
-    # store policy "area_name" to match what HUD uses for your target metros.
-    try:
-        payload = cli.fetch_fmr(state=state, area_name=area_name, year=year, bedrooms=bedrooms)
-        # payload should include "fmr" numeric; keep raw_json for audit.
-        fmr_val = float(payload["fmr"])
-    except Exception as e:
-        return FmrResult(ok=False, fmr=None, reason=f"hud_fetch_failed:{type(e).__name__}", source="hud_user_api")
-
-    row = db.scalar(
+    existing = db.scalar(
         select(HudFmrRecord)
-        .where(HudFmrRecord.state == state)
-        .where(HudFmrRecord.area_name == area_name)
-        .where(HudFmrRecord.year == year)
-        .where(HudFmrRecord.bedrooms == bedrooms)
+        .where(HudFmrRecord.org_id == org_id)
+        .where(HudFmrRecord.area_name == area)
+        .where(HudFmrRecord.state == st)
+        .where(HudFmrRecord.bedrooms == br)
+        .order_by(HudFmrRecord.id.desc())
     )
-    if row is None:
-        row = HudFmrRecord(
-            state=state,
-            area_name=area_name,
-            year=year,
-            bedrooms=bedrooms,
-            fmr=fmr_val,
-            source="hud_user_api",
-            fetched_at=_now(),
-            raw_json=json.dumps(payload, ensure_ascii=False),
-        )
-        db.add(row)
-    else:
-        row.fmr = fmr_val
-        row.source = "hud_user_api"
-        row.fetched_at = _now()
-        row.raw_json = json.dumps(payload, ensure_ascii=False)
+    if existing:
+        return existing
 
+    # Create a truthful placeholder (no silent lying).
+    r = HudFmrRecord(
+        org_id=org_id,
+        area_name=area,
+        state=st,
+        bedrooms=br,
+        fmr=0.0,
+        effective_date=date.today().replace(month=1, day=1),
+        source_urls_json=json.dumps([]),
+        created_at=datetime.utcnow(),
+    )
+    db.add(r)
     db.commit()
-    return FmrResult(ok=True, fmr=fmr_val, reason="refreshed", source="hud_user_api")
+    db.refresh(r)
+    return r

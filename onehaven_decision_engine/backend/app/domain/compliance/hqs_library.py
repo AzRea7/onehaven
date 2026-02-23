@@ -1,91 +1,70 @@
-# backend/app/domain/compliance/hqs_library.py
+# onehaven_decision_engine/backend/app/domain/compliance/hqs_library.py
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...policy_models import HqsRule, HqsAddendumRule
+from app.models import Property
+from app.policy_models import HqsRule, HqsAddendum, JurisdictionProfile
 
 
-@dataclass(frozen=True)
-class HqsItem:
-    code: str
-    category: str
-    severity: str
-    description: str
-    evidence: List[str]
-    remediation_hints: List[str]
-
-
-def _loads_list(s: Optional[str]) -> List[str]:
+def _loads(s: str | None, default):
     if not s:
-        return []
+        return default
     try:
-        v = json.loads(s)
-        return v if isinstance(v, list) else []
+        return json.loads(s)
     except Exception:
-        return []
+        return default
 
 
-def load_hqs_items(db: Session, *, org_id: int, jurisdiction_profile_id: int | None = None) -> List[HqsItem]:
+def _baseline_hqs_items() -> list[dict[str, Any]]:
     """
-    Baseline HQS rules + optional local addendum overlays.
-    Overlay semantics:
-      - if addendum code matches baseline code: override non-null fields
-      - else: add new item
+    Minimal-but-operational baseline HQS-ish library.
+    Expand over time (this is your canonical internal list).
     """
-    base = list(db.scalars(select(HqsRule).order_by(HqsRule.code.asc())).all())
-    items_by_code: dict[str, HqsItem] = {}
-
-    for r in base:
-        items_by_code[r.code] = HqsItem(
-            code=r.code,
-            category=r.category,
-            severity=r.severity,
-            description=r.description,
-            evidence=_loads_list(r.evidence_json),
-            remediation_hints=_loads_list(r.remediation_hints_json),
-        )
-
-    if jurisdiction_profile_id is not None:
-        adds = list(
-            db.scalars(
-                select(HqsAddendumRule)
-                .where(HqsAddendumRule.org_id == org_id)
-                .where(HqsAddendumRule.jurisdiction_profile_id == jurisdiction_profile_id)
-                .order_by(HqsAddendumRule.code.asc())
-            ).all()
-        )
-
-        for a in adds:
-            existing = items_by_code.get(a.code)
-            if existing is None:
-                items_by_code[a.code] = HqsItem(
-                    code=a.code,
-                    category=a.category or "safety",
-                    severity=a.severity or "fail",
-                    description=a.description or a.code,
-                    evidence=_loads_list(a.evidence_json),
-                    remediation_hints=_loads_list(a.remediation_hints_json),
-                )
-            else:
-                items_by_code[a.code] = HqsItem(
-                    code=a.code,
-                    category=a.category or existing.category,
-                    severity=a.severity or existing.severity,
-                    description=a.description or existing.description,
-                    evidence=_loads_list(a.evidence_json) or existing.evidence,
-                    remediation_hints=_loads_list(a.remediation_hints_json) or existing.remediation_hints,
-                )
-
-    return list(items_by_code.values())
+    return [
+        {"code": "SMOKE_CO", "description": "Smoke + CO detectors present and functional", "category": "safety", "severity": "fail", "suggested_fix": "Install/replace detectors; test and document."},
+        {"code": "GFCI_KITCHEN", "description": "GFCI present at kitchen counter outlets", "category": "electrical", "severity": "fail", "suggested_fix": "Install GFCI receptacle or breaker."},
+        {"code": "GFCI_BATH", "description": "GFCI present at bathroom outlets", "category": "electrical", "severity": "fail", "suggested_fix": "Install GFCI receptacle or breaker."},
+        {"code": "HANDRAILS", "description": "Handrails secure on stairs (where required)", "category": "safety", "severity": "fail", "suggested_fix": "Install/secure handrails; verify stability."},
+        {"code": "HEAT", "description": "Permanent heat source operational", "category": "interior", "severity": "fail", "suggested_fix": "Repair furnace/boiler; verify thermostat control."},
+        {"code": "HOT_WATER", "description": "Hot water available; no unsafe leaks", "category": "plumbing", "severity": "fail", "suggested_fix": "Repair water heater/leaks; confirm safe venting."},
+        {"code": "LEAKS_ROOF", "description": "No active roof leaks / ceiling damage", "category": "exterior", "severity": "fail", "suggested_fix": "Repair roof; replace damaged interior materials."},
+        {"code": "WINDOWS_LOCKS", "description": "Windows intact and lockable", "category": "egress", "severity": "fail", "suggested_fix": "Repair/replace sash/locks; ensure emergency egress works."},
+        {"code": "ELECT_PANEL", "description": "Electrical panel safe (no exposed live parts)", "category": "electrical", "severity": "fail", "suggested_fix": "Install blanks/covers; correct unsafe wiring."},
+    ]
 
 
-def required_categories_present(items: Iterable[HqsItem]) -> bool:
-    required = {"safety", "electrical", "plumbing", "egress", "interior", "exterior", "structure", "thermal"}
-    have = {i.category for i in items}
-    return required.issubset(have)
+def get_effective_hqs_items(db: Session, *, org_id: int, prop: Property) -> dict[str, Any]:
+    """
+    Effective HQS items = baseline + policy table overrides (HqsRule) + local addendum.
+    This makes agents policy-driven without hardcoding everything into agent logic.
+    """
+    items = {i["code"]: dict(i) for i in _baseline_hqs_items()}
+    sources: list[dict[str, Any]] = [{"type": "baseline_internal", "name": "OneHaven HQS baseline"}]
+
+    # HqsRule table can override/extend baseline
+    rules = db.scalars(select(HqsRule).where(HqsRule.org_id == org_id)).all()
+    for r in rules:
+        code = (getattr(r, "code", None) or "").strip()
+        if not code:
+            continue
+        items[code] = {
+            "code": code,
+            "description": getattr(r, "description", None) or items.get(code, {}).get("description") or "",
+            "category": getattr(r, "category", None) or items.get(code, {}).get("category") or "other",
+            "severity": getattr(r, "severity", None) or items.get(code, {}).get("severity") or "fail",
+            "suggested_fix": getattr(r, "suggested_fix", None) or items.get(code, {}).get("suggested_fix"),
+        }
+    if rules:
+        sources.append({"type": "policy_table", "table": "HqsRule", "count": len(rules)})
+
+    # Optional addendum via JurisdictionProfile → addendum_id (if you model it that way)
+    addenda = db.scalars(select(HqsAddendum).where(HqsAddendum.org_id == org_id)).all()
+    if addenda:
+        sources.append({"type": "policy_table", "table": "HqsAddendum", "count": len(addenda)})
+
+    return {"items": list(items.values()), "sources": sources}

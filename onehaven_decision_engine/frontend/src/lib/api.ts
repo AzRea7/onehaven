@@ -288,7 +288,10 @@ export const api = {
   ) =>
     request<any>(
       `/compliance/checklist/${propertyId}/items/${encodeURIComponent(itemCode)}`,
-      { method: "PATCH", body: JSON.stringify(payload) },
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
     ),
 
   // Rehab
@@ -336,7 +339,10 @@ export const api = {
   txns: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/cash/transactions${qs({ property_id: propertyId, limit: 1000 })}`,
-      { cacheTtlMs: 2_000, signal },
+      {
+        cacheTtlMs: 2_000,
+        signal,
+      },
     ),
 
   createTxn: (payload: any) =>
@@ -349,7 +355,10 @@ export const api = {
   valuations: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/equity/valuations${qs({ property_id: propertyId, limit: 200 })}`,
-      { cacheTtlMs: 2_000, signal },
+      {
+        cacheTtlMs: 2_000,
+        signal,
+      },
     ),
 
   createValuation: (payload: any) =>
@@ -358,9 +367,59 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Agents
+  // Agents (specs)
   agents: () => requestArray<any>(`/agents`, { cacheTtlMs: 4_000 }),
 
+  // -----------------------------
+  // ✅ NEW AGENT-RUNS (Phase 5+)
+  // -----------------------------
+  agentRunsList: (propertyId: number) =>
+    requestArray<any>(`/agent-runs${qs({ property_id: propertyId })}`, {
+      cacheTtlMs: 800,
+    }),
+
+  agentRunsPlan: (propertyId: number) =>
+    request<any>(`/agent-runs/plan${qs({ property_id: propertyId })}`, {
+      method: "POST",
+      cacheTtlMs: 0,
+    }),
+
+  agentRunsEnqueue: (propertyId: number, dispatch: boolean = true) =>
+    request<any>(
+      `/agent-runs/enqueue${qs({ property_id: propertyId, dispatch: dispatch ? "true" : "false" })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
+  agentRunsDispatchOne: (runId: number) =>
+    request<any>(`/agent-runs/${runId}/dispatch`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  agentRunsApprove: (runId: number) =>
+    request<any>(`/agent-runs/${runId}/approve`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  agentRunsReject: (runId: number, reason: string) =>
+    request<any>(`/agent-runs/${runId}/reject${qs({ reason })}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  agentRunsApply: (runId: number) =>
+    request<any>(`/agent-runs/${runId}/apply`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  // --------------------------
+  // Legacy “agents/runs” APIs
+  // --------------------------
   agentRuns: (propertyId: number) =>
     requestArray<any>(
       `/agents/runs${qs({ property_id: propertyId, limit: 200 })}`,
@@ -454,9 +513,7 @@ export const api = {
     if (!city) throw new Error("deleteJurisdictionRule missing city");
     return request<any>(
       `/jurisdictions/rule${qs({ city, state, scope: "org" })}`,
-      {
-        method: "DELETE",
-      },
+      { method: "DELETE" },
     );
   },
 };

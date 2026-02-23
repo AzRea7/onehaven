@@ -1,7 +1,7 @@
 # onehaven_decision_engine/backend/app/routers/agent_runs.py
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -41,6 +41,8 @@ def list_runs(
             "finished_at": getattr(r, "finished_at", None),
             "approval_status": getattr(r, "approval_status", None),
             "approved_at": getattr(r, "approved_at", None),
+            "output_json": getattr(r, "output_json", None),
+            "proposed_actions_json": getattr(r, "proposed_actions_json", None),
         }
         for r in rows
     ]
@@ -111,7 +113,6 @@ def approve_run(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    # Approval is an owner-only action
     require_owner(principal)
     r = mark_approved(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=int(run_id))
     return {
@@ -123,13 +124,34 @@ def approve_run(
     }
 
 
+@router.post("/{run_id}/reject")
+def reject_run(
+    run_id: int,
+    reason: str = Query(default="rejected_by_owner"),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    require_owner(principal)
+    r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
+    if r is None:
+        raise HTTPException(status_code=404, detail="AgentRun not found")
+
+    # deterministic reject path
+    r.status = "failed"
+    r.approval_status = "rejected"
+    r.last_error = f"rejected: {reason}"
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return {"ok": True, "run_id": int(r.id), "status": r.status, "approval_status": r.approval_status}
+
+
 @router.post("/{run_id}/apply")
 def apply_run(
     run_id: int,
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    # Applying DB mutations is also owner-only
     require_owner(principal)
     res = apply_run_actions(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=int(run_id))
     return {
