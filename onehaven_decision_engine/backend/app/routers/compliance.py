@@ -148,14 +148,6 @@ def _merge_state(db: Session, *, org_id: int, property_id: int, items: list[Chec
 
 
 def _summarize_status(items: list[PropertyChecklistItem]) -> dict:
-    """
-    Deterministic summary for Phase 3:
-      - done = "done"
-      - failed = "failed"
-      - in_progress = "in_progress"
-      - todo = "todo"
-      - blocked = "blocked"
-    """
     total = len(items)
     counts = {s: 0 for s in _ALLOWED_STATUS}
     for x in items:
@@ -183,6 +175,22 @@ def _summarize_status(items: list[PropertyChecklistItem]) -> dict:
     }
 
 
+def _is_template_version_locked(db: Session, *, org_id: int, strategy: str, version: str) -> bool:
+    """
+    Phase 3 governance DoD:
+    - Once ANY inspections exist for an org, v1 templates become immutable.
+    - This prevents changing what “pass/fail” historically meant.
+
+    Rule:
+      lock if version == "v1" AND there exists Inspection(org_id=org_id)
+    """
+    if (version or "").strip().lower() != "v1":
+        return False
+
+    insp_id = db.scalar(select(Inspection.id).where(Inspection.org_id == org_id).limit(1))
+    return insp_id is not None
+
+
 @router.get("/templates", response_model=list[ChecklistTemplateItemOut])
 def list_templates(
     strategy: str = Query(default="section8"),
@@ -190,7 +198,6 @@ def list_templates(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    # global-by-design (for now)
     rows = db.scalars(
         select(ChecklistTemplateItem)
         .where(ChecklistTemplateItem.strategy == strategy, ChecklistTemplateItem.version == version)
@@ -202,6 +209,13 @@ def list_templates(
 @router.put("/templates", response_model=ChecklistTemplateItemOut)
 def upsert_template(payload: ChecklistTemplateItemUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
     require_owner(p)
+
+    # ✅ Phase 3 governance: freeze v1 once inspections exist.
+    if _is_template_version_locked(db, org_id=p.org_id, strategy=payload.strategy, version=payload.version):
+        raise HTTPException(
+            status_code=409,
+            detail="Template version v1 is locked because inspections exist. Create version v2 instead.",
+        )
 
     row = db.scalar(
         select(ChecklistTemplateItem).where(
@@ -270,7 +284,6 @@ def generate_checklist(
     if persist:
         now = datetime.utcnow()
 
-        # UPSERT to satisfy uq_property_checklists_org_property_strategy_version
         row = db.scalar(
             select(PropertyChecklist).where(
                 PropertyChecklist.org_id == p.org_id,
@@ -331,7 +344,6 @@ def generate_checklist(
                 existing.severity = int(i.severity)
                 existing.common_fail = bool(i.common_fail)
                 existing.applies_if_json = applies_if_json
-                # DO NOT overwrite status/notes/proof/marked_by — that’s user state.
                 existing.updated_at = now
                 db.add(existing)
 
@@ -378,14 +390,6 @@ def get_latest_checklist(property_id: int, db: Session = Depends(get_db), p=Depe
 
 @router.get("/status/{property_id}", response_model=dict)
 def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    """
-    Phase 3 DoD completion rule:
-      pass = checklist >= 95% done AND no failed items AND latest inspection passed
-
-    NOTE:
-      Checklist item statuses in this system are:
-        todo | in_progress | done | blocked | failed
-    """
     prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
     if not prop:
         raise HTTPException(status_code=404, detail="property not found")
@@ -430,14 +434,6 @@ def run_compliance_hqs(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Phase 3 completion: deterministic HQS-style run.
-
-    - Reads current checklist item state
-    - Computes summary + fix-next
-    - Optionally creates rehab tasks (idempotent)
-    - Emits WorkflowEvent + AuditEvent through the service
-    """
     try:
         return run_hqs_service(
             db,
@@ -460,9 +456,6 @@ def compliance_timeline(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Returns a chronological-ish audit trail (workflow events) for compliance/inspection work.
-    """
     prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
     if not prop:
         raise HTTPException(status_code=404, detail="property not found")
@@ -496,14 +489,6 @@ def compliance_timeline(
 
 @router.get("/run_hqs/{property_id}", response_model=dict)
 def run_hqs_summary_only(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    """
-    Legacy/simple deterministic “HQS run” summary for Phase 3 (no side effects).
-
-    Mapping:
-      - done   => pass
-      - failed => fail
-      - everything else => not-yet (todo/in_progress/blocked)
-    """
     prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
     if not prop:
         raise HTTPException(status_code=404, detail="property not found")

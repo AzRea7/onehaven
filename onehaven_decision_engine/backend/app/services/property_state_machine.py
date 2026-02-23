@@ -30,6 +30,11 @@ def _utcnow() -> datetime:
     return datetime.utcnow()
 
 
+def _utcday() -> datetime:
+    # normalized “now” used for range queries
+    return _utcnow()
+
+
 def _stage_rank(stage: str) -> int:
     try:
         return STAGE_ORDER.index(stage)
@@ -131,12 +136,6 @@ def advance_stage_if_needed(
     constraints: Optional[dict[str, Any]] = None,
     outstanding_tasks: Optional[dict[str, Any]] = None,
 ) -> PropertyState:
-    """
-    Conservative stage advance:
-      - never moves backward
-      - only updates to higher-ranked stage
-      - always updates constraints/tasks if provided
-    """
     row = ensure_state_row(db, org_id=org_id, property_id=property_id)
 
     cur = _clamp_stage(str(row.current_stage or "deal"))
@@ -204,22 +203,23 @@ def _compute_checklist_progress(db: Session, *, org_id: int, property_id: int) -
     return ChecklistProgress(total=total, todo=todo, in_progress=inprog, blocked=blocked, failed=failed, done=done)
 
 
-def _get_latest_inspection(db: Session, *, property_id: int) -> Optional[Inspection]:
+def _get_latest_inspection(db: Session, *, org_id: int, property_id: int) -> Optional[Inspection]:
     return db.scalar(
         select(Inspection)
-        .where(Inspection.property_id == property_id)
+        .where(Inspection.org_id == org_id, Inspection.property_id == property_id)
         .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
         .limit(1)
     )
 
 
-def _open_failed_inspection_items(db: Session, *, property_id: int) -> int:
+def _open_failed_inspection_items(db: Session, *, org_id: int, property_id: int) -> int:
     return int(
         db.scalar(
             select(func.count(InspectionItem.id))
             .select_from(InspectionItem)
             .join(Inspection, Inspection.id == InspectionItem.inspection_id)
             .where(
+                Inspection.org_id == org_id,
                 Inspection.property_id == property_id,
                 InspectionItem.failed.is_(True),
                 InspectionItem.resolved_at.is_(None),
@@ -229,12 +229,12 @@ def _open_failed_inspection_items(db: Session, *, property_id: int) -> int:
     )
 
 
-def _compute_inspection_status(db: Session, *, property_id: int) -> InspectionStatus:
-    insp = _get_latest_inspection(db, property_id=property_id)
+def _compute_inspection_status(db: Session, *, org_id: int, property_id: int) -> InspectionStatus:
+    insp = _get_latest_inspection(db, org_id=org_id, property_id=property_id)
     if not insp:
         return InspectionStatus(exists=False, latest_passed=False, open_failed_items=0)
 
-    open_failed = _open_failed_inspection_items(db, property_id=property_id)
+    open_failed = _open_failed_inspection_items(db, org_id=org_id, property_id=property_id)
     passed = bool(getattr(insp, "passed", False))
     if open_failed > 0:
         passed = False
@@ -256,12 +256,6 @@ def _rehab_open_count(db: Session, *, org_id: int, property_id: int) -> int:
 
 
 def _has_active_lease(db: Session, *, org_id: int, property_id: int) -> bool:
-    """
-    IMPORTANT FIX:
-    - Lease.start_date / end_date are DateTime in models.
-    - The previous version compared them to a date(), which can break on some DBs/drivers.
-    We compare using datetime bounds instead.
-    """
     now = _utcnow()
     far_future = now + timedelta(days=3650)
 
@@ -297,16 +291,77 @@ def _latest_valuation(db: Session, *, org_id: int, property_id: int) -> Optional
     )
 
 
+def _valuation_is_due(val: Optional[Valuation], *, cadence_days: int = 180) -> bool:
+    """
+    Phase 4 enforcement:
+    - If missing valuation -> due
+    - If as_of older than cadence_days -> due
+    """
+    if val is None or getattr(val, "as_of", None) is None:
+        return True
+    as_of = val.as_of
+    if isinstance(as_of, datetime):
+        as_of = as_of.date()
+    today = _utcnow().date()
+    try:
+        return (today - as_of).days >= cadence_days
+    except Exception:
+        return True
+
+
+def _rent_expected_proxy(db: Session, *, org_id: int, property_id: int) -> float:
+    """
+    Expected rent proxy:
+    - Use active lease monthly rent.
+    - If your schema uses a different field name than `total_rent`, update here.
+    """
+    now = _utcnow()
+    far_future = now + timedelta(days=3650)
+    lease = db.scalar(
+        select(Lease)
+        .where(
+            Lease.org_id == org_id,
+            Lease.property_id == property_id,
+            Lease.start_date <= now,
+            func.coalesce(Lease.end_date, far_future) >= now,
+        )
+        .order_by(desc(Lease.start_date), desc(Lease.id))
+        .limit(1)
+    )
+    if not lease:
+        return 0.0
+    try:
+        return float(getattr(lease, "total_rent", 0.0) or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _rent_collected_last_30(db: Session, *, org_id: int, property_id: int) -> float:
+    """
+    Collected rent (last 30d):
+    - Transaction.txn_type == "rent" (case-insensitive)
+    - Sum Transaction.amount within window.
+    """
+    end = _utcnow()
+    start = end - timedelta(days=30)
+    s = db.scalar(
+        select(func.coalesce(func.sum(Transaction.amount), 0.0))
+        .where(Transaction.org_id == org_id, Transaction.property_id == property_id)
+        .where(Transaction.txn_date >= start, Transaction.txn_date <= end)
+        .where(func.lower(Transaction.txn_type) == "rent")
+    )
+    try:
+        return float(s or 0.0)
+    except Exception:
+        return 0.0
+
+
 # -----------------------------------------------------------------------------
 # Main derivation
 # -----------------------------------------------------------------------------
 def derive_stage_and_constraints(
     db: Session, *, org_id: int, property_id: int
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any], List[str]]:
-    """
-    Returns:
-      (suggested_stage, constraints_dict, tasks_dict, next_actions_human)
-    """
     next_actions: List[str] = []
     constraints: Dict[str, Any] = {}
     tasks: Dict[str, Any] = {}
@@ -315,7 +370,7 @@ def derive_stage_and_constraints(
     uw = _get_latest_underwriting(db, org_id=org_id, property_id=property_id)
 
     checklist = _compute_checklist_progress(db, org_id=org_id, property_id=property_id)
-    insp = _compute_inspection_status(db, property_id=property_id)
+    insp = _compute_inspection_status(db, org_id=org_id, property_id=property_id)
     rehab_open = _rehab_open_count(db, org_id=org_id, property_id=property_id)
     has_lease = _has_active_lease(db, org_id=org_id, property_id=property_id)
     last_txn = _last_txn_date(db, org_id=org_id, property_id=property_id)
@@ -396,11 +451,33 @@ def derive_stage_and_constraints(
         next_actions.append("Add transactions (rent, expenses) to start cash tracking.")
         return "cash", constraints, tasks, next_actions
 
-    # Stage 6: equity until valuations exist
+    # ✅ Phase 4: cash reconciliation expectation (expected vs collected proxy)
+    expected = _rent_expected_proxy(db, org_id=org_id, property_id=property_id)
+    collected = _rent_collected_last_30(db, org_id=org_id, property_id=property_id)
+    tasks["cash"]["rent_expected_proxy"] = round(expected, 2)
+    tasks["cash"]["rent_collected_last_30"] = round(collected, 2)
+    if expected > 0 and collected + 1e-6 < expected:
+        constraints["rent_reconciliation_gap"] = {
+            "expected_proxy": round(expected, 2),
+            "collected_last_30": round(collected, 2),
+            "gap": round(expected - collected, 2),
+        }
+        next_actions.append(
+            f"Reconcile rent: expected ~${expected:.0f} vs collected ${collected:.0f} (last 30d)."
+        )
+        return "cash", constraints, tasks, next_actions
+
+    # Stage 6: equity until valuations exist (and cadence is enforced)
     tasks["equity"] = {"has_valuation": val is not None}
     if val is None:
         constraints["missing_valuation"] = True
         next_actions.append("Add a valuation snapshot to track equity.")
+        return "equity", constraints, tasks, next_actions
+
+    # ✅ Phase 4: valuation cadence enforcement
+    if _valuation_is_due(val, cadence_days=180):
+        constraints["valuation_due"] = {"cadence_days": 180, "latest_as_of": getattr(val, "as_of", None)}
+        next_actions.append("Valuation is stale (>=180 days). Add a new valuation snapshot.")
         return "equity", constraints, tasks, next_actions
 
     return "equity", constraints, tasks, next_actions
@@ -425,9 +502,6 @@ def get_state_payload(
     property_id: int,
     recompute: bool = True,
 ) -> Dict[str, Any]:
-    """
-    UI-friendly payload: includes next_actions.
-    """
     row = sync_property_state(db, org_id=org_id, property_id=property_id) if recompute else ensure_state_row(
         db, org_id=org_id, property_id=property_id
     )
@@ -447,14 +521,7 @@ def get_state_payload(
     }
 
 
-# -----------------------------------------------------------------------------
-# Backward-compatible function used by ops.py
-# -----------------------------------------------------------------------------
 def compute_and_persist_stage(db: Session, *, org_id: int, property: Property) -> PropertyState:
-    """
-    This is the exact function ops.py imports.
-    It recomputes and persists stage/constraints/tasks.
-    """
     row = sync_property_state(db, org_id=org_id, property_id=property.id)
     db.commit()
     db.refresh(row)

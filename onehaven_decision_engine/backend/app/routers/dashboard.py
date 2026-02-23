@@ -26,12 +26,6 @@ def dashboard_properties(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Returns a resilient list of PropertyView payloads, optionally filtered by city and/or strategy.
-
-    - Always uses property_view() for a single source of truth.
-    - Skips any property that errors (dashboard must not crash).
-    """
     q = select(Property.id).where(Property.org_id == p.org_id).order_by(desc(Property.id))
 
     if city:
@@ -44,7 +38,6 @@ def dashboard_properties(
     out: list[dict] = []
     for pid in prop_ids:
         try:
-            # strategy filter (based on latest deal)
             if strategy:
                 d = db.scalar(
                     select(Deal)
@@ -71,13 +64,6 @@ def portfolio_rollup(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Portfolio-level stats for top dashboard cards.
-
-    Uses the property_state_machine "truth" to compute:
-      - stage_counts
-      - properties_with_next_actions
-    """
     prop_ids = [
         r[0]
         for r in db.execute(
@@ -99,7 +85,6 @@ def portfolio_rollup(
             if (st.get("next_actions") or []) and len(st.get("next_actions") or []) > 0:
                 has_next_action += 1
         except Exception:
-            # Don't let a single compute blow up the rollup
             continue
 
     return {
@@ -116,11 +101,6 @@ def next_actions(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Global queue of what to do next.
-
-    We compute the state payload per property and flatten the first few next_actions.
-    """
     prop_ids = [
         r[0]
         for r in db.execute(
@@ -156,7 +136,6 @@ def next_actions(
         except Exception:
             continue
 
-    # Simple prioritization: compliance > rehab > tenant > cash > equity > deal
     order = {"compliance": 0, "rehab": 1, "tenant": 2, "cash": 3, "equity": 4, "deal": 5}
     rows = sorted(rows, key=lambda r: (order.get(str(r.get("stage") or ""), 9), r["city"] or "", r["address"] or ""))[
         :limit
@@ -171,14 +150,4 @@ def dashboard_rollups(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Phase 4 completion endpoint.
-
-    Cross-module rollups:
-      - stage counts (pipeline)
-      - compliance health (passed/failing/no_checklist)
-      - rehab totals (open tasks + sums)
-      - cashflow last 30d (net)
-      - equity summary (valuation coverage + avg delta)
-    """
     return compute_rollups(db, org_id=p.org_id, state=state, limit=limit)
