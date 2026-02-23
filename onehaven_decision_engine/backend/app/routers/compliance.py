@@ -46,6 +46,9 @@ _SECTION8_TEMPLATE: list[dict] = [
 ]
 
 
+_ALLOWED_STATUS = {"todo", "in_progress", "done", "blocked", "failed"}
+
+
 def _applies(cond: dict | None, *, year_built: int | None, has_garage: bool, property_type: str) -> bool:
     if not cond:
         return True
@@ -141,6 +144,42 @@ def _merge_state(db: Session, *, org_id: int, property_id: int, items: list[Chec
                 i.marked_by = users_by_id.get(r.marked_by_user_id)
         out.append(i)
     return out
+
+
+def _summarize_status(items: list[PropertyChecklistItem]) -> dict:
+    """
+    Deterministic summary for Phase 3:
+      - done = "done"
+      - failed = "failed"
+      - in_progress = "in_progress"
+      - todo = "todo"
+      - blocked = "blocked"
+    """
+    total = len(items)
+    counts = {s: 0 for s in _ALLOWED_STATUS}
+    for x in items:
+        s = (x.status or "todo").strip().lower()
+        if s not in _ALLOWED_STATUS:
+            s = "todo"
+        counts[s] += 1
+
+    done = counts["done"]
+    failed = counts["failed"]
+    blocked = counts["blocked"]
+    in_progress = counts["in_progress"]
+    todo = counts["todo"]
+
+    pct_done = (done / total) if total else 0.0
+
+    return {
+        "total": total,
+        "done": done,
+        "failed": failed,
+        "blocked": blocked,
+        "in_progress": in_progress,
+        "todo": todo,
+        "pct_done": round(pct_done, 4),
+    }
 
 
 @router.get("/templates", response_model=list[ChecklistTemplateItemOut])
@@ -291,6 +330,7 @@ def generate_checklist(
                 existing.severity = int(i.severity)
                 existing.common_fail = bool(i.common_fail)
                 existing.applies_if_json = applies_if_json
+                # DO NOT overwrite status/notes/proof/marked_by — that’s user state.
                 existing.updated_at = now
                 db.add(existing)
 
@@ -334,11 +374,63 @@ def get_latest_checklist(property_id: int, db: Session = Depends(get_db), p=Depe
         items=items,
     )
 
+
 @router.get("/status/{property_id}", response_model=dict)
 def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
     """
     Phase 3 DoD completion rule:
       pass = checklist >= 95% done AND no failed items AND latest inspection passed
+
+    NOTE:
+      Checklist item statuses in this system are:
+        todo | in_progress | done | blocked | failed
+    """
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    items = db.scalars(
+        select(PropertyChecklistItem).where(
+            PropertyChecklistItem.org_id == p.org_id,
+            PropertyChecklistItem.property_id == property_id,
+        )
+    ).all()
+
+    summary = _summarize_status(items)
+
+    latest_insp = db.scalar(
+        select(Inspection)
+        .where(Inspection.org_id == p.org_id, Inspection.property_id == property_id)
+        .order_by(desc(Inspection.id))
+        .limit(1)
+    )
+    latest_inspection_passed = bool(latest_insp.passed) if latest_insp else False
+
+    passed = (summary["pct_done"] >= 0.95) and (summary["failed"] == 0) and latest_inspection_passed
+
+    return {
+        "property_id": property_id,
+        "checklist_total": summary["total"],
+        "checklist_done": summary["done"],
+        "checklist_failed": summary["failed"],
+        "checklist_blocked": summary["blocked"],
+        "checklist_in_progress": summary["in_progress"],
+        "checklist_todo": summary["todo"],
+        "pct_done": summary["pct_done"],
+        "latest_inspection_passed": latest_inspection_passed,
+        "passed": passed,
+    }
+
+
+@router.get("/run_hqs/{property_id}", response_model=dict)
+def run_hqs(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    """
+    Deterministic “HQS run” summary for Phase 3.
+
+    Mapping:
+      - done   => pass
+      - failed => fail
+      - everything else => not-yet (todo/in_progress/blocked)
     """
     prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
     if not prop:
@@ -352,29 +444,21 @@ def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends
     ).all()
 
     total = len(items)
-    done = sum(1 for x in items if (x.status or "").lower() == "done")
+    passed = sum(1 for x in items if (x.status or "").lower() == "done")
     failed = sum(1 for x in items if (x.status or "").lower() == "failed")
+    not_yet = total - passed - failed
 
-    pct_done = (done / total) if total else 0.0
-
-    latest_insp = db.scalar(
-        select(Inspection)
-        .where(Inspection.property_id == property_id)
-        .order_by(desc(Inspection.id))
-        .limit(1)
-    )
-    latest_inspection_passed = bool(latest_insp.passed) if latest_insp else False
-
-    passed = (pct_done >= 0.95) and (failed == 0) and latest_inspection_passed
+    score_pct = round((passed / total) * 100.0, 2) if total else 0.0
+    fail_codes = sorted([x.item_code for x in items if (x.status or "").lower() == "failed" and x.item_code])
 
     return {
         "property_id": property_id,
-        "checklist_total": total,
-        "checklist_done": done,
-        "checklist_failed": failed,
-        "pct_done": round(pct_done, 4),
-        "latest_inspection_passed": latest_inspection_passed,
+        "total": total,
         "passed": passed,
+        "failed": failed,
+        "not_yet": not_yet,
+        "score_pct": score_pct,
+        "fail_codes": fail_codes,
     }
 
 
@@ -412,8 +496,7 @@ def update_checklist_item(
 
     if payload.status is not None:
         s = (payload.status or "").strip().lower()
-        allowed = {"todo", "in_progress", "done", "blocked", "failed"}
-        if s not in allowed:
+        if s not in _ALLOWED_STATUS:
             raise HTTPException(status_code=400, detail=f"invalid status: {payload.status}")
         row.status = s
         row.marked_by_user_id = p.user_id

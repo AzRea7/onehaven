@@ -25,6 +25,12 @@ def dashboard_properties(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
+    """
+    Returns a resilient list of PropertyView payloads, optionally filtered by city and/or strategy.
+
+    - Always uses property_view() for a single source of truth.
+    - Skips any property that errors (dashboard must not crash).
+    """
     q = select(Property.id).where(Property.org_id == p.org_id).order_by(desc(Property.id))
 
     if city:
@@ -37,9 +43,7 @@ def dashboard_properties(
     out: list[dict] = []
     for pid in prop_ids:
         try:
-            view = property_view(property_id=pid, db=db, p=p)
-            v = view.model_dump() if hasattr(view, "model_dump") else dict(view)
-
+            # strategy filter (based on latest deal)
             if strategy:
                 d = db.scalar(
                     select(Deal)
@@ -50,9 +54,10 @@ def dashboard_properties(
                 if not d or (d.strategy or "").strip().lower() != strategy.strip().lower():
                     continue
 
+            view = property_view(property_id=pid, db=db, p=p)
+            v = view.model_dump() if hasattr(view, "model_dump") else dict(view)
             out.append(v)
         except Exception:
-            # Dashboard should be resilient; one broken row must not kill the list.
             continue
 
     return out
@@ -67,6 +72,10 @@ def portfolio_rollup(
 ):
     """
     Portfolio-level stats for top dashboard cards.
+
+    Uses the property_state_machine "truth" to compute:
+      - stage_counts
+      - properties_with_next_actions
     """
     prop_ids = [
         r[0]
@@ -82,11 +91,15 @@ def portfolio_rollup(
     has_next_action = 0
 
     for pid in prop_ids:
-        st = get_state_payload(db, org_id=p.org_id, property_id=pid, recompute=True)
-        stage = str(st.get("current_stage") or "deal")
-        stage_counts[stage] = stage_counts.get(stage, 0) + 1
-        if st.get("next_actions") or []:
-            has_next_action += 1
+        try:
+            st = get_state_payload(db, org_id=p.org_id, property_id=pid, recompute=True)
+            stage = str(st.get("current_stage") or "deal")
+            stage_counts[stage] = stage_counts.get(stage, 0) + 1
+            if (st.get("next_actions") or []) and len(st.get("next_actions") or []) > 0:
+                has_next_action += 1
+        except Exception:
+            # Don't let a single compute blow up the rollup
+            continue
 
     return {
         "properties": len(prop_ids),
@@ -104,6 +117,8 @@ def next_actions(
 ):
     """
     Global queue of what to do next.
+
+    We compute the state payload per property and flatten the first few next_actions.
     """
     prop_ids = [
         r[0]
@@ -117,27 +132,32 @@ def next_actions(
 
     rows: list[dict[str, Any]] = []
     for pid in prop_ids:
-        st = get_state_payload(db, org_id=p.org_id, property_id=pid, recompute=True)
-        actions = st.get("next_actions") or []
-        if not actions:
-            continue
+        try:
+            st = get_state_payload(db, org_id=p.org_id, property_id=pid, recompute=True)
+            actions = st.get("next_actions") or []
+            if not actions:
+                continue
 
-        prop = db.get(Property, pid)
-        if not prop:
-            continue
+            prop = db.scalar(select(Property).where(Property.id == pid, Property.org_id == p.org_id))
+            if not prop:
+                continue
 
-        for a in actions[:3]:
-            rows.append(
-                {
-                    "property_id": pid,
-                    "address": prop.address,
-                    "city": prop.city,
-                    "stage": st.get("current_stage"),
-                    "action": a,
-                }
-            )
+            for a in actions[:3]:
+                rows.append(
+                    {
+                        "property_id": pid,
+                        "address": prop.address,
+                        "city": prop.city,
+                        "stage": st.get("current_stage"),
+                        "action": a,
+                    }
+                )
+        except Exception:
+            continue
 
     # Simple prioritization: compliance > rehab > tenant > cash > equity > deal
     order = {"compliance": 0, "rehab": 1, "tenant": 2, "cash": 3, "equity": 4, "deal": 5}
-    rows = sorted(rows, key=lambda r: (order.get(str(r.get("stage") or ""), 9), r["city"], r["address"]))[:limit]
+    rows = sorted(rows, key=lambda r: (order.get(str(r.get("stage") or ""), 9), r["city"] or "", r["address"] or ""))[
+        :limit
+    ]
     return {"rows": rows, "count": len(rows)}
