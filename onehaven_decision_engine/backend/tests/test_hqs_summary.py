@@ -1,26 +1,31 @@
-# onehaven_decision_engine/backend/tests/test_hqs_summary.py
+# backend/tests/test_hqs_summary.py
 from __future__ import annotations
 
-from backend.app.domain.compliance.hqs import summarize_checklist
-from backend.app.models import PropertyChecklist, PropertyChecklistItem
+from backend.app.domain.compliance.hqs import summarize_items
 
 
-def test_hqs_summary_counts_pass_fail_todo_correctly():
-    checklist = PropertyChecklist(id=10, org_id=1, property_id=99, template="base_hqs")
+class DummyItem:
+    def __init__(self, status: str):
+        self.status = status
 
+
+def test_summarize_items_done_failed_ratio():
     items = [
-        PropertyChecklistItem(code="SMOKE_CO", status="pass"),
-        PropertyChecklistItem(code="GFCI_BATH", status="fail"),
-        PropertyChecklistItem(code="HANDRAILS", status="todo"),
-        PropertyChecklistItem(code="ELECT_PANEL", status="todo"),
+        DummyItem("done"),
+        DummyItem("done"),
+        DummyItem("todo"),
+        DummyItem("failed"),
     ]
-
-    s = summarize_checklist(checklist, items)
-
+    s = summarize_items(items, latest_inspection_passed=True)
     assert s.total == 4
-    assert s.passed == 1
+    assert s.done == 2
     assert s.failed == 1
-    assert s.todo == 2
-    assert s.score_pct == 25.0
-    assert "GFCI_BATH" in s.fail_codes
-    assert "HANDRAILS" in s.todo_codes
+    assert s.pct_done == 0.5
+    assert s.passed is False
+
+
+def test_summarize_items_pass_rule_requires_inspection():
+    items = [DummyItem("done")] * 20
+    s = summarize_items(items, latest_inspection_passed=False)
+    assert s.pct_done == 1.0
+    assert s.passed is False  # requires inspection passed

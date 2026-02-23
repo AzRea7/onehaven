@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_principal
 from ..db import get_db
 from ..models import Deal, Property
+from ..services.dashboard_rollups import compute_rollups
 from ..services.property_state_machine import get_state_payload
 from .properties import property_view  # reuse “single source of truth”
 
@@ -161,3 +162,23 @@ def next_actions(
         :limit
     ]
     return {"rows": rows, "count": len(rows)}
+
+
+@router.get("/rollups", response_model=dict)
+def dashboard_rollups(
+    state: str = Query(default="MI"),
+    limit: int = Query(default=500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    """
+    Phase 4 completion endpoint.
+
+    Cross-module rollups:
+      - stage counts (pipeline)
+      - compliance health (passed/failing/no_checklist)
+      - rehab totals (open tasks + sums)
+      - cashflow last 30d (net)
+      - equity summary (valuation coverage + avg delta)
+    """
+    return compute_rollups(db, org_id=p.org_id, state=state, limit=limit)

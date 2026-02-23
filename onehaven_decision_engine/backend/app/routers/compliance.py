@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
@@ -14,11 +15,11 @@ from ..models import (
     AppUser,
     AuditEvent,
     ChecklistTemplateItem,
+    Inspection,
     Property,
     PropertyChecklist,
     PropertyChecklistItem,
     WorkflowEvent,
-    Inspection,
 )
 from ..schemas import (
     ChecklistItemOut,
@@ -28,6 +29,7 @@ from ..schemas import (
     ChecklistTemplateItemUpsert,
     PropertyChecklistOut,
 )
+from ..services.compliance_service import run_hqs as run_hqs_service
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -44,7 +46,6 @@ _SECTION8_TEMPLATE: list[dict] = [
     {"category": "Lead Paint", "item_code": "LEAD_PAINT_FLAGS", "description": "Potential lead paint hazards (pre-1978): peeling/chipping paint", "severity": 5, "common_fail": True, "applies_if": {"year_built_lt": 1978}},
     {"category": "Garage", "item_code": "GARAGE_DOOR_SAFE", "description": "Garage door operates safely; no unsafe springs/rails", "severity": 2, "common_fail": False, "applies_if": {"has_garage": True}},
 ]
-
 
 _ALLOWED_STATUS = {"todo", "in_progress", "done", "blocked", "failed"}
 
@@ -422,10 +423,81 @@ def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends
     }
 
 
-@router.get("/run_hqs/{property_id}", response_model=dict)
-def run_hqs(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+@router.post("/run/{property_id}", response_model=dict)
+def run_compliance_hqs(
+    property_id: int,
+    auto_create_rehab_tasks: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     """
-    Deterministic “HQS run” summary for Phase 3.
+    Phase 3 completion: deterministic HQS-style run.
+
+    - Reads current checklist item state
+    - Computes summary + fix-next
+    - Optionally creates rehab tasks (idempotent)
+    - Emits WorkflowEvent + AuditEvent through the service
+    """
+    try:
+        return run_hqs_service(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            actor_email=p.email,
+            property_id=property_id,
+            auto_create_rehab_tasks=auto_create_rehab_tasks,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"run failed: {e}")
+
+
+@router.get("/timeline/{property_id}", response_model=dict)
+def compliance_timeline(
+    property_id: int,
+    limit: int = Query(default=200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    """
+    Returns a chronological-ish audit trail (workflow events) for compliance/inspection work.
+    """
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    rows = db.scalars(
+        select(WorkflowEvent)
+        .where(WorkflowEvent.org_id == p.org_id, WorkflowEvent.property_id == property_id)
+        .order_by(desc(WorkflowEvent.id))
+        .limit(limit)
+    ).all()
+
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        try:
+            payload = json.loads(r.payload_json or "{}")
+        except Exception:
+            payload = {"raw": r.payload_json}
+
+        out.append(
+            {
+                "id": r.id,
+                "event_type": r.event_type,
+                "created_at": r.created_at,
+                "payload": payload,
+                "actor_user_id": r.actor_user_id,
+            }
+        )
+
+    return {"property_id": property_id, "rows": out, "count": len(out)}
+
+
+@router.get("/run_hqs/{property_id}", response_model=dict)
+def run_hqs_summary_only(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    """
+    Legacy/simple deterministic “HQS run” summary for Phase 3 (no side effects).
 
     Mapping:
       - done   => pass
@@ -444,18 +516,18 @@ def run_hqs(property_id: int, db: Session = Depends(get_db), p=Depends(get_princ
     ).all()
 
     total = len(items)
-    passed = sum(1 for x in items if (x.status or "").lower() == "done")
-    failed = sum(1 for x in items if (x.status or "").lower() == "failed")
-    not_yet = total - passed - failed
+    passed_ct = sum(1 for x in items if (x.status or "").lower() == "done")
+    failed_ct = sum(1 for x in items if (x.status or "").lower() == "failed")
+    not_yet = total - passed_ct - failed_ct
 
-    score_pct = round((passed / total) * 100.0, 2) if total else 0.0
+    score_pct = round((passed_ct / total) * 100.0, 2) if total else 0.0
     fail_codes = sorted([x.item_code for x in items if (x.status or "").lower() == "failed" and x.item_code])
 
     return {
         "property_id": property_id,
         "total": total,
-        "passed": passed,
-        "failed": failed,
+        "passed": passed_ct,
+        "failed": failed_ct,
         "not_yet": not_yet,
         "score_pct": score_pct,
         "fail_codes": fail_codes,
