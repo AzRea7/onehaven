@@ -1,113 +1,118 @@
 # onehaven_decision_engine/backend/app/routers/agent_runs.py
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, desc
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
-from ..auth import get_principal
-from ..db import get_db
-from ..models import AgentRun, AgentMessage
-from ..schemas import AgentRunCreate, AgentRunOut, AgentMessageCreate, AgentMessageOut
-
-from ..domain.agents.run_service import create_run, append_message, close_run
-
-router = APIRouter(tags=["agents"])
+from app.auth import get_principal, require_owner
+from app.db import get_db
+from app.models import AgentRun
+from app.services.agent_engine import create_run, mark_approved
+from app.services.agent_orchestrator import plan_agent_runs
+from app.workers.agent_tasks import execute_agent_run
 
 
-@router.post("/agent-runs", response_model=AgentRunOut)
-def create_agent_run(
-    inp: AgentRunCreate,
+router = APIRouter(prefix="/agent-runs", tags=["agents"])
+
+
+@router.get("")
+def list_runs(
+    property_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    run = create_run(
-        db=db,
-        org_id=principal.org_id,
-        created_by_user_id=principal.user_id,
-        agent_key=inp.agent_key,
-        property_id=inp.property_id,
-        title=inp.title,
-        input_json=inp.input_json,
-    )
-    return run
+    q = select(AgentRun).where(AgentRun.org_id == principal.org_id).order_by(AgentRun.id.desc())
+    if property_id:
+        q = q.where(AgentRun.property_id == property_id)
+    rows = db.scalars(q).all()
+    return [
+        {
+            "id": r.id,
+            "org_id": r.org_id,
+            "property_id": r.property_id,
+            "agent_key": r.agent_key,
+            "status": r.status,
+            "attempts": getattr(r, "attempts", 0),
+            "last_error": getattr(r, "last_error", None),
+            "created_at": r.created_at,
+            "started_at": getattr(r, "started_at", None),
+            "finished_at": getattr(r, "finished_at", None),
+            "approval_status": getattr(r, "approval_status", None),
+            "approved_at": getattr(r, "approved_at", None),
+        }
+        for r in rows
+    ]
 
 
-@router.get("/agent-runs", response_model=list[AgentRunOut])
-def list_agent_runs(
-    limit: int = 50,
+@router.post("/plan")
+def plan_runs(
+    property_id: int = Query(...),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    rows = db.execute(
-        select(AgentRun)
-        .where(AgentRun.org_id == principal.org_id)
-        .order_by(desc(AgentRun.created_at))
-        .limit(limit)
-    ).scalars().all()
-    return rows
+    plan = plan_agent_runs(db, org_id=principal.org_id, property_id=property_id)
+    return [
+        {
+            "agent_key": p.agent_key,
+            "property_id": p.property_id,
+            "reason": p.reason,
+            "input_payload": p.input_payload,
+            "idempotency_key": p.idempotency_key,
+        }
+        for p in plan
+    ]
 
 
-@router.get("/agent-runs/{run_id}/messages", response_model=list[AgentMessageOut])
-def list_agent_run_messages(
-    run_id: int,
-    limit: int = 200,
+@router.post("/enqueue")
+def enqueue_planned_runs(
+    property_id: int = Query(...),
+    dispatch: bool = Query(default=True),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    # Ensure run exists
-    run = db.execute(
-        select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == principal.org_id)
-    ).scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="Agent run not found")
-
-    msgs = db.execute(
-        select(AgentMessage)
-        .where(AgentMessage.org_id == principal.org_id, AgentMessage.run_id == run_id)
-        .order_by(AgentMessage.created_at.asc())
-        .limit(limit)
-    ).scalars().all()
-    return msgs
-
-
-@router.post("/agent-runs/{run_id}/messages", response_model=AgentMessageOut)
-def add_agent_run_message(
-    run_id: int,
-    inp: AgentMessageCreate,
-    db: Session = Depends(get_db),
-    principal=Depends(get_principal),
-):
-    try:
-        msg = append_message(
-            db=db,
+    plan = plan_agent_runs(db, org_id=principal.org_id, property_id=property_id)
+    created = []
+    for p in plan:
+        r = create_run(
+            db,
             org_id=principal.org_id,
-            run_id=run_id,
-            role=inp.role,
-            content=inp.content,
-            data_json=inp.data_json,
+            actor_user_id=principal.user_id,
+            agent_key=p.agent_key,
+            property_id=p.property_id,
+            input_payload=p.input_payload,
+            idempotency_key=p.idempotency_key,
         )
-        return msg
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        created.append(r)
+
+        if dispatch and r.status == "queued":
+            execute_agent_run.delay(org_id=principal.org_id, run_id=int(r.id))
+
+    return {"planned": len(plan), "created": [int(r.id) for r in created]}
 
 
-@router.post("/agent-runs/{run_id}/close", response_model=AgentRunOut)
-def close_agent_run(
+@router.post("/{run_id}/dispatch")
+def dispatch_run(
     run_id: int,
-    status: str = "done",  # done|blocked|cancelled
-    summary: str | None = None,
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    try:
-        run = close_run(
-            db=db,
-            org_id=principal.org_id,
-            run_id=run_id,
-            status=status,
-            summary=summary,
-        )
-        return run
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    r = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == principal.org_id))
+    if r is None:
+        raise HTTPException(status_code=404, detail="AgentRun not found")
+
+    if r.status not in {"queued"}:
+        return {"ok": True, "run_id": r.id, "status": r.status}
+
+    execute_agent_run.delay(org_id=principal.org_id, run_id=int(r.id))
+    return {"ok": True, "run_id": r.id, "status": "queued"}
+
+
+@router.post("/{run_id}/approve")
+def approve_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    r = mark_approved(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=run_id)
+    return {"ok": True, "run_id": r.id, "approval_status": r.approval_status}

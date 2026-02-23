@@ -16,6 +16,12 @@ services:
       retries: 20
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
   backend:
     build: ./backend
     working_dir: /app
@@ -29,13 +35,41 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       HUD_USER_TOKEN: ${HUD_USER_TOKEN}
       RENTCAST_API_KEY: ${RENTCAST_API_KEY}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+      AGENTS_MAX_RUNS_PER_PROPERTY_PER_HOUR: ${AGENTS_MAX_RUNS_PER_PROPERTY_PER_HOUR:-3}
+      AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
+      AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
     command: bash -lc "alembic -c /app/app/alembic.ini upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     depends_on:
       postgres:
         condition: service_healthy
-    # Publish to host so you can hit localhost:8000 (scripts, curl, browser)
+      redis:
+        condition: service_started
     ports:
       - "8000:8000"
+    restart: unless-stopped
+
+  agent-worker:
+    build: ./backend
+    working_dir: /app
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+      APP_ENV: ${APP_ENV:-dev}
+      AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
+      AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
+    command: bash -lc "celery -A app.workers.celery_app.celery_app worker -l INFO -Q agents"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   frontend:
@@ -52,3 +86,4 @@ services:
 
 volumes:
   pgdata:
+  

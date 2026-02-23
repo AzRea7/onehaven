@@ -642,18 +642,39 @@ class InspectionEvent(Base):
 # -----------------------------
 class AgentRun(Base):
     __tablename__ = "agent_runs"
+    __table_args__ = (
+        UniqueConstraint("org_id", "idempotency_key", name="uq_agent_runs_org_idempotency_key"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
 
-    agent_key: Mapped[str] = mapped_column(String(80), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="queued")
+    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), index=True, nullable=True)
+    agent_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")  # queued|running|done|failed|blocked
 
     input_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     output_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    # Reliability semantics
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
+
+    # Approval semantics (mutation agents)
+    approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required")  # not_required|pending|approved|rejected
+    approved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    proposed_actions_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class AgentMessage(Base):
