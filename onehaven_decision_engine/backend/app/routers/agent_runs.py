@@ -1,7 +1,7 @@
 # onehaven_decision_engine/backend/app/routers/agent_runs.py
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -10,6 +10,7 @@ from app.db import get_db
 from app.models import AgentRun
 from app.services.agent_engine import create_run, mark_approved
 from app.services.agent_orchestrator import plan_agent_runs
+from app.services.agent_actions import apply_run_actions
 from app.workers.agent_tasks import execute_agent_run
 
 
@@ -97,22 +98,44 @@ def dispatch_run(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    r = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == principal.org_id))
+    r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
     if r is None:
-        raise HTTPException(status_code=404, detail="AgentRun not found")
-
-    if r.status not in {"queued"}:
-        return {"ok": True, "run_id": r.id, "status": r.status}
-
+        return {"ok": False, "error": "not_found"}
     execute_agent_run.delay(org_id=principal.org_id, run_id=int(r.id))
-    return {"ok": True, "run_id": r.id, "status": "queued"}
+    return {"ok": True, "queued": True, "run_id": int(r.id)}
 
 
 @router.post("/{run_id}/approve")
 def approve_run(
     run_id: int,
     db: Session = Depends(get_db),
-    principal=Depends(require_owner),
+    principal=Depends(get_principal),
 ):
-    r = mark_approved(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=run_id)
-    return {"ok": True, "run_id": r.id, "approval_status": r.approval_status}
+    # Approval is an owner-only action
+    require_owner(principal)
+    r = mark_approved(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=int(run_id))
+    return {
+        "ok": True,
+        "run_id": int(r.id),
+        "status": r.status,
+        "approval_status": getattr(r, "approval_status", None),
+        "approved_at": getattr(r, "approved_at", None),
+    }
+
+
+@router.post("/{run_id}/apply")
+def apply_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    # Applying DB mutations is also owner-only
+    require_owner(principal)
+    res = apply_run_actions(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=int(run_id))
+    return {
+        "ok": res.ok,
+        "status": res.status,
+        "run_id": res.run_id,
+        "applied_count": res.applied_count,
+        "errors": res.errors,
+    }

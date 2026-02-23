@@ -1,4 +1,4 @@
-# backend/app/domain/agents/contracts.py
+# onehaven_decision_engine/backend/app/domain/agents/contracts.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,103 +14,110 @@ class AgentContract:
     required_fields: Dict[str, List[str]]
 
 
-def _as_list(v: Any) -> List[Any]:
-    return v if isinstance(v, list) else []
-
-
-def _is_str(v: Any) -> bool:
-    return isinstance(v, str) and bool(v.strip())
-
-
-def _is_dict(v: Any) -> bool:
-    return isinstance(v, dict)
-
+# Canonical action schema (what executor must emit)
+# {
+#   "entity_type": "rehab_task" | "checklist_item" | "workflow_event",
+#   "op": "create" | "update_status" | "create",
+#   "data": { ... }
+# }
 
 CONTRACTS: Dict[str, AgentContract] = {
-    # SAFE defaults: recommend-only agents that create structured "actions" proposals.
     "deal_intake": AgentContract(
         agent_key="deal_intake",
         mode="recommend_only",
-        allowed_entity_types=["WorkflowEvent"],
-        allowed_operations=["recommend"],
-        required_fields={"WorkflowEvent": ["event_type", "payload"]},
+        allowed_entity_types=[],
+        allowed_operations=[],
+        required_fields={"root": ["summary"]},
     ),
     "public_records_check": AgentContract(
         agent_key="public_records_check",
         mode="recommend_only",
-        allowed_entity_types=["WorkflowEvent"],
-        allowed_operations=["recommend"],
-        required_fields={"WorkflowEvent": ["event_type", "payload"]},
+        allowed_entity_types=[],
+        allowed_operations=[],
+        required_fields={"root": ["summary"]},
     ),
     "rent_reasonableness": AgentContract(
         agent_key="rent_reasonableness",
         mode="recommend_only",
-        allowed_entity_types=["WorkflowEvent"],
-        allowed_operations=["recommend"],
-        required_fields={"WorkflowEvent": ["event_type", "payload"]},
-    ),
-    "hqs_precheck": AgentContract(
-        agent_key="hqs_precheck",
-        mode="recommend_only",
-        allowed_entity_types=["WorkflowEvent"],
-        allowed_operations=["recommend"],
-        required_fields={"WorkflowEvent": ["event_type", "payload"]},
+        allowed_entity_types=[],
+        allowed_operations=[],
+        required_fields={"root": ["summary"]},
     ),
     "packet_builder": AgentContract(
         agent_key="packet_builder",
         mode="recommend_only",
-        allowed_entity_types=["WorkflowEvent"],
-        allowed_operations=["recommend"],
-        required_fields={"WorkflowEvent": ["event_type", "payload"]},
+        allowed_entity_types=[],
+        allowed_operations=[],
+        required_fields={"root": ["summary"]},
     ),
     "timeline_nudger": AgentContract(
         agent_key="timeline_nudger",
         mode="recommend_only",
-        allowed_entity_types=["WorkflowEvent"],
-        allowed_operations=["recommend"],
-        required_fields={"WorkflowEvent": ["event_type", "payload"]},
+        allowed_entity_types=[],
+        allowed_operations=[],
+        required_fields={"root": ["summary"]},
+    ),
+    "hqs_precheck": AgentContract(
+        agent_key="hqs_precheck",
+        mode="mutate_requires_approval",
+        allowed_entity_types=["rehab_task", "workflow_event", "checklist_item"],
+        allowed_operations=["create", "update_status"],
+        required_fields={"root": ["summary", "actions"]},
     ),
 }
 
 
+def get_contract(agent_key: str) -> AgentContract:
+    if agent_key not in CONTRACTS:
+        # default safe mode
+        return AgentContract(
+            agent_key=agent_key,
+            mode="recommend_only",
+            allowed_entity_types=[],
+            allowed_operations=[],
+            required_fields={"root": ["summary"]},
+        )
+    return CONTRACTS[agent_key]
+
+
 def validate_agent_output(agent_key: str, output_json: Any) -> Tuple[bool, List[str]]:
-    c = CONTRACTS.get(agent_key)
-    if c is None:
-        return False, [f"unknown agent_key={agent_key}"]
+    errs: List[str] = []
+    c = get_contract(agent_key)
 
-    if not _is_dict(output_json):
-        return False, ["output must be a JSON object"]
+    if not isinstance(output_json, dict):
+        return False, ["output must be an object"]
 
-    # Required top-level keys
-    summary = output_json.get("summary")
-    actions = output_json.get("actions")
+    # required root fields
+    req = c.required_fields.get("root", [])
+    for f in req:
+        if f not in output_json:
+            errs.append(f"missing required field: {f}")
 
-    if not _is_str(summary):
-        return False, ["output.summary must be a non-empty string"]
+    actions = output_json.get("actions", None)
 
-    if actions is not None and not isinstance(actions, list):
-        return False, ["output.actions must be a list when provided"]
+    # recommend-only MUST NOT contain actions
+    if c.mode == "recommend_only":
+        if isinstance(actions, list) and len(actions) > 0:
+            errs.append("recommend_only agents may not emit actions[]")
+        return (len(errs) == 0), errs
 
-    errors: List[str] = []
-    for i, a in enumerate(_as_list(actions)):
-        if not _is_dict(a):
-            errors.append(f"actions[{i}] must be an object")
+    # mutation modes: actions is required and must validate
+    if not isinstance(actions, list) or len(actions) == 0:
+        errs.append("mutation agent must emit non-empty actions[]")
+        return (len(errs) == 0), errs
+
+    for i, a in enumerate(actions):
+        if not isinstance(a, dict):
+            errs.append(f"actions[{i}] must be an object")
             continue
-
-        entity_type = a.get("entity_type")
+        et = a.get("entity_type")
         op = a.get("op")
         data = a.get("data")
-
-        if entity_type not in c.allowed_entity_types:
-            errors.append(f"actions[{i}].entity_type not allowed: {entity_type}")
+        if et not in c.allowed_entity_types:
+            errs.append(f"actions[{i}] entity_type '{et}' not allowed")
         if op not in c.allowed_operations:
-            errors.append(f"actions[{i}].op not allowed: {op}")
-        if not _is_dict(data):
-            errors.append(f"actions[{i}].data must be an object")
+            errs.append(f"actions[{i}] op '{op}' not allowed")
+        if not isinstance(data, dict):
+            errs.append(f"actions[{i}].data must be an object")
 
-        req = c.required_fields.get(str(entity_type), [])
-        for k in req:
-            if not (isinstance(data, dict) and k in data):
-                errors.append(f"actions[{i}].data missing required field: {k}")
-
-    return (len(errors) == 0), errors
+    return (len(errs) == 0), errs
