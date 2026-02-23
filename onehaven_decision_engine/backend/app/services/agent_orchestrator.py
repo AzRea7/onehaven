@@ -1,152 +1,116 @@
-# onehaven_decision_engine/backend/app/services/agent_orchestrator.py
+# backend/app/services/agent_orchestrator.py
 from __future__ import annotations
 
+import hashlib
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from app.domain.fingerprint import stable_fingerprint
-from app.models import AgentRun, PropertyState, WorkflowEvent
+from ..config import settings
+from ..models import AgentRun, Property, PropertyState
+from ..policy_models import JurisdictionProfile
+from .property_state_machine import compute_and_persist_stage
 
 
 @dataclass(frozen=True)
-class PlannedAgentRun:
+class PlannedRun:
     agent_key: str
-    property_id: int
     reason: str
-    input_payload: Dict[str, Any]
     idempotency_key: str
 
 
-def _loads(s: Optional[str], default: Any) -> Any:
+def _loads_json(s: Optional[str]):
     if not s:
-        return default
+        return None
     try:
         return json.loads(s)
     except Exception:
-        return default
+        return None
 
 
-def _hourly_cap(db: Session, org_id: int, property_id: int) -> bool:
+def _fingerprint(obj) -> str:
+    blob = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:32]
+
+
+def _hour_bucket(dt: datetime) -> datetime:
+    return dt.replace(minute=0, second=0, microsecond=0)
+
+
+def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[PlannedRun]:
     """
-    Hard cap: max N runs per property per hour (prevents agent spam loops).
+    Deterministic orchestration:
+      - reads property stage + next actions
+      - selects agents
+      - enforces caps to prevent spam loops
     """
-    max_per_hr = int(os.getenv("AGENTS_MAX_RUNS_PER_PROPERTY_PER_HOUR", "3"))
-    since = datetime.utcnow() - timedelta(hours=1)
+    prop = db.scalar(select(Property).where(Property.org_id == org_id).where(Property.id == property_id))
+    if prop is None:
+        return []
 
-    n = db.scalar(
-        select(func.count())
-        .select_from(AgentRun)
+    # Ensure state is up to date (Phase 4 hook)
+    st = compute_and_persist_stage(db, org_id=org_id, property=prop)
+
+    # Anti-spam cap: max N runs/property/hour
+    bucket = _hour_bucket(datetime.utcnow())
+    count = db.scalar(
+        select(func.count(AgentRun.id))
         .where(AgentRun.org_id == org_id)
         .where(AgentRun.property_id == property_id)
-        .where(AgentRun.created_at >= since)
-    ) or 0
-
-    return int(n) < max_per_hr
-
-
-def _state_fingerprint(*, stage: str, constraints: Any, tasks: Any) -> str:
-    return stable_fingerprint(
-        {
-            "stage": stage,
-            "constraints": constraints,
-            "tasks": tasks,
-        }
+        .where(AgentRun.created_at >= bucket)
     )
-
-
-def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[PlannedAgentRun]:
-    """
-    Deterministic planner:
-    - Reads PropertyState + recent workflow events
-    - Chooses which agents to run now
-    - Produces idempotency keys based on state fingerprint
-    """
-    ps = db.scalar(
-        select(PropertyState)
-        .where(PropertyState.org_id == org_id)
-        .where(PropertyState.property_id == property_id)
-    )
-    if ps is None:
+    if int(count or 0) >= int(settings.agents_max_runs_per_property_per_hour):
         return []
 
-    if not _hourly_cap(db, org_id, property_id):
-        return []
+    next_actions = _loads_json(getattr(st, "outstanding_tasks_json", None)) or []
+    constraints = _loads_json(getattr(st, "constraints_json", None)) or []
 
-    stage = (ps.current_stage or "deal").strip().lower()
-    constraints = _loads(ps.constraints_json, {})
-    tasks = _loads(ps.outstanding_tasks_json, [])
+    stage = (getattr(st, "current_stage", "deal") or "deal").strip().lower()
 
-    fp = _state_fingerprint(stage=stage, constraints=constraints, tasks=tasks)
+    planned: list[tuple[str, str]] = []
 
-    # Very explicit routing rules (you can expand over time):
-    # Think of this like a “finite-state playbook”, not an LLM decision.
-    plan: List[PlannedAgentRun] = []
-
-    def add(agent_key: str, reason: str, payload: Dict[str, Any]) -> None:
-        idem = stable_fingerprint({"org": org_id, "property": property_id, "agent": agent_key, "state_fp": fp})
-        plan.append(
-            PlannedAgentRun(
-                agent_key=agent_key,
-                property_id=property_id,
-                reason=reason,
-                input_payload=payload,
-                idempotency_key=idem,
-            )
-        )
-
-    # Stage-based defaults
+    # Core logic
     if stage in {"deal", "intake"}:
-        add(
-            "deal_intake",
-            "Property is in deal/intake stage: validate intake completeness.",
-            {"property_id": property_id, "stage": stage},
-        )
+        planned.append(("deal_intake", "stage=deal/intake"))
+        planned.append(("public_records_check", "stage=deal/intake"))
+        planned.append(("packet_builder", "stage=deal/intake (packet readiness begins early)"))
 
-    if stage in {"rent", "underwrite"}:
-        add(
-            "rent_reasonableness",
-            "Property is in rent/underwrite stage: package rent narrative inputs.",
-            {"property_id": property_id, "stage": stage},
-        )
+    if stage in {"rent", "underwrite", "evaluate"}:
+        planned.append(("rent_reasonableness", "stage implies rent validation"))
+        planned.append(("packet_builder", "rent stage: ensure packet checklist exists"))
 
     if stage in {"compliance", "inspection"}:
-        add(
-            "hqs_precheck",
-            "Property is in compliance/inspection stage: predict HQS fail points.",
-            {"property_id": property_id, "stage": stage, "max_items": 15},
-        )
+        planned.append(("hqs_precheck", "stage implies HQS readiness"))
+        planned.append(("timeline_nudger", "compliance stage needs timeline pressure"))
 
-    # Task-driven triggers (from your Phase 4 next-actions)
-    # If your outstanding_tasks_json includes codes like "valuation_due" / "rent_gap", this catches them.
-    tcodes = set()
-    if isinstance(tasks, list):
-        for t in tasks:
-            if isinstance(t, dict) and isinstance(t.get("code"), str):
-                tcodes.add(t["code"])
+    # Trigger-based: next actions
+    for a in next_actions:
+        typ = str((a or {}).get("type") or "").lower()
+        if "valuation_due" in typ:
+            planned.append(("timeline_nudger", "next_action=valuation_due"))
+        if "rent_gap" in typ:
+            planned.append(("rent_reasonableness", "next_action=rent_gap"))
 
-    if "valuation_due" in tcodes and stage not in {"deal", "intake"}:
-        add(
-            "rent_reasonableness",
-            "Valuation due: run rent packaging again as supporting evidence bundle (placeholder agent).",
-            {"property_id": property_id, "stage": stage, "trigger": "valuation_due"},
-        )
+    # Build idempotency keys based on state snapshot
+    state_blob = {
+        "stage": stage,
+        "next_actions": next_actions,
+        "constraints": constraints,
+        "property_id": property_id,
+    }
+    fp = _fingerprint(state_blob)
 
-    # Anti-repeat: don’t re-run same agent if we already have a run with same idempotency key
-    out: List[PlannedAgentRun] = []
-    for pr in plan:
-        exists = db.scalar(
-            select(AgentRun.id)
-            .where(AgentRun.org_id == org_id)
-            .where(AgentRun.idempotency_key == pr.idempotency_key)
-        )
-        if exists:
-            continue
-        out.append(pr)
+    out: List[PlannedRun] = []
+    for agent_key, reason in planned:
+        idem = f"{org_id}:{property_id}:{agent_key}:{fp}"
+        out.append(PlannedRun(agent_key=agent_key, reason=reason, idempotency_key=idem))
 
-    return out
+    # De-dupe (keep first reason)
+    uniq: dict[str, PlannedRun] = {}
+    for r in out:
+        uniq.setdefault(r.agent_key, r)
+    return list(uniq.values())

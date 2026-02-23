@@ -1,35 +1,64 @@
-# onehaven_decision_engine/backend/app/workers/agent_tasks.py
+# backend/app/workers/agent_tasks.py
 from __future__ import annotations
 
-import os
+from datetime import datetime, timedelta
+
 from celery import shared_task
+from sqlalchemy import select
 
-from app.db import SessionLocal
-from app.services.agent_engine import execute_run_now
+from .celery_app import celery_app
+from ..db import SessionLocal
+from ..models import AgentRun
+from ..services.agent_engine import execute_run_now
 
 
-@shared_task(bind=True, name="app.workers.agent_tasks.execute_agent_run")
-def execute_agent_run(self, *, org_id: int, run_id: int) -> dict:
-    """
-    Celery task: execute an AgentRun with retries, idempotency, and timeout semantics.
-    """
-    max_retries = int(os.getenv("AGENTS_MAX_RETRIES", "3"))
-
+@shared_task(bind=True, max_retries=3, default_retry_delay=5)
+def execute_agent_run_task(self, org_id: int, run_id: int) -> dict:
     db = SessionLocal()
     try:
-        # If execute_run_now raises, we retry. If it returns failed status, we do not retry.
-        out = execute_run_now(db, org_id=org_id, run_id=run_id, attempt_number=(self.request.retries + 1))
-        if out.get("status") == "retryable_error":
-            raise RuntimeError(out.get("error") or "retryable_error")
-        return out
+        run = db.scalar(select(AgentRun).where(AgentRun.id == run_id).where(AgentRun.org_id == org_id))
+        if run is None:
+            return {"ok": False, "reason": "run_not_found"}
+
+        # idempotency: if already finished, do nothing
+        if run.status in {"done", "failed", "timed_out"}:
+            return {"ok": True, "status": run.status, "idempotent": True}
+
+        # mark running / attempt
+        run.status = "running"
+        run.started_at = run.started_at or datetime.utcnow()
+        run.attempts = int(getattr(run, "attempts", 0) or 0) + 1
+        run.heartbeat_at = datetime.utcnow()
+        db.commit()
+
+        out = execute_run_now(db, org_id=org_id, run_id=run_id)
+        return {"ok": True, "output": out}
     except Exception as e:
-        if self.request.retries >= max_retries:
-            # Final failure: mark run as failed inside engine (it’s safe to call it; it’s idempotent)
+        # store error and retry bounded
+        try:
+            run = db.scalar(select(AgentRun).where(AgentRun.id == run_id))
+            if run is not None:
+                run.last_error = f"{type(e).__name__}: {e}"
+                run.heartbeat_at = datetime.utcnow()
+                db.commit()
+        except Exception:
+            db.rollback()
+
+        if self.request.retries >= 2:
+            # fail hard
             try:
-                execute_run_now(db, org_id=org_id, run_id=run_id, attempt_number=max_retries, force_fail=str(e))
+                run = db.scalar(select(AgentRun).where(AgentRun.id == run_id))
+                if run is not None:
+                    run.status = "failed"
+                    run.finished_at = datetime.utcnow()
+                    db.commit()
             except Exception:
-                pass
-            raise
-        raise self.retry(exc=e, countdown=min(5 * (2 ** self.request.retries), 60))
+                db.rollback()
+            return {"ok": False, "reason": "failed_final", "error": str(e)}
+
+        raise self.retry(exc=e)
     finally:
         db.close()
+
+
+celery_app.tasks.register(execute_agent_run_task)

@@ -725,3 +725,6 @@ class RentExplainRun(Base):
     payment_standard_pct_used: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+from .policy_models import JurisdictionProfile, HqsRule, HqsAddendumRule, HudFmrRecord  # noqa: E402,F401

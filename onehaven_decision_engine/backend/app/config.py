@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
 
+    celery_broker_url: str | None = None
+    celery_result_backend: str | None = None
+
+    agents_max_runs_per_property_per_hour: int = 3
+    agents_max_retries: int = 3
+    agents_run_timeout_seconds: int = 120
+
     # Local-dev bypass (ONLY honored when app_env == "local")
     # Use headers:
     #   X-User-Email: you@domain.com
