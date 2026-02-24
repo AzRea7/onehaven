@@ -1,4 +1,4 @@
-# onehaven_decision_engine/backend/app/domain/agents/contracts.py
+# backend/app/domain/agents/contracts.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,13 +13,6 @@ class AgentContract:
     allowed_operations: List[str]
     required_fields: Dict[str, List[str]]
 
-
-# Canonical action schema (what executor must emit)
-# {
-#   "entity_type": "rehab_task" | "checklist_item" | "workflow_event",
-#   "op": "create" | "update_status" | "create",
-#   "data": { ... }
-# }
 
 CONTRACTS: Dict[str, AgentContract] = {
     "deal_intake": AgentContract(
@@ -57,6 +50,16 @@ CONTRACTS: Dict[str, AgentContract] = {
         allowed_operations=[],
         required_fields={"root": ["summary"]},
     ),
+
+    # ✅ New Judge/Critic (recommend-only)
+    "ops_judge": AgentContract(
+        agent_key="ops_judge",
+        mode="recommend_only",
+        allowed_entity_types=[],
+        allowed_operations=[],
+        required_fields={"root": ["summary"]},
+    ),
+
     "hqs_precheck": AgentContract(
         agent_key="hqs_precheck",
         mode="mutate_requires_approval",
@@ -69,7 +72,6 @@ CONTRACTS: Dict[str, AgentContract] = {
 
 def get_contract(agent_key: str) -> AgentContract:
     if agent_key not in CONTRACTS:
-        # default safe mode
         return AgentContract(
             agent_key=agent_key,
             mode="recommend_only",
@@ -87,7 +89,6 @@ def validate_agent_output(agent_key: str, output_json: Any) -> Tuple[bool, List[
     if not isinstance(output_json, dict):
         return False, ["output must be an object"]
 
-    # required root fields
     req = c.required_fields.get("root", [])
     for f in req:
         if f not in output_json:
@@ -95,13 +96,11 @@ def validate_agent_output(agent_key: str, output_json: Any) -> Tuple[bool, List[
 
     actions = output_json.get("actions", None)
 
-    # recommend-only MUST NOT contain actions
     if c.mode == "recommend_only":
         if isinstance(actions, list) and len(actions) > 0:
             errs.append("recommend_only agents may not emit actions[]")
         return (len(errs) == 0), errs
 
-    # mutation modes: actions is required and must validate
     if not isinstance(actions, list) or len(actions) == 0:
         errs.append("mutation agent must emit non-empty actions[]")
         return (len(errs) == 0), errs

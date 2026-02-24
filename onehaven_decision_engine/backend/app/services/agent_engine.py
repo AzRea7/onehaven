@@ -1,4 +1,4 @@
-# onehaven_decision_engine/backend/app/services/agent_engine.py
+# backend/app/services/agent_engine.py
 from __future__ import annotations
 
 import json
@@ -11,8 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.agents.contracts import get_contract, validate_agent_output
-from app.domain.agents.executor import execute_agent, apply_proposed_actions
+from app.domain.agents.executor import execute_agent
 from app.models import AgentRun, WorkflowEvent
+from app.services.agent_actions import apply_run_actions
+from app.services.agent_trace import emit_trace_safe
 
 
 TERMINAL = {"done", "failed", "timed_out"}
@@ -130,11 +132,6 @@ def create_and_execute_run(
     idempotency_key: Optional[str] = None,
     dispatch: bool = True,
 ) -> dict[str, Any]:
-    """
-    - create run (idempotent if idempotency_key provided)
-    - if dispatch=True: queue it to Celery worker
-    - else: execute synchronously (dev)
-    """
     r = create_run(
         db,
         org_id=org_id,
@@ -185,6 +182,16 @@ def mark_approved(
         payload={"run_id": int(r.id), "agent_key": str(r.agent_key)},
     )
 
+    emit_trace_safe(
+        db,
+        org_id=org_id,
+        run_id=int(r.id),
+        agent_key=str(r.agent_key),
+        event_type="approved",
+        payload={"approved_by_user_id": actor_user_id, "approved_at": r.approved_at.isoformat() if r.approved_at else None},
+        level="info",
+    )
+
     db.commit()
     db.refresh(r)
     return r
@@ -211,9 +218,7 @@ def reject_run(
     r.approval_status = "rejected"
     r.last_error = f"rejected: {reason}"
     r.finished_at = _now()
-
-    if hasattr(r, "proposed_actions_json"):
-        r.proposed_actions_json = None
+    r.proposed_actions_json = None
 
     db.add(r)
 
@@ -224,6 +229,16 @@ def reject_run(
         actor_user_id=actor_user_id,
         event_type="agent_run_rejected",
         payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "reason": reason, "prev_status": prev_status},
+    )
+
+    emit_trace_safe(
+        db,
+        org_id=org_id,
+        run_id=int(r.id),
+        agent_key=str(r.agent_key),
+        event_type="rejected",
+        payload={"reason": reason, "prev_status": prev_status},
+        level="warn",
     )
 
     db.commit()
@@ -238,40 +253,35 @@ def apply_approved(
     actor_user_id: int,
     run_id: int,
 ) -> dict[str, Any]:
-    r = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == org_id))
-    if r is None:
-        raise HTTPException(status_code=404, detail="AgentRun not found")
+    """
+    ✅ Single source of truth: delegate ALL apply logic to services/agent_actions.apply_run_actions().
+    """
+    res = apply_run_actions(db, org_id=org_id, actor_user_id=actor_user_id, run_id=run_id)
 
-    if r.approval_status != "approved":
-        raise HTTPException(status_code=400, detail="Run is not approved")
+    # Trace apply result for UI
+    agent_key = "unknown"
+    run = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == org_id))
+    if run is not None:
+        agent_key = str(run.agent_key)
 
-    actions = _loads(r.proposed_actions_json, [])
-    if not isinstance(actions, list) or not actions:
-        return {"ok": True, "applied": 0, "skipped": 0, "run_id": int(r.id)}
-
-    applied, skipped = apply_proposed_actions(
+    emit_trace_safe(
         db,
         org_id=org_id,
-        actor_user_id=actor_user_id,
-        run=r,
-        actions=actions,
+        run_id=int(run_id),
+        agent_key=agent_key,
+        event_type="applied",
+        payload={"applied_count": int(res.applied_count), "errors": res.errors, "status": res.status},
+        level="info" if res.ok else "error",
     )
-
-    _emit_event(
-        db,
-        org_id=org_id,
-        property_id=r.property_id,
-        actor_user_id=actor_user_id,
-        event_type="agent_actions_applied",
-        payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "applied": applied, "skipped": skipped},
-    )
-
-    r.status = "done"
-    r.finished_at = _now()
-    db.add(r)
-
     db.commit()
-    return {"ok": True, "applied": applied, "skipped": skipped, "run_id": int(r.id)}
+
+    return {
+        "ok": bool(res.ok),
+        "status": res.status,
+        "run_id": int(res.run_id),
+        "applied": int(res.applied_count),
+        "errors": res.errors,
+    }
 
 
 def execute_run_now(
@@ -286,6 +296,8 @@ def execute_run_now(
     if r is None:
         return {"ok": False, "status": "not_found", "run_id": run_id}
 
+    agent_key = str(r.agent_key)
+
     if r.status in TERMINAL:
         return {"ok": True, "status": r.status, "run_id": int(r.id), "output": _loads(r.output_json, {})}
 
@@ -295,6 +307,16 @@ def execute_run_now(
         r.last_error = force_fail
         r.attempts = max(int(r.attempts or 0), attempt_number)
         db.add(r)
+
+        emit_trace_safe(
+            db,
+            org_id=org_id,
+            run_id=int(r.id),
+            agent_key=agent_key,
+            event_type="error",
+            payload={"error": force_fail, "forced": True},
+            level="error",
+        )
         db.commit()
         return {"ok": False, "status": "failed", "run_id": int(r.id), "error": force_fail}
 
@@ -312,7 +334,16 @@ def execute_run_now(
                 property_id=r.property_id,
                 actor_user_id=r.created_by_user_id,
                 event_type="agent_run_timed_out",
-                payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "timeout_s": timeout_s},
+                payload={"run_id": int(r.id), "agent_key": agent_key, "timeout_s": timeout_s},
+            )
+            emit_trace_safe(
+                db,
+                org_id=org_id,
+                run_id=int(r.id),
+                agent_key=agent_key,
+                event_type="timed_out",
+                payload={"timeout_s": timeout_s},
+                level="error",
             )
             db.commit()
             return {"ok": False, "status": "timed_out", "run_id": int(r.id), "error": r.last_error}
@@ -324,11 +355,44 @@ def execute_run_now(
     db.add(r)
     db.commit()
 
+    emit_trace_safe(
+        db,
+        org_id=org_id,
+        run_id=int(r.id),
+        agent_key=agent_key,
+        event_type="started",
+        payload={"attempt": attempt_number, "property_id": r.property_id, "status": "running"},
+        level="info",
+    )
+    db.commit()
+
+    emit_trace_safe(
+        db,
+        org_id=org_id,
+        run_id=int(r.id),
+        agent_key=agent_key,
+        event_type="context_loaded",
+        payload={"property_id": r.property_id, "has_input_json": bool(r.input_json)},
+        level="info",
+    )
+    db.commit()
+
     try:
+        emit_trace_safe(
+            db,
+            org_id=org_id,
+            run_id=int(r.id),
+            agent_key=agent_key,
+            event_type="executing_agent",
+            payload={"agent_key": agent_key},
+            level="info",
+        )
+        db.commit()
+
         res = execute_agent(
             db,
             org_id=org_id,
-            agent_key=str(r.agent_key),
+            agent_key=agent_key,
             property_id=int(r.property_id) if r.property_id else None,
             input_json=r.input_json,
         )
@@ -346,16 +410,42 @@ def execute_run_now(
             property_id=r.property_id,
             actor_user_id=r.created_by_user_id,
             event_type="agent_run_failed",
-            payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "error": str(e)},
+            payload={"run_id": int(r.id), "agent_key": agent_key, "error": str(e)},
+        )
+        emit_trace_safe(
+            db,
+            org_id=org_id,
+            run_id=int(r.id),
+            agent_key=agent_key,
+            event_type="error",
+            payload={"error": str(e)},
+            level="error",
         )
         db.commit()
         return {"ok": False, "status": "failed", "run_id": int(r.id), "error": str(e)}
 
     r.output_json = _dumps(output)
     r.heartbeat_at = _now()
+    db.add(r)
+    db.commit()
 
-    contract = get_contract(str(r.agent_key))
-    ok, errs = validate_agent_output(str(r.agent_key), output if isinstance(output, dict) else {})
+    emit_trace_safe(
+        db,
+        org_id=org_id,
+        run_id=int(r.id),
+        agent_key=agent_key,
+        event_type="agent_output",
+        payload={
+            "summary": (output.get("summary") if isinstance(output, dict) else None),
+            "actions_count": len(output.get("actions") or []) if isinstance(output, dict) else 0,
+            "recommendations_count": len(output.get("recommendations") or []) if isinstance(output, dict) else 0,
+        },
+        level="info",
+    )
+    db.commit()
+
+    contract = get_contract(agent_key)
+    ok, errs = validate_agent_output(agent_key, output if isinstance(output, dict) else {})
     if not ok:
         r.status = "failed"
         r.finished_at = _now()
@@ -367,21 +457,38 @@ def execute_run_now(
             property_id=r.property_id,
             actor_user_id=r.created_by_user_id,
             event_type="agent_run_failed_contract",
-            payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "errors": errs},
+            payload={"run_id": int(r.id), "agent_key": agent_key, "errors": errs},
+        )
+        emit_trace_safe(
+            db,
+            org_id=org_id,
+            run_id=int(r.id),
+            agent_key=agent_key,
+            event_type="validation_failed",
+            payload={"errors": errs, "mode": contract.mode},
+            level="error",
         )
         db.commit()
         return {"ok": False, "status": "failed", "run_id": int(r.id), "error": r.last_error}
 
-    # ✅ Persist proposed actions in a mode-aware way
-    if isinstance(output, dict):
-        if contract.mode == "recommend_only":
-            recs = output.get("recommendations")
-            if isinstance(recs, list) and recs:
-                r.proposed_actions_json = _dumps(recs)
+    emit_trace_safe(
+        db,
+        org_id=org_id,
+        run_id=int(r.id),
+        agent_key=agent_key,
+        event_type="validation_ok",
+        payload={"mode": contract.mode},
+        level="info",
+    )
+    db.commit()
+
+    # ✅ Persist proposed_actions_json ONLY for mutation modes, and ONLY actions[] (never recommendations)
+    if isinstance(output, dict) and contract.mode != "recommend_only":
+        actions = output.get("actions")
+        if isinstance(actions, list) and actions:
+            r.proposed_actions_json = _dumps(actions)
         else:
-            actions = output.get("actions")
-            if isinstance(actions, list) and actions:
-                r.proposed_actions_json = _dumps(actions)
+            r.proposed_actions_json = _dumps([])
 
     # recommend_only => auto-done
     if contract.mode == "recommend_only":
@@ -395,7 +502,16 @@ def execute_run_now(
             property_id=r.property_id,
             actor_user_id=r.created_by_user_id,
             event_type="agent_run_done",
-            payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "mode": "recommend_only"},
+            payload={"run_id": int(r.id), "agent_key": agent_key, "mode": "recommend_only"},
+        )
+        emit_trace_safe(
+            db,
+            org_id=org_id,
+            run_id=int(r.id),
+            agent_key=agent_key,
+            event_type="done",
+            payload={"mode": "recommend_only"},
+            level="info",
         )
         db.commit()
         return {"ok": True, "status": "done", "run_id": int(r.id), "output": output}
@@ -412,7 +528,16 @@ def execute_run_now(
         property_id=r.property_id,
         actor_user_id=r.created_by_user_id,
         event_type="agent_run_requires_approval",
-        payload={"run_id": int(r.id), "agent_key": str(r.agent_key)},
+        payload={"run_id": int(r.id), "agent_key": agent_key},
+    )
+    emit_trace_safe(
+        db,
+        org_id=org_id,
+        run_id=int(r.id),
+        agent_key=agent_key,
+        event_type="blocked_pending_approval",
+        payload={"mode": contract.mode, "approval_status": "pending"},
+        level="warn",
     )
 
     db.commit()
@@ -449,6 +574,15 @@ def sweep_stuck_runs(
                     event_type="agent_run_swept_timeout",
                     payload={"run_id": int(r.id), "agent_key": str(r.agent_key)},
                 )
+                emit_trace_safe(
+                    db,
+                    org_id=int(r.org_id),
+                    run_id=int(r.id),
+                    agent_key=str(r.agent_key),
+                    event_type="swept_timeout",
+                    payload={"timeout_seconds": int(timeout_seconds)},
+                    level="warn",
+                )
                 changed += 1
                 details.append({"run_id": int(r.id), "action": "timed_out"})
 
@@ -465,6 +599,15 @@ def sweep_stuck_runs(
                     actor_user_id=None,
                     event_type="agent_run_swept_queued",
                     payload={"run_id": int(r.id), "agent_key": str(r.agent_key)},
+                )
+                emit_trace_safe(
+                    db,
+                    org_id=int(r.org_id),
+                    run_id=int(r.id),
+                    agent_key=str(r.agent_key),
+                    event_type="swept_queued",
+                    payload={"queued_max_hours": int(queued_max_hours)},
+                    level="warn",
                 )
                 changed += 1
                 details.append({"run_id": int(r.id), "action": "failed_queued"})

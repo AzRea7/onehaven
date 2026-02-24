@@ -7,7 +7,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.models import Property, Deal, PropertyState
+from app.models import Property, Deal, PropertyState, AgentRun
 from app.policy_models import JurisdictionProfile
 from app.services.hud_fmr_service import get_or_fetch_fmr
 from app.domain.compliance.hqs_library import get_effective_hqs_items
@@ -59,7 +59,6 @@ def agent_deal_intake(
         if getattr(d, "purchase_price", None) in (None, 0):
             missing.append("deal.purchase_price")
 
-    # deal_intake contract is recommend_only => actions must be empty
     recommendations = []
     if missing:
         recommendations.append(
@@ -180,7 +179,6 @@ def agent_hqs_precheck(
             }
         )
 
-    # mutate_requires_approval contract requires non-empty actions[]
     if not actions:
         actions.append(
             {
@@ -203,7 +201,7 @@ def agent_hqs_precheck(
             "hqs_items_total": len(items),
             "likely_fail_count": len(likely),
         },
-        "actions": actions,  # ✅ contract compliant
+        "actions": actions,  # ✅ mutate_requires_approval contract compliant
     }
 
 
@@ -221,7 +219,7 @@ def agent_packet_builder(
             "agent_key": "packet_builder",
             "summary": "No property found.",
             "facts": {"property_id": property_id},
-            "actions": [],  # ✅ recommend_only in your contracts
+            "actions": [],  # ✅ recommend_only
             "recommendations": [],
         }
 
@@ -265,12 +263,11 @@ def agent_timeline_nudger(
     property_id: Optional[int],
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    # recommend_only contract => must not emit actions[]
     return {
         "agent_key": "timeline_nudger",
         "summary": "Converts outstanding constraints into reminders and nudges (workflow continuity).",
         "facts": {"property_id": property_id},
-        "actions": [],  # ✅ contract-compliant
+        "actions": [],  # ✅ recommend_only
         "recommendations": [
             {
                 "type": "timeline_nudge",
@@ -282,17 +279,96 @@ def agent_timeline_nudger(
     }
 
 
-# ✅ Execution mapping (used by executor)
+def agent_ops_judge(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: Optional[int],
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Judge/Critic agent (recommend-only):
+      - looks at recent runs on this property
+      - outputs ranked recommendations and risk flags
+      - actions MUST be [] to satisfy recommend_only contract
+    """
+    if not property_id:
+        return {
+            "agent_key": "ops_judge",
+            "summary": "No property found (missing property_id).",
+            "facts": {"property_id": property_id},
+            "actions": [],
+            "recommendations": [],
+        }
+
+    runs = db.scalars(
+        select(AgentRun)
+        .where(AgentRun.org_id == org_id, AgentRun.property_id == int(property_id))
+        .order_by(AgentRun.id.desc())
+        .limit(20)
+    ).all()
+
+    usable = []
+    for r in runs:
+        out = getattr(r, "output_json", None)
+        if out:
+            usable.append({"run_id": int(r.id), "agent_key": str(r.agent_key), "status": str(r.status), "output": out})
+
+    pending = [r for r in runs if str(getattr(r, "approval_status", "")).lower() == "pending"]
+
+    recs: list[dict[str, Any]] = []
+    if pending:
+        recs.append(
+            {
+                "type": "approval_required",
+                "property_id": int(property_id),
+                "priority": "high",
+                "reason": f"{len(pending)} run(s) pending approval. Approve/apply to unblock workflow.",
+                "blocked_runs": [{"run_id": int(r.id), "agent_key": str(r.agent_key)} for r in pending[:10]],
+            }
+        )
+
+    # Light synthesis: if some agents mention missing fields or packet checklist, surface those
+    # (UI will already show detailed recommendations in each agent output_json)
+    recs.append(
+        {
+            "type": "review_agent_outputs",
+            "property_id": int(property_id),
+            "priority": "medium",
+            "reason": "Review latest agent outputs and resolve the highest priority blockers first.",
+        }
+    )
+
+    risks: list[str] = []
+    if not usable:
+        risks.append("No recent agent outputs found (or outputs were not persisted).")
+    if len(pending) > 3:
+        risks.append("High approval backlog; consider batching approvals or tightening mutation scope.")
+
+    return {
+        "agent_key": "ops_judge",
+        "summary": f"Ops Judge synthesized {len(usable)} recent run(s) into {len(recs)} next-step recommendation(s).",
+        "facts": {
+            "property_id": int(property_id),
+            "recent_runs": [{"run_id": x["run_id"], "agent_key": x["agent_key"], "status": x["status"]} for x in usable[:10]],
+            "pending_approvals": len(pending),
+            "risks": risks,
+        },
+        "actions": [],  # ✅ recommend_only
+        "recommendations": recs,
+    }
+
+
 AGENTS: dict[str, Any] = {
     "deal_intake": agent_deal_intake,
     "rent_reasonableness": agent_rent_reasonableness,
     "hqs_precheck": agent_hqs_precheck,
     "packet_builder": agent_packet_builder,
     "timeline_nudger": agent_timeline_nudger,
+    "ops_judge": agent_ops_judge,  # ✅ NEW
 }
 
 
-# ✅ UI-safe metadata (used by /agents and /agents/registry)
 AGENT_SPECS: dict[str, dict[str, Any]] = {
     "deal_intake": {
         "agent_key": "deal_intake",
@@ -344,12 +420,18 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
         "llm_capable": False,
         "default_payload_schema": {"property_id": "number"},
     },
+    "ops_judge": {
+        "agent_key": "ops_judge",
+        "title": "Ops Judge",
+        "description": "Synthesizes multiple agent outputs into a ranked plan + risk flags. Recommend-only.",
+        "category": "ops",
+        "needs_human": False,
+        "deterministic": True,
+        "llm_capable": False,
+        "default_payload_schema": {"property_id": "number"},
+    },
 }
 
-
-# -------------------------------------------------------------------
-# Slot specs: what the UI shows + what can be assigned to humans/agents
-# -------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class SlotSpec:
@@ -404,6 +486,15 @@ SLOTS = [
         title="Timeline Nudger",
         description="Create workflow continuity events to prevent stalls.",
         default_agent_key="timeline_nudger",
+        default_payload_schema={"property_id": "number"},
+        owner_type="agent",
+        default_status="idle",
+    ),
+    SlotSpec(
+        slot_key="ops_judge",
+        title="Ops Judge",
+        description="Synthesize multiple agent outputs into a ranked plan + risk flags.",
+        default_agent_key="ops_judge",
         default_payload_schema={"property_id": "number"},
         owner_type="agent",
         default_status="idle",

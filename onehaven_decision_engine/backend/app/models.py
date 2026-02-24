@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -309,6 +310,7 @@ class JurisdictionRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
+
 class UnderwritingResult(Base):
     __tablename__ = "underwriting_results"
 
@@ -349,9 +351,6 @@ class UnderwritingResult(Base):
 # -----------------------------
 # Inspections
 # -----------------------------
-# -----------------------------
-# Inspections
-# -----------------------------
 class Inspector(Base):
     __tablename__ = "inspectors"
     __table_args__ = (UniqueConstraint("name", "agency", name="uq_inspector_name_agency"),)
@@ -373,7 +372,9 @@ class Inspection(Base):
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
-    inspector_id: Mapped[Optional[int]] = mapped_column(ForeignKey("inspectors.id", ondelete="SET NULL"), nullable=True)
+    inspector_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("inspectors.id", ondelete="SET NULL"), nullable=True
+    )
 
     inspection_date: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -475,7 +476,9 @@ class PropertyChecklist(Base):
 
 class PropertyChecklistItem(Base):
     __tablename__ = "property_checklist_items"
-    __table_args__ = (UniqueConstraint("org_id", "property_id", "item_code", name="uq_checklist_item_org_property_code"),)
+    __table_args__ = (
+        UniqueConstraint("org_id", "property_id", "item_code", name="uq_checklist_item_org_property_code"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
@@ -563,7 +566,9 @@ class Lease(Base):
     property_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     end_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -659,7 +664,11 @@ class AgentRun(Base):
     property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), index=True, nullable=True)
     agent_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
 
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")  # queued|running|done|failed|blocked
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="queued",
+    )  # queued|running|done|failed|blocked
 
     input_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     output_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -677,7 +686,11 @@ class AgentRun(Base):
     created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
 
     # Approval semantics (mutation agents)
-    approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required")  # not_required|pending|approved|rejected
+    approval_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="not_required",
+    )  # not_required|pending|approved|rejected
     approved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -688,12 +701,28 @@ class AgentMessage(Base):
     __tablename__ = "agent_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    thread_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    # ✅ tie messages to a run/property for querying + SSE
+    run_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("agent_runs.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    property_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    thread_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     sender: Mapped[str] = mapped_column(String(80), nullable=False)
     recipient: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
 
@@ -720,18 +749,68 @@ class RentExplainRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    org_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    property_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
-    strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="section8")
+    strategy: Mapped[str] = mapped_column(String(20), nullable=False, server_default="section8")
 
     cap_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    explain_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    explain_json: Mapped[str] = mapped_column(Text, nullable=False, server_default="{}")
 
-    decision_version: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    decision_version: Mapped[str] = mapped_column(String(64), nullable=False, server_default="unknown")
     payment_standard_pct_used: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), index=True)
+
+
+class AgentTraceEvent(Base):
+    __tablename__ = "agent_trace_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    org_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    property_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    run_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("agent_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+
+    # examples: started | context | tool_call | tool_result | decision | warning | final | validation | blocked | approved | applied | error
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+
+    # structured JSON serialized to text for portability
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, server_default="{}")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), index=True)
+
+    __table_args__ = (
+        Index("ix_agent_trace_events_org_run_id_id", "org_id", "run_id", "id"),
+        Index("ix_agent_trace_events_org_property_id_id", "org_id", "property_id", "id"),
+    )
 
 
 from .policy_models import JurisdictionProfile, HqsRule, HqsAddendumRule, HudFmrRecord  # noqa: E402,F401

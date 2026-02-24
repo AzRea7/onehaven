@@ -1,10 +1,9 @@
-# onehaven_decision_engine/backend/app/services/agent_actions.py
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -12,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.agents.contracts import get_contract, validate_agent_output
 from app.models import AgentRun, WorkflowEvent, RehabTask, PropertyChecklistItem
+from app.services.agent_trace import emit_trace_safe
 
 
 def _loads(s: Optional[str], default: Any) -> Any:
@@ -46,18 +46,6 @@ def apply_run_actions(
     actor_user_id: int,
     run_id: int,
 ) -> ApplyResult:
-    """
-    Applies the AgentRun.proposed_actions_json to the database.
-
-    Safety / SaaS semantics:
-    - Org boundary enforced on every write.
-    - Run must be approval-gated:
-        - status must be "blocked"
-        - approval_status must be "approved"
-    - Apply is idempotent:
-        - if run is already "done", returns without re-applying.
-    - Writes an auditable WorkflowEvent with summary.
-    """
     r = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == org_id))
     if r is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
@@ -72,13 +60,12 @@ def apply_run_actions(
     if getattr(r, "approval_status", None) != "approved":
         raise HTTPException(status_code=403, detail="Run not approved")
 
-    # Must have actions
     actions = _loads(getattr(r, "proposed_actions_json", None), [])
     if not isinstance(actions, list) or not actions:
-        # Nothing to apply; treat as done (still auditable)
         r.status = "done"
         r.finished_at = datetime.utcnow()
         db.add(r)
+
         db.add(
             WorkflowEvent(
                 org_id=org_id,
@@ -89,6 +76,18 @@ def apply_run_actions(
                 created_at=datetime.utcnow(),
             )
         )
+
+        emit_trace_safe(
+            db,
+            org_id=org_id,
+            run_id=int(r.id),
+            agent_key=str(r.agent_key),
+            event_type="applied",
+            payload={"applied_count": 0, "status": "done", "note": "no proposed actions"},
+            level="info",
+            property_id=r.property_id,
+        )
+
         db.commit()
         return ApplyResult(ok=True, status="done", run_id=int(r.id), applied_count=0, errors=[])
 
@@ -103,7 +102,6 @@ def apply_run_actions(
     applied = 0
     errors: list[str] = []
 
-    # Apply each action
     for i, a in enumerate(actions):
         if not isinstance(a, dict):
             errors.append(f"actions[{i}] not an object")
@@ -113,7 +111,6 @@ def apply_run_actions(
         op = str(a.get("op") or "")
         data = a.get("data")
 
-        # Hard allowlist from contract (prevents “LLM writes anything”)
         if entity_type not in set(contract.allowed_entity_types):
             errors.append(f"actions[{i}] entity_type '{entity_type}' not allowed by contract")
             continue
@@ -134,7 +131,13 @@ def apply_run_actions(
                 applied += 1
 
             elif entity_type == "workflow_event" and op == "create":
-                _apply_create_workflow_event(db, org_id=org_id, property_id=r.property_id, actor_user_id=actor_user_id, data=data)
+                _apply_create_workflow_event(
+                    db,
+                    org_id=org_id,
+                    property_id=r.property_id,
+                    actor_user_id=actor_user_id,
+                    data=data,
+                )
                 applied += 1
 
             else:
@@ -142,12 +145,12 @@ def apply_run_actions(
         except Exception as e:
             errors.append(f"actions[{i}] failed: {type(e).__name__}: {e}")
 
-    # If any action failed, fail closed (do NOT mark done)
     if errors:
         r.status = "failed"
         r.finished_at = datetime.utcnow()
         r.last_error = "Apply failed: " + "; ".join(errors[:10])
         db.add(r)
+
         db.add(
             WorkflowEvent(
                 org_id=org_id,
@@ -158,13 +161,25 @@ def apply_run_actions(
                 created_at=datetime.utcnow(),
             )
         )
+
+        emit_trace_safe(
+            db,
+            org_id=org_id,
+            run_id=int(r.id),
+            agent_key=str(r.agent_key),
+            event_type="apply_failed",
+            payload={"applied_count": applied, "errors": errors[:50]},
+            level="error",
+            property_id=r.property_id,
+        )
+
         db.commit()
         return ApplyResult(ok=False, status="failed", run_id=int(r.id), applied_count=applied, errors=errors)
 
-    # Success
     r.status = "done"
     r.finished_at = datetime.utcnow()
     db.add(r)
+
     db.add(
         WorkflowEvent(
             org_id=org_id,
@@ -175,6 +190,18 @@ def apply_run_actions(
             created_at=datetime.utcnow(),
         )
     )
+
+    emit_trace_safe(
+        db,
+        org_id=org_id,
+        run_id=int(r.id),
+        agent_key=str(r.agent_key),
+        event_type="applied",
+        payload={"applied_count": applied, "status": "done"},
+        level="info",
+        property_id=r.property_id,
+    )
+
     db.commit()
     return ApplyResult(ok=True, status="done", run_id=int(r.id), applied_count=applied, errors=[])
 
@@ -250,3 +277,4 @@ def _apply_create_workflow_event(
             created_at=datetime.utcnow(),
         )
     )
+    
