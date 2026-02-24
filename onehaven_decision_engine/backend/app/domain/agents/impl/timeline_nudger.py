@@ -17,20 +17,35 @@ def run_timeline_nudger(
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Deterministic ops continuity agent:
-    - reads PropertyState next_actions (Phase 4)
-    - turns them into structured reminders/tasks (recommend-only)
+    Deterministic ops continuity agent (recommend-only):
+    - reads PropertyState next_actions
+    - turns them into structured recommendations
+    - MUST NOT emit actions[] because contract.mode = recommend_only
     """
     if not property_id:
-        return {"summary": "No property_id provided.", "facts": {}, "actions": [], "citations": []}
+        return {
+            "agent_key": "timeline_nudger",
+            "summary": "No property_id provided.",
+            "facts": {},
+            "actions": [],
+            "recommendations": [],
+            "citations": [],
+        }
 
     prop = db.scalar(select(Property).where(Property.org_id == org_id, Property.id == property_id))
     if not prop:
-        return {"summary": "Property not found.", "facts": {}, "actions": [], "citations": []}
+        return {
+            "agent_key": "timeline_nudger",
+            "summary": "Property not found.",
+            "facts": {},
+            "actions": [],
+            "recommendations": [],
+            "citations": [],
+        }
 
     st = compute_and_persist_stage(db, org_id=org_id, property=prop)
 
-    next_actions = []
+    next_actions: list[Any] = []
     try:
         import json
 
@@ -40,21 +55,24 @@ def run_timeline_nudger(
     except Exception:
         next_actions = []
 
-    actions = []
+    # recommend-only: suggestions live here (NOT in actions)
+    recommendations: list[dict[str, Any]] = []
     for na in next_actions[:25]:
-        actions.append(
+        recommendations.append(
             {
-                "op": "recommend",
-                "entity_type": "Reminder",
-                "entity_id": None,
-                "payload": {"property_id": prop.id, "text": str(na)},
+                "type": "reminder",
+                "property_id": int(prop.id),
+                "text": str(na),
+                "reason": "Keeps timeline pressure visible in the ops loop.",
                 "priority": "medium",
             }
         )
 
     return {
-        "summary": f"Timeline nudger produced {len(actions)} next-action reminders from PropertyState.",
+        "agent_key": "timeline_nudger",
+        "summary": f"Timeline nudger produced {len(recommendations)} recommendations from PropertyState.",
         "facts": {"stage": getattr(st, "current_stage", None), "next_actions": next_actions},
-        "actions": actions,
+        "actions": [],  # ✅ contract-compliant
+        "recommendations": recommendations,
         "citations": [],
     }

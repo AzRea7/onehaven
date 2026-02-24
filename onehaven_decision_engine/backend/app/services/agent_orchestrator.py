@@ -4,32 +4,87 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import List, Optional
+from datetime import datetime
+from typing import Any, List, Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import AgentRun, Property, PropertyState
-from ..policy_models import JurisdictionProfile
+from ..models import AgentRun, Property
 from .property_state_machine import compute_and_persist_stage
 
 
 @dataclass(frozen=True)
 class PlannedRun:
+    property_id: int
     agent_key: str
     reason: str
     idempotency_key: str
 
 
-def _loads_json(s: Optional[str]):
-    if not s:
+def _loads_json(val: Any):
+    """
+    Defensive JSON loader:
+      - If val is already list/dict -> return as-is
+      - If val is a JSON string -> parse
+      - If val is a plain string (not JSON) -> return the raw string
+      - Else -> None
+    """
+    if val is None:
         return None
-    try:
-        return json.loads(s)
-    except Exception:
-        return None
+    if isinstance(val, (list, dict, int, float, bool)):
+        return val
+    if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return None
+        try:
+            return json.loads(s)
+        except Exception:
+            return s
+    return None
+
+
+def _normalize_next_actions(raw: Any) -> list[dict[str, Any]]:
+    """
+    Guarantee list[dict] so downstream code can safely do (a or {}).get("type").
+    Accepts:
+      - list[dict]
+      - list[str]
+      - dict
+      - str
+      - JSON string encoding any of the above
+    """
+    decoded = _loads_json(raw)
+
+    if decoded is None:
+        return []
+
+    # Single dict
+    if isinstance(decoded, dict):
+        return [decoded]
+
+    # Single string
+    if isinstance(decoded, str):
+        return [{"type": decoded}]
+
+    # List
+    if isinstance(decoded, list):
+        out: list[dict[str, Any]] = []
+        for a in decoded:
+            if a is None:
+                continue
+            if isinstance(a, dict):
+                out.append(a)
+            elif isinstance(a, str):
+                out.append({"type": a})
+            else:
+                out.append({"type": "note", "value": str(a)})
+        return out
+
+    # Unknown -> stringify
+    return [{"type": "note", "value": str(decoded)}]
 
 
 def _fingerprint(obj) -> str:
@@ -66,8 +121,13 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
     if int(count or 0) >= int(settings.agents_max_runs_per_property_per_hour):
         return []
 
-    next_actions = _loads_json(getattr(st, "outstanding_tasks_json", None)) or []
+    # ✅ critical: normalize to list[dict]
+    next_actions = _normalize_next_actions(getattr(st, "outstanding_tasks_json", None))
+
+    # constraints might be list/dict, JSON str, or junk string. Keep it safe.
     constraints = _loads_json(getattr(st, "constraints_json", None)) or []
+    if isinstance(constraints, str):
+        constraints = [{"type": "note", "value": constraints}]
 
     stage = (getattr(st, "current_stage", "deal") or "deal").strip().lower()
 
@@ -87,16 +147,19 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
         planned.append(("hqs_precheck", "stage implies HQS readiness"))
         planned.append(("timeline_nudger", "compliance stage needs timeline pressure"))
 
-    # Trigger-based: next actions
+    # Trigger-based: next actions (now safe even if original stored strings)
     for a in next_actions:
         typ = str((a or {}).get("type") or "").lower()
+
         if "valuation_due" in typ:
             planned.append(("timeline_nudger", "next_action=valuation_due"))
+
         if "rent_gap" in typ:
             planned.append(("rent_reasonableness", "next_action=rent_gap"))
 
     # Build idempotency keys based on state snapshot
     state_blob = {
+        "plan_version": getattr(settings, "decision_version", "v0"),
         "stage": stage,
         "next_actions": next_actions,
         "constraints": constraints,
@@ -107,7 +170,14 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
     out: List[PlannedRun] = []
     for agent_key, reason in planned:
         idem = f"{org_id}:{property_id}:{agent_key}:{fp}"
-        out.append(PlannedRun(agent_key=agent_key, reason=reason, idempotency_key=idem))
+        out.append(
+            PlannedRun(
+                property_id=property_id,
+                agent_key=agent_key,
+                reason=reason,
+                idempotency_key=idem
+            )
+        )
 
     # De-dupe (keep first reason)
     uniq: dict[str, PlannedRun] = {}

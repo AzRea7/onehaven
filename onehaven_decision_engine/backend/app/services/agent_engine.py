@@ -15,6 +15,10 @@ from app.domain.agents.executor import execute_agent, apply_proposed_actions
 from app.models import AgentRun, WorkflowEvent
 
 
+TERMINAL = {"done", "failed", "timed_out"}
+ACTIVE = {"queued", "running", "blocked"}
+
+
 def _dumps(v: Any) -> str:
     try:
         return json.dumps(v)
@@ -33,6 +37,27 @@ def _loads(s: Optional[str], default: Any) -> Any:
 
 def _now() -> datetime:
     return datetime.utcnow()
+
+
+def _emit_event(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: Optional[int],
+    actor_user_id: Optional[int],
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    db.add(
+        WorkflowEvent(
+            org_id=org_id,
+            property_id=property_id,
+            actor_user_id=actor_user_id,
+            event_type=event_type,
+            payload_json=_dumps(payload),
+            created_at=_now(),
+        )
+    )
 
 
 def create_run(
@@ -76,9 +101,21 @@ def create_run(
         approval_status="not_required",
         proposed_actions_json=None,
     )
+
     db.add(r)
     db.commit()
     db.refresh(r)
+
+    _emit_event(
+        db,
+        org_id=org_id,
+        property_id=r.property_id,
+        actor_user_id=actor_user_id,
+        event_type="agent_run_created",
+        payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "idempotency_key": idempotency_key},
+    )
+    db.commit()
+
     return r
 
 
@@ -94,10 +131,9 @@ def create_and_execute_run(
     dispatch: bool = True,
 ) -> dict[str, Any]:
     """
-    Convenience API expected by routers/agents.py.
-
-    - create run (idempotent)
-    - dispatch to worker (preferred) OR execute synchronously (dev)
+    - create run (idempotent if idempotency_key provided)
+    - if dispatch=True: queue it to Celery worker
+    - else: execute synchronously (dev)
     """
     r = create_run(
         db,
@@ -110,8 +146,7 @@ def create_and_execute_run(
     )
 
     if dispatch:
-        # avoid import cycles at boot
-        from app.workers.agent_tasks import execute_agent_run  # import-outside-toplevel
+        from app.workers.agent_tasks import execute_agent_run  # noqa
 
         if r.status == "queued":
             execute_agent_run.delay(org_id=org_id, run_id=int(r.id))
@@ -133,7 +168,7 @@ def mark_approved(
     if r is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
 
-    if r.approval_status not in {"pending"}:
+    if r.approval_status != "pending":
         return r
 
     r.approval_status = "approved"
@@ -141,15 +176,54 @@ def mark_approved(
     r.approved_at = _now()
     db.add(r)
 
-    db.add(
-        WorkflowEvent(
-            org_id=org_id,
-            property_id=r.property_id,
-            actor_user_id=actor_user_id,
-            event_type="agent_run_approved",
-            payload_json=_dumps({"run_id": r.id, "agent_key": r.agent_key}),
-            created_at=_now(),
-        )
+    _emit_event(
+        db,
+        org_id=org_id,
+        property_id=r.property_id,
+        actor_user_id=actor_user_id,
+        event_type="agent_run_approved",
+        payload={"run_id": int(r.id), "agent_key": str(r.agent_key)},
+    )
+
+    db.commit()
+    db.refresh(r)
+    return r
+
+
+def reject_run(
+    db: Session,
+    *,
+    org_id: int,
+    actor_user_id: int,
+    run_id: int,
+    reason: str = "rejected",
+) -> AgentRun:
+    r = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == org_id))
+    if r is None:
+        raise HTTPException(status_code=404, detail="AgentRun not found")
+
+    if r.status in TERMINAL:
+        return r
+
+    prev_status = r.status
+
+    r.status = "failed"
+    r.approval_status = "rejected"
+    r.last_error = f"rejected: {reason}"
+    r.finished_at = _now()
+
+    if hasattr(r, "proposed_actions_json"):
+        r.proposed_actions_json = None
+
+    db.add(r)
+
+    _emit_event(
+        db,
+        org_id=org_id,
+        property_id=r.property_id,
+        actor_user_id=actor_user_id,
+        event_type="agent_run_rejected",
+        payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "reason": reason, "prev_status": prev_status},
     )
 
     db.commit()
@@ -173,7 +247,7 @@ def apply_approved(
 
     actions = _loads(r.proposed_actions_json, [])
     if not isinstance(actions, list) or not actions:
-        return {"ok": True, "applied": 0, "run_id": r.id}
+        return {"ok": True, "applied": 0, "skipped": 0, "run_id": int(r.id)}
 
     applied, skipped = apply_proposed_actions(
         db,
@@ -183,15 +257,13 @@ def apply_approved(
         actions=actions,
     )
 
-    db.add(
-        WorkflowEvent(
-            org_id=org_id,
-            property_id=r.property_id,
-            actor_user_id=actor_user_id,
-            event_type="agent_actions_applied",
-            payload_json=_dumps({"run_id": r.id, "agent_key": r.agent_key, "applied": applied, "skipped": skipped}),
-            created_at=_now(),
-        )
+    _emit_event(
+        db,
+        org_id=org_id,
+        property_id=r.property_id,
+        actor_user_id=actor_user_id,
+        event_type="agent_actions_applied",
+        payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "applied": applied, "skipped": skipped},
     )
 
     r.status = "done"
@@ -199,8 +271,7 @@ def apply_approved(
     db.add(r)
 
     db.commit()
-
-    return {"ok": True, "applied": applied, "skipped": skipped, "run_id": r.id}
+    return {"ok": True, "applied": applied, "skipped": skipped, "run_id": int(r.id)}
 
 
 def execute_run_now(
@@ -215,8 +286,8 @@ def execute_run_now(
     if r is None:
         return {"ok": False, "status": "not_found", "run_id": run_id}
 
-    if r.status in {"done", "failed", "blocked"}:
-        return {"ok": True, "status": r.status, "run_id": r.id, "output": _loads(r.output_json, {})}
+    if r.status in TERMINAL:
+        return {"ok": True, "status": r.status, "run_id": int(r.id), "output": _loads(r.output_json, {})}
 
     if force_fail:
         r.status = "failed"
@@ -225,17 +296,26 @@ def execute_run_now(
         r.attempts = max(int(r.attempts or 0), attempt_number)
         db.add(r)
         db.commit()
-        return {"ok": False, "status": "failed", "run_id": r.id, "error": force_fail}
+        return {"ok": False, "status": "failed", "run_id": int(r.id), "error": force_fail}
 
     timeout_s = int(os.getenv("AGENTS_RUN_TIMEOUT_SECONDS", "120"))
+
     if r.status == "running" and r.started_at:
         if (_now() - r.started_at) > timedelta(seconds=timeout_s):
-            r.status = "failed"
+            r.status = "timed_out"
             r.finished_at = _now()
             r.last_error = f"timeout after {timeout_s}s"
             db.add(r)
+            _emit_event(
+                db,
+                org_id=org_id,
+                property_id=r.property_id,
+                actor_user_id=r.created_by_user_id,
+                event_type="agent_run_timed_out",
+                payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "timeout_s": timeout_s},
+            )
             db.commit()
-            return {"ok": False, "status": "failed", "run_id": r.id, "error": r.last_error}
+            return {"ok": False, "status": "timed_out", "run_id": int(r.id), "error": r.last_error}
 
     r.status = "running"
     r.started_at = r.started_at or _now()
@@ -252,55 +332,144 @@ def execute_run_now(
             property_id=int(r.property_id) if r.property_id else None,
             input_json=r.input_json,
         )
-        output = res.output or {}
+        output = res.output if hasattr(res, "output") else res
+        if output is None:
+            output = {}
     except Exception as e:
         r.status = "failed"
         r.finished_at = _now()
         r.last_error = str(e)
         db.add(r)
+        _emit_event(
+            db,
+            org_id=org_id,
+            property_id=r.property_id,
+            actor_user_id=r.created_by_user_id,
+            event_type="agent_run_failed",
+            payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "error": str(e)},
+        )
         db.commit()
-        return {"ok": False, "status": "retryable_error", "run_id": r.id, "error": str(e)}
+        return {"ok": False, "status": "failed", "run_id": int(r.id), "error": str(e)}
 
     r.output_json = _dumps(output)
     r.heartbeat_at = _now()
 
     contract = get_contract(str(r.agent_key))
-    ok, errs = validate_agent_output(str(r.agent_key), output)
+    ok, errs = validate_agent_output(str(r.agent_key), output if isinstance(output, dict) else {})
     if not ok:
         r.status = "failed"
         r.finished_at = _now()
         r.last_error = "Contract validation failed: " + "; ".join(errs)
         db.add(r)
+        _emit_event(
+            db,
+            org_id=org_id,
+            property_id=r.property_id,
+            actor_user_id=r.created_by_user_id,
+            event_type="agent_run_failed_contract",
+            payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "errors": errs},
+        )
         db.commit()
-        return {"ok": False, "status": "failed", "run_id": r.id, "error": r.last_error}
+        return {"ok": False, "status": "failed", "run_id": int(r.id), "error": r.last_error}
 
-    actions = output.get("actions") if isinstance(output, dict) else None
-    if isinstance(actions, list) and actions:
-        r.proposed_actions_json = _dumps(actions)
+    # ✅ Persist proposed actions in a mode-aware way
+    if isinstance(output, dict):
+        if contract.mode == "recommend_only":
+            recs = output.get("recommendations")
+            if isinstance(recs, list) and recs:
+                r.proposed_actions_json = _dumps(recs)
+        else:
+            actions = output.get("actions")
+            if isinstance(actions, list) and actions:
+                r.proposed_actions_json = _dumps(actions)
 
+    # recommend_only => auto-done
     if contract.mode == "recommend_only":
         r.status = "done"
         r.finished_at = _now()
         r.approval_status = "not_required"
         db.add(r)
+        _emit_event(
+            db,
+            org_id=org_id,
+            property_id=r.property_id,
+            actor_user_id=r.created_by_user_id,
+            event_type="agent_run_done",
+            payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "mode": "recommend_only"},
+        )
         db.commit()
-        return {"ok": True, "status": "done", "run_id": r.id, "output": output}
+        return {"ok": True, "status": "done", "run_id": int(r.id), "output": output}
 
+    # otherwise blocked pending approval
     r.status = "blocked"
     r.finished_at = _now()
     r.approval_status = "pending"
     db.add(r)
 
-    db.add(
-        WorkflowEvent(
-            org_id=org_id,
-            property_id=r.property_id,
-            actor_user_id=r.created_by_user_id,
-            event_type="agent_run_requires_approval",
-            payload_json=_dumps({"run_id": r.id, "agent_key": r.agent_key}),
-            created_at=_now(),
-        )
+    _emit_event(
+        db,
+        org_id=org_id,
+        property_id=r.property_id,
+        actor_user_id=r.created_by_user_id,
+        event_type="agent_run_requires_approval",
+        payload={"run_id": int(r.id), "agent_key": str(r.agent_key)},
     )
-    db.commit()
 
-    return {"ok": True, "status": "blocked", "run_id": r.id, "needs_approval": True, "output": output}
+    db.commit()
+    return {"ok": True, "status": "blocked", "run_id": int(r.id), "needs_approval": True, "output": output}
+
+
+def sweep_stuck_runs(
+    db: Session,
+    *,
+    timeout_seconds: int,
+    queued_max_hours: int = 12,
+) -> dict[str, Any]:
+    now = _now()
+    changed = 0
+    details: list[dict[str, Any]] = []
+
+    q = select(AgentRun).order_by(AgentRun.id.desc()).limit(500)
+    rows = db.scalars(q).all()
+
+    for r in rows:
+        st = (r.status or "").lower()
+
+        if st == "running" and r.started_at:
+            if (now - r.started_at) > timedelta(seconds=int(timeout_seconds)):
+                r.status = "timed_out"
+                r.finished_at = now
+                r.last_error = f"sweeper timeout after {timeout_seconds}s"
+                db.add(r)
+                _emit_event(
+                    db,
+                    org_id=int(r.org_id),
+                    property_id=r.property_id,
+                    actor_user_id=None,
+                    event_type="agent_run_swept_timeout",
+                    payload={"run_id": int(r.id), "agent_key": str(r.agent_key)},
+                )
+                changed += 1
+                details.append({"run_id": int(r.id), "action": "timed_out"})
+
+        if st == "queued" and r.created_at:
+            if (now - r.created_at) > timedelta(hours=int(queued_max_hours)):
+                r.status = "failed"
+                r.finished_at = now
+                r.last_error = f"sweeper: queued > {queued_max_hours}h"
+                db.add(r)
+                _emit_event(
+                    db,
+                    org_id=int(r.org_id),
+                    property_id=r.property_id,
+                    actor_user_id=None,
+                    event_type="agent_run_swept_queued",
+                    payload={"run_id": int(r.id), "agent_key": str(r.agent_key)},
+                )
+                changed += 1
+                details.append({"run_id": int(r.id), "action": "failed_queued"})
+
+    if changed:
+        db.commit()
+
+    return {"changed": changed, "details": details}

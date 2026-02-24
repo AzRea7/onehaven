@@ -1,4 +1,4 @@
-# backend/app/workers/agent_worker.py
+# backend/app/workers/agent_worker.py 
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -23,7 +23,12 @@ def main(limit: int = 50) -> None:
         ).all()
 
         for r in runs:
-            out = execute_run_now(db, org_id=int(r.org_id), run_id=int(r.id), attempt_number=int((r.attempts or 0) + 1))
+            out = execute_run_now(
+                db,
+                org_id=int(r.org_id),
+                run_id=int(r.id),
+                attempt_number=int((r.attempts or 0) + 1),
+            )
             print(f"[agent_worker] run_id={r.id} status={out.get('status')} ok={out.get('ok')}")
     finally:
         db.close()
@@ -31,4 +36,3 @@ def main(limit: int = 50) -> None:
 
 if __name__ == "__main__":
     main()
-    

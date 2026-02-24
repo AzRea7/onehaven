@@ -4,8 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
 from ..db import get_db
@@ -30,12 +30,13 @@ from ..schemas import (
 )
 from ..domain.audit import emit_audit
 from ..services.ownership import must_get_property
+
+# IMPORTANT: wf is a WorkflowFacade instance, not a function.
+# So we call wf.emit(...) instead of wf(...)
 from ..services.events_facade import wf
+
 from ..services.property_state_machine import advance_stage_if_needed
-
 from ..domain.compliance.inspection_mapping import map_inspection_code
-
-# keep your analytics helpers
 from ..domain.compliance import top_fail_points, compliance_stats
 
 router = APIRouter(prefix="/inspections", tags=["inspections"])
@@ -45,9 +46,6 @@ def _normalize_code(raw: str) -> str:
     return (raw or "").strip().upper().replace(" ", "_")
 
 
-# -----------------------------
-# Inspectors
-# -----------------------------
 @router.put("/inspectors", response_model=InspectorOut)
 def upsert_inspector(
     payload: InspectorUpsert,
@@ -80,9 +78,6 @@ def upsert_inspector(
     return ins
 
 
-# -----------------------------
-# Inspections
-# -----------------------------
 @router.post("", response_model=InspectionOut)
 def create_inspection(
     payload: InspectionCreate,
@@ -90,16 +85,15 @@ def create_inspection(
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ) -> InspectionOut:
-    # org boundary via property
     must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
 
-    # Validate inspector if provided
     if payload.inspector_id is not None:
         ins = db.get(Inspector, payload.inspector_id)
         if not ins:
             raise HTTPException(status_code=400, detail="Invalid inspector_id")
 
     insp = Inspection(
+        org_id=p.org_id,
         property_id=payload.property_id,
         inspector_id=payload.inspector_id,
         inspection_date=payload.inspection_date or datetime.utcnow(),
@@ -119,9 +113,16 @@ def create_inspection(
         entity_type="Inspection",
         entity_id=str(insp.id),
         before=None,
-        after={"property_id": insp.property_id, "passed": insp.passed, "reinspect_required": insp.reinspect_required},
+        after={
+            "org_id": insp.org_id,
+            "property_id": insp.property_id,
+            "passed": insp.passed,
+            "reinspect_required": insp.reinspect_required,
+        },
     )
-    wf(
+
+    # ✅ FIX: WorkflowFacade is not callable; call its method.
+    wf.emit(
         db,
         org_id=p.org_id,
         actor_user_id=p.user_id,
@@ -148,7 +149,9 @@ def add_item(
     if not insp:
         raise HTTPException(status_code=404, detail="Inspection not found")
 
-    # Ensure inspection property belongs to org
+    if getattr(insp, "org_id", None) != p.org_id:
+        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
+
     prop = db.scalar(select(Property).where(Property.id == insp.property_id, Property.org_id == p.org_id))
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
@@ -197,7 +200,6 @@ def add_item(
         )
         if row.failed is False:
             row.resolved_at = datetime.utcnow()
-
         db.add(row)
 
     db.commit()
@@ -219,14 +221,10 @@ def add_item(
         },
     )
 
-    # -----------------------------
-    # Phase 3 closure: failure -> checklist + rehab task
-    # -----------------------------
     if row.failed:
         mapped = map_inspection_code(row.code)
 
         if mapped:
-            # Flag checklist item as failed (create if missing)
             ci = db.scalar(
                 select(PropertyChecklistItem).where(
                     PropertyChecklistItem.org_id == p.org_id,
@@ -263,7 +261,6 @@ def add_item(
                 if row.details:
                     ci.notes = (ci.notes or "") + (("\n" if ci.notes else "") + row.details)
 
-            # Create rehab task (idempotent by title)
             if mapped.rehab_title:
                 existing_task = db.scalar(
                     select(RehabTask).where(
@@ -284,7 +281,8 @@ def add_item(
                     )
                     db.add(task)
 
-            wf(
+            # ✅ FIX: WorkflowFacade is not callable; call its method.
+            wf.emit(
                 db,
                 org_id=p.org_id,
                 actor_user_id=p.user_id,
@@ -319,8 +317,8 @@ def resolve_item(
     if not insp:
         raise HTTPException(status_code=404, detail="Inspection not found")
 
-    # org boundary
-    must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
+    if getattr(insp, "org_id", None) != p.org_id:
+        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
 
     before = {
         "failed": item.failed,
@@ -349,7 +347,9 @@ def resolve_item(
             "resolution_notes": item.resolution_notes,
         },
     )
-    wf(
+
+    # ✅ FIX: WorkflowFacade is not callable; call its method.
+    wf.emit(
         db,
         org_id=p.org_id,
         actor_user_id=p.user_id,
@@ -357,13 +357,11 @@ def resolve_item(
         property_id=insp.property_id,
         payload={"item_id": item.id, "code": item.code},
     )
+
     db.commit()
     return item
 
 
-# -----------------------------
-# Analytics / Prediction
-# -----------------------------
 @router.get("/predict", response_model=PredictFailPointsOut)
 def predict_fail_points(
     city: str = Query(...),

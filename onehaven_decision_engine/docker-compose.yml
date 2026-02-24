@@ -35,8 +35,13 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       HUD_USER_TOKEN: ${HUD_USER_TOKEN}
       RENTCAST_API_KEY: ${RENTCAST_API_KEY}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+
+      # Celery
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      CELERY_QUEUE: ${CELERY_QUEUE:-celery}
+
+      # Agents
       AGENTS_MAX_RUNS_PER_PROPERTY_PER_HOUR: ${AGENTS_MAX_RUNS_PER_PROPERTY_PER_HOUR:-3}
       AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
       AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
@@ -50,6 +55,7 @@ services:
       - "8000:8000"
     restart: unless-stopped
 
+  # ✅ Celery worker as a persistent service (NOT docker-compose exec)
   agent-worker:
     build: ./backend
     working_dir: /app
@@ -59,12 +65,40 @@ services:
       - ./backend:/app
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
       APP_ENV: ${APP_ENV:-dev}
+
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      CELERY_QUEUE: ${CELERY_QUEUE:-celery}
+
       AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
       AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
-    command: bash -lc "celery -A app.workers.celery_app.celery_app worker -l INFO -Q agents"
+    # ✅ Explicitly bind to the celery_app object + consume the same queue you publish to
+    command: bash -lc "celery -A app.workers.celery_app:celery_app worker -l INFO -Q ${CELERY_QUEUE:-celery}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  celery-beat:
+    build: ./backend
+    working_dir: /app
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      APP_ENV: ${APP_ENV:-dev}
+
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      CELERY_QUEUE: ${CELERY_QUEUE:-celery}
+
+      AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
+    command: bash -lc "celery -A app.workers.celery_app:celery_app beat -l INFO"
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,4 +120,3 @@ services:
 
 volumes:
   pgdata:
-  

@@ -73,29 +73,58 @@ def apply_proposed_actions(
 ) -> Tuple[int, int]:
     """
     Applies a SAFE subset of actions:
-      - create RehabTask
-      - create WorkflowEvent
-      - update PropertyChecklistItem.status (via op=update_status)
+      - rehab_task.create
+      - workflow_event.create
+      - checklist_item.update_status
 
-    Everything else is skipped.
-    Returns (applied_count, skipped_count)
+    Contract canonical schema:
+      {
+        "entity_type": "rehab_task" | "workflow_event" | "checklist_item",
+        "op": "create" | "update_status",
+        "data": { ... }
+      }
+
+    Backwards-compat:
+      Older actions might be TitleCase entity_type + "payload" instead of "data".
+      We'll normalize so existing runs in DB can still apply.
     """
     contract = get_contract(str(run.agent_key))
 
     applied = 0
     skipped = 0
 
+    def _normalize_entity_type(et: str) -> str:
+        et = (et or "").strip()
+        # Canonical values
+        if et in {"rehab_task", "workflow_event", "checklist_item"}:
+            return et
+        # Backward-compat TitleCase / legacy names
+        mapping = {
+            "RehabTask": "rehab_task",
+            "WorkflowEvent": "workflow_event",
+            "PropertyChecklistItem": "checklist_item",
+        }
+        return mapping.get(et, et)
+
     for a in actions:
         if not isinstance(a, dict):
             skipped += 1
             continue
 
-        entity_type = str(a.get("entity_type") or "")
-        op = str(a.get("op") or "")
-        payload = a.get("payload") if isinstance(a.get("payload"), dict) else {}
+        entity_type_raw = str(a.get("entity_type") or "")
+        entity_type = _normalize_entity_type(entity_type_raw)
+        op = str(a.get("op") or "").strip()
+
+        # Canonical uses "data"; legacy used "payload"
+        data = a.get("data") if isinstance(a.get("data"), dict) else {}
+        if not data:
+            legacy_payload = a.get("payload") if isinstance(a.get("payload"), dict) else {}
+            data = legacy_payload
+
         reason = str(a.get("reason") or "")
 
         # hard safety gates (must match contract)
+        # NOTE: contract.allowed_entity_types are snake_case in your updated contracts.py
         if entity_type not in contract.allowed_entity_types:
             skipped += 1
             continue
@@ -103,9 +132,9 @@ def apply_proposed_actions(
             skipped += 1
             continue
 
-        # ---- RehabTask.create ----
-        if entity_type == "RehabTask" and op == "create":
-            title = str(payload.get("title") or "").strip()
+        # ---- rehab_task.create ----
+        if entity_type == "rehab_task" and op == "create":
+            title = str(data.get("title") or "").strip()
             if not title:
                 skipped += 1
                 continue
@@ -114,18 +143,18 @@ def apply_proposed_actions(
                 org_id=org_id,
                 property_id=run.property_id,
                 title=title,
-                category=str(payload.get("category") or "general"),
-                status=str(payload.get("status") or "todo"),
-                cost_estimate=float(payload.get("cost_estimate") or 0.0),
-                notes=str(payload.get("notes") or reason or ""),
+                category=str(data.get("category") or "general"),
+                status=str(data.get("status") or "todo"),
+                cost_estimate=float(data.get("cost_estimate") or 0.0),
+                notes=str(data.get("notes") or reason or ""),
             )
             db.add(t)
             applied += 1
             continue
 
-        # ---- WorkflowEvent.create ----
-        if entity_type == "WorkflowEvent" and op == "create":
-            event_type = str(payload.get("event_type") or "").strip()
+        # ---- workflow_event.create ----
+        if entity_type == "workflow_event" and op == "create":
+            event_type = str(data.get("event_type") or "").strip()
             if not event_type:
                 skipped += 1
                 continue
@@ -136,16 +165,16 @@ def apply_proposed_actions(
                     property_id=run.property_id,
                     actor_user_id=actor_user_id,
                     event_type=event_type,
-                    payload_json=_dumps(payload.get("payload") or {}),
+                    payload_json=_dumps(data.get("payload") or {}),
                 )
             )
             applied += 1
             continue
 
-        # ---- PropertyChecklistItem.update_status ----
-        if entity_type == "PropertyChecklistItem" and op == "update_status":
-            item_id = payload.get("id")
-            new_status = str(payload.get("status") or "").strip()
+        # ---- checklist_item.update_status ----
+        if entity_type == "checklist_item" and op == "update_status":
+            item_id = data.get("id")
+            new_status = str(data.get("status") or "").strip()
             if not item_id or not new_status:
                 skipped += 1
                 continue

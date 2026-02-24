@@ -349,6 +349,9 @@ class UnderwritingResult(Base):
 # -----------------------------
 # Inspections
 # -----------------------------
+# -----------------------------
+# Inspections
+# -----------------------------
 class Inspector(Base):
     __tablename__ = "inspectors"
     __table_args__ = (UniqueConstraint("name", "agency", name="uq_inspector_name_agency"),)
@@ -365,6 +368,10 @@ class Inspection(Base):
     __tablename__ = "inspections"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # ✅ CRITICAL: org scope (state machine + orchestrator assumes this exists)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
     inspector_id: Mapped[Optional[int]] = mapped_column(ForeignKey("inspectors.id", ondelete="SET NULL"), nullable=True)
 

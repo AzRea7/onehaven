@@ -1,4 +1,4 @@
-# onehaven_decision_engine/backend/app/domain/agents/registry.py
+# backend/app/domain/agents/registry.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -59,17 +59,16 @@ def agent_deal_intake(
         if getattr(d, "purchase_price", None) in (None, 0):
             missing.append("deal.purchase_price")
 
-    actions = []
+    # deal_intake contract is recommend_only => actions must be empty
+    recommendations = []
     if missing:
-        actions.append(
+        recommendations.append(
             {
-                "entity_type": "WorkflowEvent",
-                "op": "create",
-                "payload": {
-                    "event_type": "deal_intake_missing_fields",
-                    "payload": {"missing": missing},
-                },
+                "type": "missing_fields",
+                "property_id": property_id,
+                "missing": missing,
                 "reason": "Intake cannot complete until required fields exist.",
+                "priority": "high",
             }
         )
 
@@ -77,7 +76,8 @@ def agent_deal_intake(
         "agent_key": "deal_intake",
         "summary": "Deal intake validation + next required steps.",
         "facts": {"property_id": property_id, "missing": missing, "stage": ctx["stage"]},
-        "actions": actions,
+        "actions": [],  # ✅ recommend_only
+        "recommendations": recommendations,
     }
 
 
@@ -95,7 +95,8 @@ def agent_rent_reasonableness(
             "agent_key": "rent_reasonableness",
             "summary": "No property found.",
             "facts": {"property_id": property_id},
-            "actions": [],
+            "actions": [],  # ✅ recommend_only
+            "recommendations": [],
         }
 
     bedrooms = int(getattr(p, "bedrooms", 0) or 0)
@@ -109,7 +110,6 @@ def agent_rent_reasonableness(
     fmr_val = float(getattr(fmr, "fmr", 0.0) or 0.0)
 
     factors = ["location", "quality", "size", "unit_type", "age", "amenities", "services", "utilities"]
-
     recommended = fmr_val * 1.10 if fmr_val else None
 
     return {
@@ -126,19 +126,16 @@ def agent_rent_reasonableness(
             "required_comparability_factors": factors,
             "recommended_gross_rent": recommended,
         },
-        "actions": [
+        "actions": [],  # ✅ recommend_only
+        "recommendations": [
             {
-                "entity_type": "WorkflowEvent",
-                "op": "create",
-                "payload": {
-                    "event_type": "rent_reasonableness_computed",
-                    "payload": {
-                        "recommended_gross_rent": recommended,
-                        "factors": factors,
-                        "fmr": fmr_val,
-                    },
-                },
-                "reason": "Persist a traceable rent reasonableness artifact.",
+                "type": "rent_reasonableness_computed",
+                "property_id": property_id,
+                "recommended_gross_rent": recommended,
+                "factors": factors,
+                "fmr": fmr_val,
+                "reason": "Use as baseline; compare comps and utilities to justify contract rent.",
+                "priority": "medium",
             }
         ],
     }
@@ -165,13 +162,14 @@ def agent_hqs_precheck(
     items = lib.get("items") or []
     likely = [x for x in items if str(x.get("severity") or "").lower() == "fail"][:12]
 
-    proposed = []
+    actions: list[dict[str, Any]] = []
     for it in likely[:6]:
-        proposed.append(
+        actions.append(
             {
-                "entity_type": "RehabTask",
+                "entity_type": "rehab_task",
                 "op": "create",
-                "payload": {
+                "data": {
+                    "property_id": int(p.id),
                     "title": f"HQS precheck: {it.get('code')}",
                     "category": it.get("category") or "safety",
                     "status": "todo",
@@ -182,11 +180,30 @@ def agent_hqs_precheck(
             }
         )
 
+    # mutate_requires_approval contract requires non-empty actions[]
+    if not actions:
+        actions.append(
+            {
+                "entity_type": "workflow_event",
+                "op": "create",
+                "data": {
+                    "property_id": int(p.id),
+                    "event_type": "hqs_precheck_no_findings",
+                    "payload": {"property_id": int(p.id)},
+                },
+                "reason": "No obvious HQS fail items found in baseline library.",
+            }
+        )
+
     return {
         "agent_key": "hqs_precheck",
         "summary": "HQS precheck generated from canonical HQS baseline; proposes rehab tasks for likely fails.",
-        "facts": {"property_id": property_id, "hqs_items_total": len(items), "likely_fail_count": len(likely)},
-        "actions": proposed,
+        "facts": {
+            "property_id": property_id,
+            "hqs_items_total": len(items),
+            "likely_fail_count": len(likely),
+        },
+        "actions": actions,  # ✅ contract compliant
     }
 
 
@@ -204,7 +221,8 @@ def agent_packet_builder(
             "agent_key": "packet_builder",
             "summary": "No property found.",
             "facts": {"property_id": property_id},
-            "actions": [],
+            "actions": [],  # ✅ recommend_only in your contracts
+            "recommendations": [],
         }
 
     jp = db.scalar(
@@ -227,15 +245,14 @@ def agent_packet_builder(
             "jurisdiction_profile_found": jp is not None,
             "packet_checklist": checklist,
         },
-        "actions": [
+        "actions": [],  # ✅ recommend_only
+        "recommendations": [
             {
-                "entity_type": "WorkflowEvent",
-                "op": "create",
-                "payload": {
-                    "event_type": "packet_checklist_generated",
-                    "payload": {"packet_checklist": checklist or []},
-                },
-                "reason": "Persist packet checklist so ops can track completion.",
+                "type": "packet_checklist_generated",
+                "property_id": property_id,
+                "packet_checklist": checklist or [],
+                "reason": "Use as your completion checklist for RFTA/HAP onboarding artifacts.",
+                "priority": "medium",
             }
         ],
     }
@@ -248,30 +265,85 @@ def agent_timeline_nudger(
     property_id: Optional[int],
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
+    # recommend_only contract => must not emit actions[]
     return {
         "agent_key": "timeline_nudger",
         "summary": "Converts outstanding constraints into reminders and nudges (workflow continuity).",
         "facts": {"property_id": property_id},
-        "actions": [
+        "actions": [],  # ✅ contract-compliant
+        "recommendations": [
             {
-                "entity_type": "WorkflowEvent",
-                "op": "create",
-                "payload": {
-                    "event_type": "timeline_nudge",
-                    "payload": {"property_id": property_id},
-                },
+                "type": "timeline_nudge",
+                "property_id": property_id,
                 "reason": "Keeps ops loop moving (no silent stalls).",
+                "priority": "medium",
             }
         ],
     }
 
 
-AGENTS = {
+# ✅ Execution mapping (used by executor)
+AGENTS: dict[str, Any] = {
     "deal_intake": agent_deal_intake,
     "rent_reasonableness": agent_rent_reasonableness,
     "hqs_precheck": agent_hqs_precheck,
     "packet_builder": agent_packet_builder,
     "timeline_nudger": agent_timeline_nudger,
+}
+
+
+# ✅ UI-safe metadata (used by /agents and /agents/registry)
+AGENT_SPECS: dict[str, dict[str, Any]] = {
+    "deal_intake": {
+        "agent_key": "deal_intake",
+        "title": "Deal Intake",
+        "description": "Validate required deal/property fields and produce next steps.",
+        "category": "intake",
+        "needs_human": False,
+        "deterministic": True,
+        "llm_capable": False,
+        "default_payload_schema": {"property_id": "number"},
+    },
+    "rent_reasonableness": {
+        "agent_key": "rent_reasonableness",
+        "title": "Rent Reasonableness",
+        "description": "Compute rent reasonableness baseline using HUD FMR cache + factors checklist.",
+        "category": "rent",
+        "needs_human": False,
+        "deterministic": True,
+        "llm_capable": False,
+        "default_payload_schema": {"property_id": "number"},
+    },
+    "hqs_precheck": {
+        "agent_key": "hqs_precheck",
+        "title": "HQS Precheck",
+        "description": "Generate HQS readiness precheck and propose rehab tasks for likely failures.",
+        "category": "compliance",
+        "needs_human": True,
+        "deterministic": True,
+        "llm_capable": False,
+        "default_payload_schema": {"property_id": "number"},
+    },
+    "packet_builder": {
+        "agent_key": "packet_builder",
+        "title": "Packet Builder",
+        "description": "Generate jurisdiction profile packet checklist (RFTA/HAP onboarding).",
+        "category": "packet",
+        "needs_human": True,
+        "deterministic": True,
+        "llm_capable": False,
+        "default_payload_schema": {"property_id": "number"},
+    },
+    "timeline_nudger": {
+        "agent_key": "timeline_nudger",
+        "title": "Timeline Nudger",
+        "description": "Create workflow continuity events to prevent stalls.",
+        "category": "ops",
+        "needs_human": False,
+        "deterministic": True,
+        "llm_capable": False,
+        "default_payload_schema": {"property_id": "number"},
+    },
 }
 
 
@@ -286,9 +358,10 @@ class SlotSpec:
     description: str
     default_agent_key: str
     default_payload_schema: dict[str, Any]
+    owner_type: str = "human"
+    default_status: str = "idle"
 
 
-# This is what routers/agents.py imports.
 SLOTS = [
     SlotSpec(
         slot_key="deal_intake",
@@ -296,6 +369,8 @@ SLOTS = [
         description="Validate required deal/property fields and produce next steps.",
         default_agent_key="deal_intake",
         default_payload_schema={"property_id": "number"},
+        owner_type="agent",
+        default_status="idle",
     ),
     SlotSpec(
         slot_key="rent_reasonableness",
@@ -303,6 +378,8 @@ SLOTS = [
         description="Compute rent reasonableness baseline from HUD FMR cache + factors checklist.",
         default_agent_key="rent_reasonableness",
         default_payload_schema={"property_id": "number"},
+        owner_type="agent",
+        default_status="idle",
     ),
     SlotSpec(
         slot_key="hqs_precheck",
@@ -310,6 +387,8 @@ SLOTS = [
         description="Generate HQS readiness precheck and propose rehab tasks for likely failures.",
         default_agent_key="hqs_precheck",
         default_payload_schema={"property_id": "number"},
+        owner_type="human",
+        default_status="idle",
     ),
     SlotSpec(
         slot_key="packet_builder",
@@ -317,6 +396,8 @@ SLOTS = [
         description="Generate jurisdiction profile packet checklist (RFTA/HAP onboarding).",
         default_agent_key="packet_builder",
         default_payload_schema={"property_id": "number"},
+        owner_type="human",
+        default_status="idle",
     ),
     SlotSpec(
         slot_key="timeline_nudger",
@@ -324,5 +405,7 @@ SLOTS = [
         description="Create workflow continuity events to prevent stalls.",
         default_agent_key="timeline_nudger",
         default_payload_schema={"property_id": "number"},
+        owner_type="agent",
+        default_status="idle",
     ),
 ]

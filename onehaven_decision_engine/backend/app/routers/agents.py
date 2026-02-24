@@ -20,9 +20,8 @@ from ..schemas import (
     AgentSlotAssignmentUpsert,
     AgentSlotSpecOut,
     AgentSpecOut,
-    AgentSlotOut,
 )
-from ..domain.agents.registry import AGENTS, SLOTS
+from ..domain.agents.registry import AGENTS, SLOTS, AGENT_SPECS
 from ..services.agent_engine import create_and_execute_run
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -31,15 +30,14 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 @router.get("", response_model=list[AgentSpecOut])
 def list_agents(p=Depends(get_principal)):
     out: list[AgentSpecOut] = []
-    for a in AGENTS.values():
+    for spec in AGENT_SPECS.values():
         out.append(
             AgentSpecOut(
-                agent_key=getattr(a, "key", ""),
-                title=getattr(a, "name", ""),
-                description=getattr(a, "description", None),
-                needs_human=bool(getattr(a, "needs_human", False)),
-                category=getattr(a, "category", None),
-                # keep stable shape for UI; slots are declared separately in /registry
+                agent_key=spec["agent_key"],
+                title=spec["title"],
+                description=spec.get("description"),
+                needs_human=bool(spec.get("needs_human", False)),
+                category=spec.get("category"),
                 sidebar_slots=[],
             )
         )
@@ -48,21 +46,8 @@ def list_agents(p=Depends(get_principal)):
 
 @router.get("/registry", response_model=dict)
 def registry(p=Depends(get_principal)):
-    # Raw metadata for UI + future agent tooling
     return {
-        "agents": [
-            {
-                "agent_key": a.key,
-                "title": a.name,
-                "description": a.description,
-                "category": getattr(a, "category", None),
-                "needs_human": bool(getattr(a, "needs_human", False)),
-                "deterministic": bool(getattr(a, "deterministic", True)),
-                "llm_capable": bool(getattr(a, "llm_capable", False)),
-                "default_payload_schema": getattr(a, "default_payload_schema", {}) or {},
-            }
-            for a in AGENTS.values()
-        ],
+        "agents": list(AGENT_SPECS.values()),
         "slots": [
             {
                 "slot_key": s.slot_key,
@@ -78,39 +63,40 @@ def registry(p=Depends(get_principal)):
 
 @router.post("/runs", response_model=AgentRunOut)
 def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    """
-    Creating a run executes deterministically (for now) and writes:
-      - agent_runs.output_json
-      - a thread message (agent_messages) in agent_engine
-    """
     if payload.agent_key not in AGENTS:
         raise HTTPException(status_code=404, detail="unknown agent_key")
 
-    # optional property_id must belong to org
     if payload.property_id is not None:
         prop = db.scalar(select(Property).where(Property.id == payload.property_id, Property.org_id == p.org_id))
         if not prop:
             raise HTTPException(status_code=404, detail="property not found")
 
-    try:
-        run = create_and_execute_run(
-            db,
-            org_id=p.org_id,
-            agent_key=payload.agent_key,
-            property_id=payload.property_id,
-            input_json=payload.input_json,
-        )
+    # IMPORTANT: your agent_engine.create_and_execute_run expects input_payload (dict) and actor_user_id
+    res = create_and_execute_run(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        agent_key=payload.agent_key,
+        property_id=payload.property_id,
+        input_payload=payload.input_json or {},
+        dispatch=True,  # async by default (worker)
+    )
+
+    # res is a dict (mode async/sync). But your response_model is AgentRunOut.
+    # To keep it stable for your UI, return the created AgentRun row when async.
+    if res.get("mode") == "async":
+        run_id = int(res["run_id"])
+        run = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == p.org_id))
+        if not run:
+            raise HTTPException(status_code=500, detail="run created but not found")
         return run
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
-
-@router.post("/runs/execute", response_model=AgentRunOut)
-def create_and_execute(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    """
-    Explicit execute endpoint (kept for future decouple: create vs execute).
-    """
-    return create_run(payload=payload, db=db, p=p)
+    # sync path (rare)
+    run_id = int(res["run_id"])
+    run = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == p.org_id))
+    if not run:
+        raise HTTPException(status_code=500, detail="run executed but row not found")
+    return run
 
 
 @router.get("/runs", response_model=list[AgentRunOut])
@@ -131,7 +117,6 @@ def list_runs(
 
 @router.post("/messages", response_model=AgentMessageOut)
 def post_message(payload: AgentMessageCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    # lightweight: just store; permissions are org-scoped by principal
     msg = AgentMessage(
         org_id=p.org_id,
         thread_key=payload.thread_key,
@@ -190,7 +175,6 @@ def slot_assignments(
         desc(AgentSlotAssignment.updated_at)
     )
     if property_id is not None:
-        # hard boundary: if property_id provided, it must belong to org
         prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
         if not prop:
             raise HTTPException(status_code=404, detail="property not found")
@@ -201,7 +185,6 @@ def slot_assignments(
 
 @router.post("/slots/assignments", response_model=AgentSlotAssignmentOut)
 def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
-    # If a property_id is specified, enforce org boundary
     if payload.property_id is not None:
         prop = db.scalar(select(Property).where(Property.id == payload.property_id, Property.org_id == p.org_id))
         if not prop:

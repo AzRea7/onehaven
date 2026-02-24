@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from ..auth import get_principal
 
 router = APIRouter(prefix="/meta", tags=["meta"])
 
@@ -16,6 +18,18 @@ def _read_doc(name: str) -> str:
     if not p.exists():
         return f"missing doc: {name}"
     return p.read_text(encoding="utf-8")
+
+
+@router.get("/whoami", response_model=dict)
+def whoami(principal=Depends(get_principal)):
+    # This matches what your frontend expects and what your pipeline script prints.
+    return {
+        "org_id": principal.org_id,
+        "org_slug": principal.org_slug,
+        "user_id": principal.user_id,
+        "email": principal.email,
+        "role": principal.role,
+    }
 
 
 @router.get("/disclaimer", response_model=dict)

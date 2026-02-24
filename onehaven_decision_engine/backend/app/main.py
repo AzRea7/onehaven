@@ -31,6 +31,7 @@ from .routers.equity import router as equity_router
 
 # Agents
 from .routers.agents import router as agents_router
+from .routers.agent_runs import router as agent_runs_router  # ✅ ADD THIS
 from .routers.auth import router as auth_router
 from .routers.workflow import router as workflow_router
 from .routers.audit import router as audit_router
@@ -42,8 +43,7 @@ API_PREFIX = "/api"
 
 def _cors_origins() -> list[str]:
     """
-    You can tighten this later (env-based).
-    We accept either:
+    Accept either:
       - settings.cors_allow_origins = ["http://localhost:5173", ...]
       - settings.cors_allow_origins = "*"  (string)
     """
@@ -61,7 +61,6 @@ app = FastAPI(
     version=getattr(settings, "decision_version", "dev"),
 )
 
-# CORS: local frontend dev + future dashboard hosting
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -101,5 +100,6 @@ app.include_router(ops_router, prefix=API_PREFIX)
 # Agents + audit/workflow
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(agents_router, prefix=API_PREFIX)
+app.include_router(agent_runs_router, prefix=API_PREFIX)  # ✅ ADD THIS
 app.include_router(workflow_router, prefix=API_PREFIX)
 app.include_router(audit_router, prefix=API_PREFIX)

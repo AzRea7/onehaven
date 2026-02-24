@@ -41,13 +41,17 @@ def _baseline_hqs_items() -> list[dict[str, Any]]:
 def get_effective_hqs_items(db: Session, *, org_id: int, prop: Property) -> dict[str, Any]:
     """
     Effective HQS items = baseline + policy table overrides (HqsRule) + local addendum.
-    This makes agents policy-driven without hardcoding everything into agent logic.
+
+    NOTE (current design):
+      - HqsRule is treated as GLOBAL policy (no org_id column on the policy model).
+      - org_id is still passed because the rest of the compliance stack is org-scoped,
+        but we do not filter HqsRule by org_id.
     """
     items = {i["code"]: dict(i) for i in _baseline_hqs_items()}
     sources: list[dict[str, Any]] = [{"type": "baseline_internal", "name": "OneHaven HQS baseline"}]
 
-    # HqsRule table can override/extend baseline
-    rules = db.scalars(select(HqsRule).where(HqsRule.org_id == org_id)).all()
+    # ✅ HqsRule overrides/extends baseline (GLOBAL rules)
+    rules = db.scalars(select(HqsRule)).all()
     for r in rules:
         code = (getattr(r, "code", None) or "").strip()
         if not code:
@@ -60,10 +64,15 @@ def get_effective_hqs_items(db: Session, *, org_id: int, prop: Property) -> dict
             "suggested_fix": getattr(r, "suggested_fix", None) or items.get(code, {}).get("suggested_fix"),
         }
     if rules:
-        sources.append({"type": "policy_table", "table": "HqsRule", "count": len(rules)})
+        sources.append({"type": "policy_table", "table": "HqsRule", "scope": "global", "count": len(rules)})
 
-    # Optional addendum via JurisdictionProfile → addendum_id (if you model it that way)
-    addenda = db.scalars(select(HqsAddendum).where(HqsAddendum.org_id == org_id)).all()
+    # Optional addendum (your policy model currently appears org-scoped)
+    # If HqsAddendum also lacks org_id in policy_models, remove org filter similarly.
+    try:
+        addenda = db.scalars(select(HqsAddendum).where(HqsAddendum.org_id == org_id)).all()
+    except Exception:
+        addenda = db.scalars(select(HqsAddendum)).all()
+
     if addenda:
         sources.append({"type": "policy_table", "table": "HqsAddendum", "count": len(addenda)})
 
