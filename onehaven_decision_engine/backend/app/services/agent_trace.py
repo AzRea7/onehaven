@@ -1,12 +1,15 @@
+# backend/app/services/agent_trace.py
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from typing import Any, Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AgentMessage
+from app.models import AgentRun, AgentTraceEvent, AgentMessage
 
 
 def _dumps(v: Any) -> str:
@@ -28,30 +31,53 @@ def emit_trace_safe(
     property_id: Optional[int] = None,
 ) -> None:
     """
-    Append a structured trace event to agent_messages.
+    Append a structured trace event.
 
-    - message is JSON (router parses it)
-    - thread_key is stable per run
+    Source of truth for SSE: agent_trace_events.
+
+    Optionally also mirrors into agent_messages for "chatty" logs if enabled.
     """
+    # Resolve property_id if missing
+    pid = property_id
+    if pid is None:
+        r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == int(org_id)))
+        if r is not None:
+            pid = int(r.property_id) if r.property_id is not None else None
+
     evt = {
-        "type": event_type,
-        "level": level,
-        "agent_key": agent_key,
+        "type": str(event_type),
+        "level": str(level),
+        "agent_key": str(agent_key),
         "ts": datetime.utcnow().isoformat(),
         "payload": payload or {},
     }
 
+    # ✅ Write to agent_trace_events (this is what /stream should read)
     db.add(
-        AgentMessage(
-            org_id=org_id,
+        AgentTraceEvent(
+            org_id=int(org_id),
             run_id=int(run_id),
-            property_id=int(property_id) if property_id is not None else None,
-            thread_key=f"run:{int(run_id)}",
-            sender=str(agent_key),
-            recipient="trace",
-            message=_dumps(evt),
+            property_id=int(pid) if pid is not None else None,
+            agent_key=str(agent_key),
+            event_type=str(event_type),
+            payload_json=_dumps(evt),
         )
     )
-    # caller controls commit pattern; but your current agent_engine commits often
-    # so keep this "no commit" and let caller commit.
+
+    # Optional: also write to agent_messages (helpful for UI "threads"/debug)
+    # Controlled via env so you can disable in prod if you don't want duplication.
+    if os.getenv("TRACE_MIRROR_TO_MESSAGES", "0").strip() in {"1", "true", "TRUE", "yes", "YES"}:
+        db.add(
+            AgentMessage(
+                org_id=int(org_id),
+                run_id=int(run_id),
+                property_id=int(pid) if pid is not None else None,
+                thread_key=f"run:{int(run_id)}",
+                sender=str(agent_key),
+                recipient="trace",
+                message=_dumps(evt),
+            )
+        )
+
+    # Caller controls commit.
     

@@ -1,4 +1,4 @@
-# backend/app/workers/agent_tasks.py 
+# backend/app/workers/agent_tasks.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -23,45 +23,33 @@ TERMINAL = {"done", "failed", "timed_out"}
 def execute_agent_run(self, org_id: int, run_id: int) -> dict:
     """
     Executes a single AgentRun.
-    Safe to retry, idempotent on terminal states.
+    Safe to retry; execute_run_now owns lifecycle transitions + tracing.
     """
     db = SessionLocal()
     try:
-        run = db.scalar(
-            select(AgentRun)
-            .where(AgentRun.id == run_id)
-            .where(AgentRun.org_id == org_id)
-        )
+        run = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == int(org_id)))
         if run is None:
             return {"ok": False, "reason": "run_not_found"}
 
         # Idempotency: do nothing if already terminal
-        if run.status in TERMINAL:
+        if (run.status or "").lower() in TERMINAL:
             return {"ok": True, "status": run.status, "idempotent": True}
 
-        # Mark running
-        run.status = "running"
-        run.started_at = run.started_at or datetime.utcnow()
-        run.attempts = int(run.attempts or 0) + 1
-        run.heartbeat_at = datetime.utcnow()
-        db.commit()
+        # Let engine own: running/started_at/attempts/trace commits
+        attempt = int(run.attempts or 0) + 1
 
         result = execute_run_now(
             db,
-            org_id=org_id,
-            run_id=run_id,
-            attempt_number=int(run.attempts),
+            org_id=int(org_id),
+            run_id=int(run_id),
+            attempt_number=attempt,
         )
         return {"ok": True, "result": result}
 
     except Exception as e:
         # Persist error for visibility
         try:
-            run2 = db.scalar(
-                select(AgentRun)
-                .where(AgentRun.id == run_id)
-                .where(AgentRun.org_id == org_id)
-            )
+            run2 = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == int(org_id)))
             if run2:
                 run2.last_error = f"{type(e).__name__}: {e}"
                 run2.heartbeat_at = datetime.utcnow()
@@ -72,11 +60,7 @@ def execute_agent_run(self, org_id: int, run_id: int) -> dict:
         # Final retry exhausted → fail hard
         if self.request.retries >= 2:
             try:
-                run3 = db.scalar(
-                    select(AgentRun)
-                    .where(AgentRun.id == run_id)
-                    .where(AgentRun.org_id == org_id)
-                )
+                run3 = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == int(org_id)))
                 if run3:
                     run3.status = "failed"
                     run3.finished_at = datetime.utcnow()
@@ -109,3 +93,4 @@ def sweep_stuck_agent_runs() -> dict:
         return {"ok": True, "sweep": res}
     finally:
         db.close()
+        

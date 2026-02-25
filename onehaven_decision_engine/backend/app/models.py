@@ -704,7 +704,7 @@ class AgentMessage(Base):
 
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    # ✅ tie messages to a run/property for querying + SSE
+    # tie messages to a run/property for querying + SSE
     run_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey("agent_runs.id", ondelete="CASCADE"),
@@ -742,7 +742,6 @@ class AgentSlotAssignment(Base):
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
 
 class RentExplainRun(Base):
     __tablename__ = "rent_explain_runs"
@@ -784,6 +783,12 @@ class AgentTraceEvent(Base):
         nullable=False,
         index=True,
     )
+    run_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("agent_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     property_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey("properties.id", ondelete="CASCADE"),
@@ -791,21 +796,17 @@ class AgentTraceEvent(Base):
         index=True,
     )
 
-    run_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("agent_runs.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
     agent_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
-
-    # examples: started | context | tool_call | tool_result | decision | warning | final | validation | blocked | approved | applied | error
     event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
 
-    # structured JSON serialized to text for portability
     payload_json: Mapped[str] = mapped_column(Text, nullable=False, server_default="{}")
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
 
     __table_args__ = (
         Index("ix_agent_trace_events_org_run_id_id", "org_id", "run_id", "id"),

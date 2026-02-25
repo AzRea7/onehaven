@@ -1,3 +1,4 @@
+# backend/app/routers/agent_runs.py
 from __future__ import annotations
 
 import json
@@ -11,11 +12,10 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_owner
 from ..db import get_db, SessionLocal
-from ..models import AgentRun, AgentMessage
+from ..models import AgentRun, AgentMessage, AgentTraceEvent
 from ..services.agent_engine import create_run, mark_approved
 from ..services.agent_orchestrator import plan_agent_runs
 from ..services.agent_actions import apply_run_actions
-
 from ..workers.agent_tasks import execute_agent_run
 
 router = APIRouter(prefix="/agent-runs", tags=["agents"])
@@ -30,7 +30,7 @@ def _loads(s: Optional[str], default: Any) -> Any:
         return default
 
 
-@router.get("/")  # ✅ FIX: use "/" not ""
+@router.get("/")
 def list_runs(
     property_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
@@ -143,8 +143,10 @@ def stream_run_messages(
     poll_ms: int = Query(default=750, ge=200, le=5000),
     principal=Depends(get_principal),
 ):
-    # ✅ IMPORTANT: Do NOT use request-scoped db session inside generator.
-    # We'll validate once, then open new short-lived sessions per poll.
+    """
+    SSE stream is powered by agent_trace_events (durable, structured).
+    """
+    # validate once outside generator
     db0 = SessionLocal()
     try:
         run = db0.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
@@ -157,17 +159,18 @@ def stream_run_messages(
 
     def gen() -> Generator[str, None, None]:
         last_id = start_id
+        yield "retry: 1500\n\n"
         yield "event: hello\ndata: {}\n\n"
 
         while True:
             db = SessionLocal()
             try:
                 q = (
-                    select(AgentMessage)
-                    .where(AgentMessage.org_id == principal.org_id)
-                    .where(AgentMessage.run_id == int(run_id))
-                    .where(AgentMessage.id > int(last_id))
-                    .order_by(AgentMessage.id.asc())
+                    select(AgentTraceEvent)
+                    .where(AgentTraceEvent.org_id == principal.org_id)
+                    .where(AgentTraceEvent.run_id == int(run_id))
+                    .where(AgentTraceEvent.id > int(last_id))
+                    .order_by(AgentTraceEvent.id.asc())
                     .limit(500)
                 )
                 rows = list(db.scalars(q).all())
@@ -175,15 +178,26 @@ def stream_run_messages(
                 db.close()
 
             if rows:
-                for m in rows:
-                    last_id = max(last_id, int(m.id))
-                    payload = {
-                        "id": int(m.id),
-                        "created_at": str(getattr(m, "created_at", "")),
-                        "sender": getattr(m, "sender", None),
-                        "message": getattr(m, "message", None),
+                for ev in rows:
+                    last_id = max(last_id, int(ev.id))
+
+                    raw = getattr(ev, "payload_json", None) or "{}"
+                    try:
+                        decoded = json.loads(raw)
+                    except Exception:
+                        decoded = {"type": "raw", "raw": raw}
+
+                    out = {
+                        "id": int(ev.id),
+                        "created_at": str(getattr(ev, "created_at", "")),
+                        "agent_key": getattr(ev, "agent_key", None),
+                        "event_type": getattr(ev, "event_type", None),
+                        # full decoded envelope (type/level/ts/payload)
+                        "event": decoded,
+                        # convenience: the "payload" field only
+                        "payload": decoded.get("payload") if isinstance(decoded, dict) else None,
                     }
-                    yield f"event: trace\ndata: {json.dumps(payload)}\n\n"
+                    yield f"event: trace\ndata: {json.dumps(out)}\n\n"
             else:
                 yield "event: ping\ndata: {}\n\n"
 
