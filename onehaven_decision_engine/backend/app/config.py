@@ -1,4 +1,3 @@
-# backend/app/config.py
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -7,10 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # ---- App ----
     app_env: str = "local"
-
-    # Give local dev a sane default so the app boots even if DATABASE_URL isn't set.
-    # In prod, you should override via env.
     database_url: str = "sqlite:///./onehaven.db"
 
     # ---- Operating Truth / Reproducibility ----
@@ -57,19 +54,26 @@ class Settings(BaseSettings):
     rentcast_api_key: str | None = None
     rentcast_base_url: str = "https://api.rentcast.io/v1"
 
-    # ---- Phase 5: Auth + Tenancy ----
-    # Supported: "clerk" (now), later you can add auth0/cognito
-    auth_provider: str = "clerk"
-    auth_mode: str = "dev"
-    dev_auto_provision: bool = True
+    # ---- SaaS Auth (cookie JWT) ----
+    # Your backend /auth routes already set + read a JWT cookie.
+    jwt_secret: str = "dev-change-me"  # override in .env in real envs
+    jwt_exp_minutes: int = 60 * 24 * 7  # 7 days
+    jwt_cookie_name: str = "onehaven_jwt"
+    jwt_cookie_secure: int = 0  # set 1 in prod over HTTPS
+    jwt_cookie_samesite: str = "lax"  # lax|strict|none
+
+    # ---- Phase 5: Tenancy helpers (dev) ----
+    dev_auto_verify_email: bool = True
+
+    # Local-dev bypass (ONLY honored when app_env == "local")
+    # Use headers:
+    #   X-User-Email: you@domain.com
+    #   X-Org-Slug: onehaven (optional)
+    #   X-User-Role: owner
+    allow_local_auth_bypass: bool = True
     dev_header_org_slug: str = "X-Org-Slug"
     dev_header_user_email: str = "X-User-Email"
     dev_header_user_role: str = "X-User-Role"
-
-    # Clerk JWT verification (set in env for prod)
-    clerk_issuer: str | None = None
-    clerk_jwks_url: str | None = None
-    clerk_audience: str | None = None
 
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
@@ -79,14 +83,7 @@ class Settings(BaseSettings):
     agents_max_retries: int = 3
     agents_run_timeout_seconds: int = 120
 
-    # Local-dev bypass (ONLY honored when app_env == "local")
-    # Use headers:
-    #   X-User-Email: you@domain.com
-    #   X-Org-Slug: onehaven (optional)
-    allow_local_auth_bypass: bool = True
-
     def model_post_init(self, __context) -> None:
-        # If someone set the misspelled env var, keep behavior stable.
         if self.rent_calibration_apha is not None:
             object.__setattr__(self, "rent_calibration_alpha", float(self.rent_calibration_apha))
 

@@ -5,13 +5,28 @@ type AuthContext = {
   orgSlug: string;
 };
 
-function getAuth(): AuthContext {
+export type Principal = {
+  org_id: number;
+  org_slug: string;
+  user_id: number;
+  email: string;
+  role: string;
+  plan_code?: string | null;
+};
+
+export function getOrgSlug(): string {
   const env = (import.meta as any).env || {};
   const envOrg = env.VITE_ORG_SLUG as string | undefined;
-  if (envOrg) return { orgSlug: envOrg };
+  if (envOrg) return envOrg;
+  return localStorage.getItem("org_slug") || "demo";
+}
 
-  const orgSlug = localStorage.getItem("org_slug") || "demo";
-  return { orgSlug };
+export function setOrgSlug(slug: string) {
+  localStorage.setItem("org_slug", slug);
+}
+
+function getAuth(): AuthContext {
+  return { orgSlug: getOrgSlug() };
 }
 
 /**
@@ -58,18 +73,14 @@ function qs(params: Record<string, any>) {
 function makeEventSource(pathWithQuery: string): EventSource {
   const auth = getAuth();
 
-  // Support both relative "/api" and absolute API_BASE
-  // URL(...) requires an absolute base; window.location.origin works fine here.
   const base = API_BASE.startsWith("http")
     ? API_BASE
     : `${window.location.origin}${API_BASE}`;
   const url = new URL(`${base}${pathWithQuery}`);
 
-  // Always attach org context for SSE
   if (!url.searchParams.get("org_slug"))
     url.searchParams.set("org_slug", auth.orgSlug);
 
-  // withCredentials allows cookie auth (supported in modern browsers)
   return new EventSource(url.toString(), { withCredentials: true } as any);
 }
 
@@ -89,13 +100,11 @@ async function request<T>(
   const bodyKey = typeof init?.body === "string" ? init?.body : undefined;
   const key = cacheKey(method, path, bodyKey);
 
-  // GET cache
   if (method === "GET" && ttl > 0) {
     const hit = memCache.get(key);
     if (hit && Date.now() - hit.at < ttl) return hit.value as T;
   }
 
-  // GET inflight dedupe
   if (method === "GET") {
     const pending = inflight.get(key);
     if (pending) return (await pending) as T;
@@ -104,10 +113,10 @@ async function request<T>(
   const run = (async () => {
     const res = await fetch(`${API_BASE}${path}`, {
       ...init,
-      credentials: "include", // ✅ sends JWT cookie
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        "X-Org-Slug": auth.orgSlug, // ✅ org context
+        "X-Org-Slug": auth.orgSlug,
         ...(init?.headers || {}),
       },
       signal: init?.signal,
@@ -153,7 +162,7 @@ async function requestArray<T = any>(
 
 export const api = {
   // -------------------------
-  // ✅ AUTH (real SaaS)
+  // ✅ AUTH
   // -------------------------
   authRegister: (payload: {
     email: string;
@@ -412,14 +421,68 @@ export const api = {
   agents: () => requestArray<any>(`/agents`, { cacheTtlMs: 4_000 }),
 
   // -------------------------
-  // ✅ Agent Runs (compat + SSE)
+  // ✅ Agent Slots (AgentSlots.tsx depends on these)
   // -------------------------
 
+  // Accepts (signal?) OR (signal, cacheTtlMs)
+  slotSpecs: (signal?: AbortSignal, cacheTtlMs: number = 10_000) =>
+    requestArray<any>(`/agents/slots/specs`, { cacheTtlMs, signal }),
+
   /**
-   * ✅ Compat: allow BOTH historical signatures:
-   *   agentRunsList(propertyId)
-   *   agentRunsList({ property_id: propertyId })
+   * ✅ Compat signatures:
+   *   slotAssignments()
+   *   slotAssignments(propertyId, signal?)
+   *   slotAssignments({ property_id, limit, signal })
    */
+  slotAssignments: (
+    a?:
+      | number
+      | {
+          property_id?: number;
+          limit?: number;
+          signal?: AbortSignal;
+        },
+    b?: AbortSignal,
+  ) => {
+    let property_id: number | undefined;
+    let limit: number | undefined;
+    let signal: AbortSignal | undefined;
+
+    if (typeof a === "number") {
+      property_id = a;
+      signal = b;
+      limit = 200;
+    } else if (a && typeof a === "object") {
+      property_id = a.property_id;
+      limit = a.limit ?? 200;
+      signal = a.signal;
+    } else {
+      // slotAssignments()
+      limit = 200;
+      signal = b;
+    }
+
+    return requestArray<any>(
+      `/agents/slots/assignments${qs({ property_id, limit })}`,
+      { cacheTtlMs: 1_000, signal },
+    );
+  },
+
+  upsertSlotAssignment: (payload: {
+    slot_key: string;
+    property_id?: number | null;
+    agent_key?: string | null;
+    status?: string | null;
+    payload_json?: any;
+  }) =>
+    request<any>(`/agents/slots/assignments`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // -------------------------
+  // ✅ Agent Runs (compat + SSE)
+  // -------------------------
   agentRunsList: (arg: number | { property_id: number }) => {
     const propertyId = typeof arg === "number" ? arg : arg.property_id;
     return requestArray<any>(`/agent-runs${qs({ property_id: propertyId })}`, {
@@ -466,15 +529,6 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  /**
-   * ✅ SSE stream for trace events
-   * UI listens for:
-   *   es.addEventListener("trace", ...)
-   *
-   * Server should emit:
-   *   event: trace
-   *   data: {"id":..., "created_at":..., ...}
-   */
   agentRunsStream: (runId: number) =>
     makeEventSource(`/agent-runs/${runId}/stream`),
 
