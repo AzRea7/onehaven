@@ -45,6 +45,7 @@ services:
       AGENTS_MAX_RUNS_PER_PROPERTY_PER_HOUR: ${AGENTS_MAX_RUNS_PER_PROPERTY_PER_HOUR:-3}
       AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
       AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
+      TRACE_MIRROR_TO_MESSAGES: ${TRACE_MIRROR_TO_MESSAGES:-0}
     command: bash -lc "alembic -c /app/app/alembic.ini upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     depends_on:
       postgres:
@@ -55,10 +56,11 @@ services:
       - "8000:8000"
     restart: unless-stopped
 
-  # ✅ Celery worker as a persistent service (NOT docker-compose exec)
+  # ✅ Celery worker service
   agent-worker:
     build: ./backend
     working_dir: /app
+    user: "1000:1000"
     env_file:
       - .env
     volumes:
@@ -73,7 +75,7 @@ services:
 
       AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
       AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
-    # ✅ Explicitly bind to the celery_app object + consume the same queue you publish to
+      TRACE_MIRROR_TO_MESSAGES: ${TRACE_MIRROR_TO_MESSAGES:-0}
     command: bash -lc "celery -A app.workers.celery_app:celery_app worker -l INFO -Q ${CELERY_QUEUE:-celery}"
     depends_on:
       postgres:
@@ -82,9 +84,11 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # ✅ Celery beat (for sweepers / periodic jobs)
   celery-beat:
     build: ./backend
     working_dir: /app
+    user: "1000:1000"
     env_file:
       - .env
     volumes:
@@ -120,3 +124,4 @@ services:
 
 volumes:
   pgdata:
+  

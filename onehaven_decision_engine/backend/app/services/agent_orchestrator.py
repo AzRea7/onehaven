@@ -81,8 +81,10 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
     if prop is None:
         return []
 
+    # This call is allowed to write the state record (your system treats "state" as derived truth)
     st = compute_and_persist_stage(db, org_id=org_id, property=prop)
 
+    # Rate-limit per property per hour (prevents runaway enqueue loops)
     bucket = _hour_bucket(datetime.utcnow())
     count = db.scalar(
         select(func.count(AgentRun.id))
@@ -103,6 +105,7 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
 
     planned: list[tuple[str, str]] = []
 
+    # Stage-triggered specialists
     if stage in {"deal", "intake"}:
         planned.append(("deal_intake", "stage=deal/intake"))
         planned.append(("public_records_check", "stage=deal/intake"))
@@ -116,6 +119,7 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
         planned.append(("hqs_precheck", "stage implies HQS readiness"))
         planned.append(("timeline_nudger", "compliance stage needs timeline pressure"))
 
+    # Next-action-triggered specialists
     for a in next_actions:
         typ = str((a or {}).get("type") or "").lower()
 
@@ -125,7 +129,7 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
         if "rent_gap" in typ:
             planned.append(("rent_reasonableness", "next_action=rent_gap"))
 
-    # ✅ Always run the Judge after specialists (recommend-only)
+    # Always run the Judge last (recommend-only)
     planned.append(("ops_judge", "synthesize specialist outputs into a ranked next-step plan"))
 
     state_blob = {
@@ -149,6 +153,7 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
             )
         )
 
+    # Deduplicate by agent_key (keep first reason)
     uniq: dict[str, PlannedRun] = {}
     for r in out:
         uniq.setdefault(r.agent_key, r)

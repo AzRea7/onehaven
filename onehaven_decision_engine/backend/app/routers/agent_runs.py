@@ -1,4 +1,3 @@
-# backend/app/routers/agent_runs.py
 from __future__ import annotations
 
 import json
@@ -48,15 +47,14 @@ def list_runs(
             "property_id": r.property_id,
             "agent_key": r.agent_key,
             "status": r.status,
-            "attempts": getattr(r, "attempts", 0),
+            "attempts": int(getattr(r, "attempts", 0) or 0),
             "last_error": getattr(r, "last_error", None),
             "created_at": r.created_at,
             "started_at": getattr(r, "started_at", None),
             "finished_at": getattr(r, "finished_at", None),
             "approval_status": getattr(r, "approval_status", None),
             "approved_at": getattr(r, "approved_at", None),
-            "output_json": getattr(r, "output_json", None),
-            "proposed_actions_json": getattr(r, "proposed_actions_json", None),
+            "idempotency_key": getattr(r, "idempotency_key", None),
         }
         for r in rows
     ]
@@ -78,7 +76,7 @@ def get_run(
         "property_id": r.property_id,
         "agent_key": r.agent_key,
         "status": r.status,
-        "attempts": getattr(r, "attempts", 0),
+        "attempts": int(getattr(r, "attempts", 0) or 0),
         "last_error": getattr(r, "last_error", None),
         "created_at": r.created_at,
         "started_at": getattr(r, "started_at", None),
@@ -116,11 +114,6 @@ def get_run_messages(
     out: list[dict[str, Any]] = []
 
     for m in rows:
-        try:
-            evt = json.loads(m.message or "{}")
-        except Exception:
-            evt = {"type": "raw", "message": m.message}
-
         out.append(
             {
                 "id": int(m.id),
@@ -129,7 +122,7 @@ def get_run_messages(
                 "sender": getattr(m, "sender", None),
                 "recipient": getattr(m, "recipient", None),
                 "created_at": getattr(m, "created_at", None),
-                "event": evt,
+                "event": _loads(m.message, {"type": "raw", "message": m.message}),
             }
         )
 
@@ -144,9 +137,17 @@ def stream_run_messages(
     principal=Depends(get_principal),
 ):
     """
-    SSE stream is powered by agent_trace_events (durable, structured).
+    SSE stream powered by agent_trace_events (durable, structured).
+
+    agent_trace_events.payload_json contains a normalized envelope from emit_trace_safe():
+      {
+        "type": "...",
+        "level": "info|warn|error",
+        "agent_key": "...",
+        "ts": "...",
+        "payload": {...}
+      }
     """
-    # validate once outside generator
     db0 = SessionLocal()
     try:
         run = db0.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
@@ -159,7 +160,7 @@ def stream_run_messages(
 
     def gen() -> Generator[str, None, None]:
         last_id = start_id
-        yield "retry: 1500\n\n"
+        yield "retry: 1500\n"
         yield "event: hello\ndata: {}\n\n"
 
         while True:
@@ -182,20 +183,21 @@ def stream_run_messages(
                     last_id = max(last_id, int(ev.id))
 
                     raw = getattr(ev, "payload_json", None) or "{}"
-                    try:
-                        decoded = json.loads(raw)
-                    except Exception:
-                        decoded = {"type": "raw", "raw": raw}
+                    decoded = _loads(raw, {})
+                    if not isinstance(decoded, dict):
+                        decoded = {"type": "raw", "raw": raw, "payload": {"raw": raw}}
 
                     out = {
                         "id": int(ev.id),
                         "created_at": str(getattr(ev, "created_at", "")),
                         "agent_key": getattr(ev, "agent_key", None),
                         "event_type": getattr(ev, "event_type", None),
-                        # full decoded envelope (type/level/ts/payload)
+                        # full envelope
                         "event": decoded,
-                        # convenience: the "payload" field only
-                        "payload": decoded.get("payload") if isinstance(decoded, dict) else None,
+                        # convenience: payload only (always dict)
+                        "payload": decoded.get("payload") if isinstance(decoded.get("payload"), dict) else {},
+                        "level": decoded.get("level"),
+                        "ts": decoded.get("ts"),
                     }
                     yield f"event: trace\ndata: {json.dumps(out)}\n\n"
             else:

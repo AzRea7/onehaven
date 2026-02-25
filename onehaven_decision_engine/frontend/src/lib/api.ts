@@ -3,29 +3,15 @@ export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 
 type AuthContext = {
   orgSlug: string;
-  userEmail: string;
-  userRole?: string;
 };
 
 function getAuth(): AuthContext {
   const env = (import.meta as any).env || {};
   const envOrg = env.VITE_ORG_SLUG as string | undefined;
-  const envEmail = env.VITE_USER_EMAIL as string | undefined;
-  const envRole = env.VITE_USER_ROLE as string | undefined;
-
-  if (envOrg && envEmail) {
-    return {
-      orgSlug: envOrg,
-      userEmail: envEmail,
-      userRole: envRole || "owner",
-    };
-  }
+  if (envOrg) return { orgSlug: envOrg };
 
   const orgSlug = localStorage.getItem("org_slug") || "demo";
-  const userEmail = localStorage.getItem("user_email") || "austin@demo.local";
-  const userRole = localStorage.getItem("user_role") || "owner";
-
-  return { orgSlug, userEmail, userRole };
+  return { orgSlug };
 }
 
 /**
@@ -53,10 +39,47 @@ function cacheKey(method: string, path: string, body?: any) {
   return `${method}:${path}:${body ?? ""}`;
 }
 
+// Helpers for querystring
+function qs(params: Record<string, any>) {
+  const sp = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null) return;
+    sp.set(k, String(v));
+  });
+  const s = sp.toString();
+  return s ? `?${s}` : "";
+}
+
+/**
+ * ✅ EventSource cannot set headers.
+ * So for SSE we pass org context via querystring: ?org_slug=...
+ * Backend should accept org_slug query param as equivalent to X-Org-Slug for SSE routes.
+ */
+function makeEventSource(pathWithQuery: string): EventSource {
+  const auth = getAuth();
+
+  // Support both relative "/api" and absolute API_BASE
+  // URL(...) requires an absolute base; window.location.origin works fine here.
+  const base = API_BASE.startsWith("http")
+    ? API_BASE
+    : `${window.location.origin}${API_BASE}`;
+  const url = new URL(`${base}${pathWithQuery}`);
+
+  // Always attach org context for SSE
+  if (!url.searchParams.get("org_slug"))
+    url.searchParams.set("org_slug", auth.orgSlug);
+
+  // withCredentials allows cookie auth (supported in modern browsers)
+  return new EventSource(url.toString(), { withCredentials: true } as any);
+}
+
 async function request<T>(
   path: string,
   init?:
-    | (RequestInit & { cacheTtlMs?: number; signal?: AbortSignal })
+    | (RequestInit & {
+        cacheTtlMs?: number;
+        signal?: AbortSignal;
+      })
     | undefined,
 ): Promise<T> {
   const auth = getAuth();
@@ -81,11 +104,10 @@ async function request<T>(
   const run = (async () => {
     const res = await fetch(`${API_BASE}${path}`, {
       ...init,
+      credentials: "include", // ✅ sends JWT cookie
       headers: {
         "Content-Type": "application/json",
-        "X-Org-Slug": auth.orgSlug,
-        "X-User-Email": auth.userEmail,
-        ...(auth.userRole ? { "X-User-Role": auth.userRole } : {}),
+        "X-Org-Slug": auth.orgSlug, // ✅ org context
         ...(init?.headers || {}),
       },
       signal: init?.signal,
@@ -119,25 +141,51 @@ async function request<T>(
 async function requestArray<T = any>(
   path: string,
   init?:
-    | (RequestInit & { cacheTtlMs?: number; signal?: AbortSignal })
+    | (RequestInit & {
+        cacheTtlMs?: number;
+        signal?: AbortSignal;
+      })
     | undefined,
 ): Promise<T[]> {
   const data = await request<any>(path, init);
   return asArray<T>(data);
 }
 
-// Helpers for querystring
-function qs(params: Record<string, any>) {
-  const sp = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v === undefined || v === null) return;
-    sp.set(k, String(v));
-  });
-  const s = sp.toString();
-  return s ? `?${s}` : "";
-}
-
 export const api = {
+  // -------------------------
+  // ✅ AUTH (real SaaS)
+  // -------------------------
+  authRegister: (payload: {
+    email: string;
+    password: string;
+    org_slug?: string;
+    org_name?: string;
+  }) =>
+    request<any>(`/auth/register`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  authLogin: (payload: { email: string; password: string; org_slug: string }) =>
+    request<any>(`/auth/login`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  authLogout: () =>
+    request<any>(`/auth/logout`, { method: "POST", body: JSON.stringify({}) }),
+
+  authMe: () => request<any>(`/auth/me`, { method: "GET", cacheTtlMs: 0 }),
+
+  authMyOrgs: () =>
+    requestArray<any>(`/auth/orgs`, { method: "GET", cacheTtlMs: 2_000 }),
+
+  authSelectOrg: (orgSlug: string) =>
+    request<any>(`/auth/select-org${qs({ org_slug: orgSlug })}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
   // Dashboard / properties
   dashboardProperties: (p: { limit: number; signal?: AbortSignal }) =>
     requestArray<any>(`/dashboard/properties?limit=${p.limit ?? 100}`, {
@@ -148,11 +196,10 @@ export const api = {
   // Property “view” and “bundle”
   propertyView: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/view`, { cacheTtlMs: 2_000, signal }),
-
   propertyBundle: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
 
-  // ✅ NEW: Ops summary (closing loops)
+  // ✅ Ops summary (closing loops)
   opsPropertySummary: (
     propertyId: number,
     cashDays: number = 90,
@@ -166,14 +213,13 @@ export const api = {
       },
     ),
 
-  // ✅ NEW: Generate rehab tasks from checklist gaps + unresolved inspection fails
   opsGenerateRehabTasks: (propertyId: number) =>
     request<any>(`/ops/property/${propertyId}/generate_rehab_tasks`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
 
-  // Deal creation (Phase 1) - existing
+  // Deal creation (Phase 1)
   createDeal: (payload: {
     property_id: number;
     asking_price: number;
@@ -200,21 +246,20 @@ export const api = {
       }),
     }),
 
-  // ✅ Deal Intake (Phase 1) - used by DealIntake.tsx
+  // Deal Intake
   intakeDeal: (payload: any) =>
     request<any>(`/intake/deal`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  // Rent pipeline actions (Phase 3)
+  // Rent
   enrichProperty: (propertyId: number, strategy: string = "section8") =>
     request<any>(`/rent/enrich${qs({ property_id: propertyId, strategy })}`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
 
-  // ✅ FIXED: backend route is GET /rent/explain/{property_id}
   explainProperty: (
     propertyId: number,
     strategy: string = "section8",
@@ -230,7 +275,7 @@ export const api = {
       { method: "GET", cacheTtlMs: 0 },
     ),
 
-  // ✅ Evaluate snapshot/run results
+  // Evaluate
   evaluateRun: (snapshotId: number, strategy: string = "section8") =>
     request<any>(`/evaluate/run${qs({ snapshot_id: snapshotId, strategy })}`, {
       method: "POST",
@@ -251,14 +296,13 @@ export const api = {
       { cacheTtlMs: 1_000 },
     ),
 
-  // ✅ Checklist / Compliance
+  // Checklist / Compliance
   checklistLatest: (propertyId: number, signal?: AbortSignal) =>
     request<any>(`/compliance/checklist/${propertyId}/latest`, {
       cacheTtlMs: 1_000,
       signal,
     }),
 
-  // ✅ Generate checklist (persisted by default)
   generateChecklist: (
     propertyId: number,
     opts?: { strategy?: string; version?: string; persist?: boolean },
@@ -266,7 +310,6 @@ export const api = {
     const strategy = opts?.strategy ?? "section8";
     const version = opts?.version ?? "v1";
     const persist = opts?.persist ?? true;
-
     return request<any>(
       `/compliance/checklist/${propertyId}${qs({
         strategy,
@@ -309,13 +352,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-
   updateRehabTask: (taskId: number, payload: any) =>
     request<any>(`/rehab/tasks/${taskId}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
-
   deleteRehabTask: (taskId: number) =>
     request<any>(`/rehab/tasks/${taskId}`, { method: "DELETE" }),
 
@@ -367,16 +408,24 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Agents (specs)
+  // Agents
   agents: () => requestArray<any>(`/agents`, { cacheTtlMs: 4_000 }),
 
-  // -----------------------------
-  // ✅ NEW AGENT-RUNS (Phase 5+)
-  // -----------------------------
-  agentRunsList: (propertyId: number) =>
-    requestArray<any>(`/agent-runs${qs({ property_id: propertyId })}`, {
+  // -------------------------
+  // ✅ Agent Runs (compat + SSE)
+  // -------------------------
+
+  /**
+   * ✅ Compat: allow BOTH historical signatures:
+   *   agentRunsList(propertyId)
+   *   agentRunsList({ property_id: propertyId })
+   */
+  agentRunsList: (arg: number | { property_id: number }) => {
+    const propertyId = typeof arg === "number" ? arg : arg.property_id;
+    return requestArray<any>(`/agent-runs${qs({ property_id: propertyId })}`, {
       cacheTtlMs: 800,
-    }),
+    });
+  },
 
   agentRunsPlan: (propertyId: number) =>
     request<any>(`/agent-runs/plan${qs({ property_id: propertyId })}`, {
@@ -386,11 +435,11 @@ export const api = {
 
   agentRunsEnqueue: (propertyId: number, dispatch: boolean = true) =>
     request<any>(
-      `/agent-runs/enqueue${qs({ property_id: propertyId, dispatch: dispatch ? "true" : "false" })}`,
-      {
-        method: "POST",
-        body: JSON.stringify({}),
-      },
+      `/agent-runs/enqueue${qs({
+        property_id: propertyId,
+        dispatch: dispatch ? "true" : "false",
+      })}`,
+      { method: "POST", body: JSON.stringify({}) },
     ),
 
   agentRunsDispatchOne: (runId: number) =>
@@ -417,72 +466,19 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  // --------------------------
-  // Legacy “agents/runs” APIs
-  // --------------------------
-  agentRuns: (propertyId: number) =>
-    requestArray<any>(
-      `/agents/runs${qs({ property_id: propertyId, limit: 200 })}`,
-      {
-        cacheTtlMs: 2_000,
-      },
-    ),
+  /**
+   * ✅ SSE stream for trace events
+   * UI listens for:
+   *   es.addEventListener("trace", ...)
+   *
+   * Server should emit:
+   *   event: trace
+   *   data: {"id":..., "created_at":..., ...}
+   */
+  agentRunsStream: (runId: number) =>
+    makeEventSource(`/agent-runs/${runId}/stream`),
 
-  createAgentRun: (payload: any) =>
-    request<any>(`/agents/runs`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  // Messages
-  messages: (threadKey: string) =>
-    requestArray<any>(
-      `/agents/messages${qs({ thread_key: threadKey, limit: 200 })}`,
-      { cacheTtlMs: 500 },
-    ),
-
-  postMessage: (payload: {
-    thread_key: string;
-    sender: string;
-    message: string;
-    recipient?: string;
-  }) =>
-    request<any>(`/agents/messages`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  // Slot Specs + Assignments
-  slotSpecs: () =>
-    requestArray<any>(`/agents/slots/specs`, { cacheTtlMs: 10_000 }),
-
-  slotAssignments: (propertyId?: number, signal?: AbortSignal) => {
-    const q =
-      propertyId != null
-        ? `?property_id=${propertyId}&limit=200`
-        : `?limit=200`;
-    return requestArray<any>(`/agents/slots/assignments${q}`, {
-      cacheTtlMs: 2_000,
-      signal,
-    });
-  },
-
-  upsertSlotAssignment: (payload: {
-    slot_key: string;
-    property_id?: number | null;
-    owner_type?: string | null;
-    assignee?: string | null;
-    status?: string | null;
-    notes?: string | null;
-  }) =>
-    request<any>(`/agents/slots/assignments`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  // --------------------------
-  // ✅ Phase 2 - Jurisdictions
-  // --------------------------
+  // Jurisdictions
   listJurisdictionRules: (includeGlobal: boolean, state: string = "MI") => {
     const scope = includeGlobal ? "all" : "org";
     return requestArray<any>(`/jurisdictions/rules${qs({ scope, state })}`, {
@@ -503,11 +499,8 @@ export const api = {
     }),
 
   deleteJurisdictionRule: (idOrPayload: any) => {
-    if (typeof idOrPayload === "number") {
-      throw new Error(
-        "deleteJurisdictionRule requires {city, state} or a rule object; UI should pass the rule.",
-      );
-    }
+    if (typeof idOrPayload === "number")
+      throw new Error("deleteJurisdictionRule requires a rule object.");
     const city = idOrPayload.city;
     const state = idOrPayload.state || "MI";
     if (!city) throw new Error("deleteJurisdictionRule missing city");

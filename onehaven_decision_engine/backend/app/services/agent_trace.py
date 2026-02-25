@@ -1,4 +1,3 @@
-# backend/app/services/agent_trace.py
 from __future__ import annotations
 
 import json
@@ -35,9 +34,8 @@ def emit_trace_safe(
 
     Source of truth for SSE: agent_trace_events.
 
-    Optionally also mirrors into agent_messages for "chatty" logs if enabled.
+    Optionally mirrors into agent_messages if TRACE_MIRROR_TO_MESSAGES=1.
     """
-    # Resolve property_id if missing
     pid = property_id
     if pid is None:
         r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == int(org_id)))
@@ -52,7 +50,6 @@ def emit_trace_safe(
         "payload": payload or {},
     }
 
-    # ✅ Write to agent_trace_events (this is what /stream should read)
     db.add(
         AgentTraceEvent(
             org_id=int(org_id),
@@ -64,8 +61,6 @@ def emit_trace_safe(
         )
     )
 
-    # Optional: also write to agent_messages (helpful for UI "threads"/debug)
-    # Controlled via env so you can disable in prod if you don't want duplication.
     if os.getenv("TRACE_MIRROR_TO_MESSAGES", "0").strip() in {"1", "true", "TRUE", "yes", "YES"}:
         db.add(
             AgentMessage(
@@ -78,6 +73,4 @@ def emit_trace_safe(
                 message=_dumps(evt),
             )
         )
-
-    # Caller controls commit.
-    
+        

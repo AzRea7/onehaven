@@ -147,6 +147,12 @@ class Property(Base):
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     valuations: Mapped[List["Valuation"]] = relationship(back_populates="property", cascade="all, delete-orphan")
 
+    # Agents (useful for UI joins later; safe even if you never eager-load)
+    agent_runs: Mapped[List["AgentRun"]] = relationship(
+        primaryjoin="Property.id==foreign(AgentRun.property_id)",
+        viewonly=True,
+    )
+
 
 class ImportSnapshot(Base):
     __tablename__ = "import_snapshots"
@@ -165,7 +171,6 @@ class ImportSnapshot(Base):
 
 class Deal(Base):
     __tablename__ = "deals"
-
     __table_args__ = (UniqueConstraint("org_id", "source_fingerprint", name="uq_deals_org_source_fingerprint"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -304,7 +309,6 @@ class JurisdictionRule(Base):
     inspection_frequency: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     tenant_waitlist_depth: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
-    # ✅ column exists after patched migration 0018 runs
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -368,7 +372,6 @@ class Inspection(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    # ✅ CRITICAL: org scope (state machine + orchestrator assumes this exists)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
@@ -476,9 +479,7 @@ class PropertyChecklist(Base):
 
 class PropertyChecklistItem(Base):
     __tablename__ = "property_checklist_items"
-    __table_args__ = (
-        UniqueConstraint("org_id", "property_id", "item_code", name="uq_checklist_item_org_property_code"),
-    )
+    __table_args__ = (UniqueConstraint("org_id", "property_id", "item_code", name="uq_checklist_item_org_property_code"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
@@ -656,6 +657,7 @@ class AgentRun(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
         UniqueConstraint("org_id", "idempotency_key", name="uq_agent_runs_org_idempotency_key"),
+        Index("ix_agent_runs_org_property_id_id", "org_id", "property_id", "id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -664,11 +666,7 @@ class AgentRun(Base):
     property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), index=True, nullable=True)
     agent_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
 
-    status: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="queued",
-    )  # queued|running|done|failed|blocked
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")  # queued|running|done|failed|blocked|timed_out
 
     input_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     output_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -686,11 +684,7 @@ class AgentRun(Base):
     created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
 
     # Approval semantics (mutation agents)
-    approval_status: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="not_required",
-    )  # not_required|pending|approved|rejected
+    approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required")  # not_required|pending|approved|rejected
     approved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -699,6 +693,7 @@ class AgentRun(Base):
 
 class AgentMessage(Base):
     __tablename__ = "agent_messages"
+    __table_args__ = (Index("ix_agent_messages_org_run_id_id", "org_id", "run_id", "id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
@@ -742,6 +737,7 @@ class AgentSlotAssignment(Base):
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 
 class RentExplainRun(Base):
     __tablename__ = "rent_explain_runs"
@@ -812,6 +808,104 @@ class AgentTraceEvent(Base):
         Index("ix_agent_trace_events_org_run_id_id", "org_id", "run_id", "id"),
         Index("ix_agent_trace_events_org_property_id_id", "org_id", "property_id", "id"),
     )
+
+
+class AuthIdentity(Base):
+    __tablename__ = "auth_identities"
+    __table_args__ = (UniqueConstraint("email", name="uq_auth_identities_email"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class EmailToken(Base):
+    __tablename__ = "email_tokens"
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_email_tokens_token_hash"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(50), nullable=False)  # verify_email | reset_password
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_api_keys_org_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class Plan(Base):
+    __tablename__ = "plans"
+    __table_args__ = (UniqueConstraint("code", name="uq_plans_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(50), nullable=False)  # free | starter | pro
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    limits_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class OrgSubscription(Base):
+    __tablename__ = "org_subscriptions"
+    __table_args__ = (UniqueConstraint("org_id", name="uq_org_subscriptions_org"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    plan_code: Mapped[str] = mapped_column(String(50), nullable=False, default="free")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="active")  # active|past_due|canceled
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class UsageLedger(Base):
+    __tablename__ = "usage_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    metric: Mapped[str] = mapped_column(String(80), nullable=False)  # agent_runs|external_calls|properties
+    units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ExternalBudgetLedger(Base):
+    __tablename__ = "external_budget_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)  # rentcast|hud|zillow|etc
+    cost_units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AgentRunDeadletter(Base):
+    __tablename__ = "agent_run_deadletters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    run_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    agent_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    reason: Mapped[str] = mapped_column(String(120), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 from .policy_models import JurisdictionProfile, HqsRule, HqsAddendumRule, HudFmrRecord  # noqa: E402,F401

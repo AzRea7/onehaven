@@ -8,7 +8,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_env: str = "local"
-    database_url: str
+
+    # Give local dev a sane default so the app boots even if DATABASE_URL isn't set.
+    # In prod, you should override via env.
+    database_url: str = "sqlite:///./onehaven.db"
 
     # ---- Operating Truth / Reproducibility ----
     payment_standard_pct: float = 1.10
@@ -37,8 +40,12 @@ class Settings(BaseSettings):
     dscr_min: float = 1.20
     dscr_penalty_enabled: bool = True
 
+    # ---- Rent calibration (learning loop) ----
     rent_calibration_alpha: float = 0.20
-    rent_calibration_apha: float | None = None  # back-compat
+
+    # back-compat (typo) – keep reading it if someone set it in env by accident
+    rent_calibration_apha: float | None = None
+
     rent_calibration_min_mult: float = 0.70
     rent_calibration_max_mult: float = 1.30
     default_payment_standard_pct: float = 1.10
@@ -67,6 +74,7 @@ class Settings(BaseSettings):
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
 
+    # ---- Agent runtime limits ----
     agents_max_runs_per_property_per_hour: int = 3
     agents_max_retries: int = 3
     agents_run_timeout_seconds: int = 120
@@ -78,6 +86,7 @@ class Settings(BaseSettings):
     allow_local_auth_bypass: bool = True
 
     def model_post_init(self, __context) -> None:
+        # If someone set the misspelled env var, keep behavior stable.
         if self.rent_calibration_apha is not None:
             object.__setattr__(self, "rent_calibration_alpha", float(self.rent_calibration_apha))
 
