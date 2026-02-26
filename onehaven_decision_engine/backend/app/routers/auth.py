@@ -11,9 +11,8 @@ from sqlalchemy.orm import Session
 from ..auth import get_principal, _hash_password, _verify_password, _jwt_sign  # noqa
 from ..config import settings
 from ..db import get_db
-from ..models import AppUser, Organization, OrgMembership, Plan, Subscription
+from ..models import AppUser, Organization, OrgMembership, Plan, OrgSubscription
 from ..schemas import PrincipalOut
-
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -28,10 +27,19 @@ def _ensure_default_plan_seeded(db: Session) -> None:
         row = db.scalar(select(Plan).where(Plan.code == code))
         if row:
             return
-        db.add(Plan(code=code, name=name, limits_json=str(limits).replace("'", '"'), is_active=True, created_at=_now()))
+        # Plan model in your models.py does NOT have is_active, so don't set it
+        db.add(Plan(code=code, name=name, limits_json=str(limits).replace("'", '"'), created_at=_now()))
 
-    upsert("free", "Free", {"max_properties": 3, "agent_runs_per_day": 20, "external_calls_per_day": 50, "max_concurrent_runs": 2})
-    upsert("starter", "Starter", {"max_properties": 25, "agent_runs_per_day": 200, "external_calls_per_day": 500, "max_concurrent_runs": 5})
+    upsert(
+        "free",
+        "Free",
+        {"max_properties": 3, "agent_runs_per_day": 20, "external_calls_per_day": 50, "max_concurrent_runs": 2},
+    )
+    upsert(
+        "starter",
+        "Starter",
+        {"max_properties": 25, "agent_runs_per_day": 200, "external_calls_per_day": 500, "max_concurrent_runs": 5},
+    )
     db.commit()
 
 
@@ -59,11 +67,13 @@ def register(
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    # NOTE: This assumes AppUser has password_hash/email_verified columns.
+    # If your AppUser does not, we will move auth storage to AuthIdentity instead.
     u = AppUser(
         email=email,
         display_name=email.split("@")[0],
         password_hash=_hash_password(password),
-        email_verified=True if settings.dev_auto_verify_email else False,
+        email_verified=True if getattr(settings, "dev_auto_verify_email", False) else False,
         created_at=_now(),
     )
     db.add(u)
@@ -85,7 +95,12 @@ def register(
         db.add(mem)
 
         # create subscription (free by default)
-        sub = Subscription(org_id=int(org.id), plan_code=settings.default_plan_code or "free", status="active", created_at=_now())
+        sub = OrgSubscription(
+            org_id=int(org.id),
+            plan_code=getattr(settings, "default_plan_code", None) or "free",
+            status="active",
+            created_at=_now(),
+        )
         db.add(sub)
 
         db.commit()
@@ -127,7 +142,7 @@ def login(
         raise HTTPException(status_code=400, detail="email, password, org_slug required")
 
     user = db.scalar(select(AppUser).where(AppUser.email == email))
-    if user is None or not user.password_hash:
+    if user is None or not getattr(user, "password_hash", None):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     if not _verify_password(password, str(user.password_hash)):
@@ -137,13 +152,20 @@ def login(
     if org is None:
         raise HTTPException(status_code=401, detail="Unknown org")
 
-    mem = db.scalar(select(OrgMembership).where(OrgMembership.org_id == int(org.id), OrgMembership.user_id == int(user.id)))
+    mem = db.scalar(
+        select(OrgMembership).where(
+            OrgMembership.org_id == int(org.id),
+            OrgMembership.user_id == int(user.id),
+        )
+    )
     if mem is None:
         raise HTTPException(status_code=403, detail="Not a member of org")
 
-    user.last_login_at = _now()
-    db.add(user)
-    db.commit()
+    # optional if your model has it
+    if hasattr(user, "last_login_at"):
+        user.last_login_at = _now()
+        db.add(user)
+        db.commit()
 
     exp = int((_now() + timedelta(minutes=int(settings.jwt_exp_minutes))).timestamp())
     token = _jwt_sign({"sub": str(user.id), "exp": exp})
@@ -195,7 +217,12 @@ def select_org(org_slug: str, request: Request, db: Session = Depends(get_db), p
     if org is None:
         raise HTTPException(status_code=404, detail="Org not found")
 
-    mem = db.scalar(select(OrgMembership).where(OrgMembership.org_id == int(org.id), OrgMembership.user_id == int(p.user_id)))
+    mem = db.scalar(
+        select(OrgMembership).where(
+            OrgMembership.org_id == int(org.id),
+            OrgMembership.user_id == int(p.user_id),
+        )
+    )
     if mem is None:
         raise HTTPException(status_code=403, detail="Not a member of that org")
 

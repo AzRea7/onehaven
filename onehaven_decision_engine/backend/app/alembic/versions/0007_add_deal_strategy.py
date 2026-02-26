@@ -5,9 +5,10 @@ Revises: 0006_compliance_and_rent_policy_fields
 Create Date: 2026-02-10
 """
 
+from __future__ import annotations
+
 from alembic import op
 import sqlalchemy as sa
-
 
 revision = "0007_add_deal_strategy"
 down_revision = "0006_compliance_and_rent_policy_fields"
@@ -16,11 +17,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('jurisdiction_rules', sa.Column('inspection_frequency', sa.String(), nullable=True))
-    op.add_column("deals", sa.Column("strategy", sa.String(length=20), nullable=False, server_default="section8"))
+    # NOTE:
+    # inspection_frequency was already added in 0006_compliance_and_rent_policy_fields.
+    # Do NOT add it again here (causes DuplicateColumn on existing DBs).
+
+    op.add_column(
+        "deals",
+        sa.Column("strategy", sa.String(length=20), nullable=False, server_default="section8"),
+    )
     op.execute("UPDATE deals SET strategy = 'section8' WHERE strategy IS NULL")
     op.alter_column("deals", "strategy", server_default=None)
 
 
 def downgrade() -> None:
     op.drop_column("deals", "strategy")
+    

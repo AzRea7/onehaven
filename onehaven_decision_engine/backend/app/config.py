@@ -1,3 +1,4 @@
+# backend/app/config.py
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -7,7 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ---- App ----
-    app_env: str = "local"
+    app_env: str = "local"  # local|dev|prod (you currently use APP_ENV)
     database_url: str = "sqlite:///./onehaven.db"
 
     # ---- Operating Truth / Reproducibility ----
@@ -39,10 +40,7 @@ class Settings(BaseSettings):
 
     # ---- Rent calibration (learning loop) ----
     rent_calibration_alpha: float = 0.20
-
-    # back-compat (typo) – keep reading it if someone set it in env by accident
-    rent_calibration_apha: float | None = None
-
+    rent_calibration_apha: float | None = None  # back-compat typo
     rent_calibration_min_mult: float = 0.70
     rent_calibration_max_mult: float = 1.30
     default_payment_standard_pct: float = 1.10
@@ -54,27 +52,34 @@ class Settings(BaseSettings):
     rentcast_api_key: str | None = None
     rentcast_base_url: str = "https://api.rentcast.io/v1"
 
-    # ---- SaaS Auth (cookie JWT) ----
-    # Your backend /auth routes already set + read a JWT cookie.
-    jwt_secret: str = "dev-change-me"  # override in .env in real envs
-    jwt_exp_minutes: int = 60 * 24 * 7  # 7 days
-    jwt_cookie_name: str = "onehaven_jwt"
-    jwt_cookie_secure: int = 0  # set 1 in prod over HTTPS
-    jwt_cookie_samesite: str = "lax"  # lax|strict|none
-
-    # ---- Phase 5: Tenancy helpers (dev) ----
+    # ---- SaaS Auth / tenancy (THIS IS THE MISSING PART) ----
+    # auth.py expects settings.auth_mode and settings.dev_auto_provision
+    auth_mode: str = "dev"  # dev|jwt (dev uses headers if no JWT)
+    dev_auto_provision: bool = True
     dev_auto_verify_email: bool = True
 
-    # Local-dev bypass (ONLY honored when app_env == "local")
-    # Use headers:
-    #   X-User-Email: you@domain.com
-    #   X-Org-Slug: onehaven (optional)
-    #   X-User-Role: owner
+    # Keep your older flag too (doesn't hurt); some code may use it.
     allow_local_auth_bypass: bool = True
     dev_header_org_slug: str = "X-Org-Slug"
     dev_header_user_email: str = "X-User-Email"
     dev_header_user_role: str = "X-User-Role"
 
+    # ---- API keys (auth.py expects these) ----
+    enable_api_keys: bool = False
+    api_key_pepper: str = "dev-pepper-change-me"
+    api_key_prefix_len: int = 10
+
+    # ---- Plans / billing (auth.py uses default_plan_code fallback) ----
+    default_plan_code: str = "free"
+
+    # ---- JWT cookie ----
+    jwt_secret: str = "dev-change-me"
+    jwt_exp_minutes: int = 60 * 24 * 7  # 7 days
+    jwt_cookie_name: str = "onehaven_jwt"
+    jwt_cookie_secure: int = 0
+    jwt_cookie_samesite: str = "lax"
+
+    # ---- Celery ----
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
 
@@ -82,6 +87,9 @@ class Settings(BaseSettings):
     agents_max_runs_per_property_per_hour: int = 3
     agents_max_retries: int = 3
     agents_run_timeout_seconds: int = 120
+
+    # ---- Trace ----
+    trace_mirror_to_messages: int = 0
 
     def model_post_init(self, __context) -> None:
         if self.rent_calibration_apha is not None:
