@@ -1,3 +1,4 @@
+# backend/app/routers/agent_runs.py
 from __future__ import annotations
 
 import json
@@ -12,9 +13,8 @@ from sqlalchemy.orm import Session
 from ..auth import get_principal, require_owner
 from ..db import get_db, SessionLocal
 from ..models import AgentRun, AgentMessage, AgentTraceEvent
-from ..services.agent_engine import create_run, mark_approved
+from ..services.agent_engine import create_run, mark_approved, apply_approved
 from ..services.agent_orchestrator import plan_agent_runs
-from ..services.agent_actions import apply_run_actions
 from ..workers.agent_tasks import execute_agent_run
 
 router = APIRouter(prefix="/agent-runs", tags=["agents"])
@@ -138,15 +138,6 @@ def stream_run_messages(
 ):
     """
     SSE stream powered by agent_trace_events (durable, structured).
-
-    agent_trace_events.payload_json contains a normalized envelope from emit_trace_safe():
-      {
-        "type": "...",
-        "level": "info|warn|error",
-        "agent_key": "...",
-        "ts": "...",
-        "payload": {...}
-      }
     """
     db0 = SessionLocal()
     try:
@@ -192,9 +183,7 @@ def stream_run_messages(
                         "created_at": str(getattr(ev, "created_at", "")),
                         "agent_key": getattr(ev, "agent_key", None),
                         "event_type": getattr(ev, "event_type", None),
-                        # full envelope
                         "event": decoded,
-                        # convenience: payload only (always dict)
                         "payload": decoded.get("payload") if isinstance(decoded.get("payload"), dict) else {},
                         "level": decoded.get("level"),
                         "ts": decoded.get("ts"),
@@ -297,11 +286,4 @@ def apply_run(
     principal=Depends(get_principal),
 ):
     require_owner(principal)
-    res = apply_run_actions(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=int(run_id))
-    return {
-        "ok": res.ok,
-        "status": res.status,
-        "run_id": res.run_id,
-        "applied_count": res.applied_count,
-        "errors": res.errors,
-    }
+    return apply_approved(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=int(run_id))

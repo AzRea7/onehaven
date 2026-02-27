@@ -1,3 +1,4 @@
+# backend/app/services/agent_actions.py
 from __future__ import annotations
 
 import json
@@ -62,6 +63,7 @@ def apply_run_actions(
 
     actions = _loads(getattr(r, "proposed_actions_json", None), [])
     if not isinstance(actions, list) or not actions:
+        # No actions => complete the run cleanly
         r.status = "done"
         r.finished_at = datetime.utcnow()
         db.add(r)
@@ -72,7 +74,7 @@ def apply_run_actions(
                 property_id=r.property_id,
                 actor_user_id=actor_user_id,
                 event_type="agent_actions_applied",
-                payload_json=_dumps({"run_id": r.id, "agent_key": r.agent_key, "applied": 0}),
+                payload_json=_dumps({"run_id": int(r.id), "agent_key": str(r.agent_key), "applied": 0}),
                 created_at=datetime.utcnow(),
             )
         )
@@ -91,9 +93,9 @@ def apply_run_actions(
         db.commit()
         return ApplyResult(ok=True, status="done", run_id=int(r.id), applied_count=0, errors=[])
 
-    # Re-validate output (defense-in-depth)
-    output = _loads(r.output_json, {})
-    ok, errs = validate_agent_output(str(r.agent_key), output)
+    # Defense-in-depth: re-validate output contract before applying
+    output = _loads(getattr(r, "output_json", None), {})
+    ok, errs = validate_agent_output(str(r.agent_key), output if isinstance(output, dict) else {})
     if not ok:
         raise HTTPException(status_code=409, detail="Cannot apply: output no longer validates contract")
 
@@ -157,7 +159,9 @@ def apply_run_actions(
                 property_id=r.property_id,
                 actor_user_id=actor_user_id,
                 event_type="agent_actions_apply_failed",
-                payload_json=_dumps({"run_id": r.id, "agent_key": r.agent_key, "applied": applied, "errors": errors[:50]}),
+                payload_json=_dumps(
+                    {"run_id": int(r.id), "agent_key": str(r.agent_key), "applied": applied, "errors": errors[:50]}
+                ),
                 created_at=datetime.utcnow(),
             )
         )
@@ -186,7 +190,7 @@ def apply_run_actions(
             property_id=r.property_id,
             actor_user_id=actor_user_id,
             event_type="agent_actions_applied",
-            payload_json=_dumps({"run_id": r.id, "agent_key": r.agent_key, "applied": applied}),
+            payload_json=_dumps({"run_id": int(r.id), "agent_key": str(r.agent_key), "applied": applied}),
             created_at=datetime.utcnow(),
         )
     )
@@ -223,7 +227,7 @@ def _apply_create_rehab_task(db: Session, *, org_id: int, property_id: Optional[
         status=str(data.get("status") or "todo"),
         cost_estimate=float(data["cost_estimate"]) if data.get("cost_estimate") is not None else None,
         vendor=str(data.get("vendor") or "") or None,
-        deadline=str(data.get("deadline") or "") or None,
+        deadline=(data.get("deadline") if isinstance(data.get("deadline"), str) else None),
         notes=str(data.get("notes") or "") or None,
         created_at=datetime.utcnow(),
     )

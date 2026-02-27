@@ -1,3 +1,4 @@
+# backend/app/routers/evaluate.py
 from __future__ import annotations
 
 import json
@@ -22,13 +23,13 @@ from .rent import explain_rent
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
 
-# --- Policy knobs (safe defaults) ------------------------------------
-# If friction is present, do NOT let it hard-REJECT a deal that is otherwise strong.
+# --- Policy knobs ----------------------------------------------------
+# “Strong” underwriting: can survive friction/cap risk and becomes REVIEW instead of REJECT.
 # You can later move these into config.py if you want.
 _STRONG_DSCR = 1.30
 _STRONG_CASHFLOW = 400.0
 
-# money tolerance when comparing ceiling values
+# Money tolerance when comparing ceiling values
 _MONEY_TOL = 2.0
 
 
@@ -154,37 +155,64 @@ def _is_strong_underwriting(*, dscr: float, cash_flow: float) -> bool:
     return float(dscr) >= float(_STRONG_DSCR) and float(cash_flow) >= float(_STRONG_CASHFLOW)
 
 
-def _apply_friction_safety_net(
+def _has_jurisdiction_signals(reasons: list[str], fr_reasons: list[str], fr_mult: float) -> bool:
+    if fr_reasons:
+        return True
+    if abs(float(fr_mult) - 1.0) > 1e-9:
+        return True
+    # Detect if your scoring already injected jurisdiction notes
+    for r in reasons:
+        if "[Jurisdiction]" in r:
+            return True
+    return False
+
+
+def _has_section8_cap_signal(reasons: list[str]) -> bool:
+    needles = [
+        "Section 8 cap applied",
+        "capped",
+        "ceiling",
+        "approved_rent_ceiling",
+    ]
+    joined = " | ".join(reasons).lower()
+    return any(n.lower() in joined for n in needles)
+
+
+def _convert_reject_to_review_when_strong(
     *,
-    decision_before_friction: str,
-    decision_after_scoring: str,
-    fr_mult: float,
-    fr_reasons: list[str],
-    uw_dscr: float,
-    uw_cash_flow: float,
+    decision: str,
     reasons: list[str],
+    fr_reasons: list[str],
+    fr_mult: float,
+    dscr: float,
+    cash_flow: float,
 ) -> str:
     """
-    Rule:
-      If friction is present (multiplier != 1 or reasons exist)
-      AND the deal would otherwise be PASS (before friction)
-      BUT the result is REJECT after scoring,
-      AND underwriting is strong,
-      => convert to REVIEW, append a clear reason.
+    Product rule:
+      If underwriting is strong, and the “badness” is operational/compliance/cap related,
+      downgrade REJECT -> REVIEW instead of losing the deal.
+
+    We intentionally do NOT convert when:
+      - decision is already PASS/REVIEW
+      - underwriting is not strong
     """
-    friction_present = (abs(float(fr_mult) - 1.0) > 1e-9) or bool(fr_reasons)
-    if not friction_present:
-        return decision_after_scoring
+    if decision != "REJECT":
+        return decision
 
-    if decision_before_friction == "PASS" and decision_after_scoring == "REJECT":
-        if _is_strong_underwriting(dscr=uw_dscr, cash_flow=uw_cash_flow):
-            reasons.append(
-                f"Converted REJECT→REVIEW: compliance friction present (x{float(fr_mult):.2f}) but underwriting is strong "
-                f"(DSCR {float(uw_dscr):.2f}, cash_flow ${float(uw_cash_flow):.0f})."
-            )
-            return "REVIEW"
+    if not _is_strong_underwriting(dscr=dscr, cash_flow=cash_flow):
+        return decision
 
-    return decision_after_scoring
+    jurisdiction_signal = _has_jurisdiction_signals(reasons=reasons, fr_reasons=fr_reasons, fr_mult=fr_mult)
+    cap_signal = _has_section8_cap_signal(reasons=reasons)
+
+    if jurisdiction_signal or cap_signal:
+        reasons.append(
+            f"Converted REJECT→REVIEW: strong underwriting (DSCR {float(dscr):.2f}, cash_flow ${float(cash_flow):.0f}) "
+            f"but friction/cap signals present (jurisdiction={jurisdiction_signal}, cap={cap_signal}, x{float(fr_mult):.2f})."
+        )
+        return "REVIEW"
+
+    return decision
 
 
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
@@ -269,7 +297,9 @@ def evaluate_snapshot(
                     ra.approved_rent_ceiling = float(computed_ceiling)
                 db.add(ra)
 
-            purchase_price = float(getattr(d, "estimated_purchase_price", None) or getattr(d, "asking_price", 0.0) or 0.0)
+            purchase_price = float(
+                getattr(d, "estimated_purchase_price", None) or getattr(d, "asking_price", 0.0) or 0.0
+            )
             if purchase_price <= 0:
                 errors.append(f"deal_id={d.id}: invalid purchase_price={purchase_price}")
                 db.rollback()
@@ -284,8 +314,7 @@ def evaluate_snapshot(
                 rehab_estimate=float(getattr(d, "rehab_estimate", 0.0) or 0.0),
             )
 
-            # Base scoring (pre-friction)
-            decision_pre_friction, score_pre_friction, reasons = score_and_decide(
+            decision, score, reasons = score_and_decide(
                 property=p,
                 deal=d,
                 rent_assumption=ra,
@@ -295,8 +324,9 @@ def evaluate_snapshot(
 
             reasons.extend(rent_notes)
 
-            if estimated and decision_pre_friction == "PASS":
-                decision_pre_friction = "REVIEW"
+            # If rent was heuristic-estimated, we never allow an autopass
+            if estimated and decision == "PASS":
+                decision = "REVIEW"
                 reasons.append("Rent was heuristic-estimated; verify comps/FMR/ceiling before PASS.")
 
             jr = db.scalar(
@@ -323,29 +353,22 @@ def evaluate_snapshot(
                 reasons.extend([f"[Jurisdiction] {r}" for r in fr_reasons])
 
             # If we literally have no jurisdiction row, we still block PASS → REVIEW
-            if jr is None and decision_pre_friction == "PASS":
-                decision_pre_friction = "REVIEW"
+            if jr is None and decision == "PASS":
+                decision = "REVIEW"
                 reasons.append("No jurisdiction row → cannot PASS without compliance friction data.")
 
             # Apply friction to score
-            score = int(round(float(score_pre_friction) * fr_mult))
+            score = int(round(float(score) * fr_mult))
             score = max(0, min(100, score))
 
-            # IMPORTANT:
-            # We keep the model decision as-is unless safety net triggers.
-            decision = decision_pre_friction
-
-            # If your decision_engine internally can produce REJECT based on reasons,
-            # you might already be REJECT here. We apply the safety net AFTER friction,
-            # but only in the PASS→REJECT scenario.
-            decision = _apply_friction_safety_net(
-                decision_before_friction=decision_pre_friction,
-                decision_after_scoring=decision,
-                fr_mult=fr_mult,
-                fr_reasons=fr_reasons,
-                uw_dscr=float(uw.dscr),
-                uw_cash_flow=float(uw.cash_flow),
+            # ✅ Key product rule: strong UW => friction/cap should produce REVIEW not REJECT
+            decision = _convert_reject_to_review_when_strong(
+                decision=decision,
                 reasons=reasons,
+                fr_reasons=fr_reasons,
+                fr_mult=fr_mult,
+                dscr=float(uw.dscr),
+                cash_flow=float(uw.cash_flow),
             )
 
             existing = db.scalar(
@@ -433,7 +456,13 @@ def evaluate_snapshot(
         org_id=principal.org_id,
         actor_user_id=principal.user_id,
         event_type="snapshot_evaluated",
-        payload={"snapshot_id": snapshot_id, "total": len(deals), "pass": pass_count, "review": review_count, "reject": reject_count},
+        payload={
+            "snapshot_id": snapshot_id,
+            "total": len(deals),
+            "pass": pass_count,
+            "review": review_count,
+            "reject": reject_count,
+        },
     )
     db.commit()
 

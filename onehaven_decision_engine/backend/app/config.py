@@ -8,8 +8,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ---- App ----
-    app_env: str = "local"  # local|dev|prod (you currently use APP_ENV)
+    app_env: str = "local"  # local|dev|prod
     database_url: str = "sqlite:///./onehaven.db"
+
+    # ---- CORS (used by main.py) ----
+    # Accepts ["*"] or comma string in env (we normalize in main.py)
+    cors_allow_origins: list[str] | str = ["*"]
 
     # ---- Operating Truth / Reproducibility ----
     payment_standard_pct: float = 1.10
@@ -52,14 +56,16 @@ class Settings(BaseSettings):
     rentcast_api_key: str | None = None
     rentcast_base_url: str = "https://api.rentcast.io/v1"
 
-    # ---- SaaS Auth / tenancy (THIS IS THE MISSING PART) ----
+    # ---- SaaS Auth / tenancy ----
     # auth.py expects settings.auth_mode and settings.dev_auto_provision
     auth_mode: str = "dev"  # dev|jwt (dev uses headers if no JWT)
     dev_auto_provision: bool = True
     dev_auto_verify_email: bool = True
 
-    # Keep your older flag too (doesn't hurt); some code may use it.
+    # Keep older flag too; some code may use it.
     allow_local_auth_bypass: bool = True
+
+    # Dev header names
     dev_header_org_slug: str = "X-Org-Slug"
     dev_header_user_email: str = "X-User-Email"
     dev_header_user_role: str = "X-User-Role"
@@ -92,6 +98,7 @@ class Settings(BaseSettings):
     trace_mirror_to_messages: int = 0
 
     def model_post_init(self, __context) -> None:
+        # Back-compat for earlier typo: rent_calibration_apha
         if self.rent_calibration_apha is not None:
             object.__setattr__(self, "rent_calibration_alpha", float(self.rent_calibration_apha))
 

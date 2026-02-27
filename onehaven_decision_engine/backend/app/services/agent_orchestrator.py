@@ -81,7 +81,7 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
     if prop is None:
         return []
 
-    # This call is allowed to write the state record (your system treats "state" as derived truth)
+    # This call is allowed to write the state record (derived truth)
     st = compute_and_persist_stage(db, org_id=org_id, property=prop)
 
     # Rate-limit per property per hour (prevents runaway enqueue loops)
@@ -160,9 +160,9 @@ def plan_agent_runs(db: Session, *, org_id: int, property_id: int) -> List[Plann
     return list(uniq.values())
 
 
-# -----------------------------------------------------------------------------
-# ✅ Missing worker hook
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
+# Worker hook: called when a run is terminal
+# -------------------------------------------------------------------
 def _safe_json_dump(x: Any) -> str:
     try:
         return json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -170,51 +170,45 @@ def _safe_json_dump(x: Any) -> str:
         return "{}"
 
 
-def on_run_terminal(db: Session, *, run_id: int) -> None:
+def on_run_terminal(db: Session, *, run_id: int, org_id: int | None = None) -> None:
     """
-    Called by worker when an AgentRun reaches a terminal state (done/failed/timed_out/blocked).
+    Called by worker when an AgentRun reaches a terminal state.
     Keep this lightweight and idempotent.
 
-    What we do (MVP):
-      1) Recompute & persist PropertyState (so UI stage/next actions update)
-      2) Optionally add a simple "outstanding task" when certain agents fail
-         (so your planner has something deterministic to react to)
+    MVP:
+      1) Recompute & persist PropertyState (UI stage/next actions update)
+      2) On failure, add deterministic "outstanding task" hints for the planner
     """
     r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id)))
     if r is None:
         return
 
-    org_id = int(r.org_id)
+    resolved_org_id = int(org_id) if org_id is not None else int(r.org_id)
     property_id = int(r.property_id) if getattr(r, "property_id", None) is not None else None
     if property_id is None:
         return
 
-    prop = db.scalar(select(Property).where(Property.org_id == org_id).where(Property.id == property_id))
+    prop = db.scalar(select(Property).where(Property.org_id == resolved_org_id).where(Property.id == property_id))
     if prop is None:
         return
 
-    # 1) Always refresh derived state after a run finishes.
-    st = compute_and_persist_stage(db, org_id=org_id, property=prop)
+    st = compute_and_persist_stage(db, org_id=resolved_org_id, property=prop)
 
-    # 2) Minimal deterministic failure → next_action hint
     status = str(getattr(r, "status", "") or "").lower()
     agent_key = str(getattr(r, "agent_key", "") or "").lower()
 
     if status in {"failed", "timed_out"}:
-        # Keep format consistent with planner: list[dict[type,...]]
         existing = _normalize_next_actions(getattr(st, "outstanding_tasks_json", None))
 
-        # Avoid duplicates
         def has_type(t: str) -> bool:
             return any(str(x.get("type", "")).lower() == t.lower() for x in existing if isinstance(x, dict))
 
-        # Map a few common agent failures into actionable nudges.
         if agent_key == "rent_reasonableness" and not has_type("rent_gap"):
             existing.append({"type": "rent_gap", "source": "agent_failure", "run_id": int(r.id)})
+
         if agent_key in {"hqs_precheck", "packet_builder"} and not has_type("packet_incomplete"):
             existing.append({"type": "packet_incomplete", "source": "agent_failure", "run_id": int(r.id)})
 
-        # Write back if we changed anything
         setattr(st, "outstanding_tasks_json", _safe_json_dump(existing))
         db.add(st)
 

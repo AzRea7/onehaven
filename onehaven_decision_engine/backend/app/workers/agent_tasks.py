@@ -6,13 +6,14 @@ import os
 
 from sqlalchemy import select
 
+from ..config import settings
 from ..db import SessionLocal
 from ..models import AgentRun, AgentRunDeadletter
 from ..services.agent_engine import execute_run_now, sweep_stuck_runs
 from ..services.agent_orchestrator import on_run_terminal
 from .celery_app import celery_app
 
-TERMINAL = {"done", "failed", "timed_out"}
+TERMINAL = {"done", "failed", "timed_out", "blocked"}
 
 
 @celery_app.task(
@@ -24,8 +25,9 @@ TERMINAL = {"done", "failed", "timed_out"}
 def execute_agent_run(self, org_id: int, run_id: int) -> dict:
     """
     Executes a single AgentRun.
+
     Safe to retry; execute_run_now owns lifecycle transitions + tracing.
-    After terminal: orchestrator may enqueue next runs.
+    After terminal: orchestrator may enqueue next runs (later) and refresh property state.
     """
     db = SessionLocal()
     try:
@@ -39,7 +41,7 @@ def execute_agent_run(self, org_id: int, run_id: int) -> dict:
         attempt = int(run.attempts or 0) + 1
         result = execute_run_now(db, org_id=int(org_id), run_id=int(run_id), attempt_number=attempt)
 
-        # ✅ chaining hook
+        # chaining hook (best-effort; never break worker)
         try:
             run2 = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == int(org_id)))
             if run2 and (run2.status or "").lower() in TERMINAL:
@@ -47,7 +49,7 @@ def execute_agent_run(self, org_id: int, run_id: int) -> dict:
                 db.commit()
         except Exception as chain_err:
             db.rollback()
-            # chaining errors should never break worker; record as deadletter
+            # record deadletter but keep worker alive
             try:
                 run3 = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == int(org_id)))
                 db.add(
@@ -55,8 +57,8 @@ def execute_agent_run(self, org_id: int, run_id: int) -> dict:
                         org_id=int(org_id),
                         run_id=int(run_id),
                         agent_key=str(run3.agent_key if run3 else "unknown"),
-                        reason=f"orchestrator_error: {type(chain_err).__name__}",
-                        payload_json=str({"error": str(chain_err)}).replace("'", '"'),
+                        reason=f"orchestrator_error:{type(chain_err).__name__}",
+                        error=str(chain_err),
                         created_at=datetime.utcnow(),
                     )
                 )
@@ -77,7 +79,8 @@ def execute_agent_run(self, org_id: int, run_id: int) -> dict:
         except Exception:
             db.rollback()
 
-        if self.request.retries >= 2:
+        # poison-run handling after final retry
+        if getattr(self.request, "retries", 0) >= 2:
             try:
                 run3 = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == int(org_id)))
                 if run3:
@@ -90,7 +93,7 @@ def execute_agent_run(self, org_id: int, run_id: int) -> dict:
                             run_id=int(run_id),
                             agent_key=str(run3.agent_key),
                             reason="poison_run_final_retry",
-                            payload_json=str({"error": str(e)}).replace("'", '"'),
+                            error=str(e),
                             created_at=datetime.utcnow(),
                         )
                     )
@@ -114,7 +117,15 @@ def sweep_stuck_agent_runs() -> dict:
     """
     db = SessionLocal()
     try:
-        timeout_s = int(os.getenv("AGENTS_RUN_TIMEOUT_SECONDS", "120"))
+        # Prefer settings; allow env override as last-resort
+        timeout_s = int(getattr(settings, "agents_run_timeout_seconds", 120) or 120)
+        env_timeout = os.getenv("AGENTS_RUN_TIMEOUT_SECONDS")
+        if env_timeout:
+            try:
+                timeout_s = int(env_timeout)
+            except Exception:
+                pass
+
         res = sweep_stuck_runs(db, timeout_seconds=timeout_s, queued_max_hours=12)
         return {"ok": True, "sweep": res}
     finally:

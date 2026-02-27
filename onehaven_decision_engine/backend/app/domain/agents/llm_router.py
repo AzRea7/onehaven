@@ -8,11 +8,12 @@ from ...integrations.lm_studio_client import LMStudioClient
 
 class LLMProvider:
     """
-    Provider interface. Later you can implement:
+    Provider interface. Later implement:
       - OpenAIProvider
       - AnthropicProvider
       - LMStudioProvider (OpenAI-compatible local)
     """
+
     def chat_complete(
         self,
         *,
@@ -38,8 +39,12 @@ class LMStudioProvider(LLMProvider):
         tools: Optional[List[dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
     ) -> Dict[str, Any]:
-        # LMStudioClient is intentionally not enabled yet in your repo.
-        # When you enable it, this becomes the place to add tool calling.
+        # When you enable LM Studio network calls, add:
+        #  - tools serialization
+        #  - tool_choice handling
+        #  - response normalization to your agent contract schema
+        _ = tools
+        _ = tool_choice
         return self.client.chat_complete(system=system, user=user, temperature=temperature)
 
 
