@@ -13,6 +13,24 @@ def _to_pos_float(x: object) -> Optional[float]:
         return None
 
 
+def _normalize_payment_standard_pct(x: object, default: float = 110.0) -> float:
+    """
+    Accept either:
+      - 110 (meaning 110%)
+      - 1.10 (meaning 110% as a ratio)
+    Returns a percent number, e.g. 110.0.
+    """
+    v = _to_pos_float(x)
+    if v is None:
+        return float(default)
+
+    # If someone stores 1.10 in config, treat it as a ratio.
+    if 0 < v <= 3.0:
+        return float(v * 100.0)
+
+    return float(v)
+
+
 @dataclass(frozen=True)
 class CeilingCandidate:
     type: str
@@ -51,10 +69,10 @@ def compute_approved_ceiling(
     fmr = _to_pos_float(section8_fmr)
     rr = _to_pos_float(rent_reasonableness_comp)
 
+    pct = _normalize_payment_standard_pct(payment_standard_pct, default=110.0)
+
     # Candidate: adjusted FMR
     if fmr is not None:
-        pct = float(payment_standard_pct)
-        pct = pct if pct > 0 else 100.0
         adjusted = float(fmr) * (pct / 100.0)
         if adjusted > 0:
             caps.append(adjusted)

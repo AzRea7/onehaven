@@ -15,11 +15,10 @@ from ..config import settings
 from ..db import get_db
 from ..models import Deal, Property, RentAssumption
 
-from ..services.api_budget import ApiBudgetExceeded, get_remaining
+from ..services.budget_service import consume_external_budget, get_external_budget_status
 from ..services.fmr import HudUserClient
 from ..services.rentcast_service import (
     RentCastClient,
-    consume_rentcast_call,
     persist_rentcast_comps_and_get_median,
 )
 
@@ -46,27 +45,22 @@ except Exception:  # pragma: no cover
 router = APIRouter(prefix="/rent", tags=["rent"])
 
 
-# ---------------------------- Response schema ----------------------------
 class RentEnrichOut(BaseModel):
     property_id: int
     strategy: str = "section8"
 
     market_rent_estimate: Optional[float] = None
     section8_fmr: Optional[float] = None
-
     rent_reasonableness_comp: Optional[float] = None
 
-    # IMPORTANT: this is the *approved* ceiling (manual override OR computed min(candidates))
     approved_rent_ceiling: Optional[float] = None
-
     rent_used: Optional[float] = None
 
-    # Explainability payload (this is what makes it “pro SaaS” instead of “a number”)
     cap_reason: str = "none"  # "none" | "capped" | "uncapped"
     explanation: str = ""
     ceiling_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
-    rentcast_budget: dict[str, Any] = Field(default_factory=dict)
+    external_budget: dict[str, Any] = Field(default_factory=dict)
 
     hud: dict[str, Any] = Field(default_factory=dict)
     rentcast: dict[str, Any] = Field(default_factory=dict)
@@ -81,36 +75,19 @@ class RentEnrichBatchOut(BaseModel):
     errors: list[dict[str, Any]] = Field(default_factory=list)
     stopped_early: bool = False
     stop_reason: Optional[str] = None
-    rentcast_budget: dict[str, Any] = Field(default_factory=dict)
+    external_budget: dict[str, Any] = Field(default_factory=dict)
 
 
-# ---------------------------- Budget helpers ----------------------------
-def _rentcast_daily_limit() -> int:
+def _payment_standard_setting() -> float:
+    # Your config currently uses default_payment_standard_pct = 1.10
+    # rent_rules.py normalizes ratio vs percent.
     try:
-        v = getattr(settings, "rentcast_daily_limit", None)
-        if v is None:
-            return 50
-        return int(v)
+        v = getattr(settings, "default_payment_standard_pct", None)
+        return float(v) if v is not None else 1.10
     except Exception:
-        return 50
+        return 1.10
 
 
-def _payment_standard_pct() -> float:
-    """
-    Section 8 uses a Payment Standard (often 90%–110% of FMR; sometimes higher by exception).
-    Keep it in config so it’s a constitution-level parameter.
-    """
-    try:
-        v = getattr(settings, "payment_standard_pct", None)
-        if v is None:
-            return 110.0
-        fv = float(v)
-        return fv if fv > 0 else 110.0
-    except Exception:
-        return 110.0
-
-
-# ---------------------------- DB helpers (multitenancy-safe) ----------------------------
 def _get_or_create_rent_assumption(db: Session, property_id: int, org_id: int) -> RentAssumption:
     ra = db.scalar(
         select(RentAssumption)
@@ -137,12 +114,6 @@ def _emit_rent_trust_signals(
     has_ceiling: bool,
     has_market: bool,
 ):
-    """
-    “Trust loop” wiring:
-    - record raw signals
-    - recompute trust for the property and providers
-    Best-effort: enrich should still succeed if trust layer is absent.
-    """
     try:
         if rentcast_ok is not None:
             record_signal(
@@ -154,16 +125,6 @@ def _emit_rent_trust_signals(
                 value=1.0 if rentcast_ok else 0.0,
                 meta={"property_id": property_id},
             )
-            record_signal(
-                db,
-                org_id=org_id,
-                entity_type="property",
-                entity_id=str(property_id),
-                signal_key="rentcast.success",
-                value=1.0 if rentcast_ok else 0.0,
-                meta={},
-            )
-
         if rentcast_comps_count is not None:
             v = max(0.0, min(1.0, float(rentcast_comps_count) / 10.0))
             record_signal(
@@ -175,7 +136,6 @@ def _emit_rent_trust_signals(
                 value=v,
                 meta={"count": int(rentcast_comps_count)},
             )
-
         if rentcast_dispersion is not None:
             try:
                 record_dispersion_signal(
@@ -208,15 +168,6 @@ def _emit_rent_trust_signals(
                 signal_key="hud.success",
                 value=1.0 if hud_ok else 0.0,
                 meta={"property_id": property_id},
-            )
-            record_signal(
-                db,
-                org_id=org_id,
-                entity_type="property",
-                entity_id=str(property_id),
-                signal_key="hud.success",
-                value=1.0 if hud_ok else 0.0,
-                meta={},
             )
 
         record_signal(
@@ -269,18 +220,33 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
 
     rc_payload: Optional[dict[str, Any]] = None
 
-    # Trust capture vars
     rentcast_ok: bool | None = None
     hud_ok: bool | None = None
     comps_count: int | None = None
     dispersion: float | None = None
 
-    # ---- RentCast market rent + comps + RR proxy (BUDGETED) ----
+    # ---- RentCast market rent + comps (METERED) ----
     try:
         provider = "rentcast"
-        today = date.today()
-        limit = _rentcast_daily_limit()
-        budget_debug = consume_rentcast_call(db, provider=provider, day=today, daily_limit=limit)
+
+        # Single enforcement point:
+        status = consume_external_budget(
+            db,
+            org_id=org_id,
+            provider=provider,
+            units=1,
+            meta={"endpoint": "rent_estimate", "property_id": property_id},
+            metric_key="external_calls_per_day",
+        )
+        budget_debug = {
+            "code": "ok",
+            "metric": status.metric,
+            "provider": status.provider,
+            "limit": status.limit,
+            "used": status.used,
+            "remaining": status.remaining,
+            "reset_at": status.reset_at,
+        }
 
         rc = RentCastClient(getattr(settings, "rentcast_api_key", "") or "")
         rc_payload = rc.rent_estimate(
@@ -352,7 +318,10 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
                     ra.rent_reasonableness_comp = float(rr_proxy)
                     updated_fields.append("rent_reasonableness_comp")
 
-    except ApiBudgetExceeded as e:
+        db.commit()  # commit ledger + rent changes
+
+    except HTTPException as he:
+        # Budget exceeded errors will arrive as HTTPException(402, detail={...})
         rentcast_ok = False
         _emit_rent_trust_signals(
             db,
@@ -365,7 +334,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
             has_ceiling=bool(ra.approved_rent_ceiling),
             has_market=bool(ra.market_rent_estimate),
         )
-        raise HTTPException(status_code=429, detail=str(e))
+        raise
     except Exception as e:
         rentcast_ok = False
         rentcast_debug = {"error": str(e)}
@@ -374,17 +343,16 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
     try:
         hud = HudUserClient(getattr(settings, "hud_user_token", "") or "")
         if not isinstance(rc_payload, dict):
-            raise RuntimeError("HUD FMR requires RentCast payload to derive county FIPS (no USPS crosswalk).")
+            raise RuntimeError("HUD FMR requires RentCast payload to derive county FIPS.")
 
         entityid = RentCastClient.derive_hud_entityid_from_comps(rc_payload)
         if not entityid:
-            raise RuntimeError("Could not derive HUD entityid from RentCast comparables (missing stateFips/countyFips).")
+            raise RuntimeError("Could not derive HUD entityid from RentCast comparables.")
 
         fmr_data = hud.fmr_for_entityid(entityid)
         fmr_value = hud.pick_bedroom_fmr(fmr_data, int(prop.bedrooms or 0))
 
         hud_ok = True
-
         hud_debug = {
             "entityid": entityid,
             "bedrooms": int(prop.bedrooms or 0),
@@ -401,39 +369,28 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         hud_ok = False
         hud_debug = {"error": str(e)}
 
-    # ---- Compute approved ceiling + rent_used using the SINGLE SOURCE OF TRUTH: rent_rules.py ----
-    payment_standard_pct = _payment_standard_pct()
-
+    # ---- Compute approved ceiling + rent_used ----
     approved, candidates = compute_approved_ceiling(
         section8_fmr=ra.section8_fmr,
-        payment_standard_pct=payment_standard_pct,
+        payment_standard_pct=_payment_standard_setting(),
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
-        manual_override=ra.approved_rent_ceiling,  # if already set manually, it wins
+        manual_override=ra.approved_rent_ceiling,  # manual wins
     )
 
-    decision: RentDecision = compute_rent_used(strategy=strategy, market=ra.market_rent_estimate, approved=approved)
+    decision: RentDecision = compute_rent_used(strategy=strategy, market=ra.market_rent_estimate, approved=approved, candidates=candidates)
 
     # Persist authoritative values
-    try:
-        # Keep approved_rent_ceiling synced to the approved result ONLY if it wasn't a manual override.
-        # If you want to explicitly track "manual vs computed", add fields later.
-        if ra.approved_rent_ceiling is None and approved is not None:
-            ra.approved_rent_ceiling = float(approved)
-            updated_fields.append("approved_rent_ceiling")
-    except Exception:
-        pass
+    if ra.approved_rent_ceiling is None and approved is not None:
+        ra.approved_rent_ceiling = float(approved)
+        updated_fields.append("approved_rent_ceiling")
 
-    try:
-        if getattr(ra, "rent_used", None) != decision.rent_used:
-            ra.rent_used = decision.rent_used
-            updated_fields.append("rent_used")
-    except Exception:
-        pass
+    if getattr(ra, "rent_used", None) != decision.rent_used:
+        ra.rent_used = decision.rent_used
+        updated_fields.append("rent_used")
 
     db.commit()
     db.refresh(ra)
 
-    # ---- Trust wiring (post-commit) ----
     _emit_rent_trust_signals(
         db,
         org_id=org_id,
@@ -457,30 +414,27 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         cap_reason=decision.cap_reason,
         explanation=decision.explanation,
         ceiling_candidates=_candidates_to_dicts(candidates),
-        rentcast_budget=budget_debug,
+        external_budget=budget_debug,
         hud=hud_debug,
         rentcast=rentcast_debug,
         updated_fields=updated_fields,
     )
 
 
-# ---------------------------- ROUTES ----------------------------
 @router.get("/enrich/budget")
-def get_rentcast_budget(
+def get_external_budget(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    provider = "rentcast"
-    today = date.today()
-    limit = _rentcast_daily_limit()
-    remaining = get_remaining(db, provider=provider, day=today, daily_limit=limit)
-    used = max(0, limit - remaining)
+    status = get_external_budget_status(db, org_id=p.org_id, provider="rentcast", metric_key="external_calls_per_day")
     return {
-        "provider": provider,
-        "day": today.isoformat(),
-        "daily_limit": limit,
-        "used": used,
-        "remaining": remaining,
+        "code": "ok",
+        "metric": status.metric,
+        "provider": status.provider,
+        "limit": status.limit,
+        "used": status.used,
+        "remaining": status.remaining,
+        "reset_at": status.reset_at,
     }
 
 
@@ -509,14 +463,14 @@ def enrich_rent_batch(
     stopped_early = False
     stop_reason: Optional[str] = None
 
-    provider = "rentcast"
-    today = date.today()
-    daily_limit = _rentcast_daily_limit()
+    before = get_external_budget_status(db, org_id=p.org_id, provider="rentcast", metric_key="external_calls_per_day")
     budget_summary = {
-        "provider": provider,
-        "day": today.isoformat(),
-        "daily_limit": daily_limit,
-        "remaining_before_batch": get_remaining(db, provider=provider, day=today, daily_limit=daily_limit),
+        "provider": before.provider,
+        "metric": before.metric,
+        "limit": before.limit,
+        "used_before": before.used,
+        "remaining_before": before.remaining,
+        "reset_at": before.reset_at,
     }
 
     for pid in pids:
@@ -524,10 +478,11 @@ def enrich_rent_batch(
             _enrich_one(db, pid, org_id=p.org_id, strategy=strategy)
             enriched += 1
         except HTTPException as he:
-            if he.status_code == 429:
+            # If budget exceeded, stop early
+            if he.status_code == 402 and isinstance(he.detail, dict) and he.detail.get("code") == "plan_limit_exceeded":
                 errors.append({"property_id": pid, "error": he.detail, "type": "budget_exceeded"})
                 stopped_early = True
-                stop_reason = "rentcast_budget_exceeded"
+                stop_reason = "external_budget_exceeded"
                 break
             errors.append({"property_id": pid, "error": he.detail, "type": "http"})
         except Exception as e:
@@ -536,7 +491,8 @@ def enrich_rent_batch(
         if sleep_ms:
             time.sleep(sleep_ms / 1000.0)
 
-    budget_summary["remaining_after_batch"] = get_remaining(db, provider=provider, day=today, daily_limit=daily_limit)
+    after = get_external_budget_status(db, org_id=p.org_id, provider="rentcast", metric_key="external_calls_per_day")
+    budget_summary.update({"used_after": after.used, "remaining_after": after.remaining})
 
     return RentEnrichBatchOut(
         snapshot_id=snapshot_id,
@@ -545,7 +501,7 @@ def enrich_rent_batch(
         errors=errors,
         stopped_early=stopped_early,
         stop_reason=stop_reason,
-        rentcast_budget=budget_summary,
+        external_budget=budget_summary,
     )
 
 

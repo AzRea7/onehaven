@@ -3,21 +3,28 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from typing import Any, Optional, Generator
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_owner
 from ..db import get_db, SessionLocal
-from ..models import AgentRun, AgentMessage, AgentTraceEvent
+from ..models import AgentRun, AgentMessage, AgentTraceEvent, AgentRunDeadletter
 from ..services.agent_engine import create_run, mark_approved, apply_approved
 from ..services.agent_orchestrator import plan_agent_runs
 from ..workers.agent_tasks import execute_agent_run
 
 router = APIRouter(prefix="/agent-runs", tags=["agents"])
+
+TERMINAL = {"done", "failed", "timed_out", "blocked"}
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
 
 
 def _loads(s: Optional[str], default: Any) -> Any:
@@ -27,6 +34,13 @@ def _loads(s: Optional[str], default: Any) -> Any:
         return json.loads(s)
     except Exception:
         return default
+
+
+def _dumps(v: Any) -> str:
+    try:
+        return json.dumps(v)
+    except Exception:
+        return "{}"
 
 
 @router.get("/")
@@ -58,6 +72,91 @@ def list_runs(
         }
         for r in rows
     ]
+
+
+@router.get("/deadletter")
+def list_deadletters(
+    limit: int = Query(default=50, ge=1, le=500),
+    run_id: int | None = Query(default=None),
+    include_acked: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    """
+    Operator endpoint: shows runs that ended up in deadletter.
+    This is your "failed runs needing attention" queue.
+    """
+    q = select(AgentRunDeadletter).where(AgentRunDeadletter.org_id == principal.org_id).order_by(AgentRunDeadletter.id.desc())
+    if run_id is not None:
+        q = q.where(AgentRunDeadletter.run_id == int(run_id))
+
+    # If your model has ack fields, honor them. If not, we just return everything.
+    if not include_acked:
+        # defensive: only filter if columns exist
+        try:
+            # type: ignore[attr-defined]
+            q = q.where(getattr(AgentRunDeadletter, "acked_at") == None)  # noqa: E711
+        except Exception:
+            pass
+
+    rows = db.scalars(q.limit(int(limit))).all()
+
+    out: list[dict[str, Any]] = []
+    for d in rows:
+        out.append(
+            {
+                "id": int(getattr(d, "id")),
+                "org_id": int(getattr(d, "org_id")),
+                "run_id": int(getattr(d, "run_id")),
+                "agent_key": getattr(d, "agent_key", None),
+                "reason": getattr(d, "reason", None),
+                "error": getattr(d, "error", None),
+                "created_at": getattr(d, "created_at", None),
+                "acked_at": getattr(d, "acked_at", None),
+                "acked_by_user_id": getattr(d, "acked_by_user_id", None),
+            }
+        )
+    return out
+
+
+@router.post("/deadletter/{dead_id}/ack")
+def ack_deadletter(
+    dead_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    """
+    Acknowledge a deadletter row (mark handled).
+    If your schema doesn't have ack fields, this will no-op safely.
+    """
+    require_owner(principal)
+
+    d = db.scalar(select(AgentRunDeadletter).where(AgentRunDeadletter.id == int(dead_id), AgentRunDeadletter.org_id == principal.org_id))
+    if d is None:
+        raise HTTPException(status_code=404, detail="Deadletter not found")
+
+    # best-effort: only set if columns exist
+    changed = False
+    try:
+        if getattr(d, "acked_at", None) is None:
+            setattr(d, "acked_at", _utcnow())
+            changed = True
+    except Exception:
+        pass
+
+    try:
+        if getattr(d, "acked_by_user_id", None) is None:
+            setattr(d, "acked_by_user_id", int(principal.user_id))
+            changed = True
+    except Exception:
+        pass
+
+    if changed:
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+
+    return {"ok": True, "dead_id": int(dead_id)}
 
 
 @router.get("/{run_id}")
@@ -260,6 +359,75 @@ def dispatch_run(
 
     execute_agent_run.delay(org_id=principal.org_id, run_id=int(r.id))
     return {"ok": True, "queued": True, "run_id": int(r.id)}
+
+
+@router.post("/{run_id}/retry")
+def retry_run(
+    run_id: int,
+    dispatch: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    """
+    Operator action: reset a failed/timed_out/blocked run back to queued and re-dispatch.
+    This is your manual "dead-letter recovery" lever.
+    """
+    require_owner(principal)
+
+    r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
+    if r is None:
+        raise HTTPException(status_code=404, detail="AgentRun not found")
+
+    # Only allow retry if it's terminal (otherwise you're racing the worker)
+    if (r.status or "").lower() not in TERMINAL:
+        raise HTTPException(status_code=409, detail={"code": "run_not_terminal", "status": r.status})
+
+    # Reset to queued
+    r.status = "queued"
+    r.started_at = None
+    r.finished_at = None
+    r.last_error = None
+
+    # If you have approval gating, reset it (best-effort)
+    try:
+        if getattr(r, "approval_status", None) in ("rejected", "approved"):
+            r.approval_status = "pending"
+            r.approved_at = None
+    except Exception:
+        pass
+
+    # Optional: trace event for auditability (only if model supports payload_json)
+    try:
+        ev = AgentTraceEvent(
+            org_id=principal.org_id,
+            run_id=int(r.id),
+            agent_key=str(getattr(r, "agent_key", "")),
+            event_type="retry_requested",
+            payload_json=_dumps(
+                {
+                    "type": "retry_requested",
+                    "payload": {
+                        "run_id": int(r.id),
+                        "by_user_id": int(principal.user_id),
+                        "ts": _utcnow().isoformat(),
+                    },
+                }
+            ),
+            created_at=_utcnow(),
+        )
+        db.add(ev)
+    except Exception:
+        pass
+
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+
+    if dispatch:
+        execute_agent_run.delay(org_id=principal.org_id, run_id=int(r.id))
+        return {"ok": True, "run_id": int(r.id), "status": r.status, "queued": True}
+
+    return {"ok": True, "run_id": int(r.id), "status": r.status, "queued": False}
 
 
 @router.post("/{run_id}/approve")

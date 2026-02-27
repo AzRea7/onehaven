@@ -31,6 +31,7 @@ from .routers.cash import router as cash_router
 from .routers.equity import router as equity_router
 from .routers.ops import router as ops_router
 
+from .middleware.structured_logging import StructuredLoggingMiddleware  
 from .routers.agents import router as agents_router
 from .routers.agent_runs import router as agent_runs_router
 from .routers.workflow import router as workflow_router
@@ -61,6 +62,7 @@ app = FastAPI(
 
 # ✅ Request-ID first (observability baseline)
 app.add_middleware(RequestIdMiddleware)
+app.add_middleware(StructuredLoggingMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
