@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule
+from ..models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule, RentExplainRun
 from ..schemas import BatchEvalOut, UnderwritingResultOut
 from ..domain.decision_engine import score_and_decide
 from ..domain.underwriting import underwrite
@@ -17,10 +17,19 @@ from ..domain.jurisdiction_scoring import compute_friction
 from ..domain.events import emit_workflow_event
 from ..config import settings
 
-# ✅ Phase 3: enforce explain artifact creation
 from .rent import explain_rent
 
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
+
+
+# --- Policy knobs (safe defaults) ------------------------------------
+# If friction is present, do NOT let it hard-REJECT a deal that is otherwise strong.
+# You can later move these into config.py if you want.
+_STRONG_DSCR = 1.30
+_STRONG_CASHFLOW = 400.0
+
+# money tolerance when comparing ceiling values
+_MONEY_TOL = 2.0
 
 
 def _to_pos_float(v: object) -> Optional[float]:
@@ -38,34 +47,62 @@ def _norm_strategy(strategy: Optional[str]) -> str:
     return s if s in {"section8", "market"} else "section8"
 
 
+def _almost_equal(a: Optional[float], b: Optional[float], tol: float = _MONEY_TOL) -> bool:
+    if a is None or b is None:
+        return False
+    return abs(float(a) - float(b)) <= float(tol)
+
+
+def _compute_fmr_adjusted(ra: Optional[RentAssumption], payment_standard_pct: float) -> Optional[float]:
+    if ra is None:
+        return None
+    fmr = _to_pos_float(getattr(ra, "section8_fmr", None))
+    if fmr is None:
+        return None
+    return float(fmr) * float(payment_standard_pct)
+
+
 def _ceiling_and_reason(
     ra: Optional[RentAssumption],
     payment_standard_pct: float,
 ) -> tuple[Optional[float], str, Optional[float]]:
+    """
+    Returns (ceiling, cap_reason, fmr_adjusted)
+
+    cap_reason is one of:
+      - "override"  (true manual override)
+      - "fmr"       (payment standard cap)
+      - "comps"     (rent reasonableness cap)
+      - "none"
+    """
     if ra is None:
         return None, "none", None
 
-    manual = _to_pos_float(getattr(ra, "approved_rent_ceiling", None))
-    if manual is not None:
-        return float(manual), "override", None
+    fmr_adjusted = _compute_fmr_adjusted(ra, payment_standard_pct)
 
-    fmr_adjusted: Optional[float] = None
     candidates: list[tuple[str, float]] = []
-
-    fmr = _to_pos_float(getattr(ra, "section8_fmr", None))
-    if fmr is not None:
-        fmr_adjusted = float(fmr) * float(payment_standard_pct)
+    if fmr_adjusted is not None:
         candidates.append(("fmr", float(fmr_adjusted)))
 
     comps = _to_pos_float(getattr(ra, "rent_reasonableness_comp", None))
     if comps is not None:
         candidates.append(("comps", float(comps)))
 
-    if not candidates:
-        return None, "none", fmr_adjusted
+    computed_ceiling: Optional[float] = None
+    computed_reason: str = "none"
+    if candidates:
+        computed_reason, computed_ceiling = min(candidates, key=lambda x: x[1])
 
-    cap_reason, ceiling = min(candidates, key=lambda x: x[1])
-    return float(ceiling), cap_reason, fmr_adjusted
+    approved = _to_pos_float(getattr(ra, "approved_rent_ceiling", None))
+    if approved is None:
+        return computed_ceiling, computed_reason, fmr_adjusted
+
+    # If approved matches computed within tolerance, treat as computed (NOT manual override)
+    if computed_ceiling is not None and _almost_equal(approved, computed_ceiling):
+        return float(computed_ceiling), computed_reason, fmr_adjusted
+
+    # Otherwise it’s a true override
+    return float(approved), "override", fmr_adjusted
 
 
 def _rent_used_for_underwriting(
@@ -92,6 +129,7 @@ def _rent_used_for_underwriting(
         notes.append("Market strategy: missing market_rent_estimate; fell back to rent_rule_min_pct heuristic.")
         return float(est), True, notes, computed_ceiling, "none", fmr_adjusted
 
+    # section8
     if market is None and computed_ceiling is None:
         asking = float(getattr(d, "asking_price", 0.0) or 0.0)
         est = asking * float(settings.rent_rule_min_pct)
@@ -110,6 +148,43 @@ def _rent_used_for_underwriting(
         notes.append("Section 8 cap applied: market_rent_estimate > ceiling.")
 
     return float(min(float(market), float(computed_ceiling))), False, notes, computed_ceiling, cap_reason, fmr_adjusted
+
+
+def _is_strong_underwriting(*, dscr: float, cash_flow: float) -> bool:
+    return float(dscr) >= float(_STRONG_DSCR) and float(cash_flow) >= float(_STRONG_CASHFLOW)
+
+
+def _apply_friction_safety_net(
+    *,
+    decision_before_friction: str,
+    decision_after_scoring: str,
+    fr_mult: float,
+    fr_reasons: list[str],
+    uw_dscr: float,
+    uw_cash_flow: float,
+    reasons: list[str],
+) -> str:
+    """
+    Rule:
+      If friction is present (multiplier != 1 or reasons exist)
+      AND the deal would otherwise be PASS (before friction)
+      BUT the result is REJECT after scoring,
+      AND underwriting is strong,
+      => convert to REVIEW, append a clear reason.
+    """
+    friction_present = (abs(float(fr_mult) - 1.0) > 1e-9) or bool(fr_reasons)
+    if not friction_present:
+        return decision_after_scoring
+
+    if decision_before_friction == "PASS" and decision_after_scoring == "REJECT":
+        if _is_strong_underwriting(dscr=uw_dscr, cash_flow=uw_cash_flow):
+            reasons.append(
+                f"Converted REJECT→REVIEW: compliance friction present (x{float(fr_mult):.2f}) but underwriting is strong "
+                f"(DSCR {float(uw_dscr):.2f}, cash_flow ${float(uw_cash_flow):.0f})."
+            )
+            return "REVIEW"
+
+    return decision_after_scoring
 
 
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
@@ -149,17 +224,10 @@ def evaluate_snapshot(
                 db.rollback()
                 continue
 
-            ra = db.scalar(
-                select(RentAssumption)
-                .where(RentAssumption.property_id == p.id)
-                .where(RentAssumption.org_id == principal.org_id)
-            )
-
             deal_strategy = _norm_strategy(strategy or getattr(d, "strategy", None) or "section8")
 
-            # ✅ Phase 3 DoD: force explain artifact creation (RentExplainRun)
-            # This will also create a RentAssumption if it doesn't exist (via get_or_create inside rent.py).
-            explain_out = explain_rent(
+            # Force explain artifact creation (RentExplainRun) + persist rent_used/ceiling
+            _ = explain_rent(
                 property_id=int(p.id),
                 strategy=deal_strategy,
                 payment_standard_pct=float(ps),
@@ -167,7 +235,24 @@ def evaluate_snapshot(
                 db=db,
                 p=principal,
             )
-            rent_explain_run_id = getattr(explain_out, "run_id", None)
+
+            # Re-fetch RA after explain (explain may create/update it)
+            ra = db.scalar(
+                select(RentAssumption)
+                .where(RentAssumption.property_id == p.id)
+                .where(RentAssumption.org_id == principal.org_id)
+            )
+
+            rent_explain_run_id = db.scalar(
+                select(RentExplainRun.id)
+                .where(
+                    RentExplainRun.org_id == principal.org_id,
+                    RentExplainRun.property_id == int(p.id),
+                    RentExplainRun.strategy == deal_strategy,
+                )
+                .order_by(desc(RentExplainRun.id))
+                .limit(1)
+            )
 
             gross_rent, estimated, rent_notes, computed_ceiling, cap_reason, fmr_adjusted = _rent_used_for_underwriting(
                 strategy=deal_strategy,
@@ -176,11 +261,11 @@ def evaluate_snapshot(
                 payment_standard_pct=ps,
             )
 
-            # keep RA aligned with used rent
             if ra is not None:
                 ra.rent_used = float(gross_rent)
-                override_ok = _to_pos_float(getattr(ra, "approved_rent_ceiling", None)) is not None
-                if (not override_ok) and (computed_ceiling is not None):
+                # Only auto-fill approved ceiling if empty
+                manual = _to_pos_float(getattr(ra, "approved_rent_ceiling", None))
+                if manual is None and computed_ceiling is not None:
                     ra.approved_rent_ceiling = float(computed_ceiling)
                 db.add(ra)
 
@@ -199,7 +284,8 @@ def evaluate_snapshot(
                 rehab_estimate=float(getattr(d, "rehab_estimate", 0.0) or 0.0),
             )
 
-            decision, score, reasons = score_and_decide(
+            # Base scoring (pre-friction)
+            decision_pre_friction, score_pre_friction, reasons = score_and_decide(
                 property=p,
                 deal=d,
                 rent_assumption=ra,
@@ -209,8 +295,8 @@ def evaluate_snapshot(
 
             reasons.extend(rent_notes)
 
-            if estimated and decision == "PASS":
-                decision = "REVIEW"
+            if estimated and decision_pre_friction == "PASS":
+                decision_pre_friction = "REVIEW"
                 reasons.append("Rent was heuristic-estimated; verify comps/FMR/ceiling before PASS.")
 
             jr = db.scalar(
@@ -236,12 +322,31 @@ def evaluate_snapshot(
             if fr_reasons:
                 reasons.extend([f"[Jurisdiction] {r}" for r in fr_reasons])
 
-            if jr is None and decision == "PASS":
-                decision = "REVIEW"
+            # If we literally have no jurisdiction row, we still block PASS → REVIEW
+            if jr is None and decision_pre_friction == "PASS":
+                decision_pre_friction = "REVIEW"
                 reasons.append("No jurisdiction row → cannot PASS without compliance friction data.")
 
-            score = int(round(float(score) * fr_mult))
+            # Apply friction to score
+            score = int(round(float(score_pre_friction) * fr_mult))
             score = max(0, min(100, score))
+
+            # IMPORTANT:
+            # We keep the model decision as-is unless safety net triggers.
+            decision = decision_pre_friction
+
+            # If your decision_engine internally can produce REJECT based on reasons,
+            # you might already be REJECT here. We apply the safety net AFTER friction,
+            # but only in the PASS→REJECT scenario.
+            decision = _apply_friction_safety_net(
+                decision_before_friction=decision_pre_friction,
+                decision_after_scoring=decision,
+                fr_mult=fr_mult,
+                fr_reasons=fr_reasons,
+                uw_dscr=float(uw.dscr),
+                uw_cash_flow=float(uw.cash_flow),
+                reasons=reasons,
+            )
 
             existing = db.scalar(
                 select(UnderwritingResult)
@@ -291,25 +396,25 @@ def evaluate_snapshot(
             existing.rent_cap_reason = str(cap_reason or "none")
             existing.fmr_adjusted = float(fmr_adjusted) if fmr_adjusted is not None else None
 
-            # ✅ if the model has this field, persist it
             if rent_explain_run_id is not None and hasattr(existing, "rent_explain_run_id"):
                 setattr(existing, "rent_explain_run_id", int(rent_explain_run_id))
-
-            db.commit()
 
             emit_workflow_event(
                 db,
                 org_id=principal.org_id,
                 actor_user_id=principal.user_id,
                 event_type="deal_evaluated",
+                property_id=int(d.property_id),
                 payload={
-                    "deal_id": d.id,
-                    "property_id": d.property_id,
+                    "deal_id": int(d.id),
+                    "property_id": int(d.property_id),
                     "decision": decision,
                     "score": int(score),
                     "rent_explain_run_id": rent_explain_run_id,
+                    "jurisdiction_multiplier": float(fr_mult),
                 },
             )
+
             db.commit()
 
             if decision == "PASS":
@@ -410,7 +515,6 @@ def evaluate_results(
             "bedrooms": getattr(p, "bedrooms", None),
             "bathrooms": getattr(p, "bathrooms", None),
         }
-        # optionally expose explain run id if your schema supports it
         if hasattr(r, "rent_explain_run_id"):
             payload["rent_explain_run_id"] = getattr(r, "rent_explain_run_id")
         out.append(UnderwritingResultOut.model_validate(payload))

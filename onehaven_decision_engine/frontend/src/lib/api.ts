@@ -3,6 +3,8 @@ export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 
 type AuthContext = {
   orgSlug: string;
+  devEmail?: string;
+  devRole?: string;
 };
 
 export type Principal = {
@@ -26,7 +28,10 @@ export function setOrgSlug(slug: string) {
 }
 
 function getAuth(): AuthContext {
-  return { orgSlug: getOrgSlug() };
+  const env = (import.meta as any).env || {};
+  const devEmail = (env.VITE_DEV_EMAIL as string | undefined) || undefined;
+  const devRole = (env.VITE_DEV_ROLE as string | undefined) || undefined;
+  return { orgSlug: getOrgSlug(), devEmail, devRole };
 }
 
 /**
@@ -67,8 +72,9 @@ function qs(params: Record<string, any>) {
 
 /**
  * ✅ EventSource cannot set headers.
- * So for SSE we pass org context via querystring: ?org_slug=...
- * Backend should accept org_slug query param as equivalent to X-Org-Slug for SSE routes.
+ * So for SSE we pass auth via querystring:
+ *   ?org_slug=...&user_email=...&user_role=...
+ * Backend must accept these as dev-auth fallbacks.
  */
 function makeEventSource(pathWithQuery: string): EventSource {
   const auth = getAuth();
@@ -80,6 +86,14 @@ function makeEventSource(pathWithQuery: string): EventSource {
 
   if (!url.searchParams.get("org_slug"))
     url.searchParams.set("org_slug", auth.orgSlug);
+
+  // ✅ dev auth fallbacks for SSE
+  if (auth.devEmail && !url.searchParams.get("user_email")) {
+    url.searchParams.set("user_email", auth.devEmail);
+  }
+  if (auth.devRole && !url.searchParams.get("user_role")) {
+    url.searchParams.set("user_role", auth.devRole);
+  }
 
   return new EventSource(url.toString(), { withCredentials: true } as any);
 }
@@ -117,6 +131,11 @@ async function request<T>(
       headers: {
         "Content-Type": "application/json",
         "X-Org-Slug": auth.orgSlug,
+
+        // ✅ browser parity with curl dev auth
+        ...(auth.devEmail ? { "X-User-Email": auth.devEmail } : {}),
+        ...(auth.devRole ? { "X-User-Role": auth.devRole } : {}),
+
         ...(init?.headers || {}),
       },
       signal: init?.signal,
@@ -340,20 +359,14 @@ export const api = {
   ) =>
     request<any>(
       `/compliance/checklist/${propertyId}/items/${encodeURIComponent(itemCode)}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      },
+      { method: "PATCH", body: JSON.stringify(payload) },
     ),
 
   // Rehab
   rehabTasks: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/rehab/tasks${qs({ property_id: propertyId, limit: 500 })}`,
-      {
-        cacheTtlMs: 2_000,
-        signal,
-      },
+      { cacheTtlMs: 2_000, signal },
     ),
 
   createRehabTask: (payload: any) =>
@@ -373,10 +386,7 @@ export const api = {
   leases: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/tenants/leases${qs({ property_id: propertyId, limit: 200 })}`,
-      {
-        cacheTtlMs: 2_000,
-        signal,
-      },
+      { cacheTtlMs: 2_000, signal },
     ),
 
   createLease: (payload: any) =>
@@ -389,10 +399,7 @@ export const api = {
   txns: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/cash/transactions${qs({ property_id: propertyId, limit: 1000 })}`,
-      {
-        cacheTtlMs: 2_000,
-        signal,
-      },
+      { cacheTtlMs: 2_000, signal },
     ),
 
   createTxn: (payload: any) =>
@@ -405,10 +412,7 @@ export const api = {
   valuations: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/equity/valuations${qs({ property_id: propertyId, limit: 200 })}`,
-      {
-        cacheTtlMs: 2_000,
-        signal,
-      },
+      { cacheTtlMs: 2_000, signal },
     ),
 
   createValuation: (payload: any) =>
@@ -420,28 +424,12 @@ export const api = {
   // Agents
   agents: () => requestArray<any>(`/agents`, { cacheTtlMs: 4_000 }),
 
-  // -------------------------
-  // ✅ Agent Slots (AgentSlots.tsx depends on these)
-  // -------------------------
-
-  // Accepts (signal?) OR (signal, cacheTtlMs)
+  // Agent Slots
   slotSpecs: (signal?: AbortSignal, cacheTtlMs: number = 10_000) =>
     requestArray<any>(`/agents/slots/specs`, { cacheTtlMs, signal }),
 
-  /**
-   * ✅ Compat signatures:
-   *   slotAssignments()
-   *   slotAssignments(propertyId, signal?)
-   *   slotAssignments({ property_id, limit, signal })
-   */
   slotAssignments: (
-    a?:
-      | number
-      | {
-          property_id?: number;
-          limit?: number;
-          signal?: AbortSignal;
-        },
+    a?: number | { property_id?: number; limit?: number; signal?: AbortSignal },
     b?: AbortSignal,
   ) => {
     let property_id: number | undefined;
@@ -457,7 +445,6 @@ export const api = {
       limit = a.limit ?? 200;
       signal = a.signal;
     } else {
-      // slotAssignments()
       limit = 200;
       signal = b;
     }
@@ -480,9 +467,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // -------------------------
-  // ✅ Agent Runs (compat + SSE)
-  // -------------------------
+  // Agent Runs
   agentRunsList: (arg: number | { property_id: number }) => {
     const propertyId = typeof arg === "number" ? arg : arg.property_id;
     return requestArray<any>(`/agent-runs${qs({ property_id: propertyId })}`, {

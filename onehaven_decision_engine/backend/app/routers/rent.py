@@ -1,4 +1,3 @@
-# backend/app/routers/rent.py
 from __future__ import annotations
 
 import json
@@ -20,7 +19,7 @@ from ..models import (
     RentObservation,
     RentCalibration,
     AuditEvent,
-    RentExplainRun,  # ✅ Phase 3 artifact
+    RentExplainRun,
 )
 from ..schemas import (
     RentAssumptionOut,
@@ -99,14 +98,14 @@ def _persist_rent_explain_run(
         org_id=org_id,
         property_id=property_id,
         strategy=strategy,
-        cap_reason=cap_reason,
+        cap_reason=str(cap_reason),
         explain_json=json.dumps(explain_payload, sort_keys=True),
         decision_version=str(getattr(settings, "decision_version", "unknown")),
         payment_standard_pct_used=float(payment_standard_pct_used),
         created_at=datetime.utcnow(),
     )
     db.add(run)
-    db.flush()  # so run.id exists before commit
+    db.flush()
     return run
 
 
@@ -194,12 +193,7 @@ def upsert_rent_assumption_alias(
 
 
 @router.post("/comps/{property_id}", response_model=RentCompsSummaryOut)
-def add_comps_batch(
-    property_id: int,
-    payload: RentCompsBatchIn,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
+def add_comps_batch(property_id: int, payload: RentCompsBatchIn, db: Session = Depends(get_db), p=Depends(get_principal)):
     prop = db.get(Property, property_id)
     if not prop or prop.org_id != p.org_id:
         raise HTTPException(status_code=404, detail="property not found")
@@ -225,7 +219,6 @@ def add_comps_batch(
         rents.append(float(c.rent))
 
     summary = summarize_comps(rents)
-
     ra.rent_reasonableness_comp = summary.median_rent
     db.add(ra)
     db.commit()
@@ -335,7 +328,12 @@ def recompute(
         payment_standard_pct=pct,
     )
 
-    ra = db.execute(select(RentAssumption).where(RentAssumption.property_id == property_id, RentAssumption.org_id == p.org_id)).scalar_one_or_none()
+    ra = db.execute(
+        select(RentAssumption).where(
+            RentAssumption.property_id == property_id,
+            RentAssumption.org_id == p.org_id,
+        )
+    ).scalar_one_or_none()
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
 
@@ -364,9 +362,6 @@ def recompute(
     )
 
 
-# -------------------------------------------------------------------
-# /explain/batch MUST be defined before /explain/{property_id}
-# -------------------------------------------------------------------
 @router.get("/explain/batch", response_model=RentExplainBatchOut)
 def explain_rent_batch(
     snapshot_id: int = Query(...),
@@ -380,7 +375,6 @@ def explain_rent_batch(
     strategy = _norm_strategy(strategy)
     pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
 
-    # ✅ Phase 0: deals must be org-scoped at query time (not filtered after)
     deals = db.scalars(
         select(Deal)
         .where(Deal.snapshot_id == snapshot_id, Deal.org_id == p.org_id)
@@ -448,10 +442,11 @@ def explain_rent(
     caps: list[float] = []
 
     fmr = _to_pos_float(ra.section8_fmr)
+    fmr_adjusted: Optional[float] = None
     if fmr is not None:
-        ps = float(fmr) * float(pct)
-        caps.append(ps)
-        ceiling_candidates.append({"type": "payment_standard", "value": ps})
+        fmr_adjusted = float(fmr) * float(pct)
+        caps.append(float(fmr_adjusted))
+        ceiling_candidates.append({"type": "payment_standard", "value": float(fmr_adjusted)})
 
     rr = _to_pos_float(ra.rent_reasonableness_comp)
     if rr is not None:
@@ -493,11 +488,11 @@ def explain_rent(
             cap_reason = "capped" if float(market) > float(approved) else "uncapped"
             explanation = "Section 8 strategy caps rent by the strictest limit (approved ceiling vs market estimate)."
 
-    # ✅ Phase 3 DoD: persist immutable explain artifact ALWAYS
     explain_payload = {
         "property_id": property_id,
         "strategy": strategy,
         "payment_standard_pct": float(pct),
+        "fmr_adjusted": fmr_adjusted,
         "market_rent_estimate": market,
         "section8_fmr": ra.section8_fmr,
         "rent_reasonableness_comp": ra.rent_reasonableness_comp,
@@ -528,17 +523,17 @@ def explain_rent(
         org_id=p.org_id,
         actor_user_id=p.user_id,
         event_type="rent_explained",
-        payload={"property_id": property_id, "run_id": run.id, "strategy": strategy},
+        property_id=property_id,
+        payload={"property_id": property_id, "run_id": int(run.id), "strategy": strategy},
     )
 
     db.commit()
 
-    # If your RentExplainOut supports run_id/created_at, great.
-    # If it doesn't, remove those two fields from the return call.
     return RentExplainOut(
         property_id=property_id,
         strategy=strategy,
         payment_standard_pct=float(pct),
+        fmr_adjusted=fmr_adjusted,
         market_rent_estimate=market,
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
@@ -546,7 +541,8 @@ def explain_rent(
         calibrated_market_rent=None,
         rent_used=rent_used,
         ceiling_candidates=ceiling_candidates,
+        cap_reason=cap_reason,
         explanation=explanation,
-        run_id=run.id,               # ✅ new
-        created_at=run.created_at,   # ✅ new
+        run_id=int(run.id),
+        created_at=run.created_at,
     )

@@ -41,8 +41,7 @@ def create_task(payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depen
         created_at=datetime.utcnow(),
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     emit_audit(
         db,
@@ -59,21 +58,18 @@ def create_task(payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depen
         org_id=p.org_id,
         actor_user_id=p.user_id,
         event_type="rehab_task_created",
-        payload={"task_id": row.id, "property_id": row.property_id, "status": row.status},
+        property_id=row.property_id,
+        payload={"task_id": int(row.id), "property_id": int(row.property_id), "status": row.status},
     )
-    db.commit()
 
+    db.commit()
+    db.refresh(row)
     return row
 
 
 @router.get("/tasks", response_model=list[RehabTaskOut])
-def list_tasks(
-    property_id: int = Query(...),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
+def list_tasks(property_id: int = Query(...), db: Session = Depends(get_db), p=Depends(get_principal)):
     _get_property_or_404(db, org_id=p.org_id, property_id=property_id)
-
     rows = db.scalars(
         select(RehabTask)
         .where(RehabTask.org_id == p.org_id, RehabTask.property_id == property_id)
@@ -91,7 +87,6 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
     before = row.model_dump()
     old_status = getattr(row, "status", None)
 
-    # if property_id changes, validate org ownership
     if payload.property_id != row.property_id:
         _get_property_or_404(db, org_id=p.org_id, property_id=payload.property_id)
         row.property_id = payload.property_id
@@ -106,8 +101,7 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
     row.notes = payload.notes
 
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     emit_audit(
         db,
@@ -120,14 +114,14 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
         after=row.model_dump(),
     )
 
-    # Phase 5: emit distinct signal if status changed
     if old_status != row.status:
         emit_workflow_event(
             db,
             org_id=p.org_id,
             actor_user_id=p.user_id,
             event_type="rehab_task_status_changed",
-            payload={"task_id": row.id, "property_id": row.property_id, "from": old_status, "to": row.status},
+            property_id=row.property_id,
+            payload={"task_id": int(row.id), "property_id": int(row.property_id), "from": old_status, "to": row.status},
         )
     else:
         emit_workflow_event(
@@ -135,10 +129,12 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
             org_id=p.org_id,
             actor_user_id=p.user_id,
             event_type="rehab_task_updated",
-            payload={"task_id": row.id, "property_id": row.property_id},
+            property_id=row.property_id,
+            payload={"task_id": int(row.id), "property_id": int(row.property_id)},
         )
 
     db.commit()
+    db.refresh(row)
     return row
 
 
@@ -149,10 +145,10 @@ def delete_task(task_id: int, db: Session = Depends(get_db), p=Depends(get_princ
         raise HTTPException(status_code=404, detail="rehab task not found")
 
     before = row.model_dump()
-    prop_id = row.property_id
+    prop_id = int(row.property_id)
 
     db.delete(row)
-    db.commit()
+    db.flush()
 
     emit_audit(
         db,
@@ -169,7 +165,8 @@ def delete_task(task_id: int, db: Session = Depends(get_db), p=Depends(get_princ
         org_id=p.org_id,
         actor_user_id=p.user_id,
         event_type="rehab_task_deleted",
-        payload={"task_id": task_id, "property_id": prop_id},
+        property_id=prop_id,
+        payload={"task_id": int(task_id), "property_id": prop_id},
     )
 
     db.commit()

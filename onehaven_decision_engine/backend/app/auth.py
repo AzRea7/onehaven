@@ -137,19 +137,28 @@ def _get_user_by_email(db: Session, email: str) -> AppUser | None:
 
 
 def _get_membership(db: Session, org_id: int, user_id: int) -> OrgMembership | None:
-    return db.scalar(select(OrgMembership).where(OrgMembership.org_id == org_id, OrgMembership.user_id == user_id))
+    return db.scalar(
+        select(OrgMembership).where(OrgMembership.org_id == org_id, OrgMembership.user_id == user_id)
+    )
 
 
 def _get_plan_code_for_org(db: Session, org_id: int) -> str | None:
     try:
-        sub = db.scalar(select(Subscription).where(Subscription.org_id == org_id).order_by(Subscription.id.desc()))
+        sub = db.scalar(
+            select(Subscription).where(Subscription.org_id == org_id).order_by(Subscription.id.desc())
+        )
         if sub is not None:
             status = getattr(sub, "status", None)
             plan_code = getattr(sub, "plan_code", None)
             if (status is None or str(status) == "active") and plan_code:
                 return str(plan_code)
     except Exception:
-        pass
+        # ✅ CRITICAL: Any SQL error aborts the transaction in Postgres until rollback.
+        # Swallowing the exception without rollback poisons the session -> InFailedSqlTransaction later.
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
     return str(getattr(settings, "default_plan_code", "free") or "free")
 
@@ -222,7 +231,8 @@ def get_principal(
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ) -> Principal:
-    org_slug = str(x_org_slug or "").strip()
+    # ✅ allow query fallback for SSE (EventSource can't send headers)
+    org_slug = str(x_org_slug or request.query_params.get("org_slug") or "").strip()
     if not org_slug:
         raise HTTPException(status_code=401, detail="Missing X-Org-Slug (active org context).")
 
@@ -254,8 +264,17 @@ def get_principal(
 
     # 3) Dev spoofing
     if auth_mode == "dev":
-        email = (request.headers.get("X-User-Email") or "").strip().lower()
-        role_hint = (request.headers.get("X-User-Role") or "owner").strip().lower()
+        # header first, query fallback for SSE
+        email = (
+            (request.headers.get("X-User-Email") or request.query_params.get("user_email") or "")
+            .strip()
+            .lower()
+        )
+        role_hint = (
+            (request.headers.get("X-User-Role") or request.query_params.get("user_role") or "owner")
+            .strip()
+            .lower()
+        )
         if not email:
             raise HTTPException(status_code=401, detail="Missing X-User-Email for dev auth")
 
@@ -278,7 +297,12 @@ def get_principal(
         if org is None or user is None:
             raise HTTPException(status_code=401, detail="Dev auth could not provision user/org")
 
-        mem = db.scalar(select(OrgMembership).where(OrgMembership.org_id == int(org.id), OrgMembership.user_id == int(user.id)))
+        mem = db.scalar(
+            select(OrgMembership).where(
+                OrgMembership.org_id == int(org.id),
+                OrgMembership.user_id == int(user.id),
+            )
+        )
         if mem is None and dev_auto_provision:
             mem = OrgMembership(
                 org_id=int(org.id),
