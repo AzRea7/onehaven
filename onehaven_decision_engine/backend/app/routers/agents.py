@@ -24,6 +24,17 @@ from ..schemas import (
 from ..domain.agents.registry import AGENTS, SLOTS, AGENT_SPECS
 from ..services.agent_engine import create_and_execute_run
 
+# Optional trust wiring (no hard dependency)
+try:
+    from ..services.trust_service import record_signal, recompute_and_persist  # type: ignore
+except Exception:  # pragma: no cover
+    def record_signal(*args, **kwargs):  # type: ignore
+        return None
+
+    def recompute_and_persist(*args, **kwargs):  # type: ignore
+        return None
+
+
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
@@ -71,7 +82,7 @@ def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends
         if not prop:
             raise HTTPException(status_code=404, detail="property not found")
 
-    # IMPORTANT: your agent_engine.create_and_execute_run expects input_payload (dict) and actor_user_id
+    # Create + dispatch run (usually async via worker)
     res = create_and_execute_run(
         db,
         org_id=p.org_id,
@@ -79,23 +90,35 @@ def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends
         agent_key=payload.agent_key,
         property_id=payload.property_id,
         input_payload=payload.input_json or {},
-        dispatch=True,  # async by default (worker)
+        dispatch=True,
     )
 
-    # res is a dict (mode async/sync). But your response_model is AgentRunOut.
-    # To keep it stable for your UI, return the created AgentRun row when async.
-    if res.get("mode") == "async":
-        run_id = int(res["run_id"])
-        run = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == p.org_id))
-        if not run:
-            raise HTTPException(status_code=500, detail="run created but not found")
-        return run
-
-    # sync path (rare)
     run_id = int(res["run_id"])
     run = db.scalar(select(AgentRun).where(AgentRun.id == run_id, AgentRun.org_id == p.org_id))
     if not run:
-        raise HTTPException(status_code=500, detail="run executed but row not found")
+        raise HTTPException(status_code=500, detail="run created but not found")
+
+    # Trust: the *creation* of a run is not success/failure, but it is a signal that an agent was requested.
+    # This helps you answer: “why is the system busy?” and makes runs observable.
+    try:
+        record_signal(
+            db,
+            org_id=p.org_id,
+            entity_type="property" if payload.property_id is not None else "org",
+            entity_id=str(payload.property_id if payload.property_id is not None else p.org_id),
+            signal_key=f"agent.{payload.agent_key}.requested",
+            value=1.0,
+            meta={"run_id": run_id, "actor_user_id": p.user_id},
+        )
+        recompute_and_persist(
+            db,
+            p.org_id,
+            "property" if payload.property_id is not None else "org",
+            str(payload.property_id if payload.property_id is not None else p.org_id),
+        )
+    except Exception:
+        pass
+
     return run
 
 
@@ -229,6 +252,28 @@ def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Dep
         db.add(existing)
 
         _emit_event(existing.owner_type, existing.assignee, existing.status)
+
+        # Trust: manual slot assignment/override is *always* a trust-relevant event.
+        # We record it as “manual_override.slot_assignment”. Your trust formula can penalize or just lower confidence.
+        try:
+            record_signal(
+                db,
+                org_id=p.org_id,
+                entity_type="property" if payload.property_id is not None else "org",
+                entity_id=str(payload.property_id if payload.property_id is not None else p.org_id),
+                signal_key="property.manual_override.slot_assignment",
+                value=0.4,
+                meta={"slot_key": payload.slot_key, "assignee": existing.assignee, "status": existing.status},
+            )
+            recompute_and_persist(
+                db,
+                p.org_id,
+                "property" if payload.property_id is not None else "org",
+                str(payload.property_id if payload.property_id is not None else p.org_id),
+            )
+        except Exception:
+            pass
+
         db.commit()
         db.refresh(existing)
         return existing
@@ -246,6 +291,26 @@ def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Dep
     )
     db.add(row)
     _emit_event(row.owner_type, row.assignee, row.status)
+
+    try:
+        record_signal(
+            db,
+            org_id=p.org_id,
+            entity_type="property" if payload.property_id is not None else "org",
+            entity_id=str(payload.property_id if payload.property_id is not None else p.org_id),
+            signal_key="property.manual_override.slot_assignment",
+            value=0.4,
+            meta={"slot_key": payload.slot_key, "assignee": row.assignee, "status": row.status},
+        )
+        recompute_and_persist(
+            db,
+            p.org_id,
+            "property" if payload.property_id is not None else "org",
+            str(payload.property_id if payload.property_id is not None else p.org_id),
+        )
+    except Exception:
+        pass
+
     db.commit()
     db.refresh(row)
     return row

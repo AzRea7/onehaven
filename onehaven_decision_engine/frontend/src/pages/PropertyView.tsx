@@ -191,6 +191,25 @@ function ChecklistItemCard({
   );
 }
 
+function TrustPill({ score }: { score: number | null }) {
+  const s =
+    score == null ? null : Math.max(0, Math.min(100, Math.round(score)));
+  const cls =
+    s == null
+      ? "border-white/10 bg-white/[0.03] text-zinc-300"
+      : s >= 80
+        ? "border-green-400/20 bg-green-400/10 text-green-200"
+        : s >= 55
+          ? "border-yellow-300/20 bg-yellow-300/10 text-yellow-100"
+          : "border-red-400/20 bg-red-400/10 text-red-200";
+
+  return (
+    <span className={`text-[11px] px-2 py-1 rounded-full border ${cls}`}>
+      {s == null ? "—" : `Trust ${s}`}
+    </span>
+  );
+}
+
 export default function PropertyView() {
   const { id } = useParams();
   const propertyId = Number(id);
@@ -198,6 +217,9 @@ export default function PropertyView() {
   const [tab, setTab] = React.useState<Tab>("Deal");
   const [bundle, setBundle] = React.useState<any | null>(null);
   const [ops, setOps] = React.useState<any | null>(null);
+
+  const [trust, setTrust] = React.useState<any | null>(null);
+  const [trustErr, setTrustErr] = React.useState<string | null>(null);
 
   const [err, setErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -229,14 +251,25 @@ export default function PropertyView() {
     try {
       setErr(null);
 
-      // Load bundle + ops in parallel (ops is the loop-closer)
-      const [out, opsOut] = await Promise.all([
+      // Load bundle + ops + trust in parallel
+      const [out, opsOut, trustOut] = await Promise.all([
         api.propertyBundle(propertyId, ac.signal),
         api.opsPropertySummary(propertyId, 90, ac.signal).catch(() => null),
+        api
+          .trustGet("property", propertyId, ac.signal)
+          .then((x) => {
+            setTrustErr(null);
+            return x;
+          })
+          .catch((e) => {
+            setTrustErr(String(e?.message || e));
+            return null;
+          }),
       ]);
 
       setBundle(out);
       setOps(opsOut);
+      setTrust(trustOut);
 
       try {
         const latest = await api.checklistLatest(propertyId, ac.signal);
@@ -248,6 +281,7 @@ export default function PropertyView() {
       if (String(e?.name) === "AbortError") return;
       setBundle(null);
       setOps(null);
+      setTrust(null);
       setErr(String(e.message || e));
     }
   }
@@ -305,8 +339,7 @@ export default function PropertyView() {
     );
   }
 
-  // ✅ FIX: evaluateProperty no longer exists on typed api.
-  // Use runtime fallback to keep compatibility with older backend routes.
+  // Runtime fallback kept
   async function evaluate() {
     await doAction("Evaluating…", async () => {
       const strategy = d?.strategy || "section8";
@@ -371,6 +404,26 @@ export default function PropertyView() {
   const nextActions: string[] = Array.isArray(ops?.next_actions)
     ? ops.next_actions
     : [];
+
+  // Trust bits (defensive)
+  const trustScore =
+    trust?.score != null
+      ? Number(trust.score)
+      : trust?.trust_score != null
+        ? Number(trust.trust_score)
+        : null;
+  const trustConfidence =
+    trust?.confidence ?? trust?.confidence_label ?? trust?.band ?? null;
+  const positives: any[] = Array.isArray(trust?.top_positive)
+    ? trust.top_positive
+    : Array.isArray(trust?.positives)
+      ? trust.positives
+      : [];
+  const negatives: any[] = Array.isArray(trust?.top_negative)
+    ? trust.top_negative
+    : Array.isArray(trust?.negatives)
+      ? trust.negatives
+      : [];
 
   return (
     <div className="relative space-y-5">
@@ -439,7 +492,7 @@ export default function PropertyView() {
         </div>
       )}
 
-      {/* ✅ NEW: Reality Loop Panel (Phase 3/4 closer) */}
+      {/* Reality + Trust + Slots */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div className="lg:col-span-2">
           <Panel
@@ -554,7 +607,76 @@ export default function PropertyView() {
         </div>
 
         <div className="space-y-3">
+          {/* ✅ NEW: Trust Card (visible or it rots) */}
+          <Panel title="Trust" right={<TrustPill score={trustScore} />}>
+            {trust == null ? (
+              <div className="text-sm text-zinc-400">
+                Trust is not available yet.
+                {trustErr ? (
+                  <div className="mt-2 text-xs text-zinc-500">{trustErr}</div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Row
+                  k="Score"
+                  v={trustScore != null ? `${Math.round(trustScore)}/100` : "—"}
+                />
+                <Row k="Confidence" v={trustConfidence ?? "—"} />
+                <div className="grid grid-cols-1 gap-2">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <div className="text-[11px] text-zinc-500 mb-2">
+                      Top positives
+                    </div>
+                    {positives.length ? (
+                      <div className="space-y-1">
+                        {positives.slice(0, 3).map((x: any, i: number) => (
+                          <div key={i} className="text-sm text-zinc-200">
+                            •{" "}
+                            {x.signal_key ||
+                              x.key ||
+                              x.name ||
+                              JSON.stringify(x)}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-zinc-400">—</div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <div className="text-[11px] text-zinc-500 mb-2">
+                      Top negatives
+                    </div>
+                    {negatives.length ? (
+                      <div className="space-y-1">
+                        {negatives.slice(0, 3).map((x: any, i: number) => (
+                          <div key={i} className="text-sm text-zinc-200">
+                            •{" "}
+                            {x.signal_key ||
+                              x.key ||
+                              x.name ||
+                              JSON.stringify(x)}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-zinc-400">—</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="text-xs text-zinc-500">
+                  Trust is computed from stored signals (providers, pipeline
+                  completeness, overrides).
+                </div>
+              </div>
+            )}
+          </Panel>
+
           <AgentSlots propertyId={propertyId} />
+
           <Panel title="Ops intent">
             <div className="text-sm text-zinc-300 leading-relaxed">
               This panel is the loop-closer: it turns backend truth into UI
@@ -818,11 +940,16 @@ export default function PropertyView() {
                         patch,
                       );
                       await refreshChecklist();
-                      // refresh ops too (since checklist progress changes stage/next-actions)
-                      const opsOut = await api
-                        .opsPropertySummary(propertyId, 90)
-                        .catch(() => null);
+
+                      // refresh ops + trust too (since progress + overrides can affect trust/confidence)
+                      const [opsOut, trustOut] = await Promise.all([
+                        api
+                          .opsPropertySummary(propertyId, 90)
+                          .catch(() => null),
+                        api.trustGet("property", propertyId).catch(() => null),
+                      ]);
                       setOps(opsOut);
+                      setTrust(trustOut);
                     } finally {
                       setCheckBusyCode(null);
                     }

@@ -1,30 +1,50 @@
+# backend/app/routers/rent_enrich.py
 from __future__ import annotations
 
-import json
-import statistics
 import time
-import urllib.parse
-import urllib.request
-from dataclasses import dataclass
 from datetime import date
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..config import settings
 from ..db import get_db
-from ..models import Deal, Property, RentAssumption, RentComp
-from ..services.api_budget import ApiBudgetExceeded, consume, get_remaining
+from ..models import Deal, Property, RentAssumption
+
+from ..services.api_budget import ApiBudgetExceeded, get_remaining
+from ..services.fmr import HudUserClient
+from ..services.rentcast_service import (
+    RentCastClient,
+    consume_rentcast_call,
+    persist_rentcast_comps_and_get_median,
+)
+
+# Optional trust wiring (no hard dependency)
+try:
+    from ..services.trust_service import (
+        record_signal,
+        recompute_and_persist,
+        record_dispersion_signal,  # optional helper you mentioned
+    )  # type: ignore
+except Exception:  # pragma: no cover
+    def record_signal(*args, **kwargs):  # type: ignore
+        return None
+
+    def recompute_and_persist(*args, **kwargs):  # type: ignore
+        return None
+
+    def record_dispersion_signal(*args, **kwargs):  # type: ignore
+        return None
+
 
 router = APIRouter(prefix="/rent", tags=["rent"])
 
 
 # ---------------------------- Response schema ----------------------------
-
 class RentEnrichOut(BaseModel):
     property_id: int
     strategy: str = "section8"
@@ -55,236 +75,7 @@ class RentEnrichBatchOut(BaseModel):
     rentcast_budget: dict[str, Any] = Field(default_factory=dict)
 
 
-# ---------------------------- Small HTTP helper ----------------------------
-
-@dataclass(frozen=True)
-class HttpResp:
-    status: int
-    data: Any
-
-
-def _http_get_json(url: str, headers: dict[str, str], timeout_s: int = 20) -> HttpResp:
-    req = urllib.request.Request(url, headers=headers, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            try:
-                payload = json.loads(raw) if raw else None
-            except json.JSONDecodeError:
-                payload = {"_raw": raw}
-            return HttpResp(status=int(resp.status), data=payload)
-    except Exception as e:
-        return HttpResp(status=0, data={"error": str(e), "url": url})
-
-
-# ---------------------------- HUD FMR client ----------------------------
-
-class HudUserClient:
-    FMR_BASE = "https://www.huduser.gov/hudapi/public/fmr"
-
-    def __init__(self, token: str):
-        if not token:
-            raise ValueError("HUD_USER_TOKEN is missing")
-        self._headers = {"Authorization": f"Bearer {token}"}
-
-    def fmr_for_entityid(self, entityid: str, year: Optional[int] = None) -> dict[str, Any]:
-        entityid = str(entityid).strip()
-        if not entityid:
-            raise ValueError("entityid missing")
-
-        if year:
-            url = f"{self.FMR_BASE}/data/{entityid}?{urllib.parse.urlencode({'year': year})}"
-        else:
-            url = f"{self.FMR_BASE}/data/{entityid}"
-
-        resp = _http_get_json(url, self._headers)
-        if resp.status != 200:
-            raise RuntimeError(f"HUD FMR failed (status={resp.status}): {resp.data}")
-
-        payload = resp.data
-        data = payload.get("data") if isinstance(payload, dict) else payload
-        if not data:
-            raise RuntimeError(f"HUD FMR empty response: {payload}")
-        return data
-
-    @staticmethod
-    def pick_bedroom_fmr(fmr_data: dict[str, Any], bedrooms: int) -> Optional[float]:
-        b = int(bedrooms or 0)
-        if b <= 0:
-            key = "Efficiency"
-        elif b == 1:
-            key = "One-Bedroom"
-        elif b == 2:
-            key = "Two-Bedroom"
-        elif b == 3:
-            key = "Three-Bedroom"
-        else:
-            key = "Four-Bedroom"
-
-        basic = fmr_data.get("basicdata")
-
-        if isinstance(basic, dict):
-            val = basic.get(key)
-            try:
-                return float(val) if val is not None else None
-            except Exception:
-                return None
-
-        if isinstance(basic, list):
-            row = None
-            for r in basic:
-                if isinstance(r, dict) and str(r.get("zip_code", "")).lower() == "msa level":
-                    row = r
-                    break
-            if row is None and basic and isinstance(basic[0], dict):
-                row = basic[0]
-            if row:
-                val = row.get(key)
-                try:
-                    return float(val) if val is not None else None
-                except Exception:
-                    return None
-
-        return None
-
-
-# ---------------------------- RentCast client ----------------------------
-
-class RentCastClient:
-    BASE = "https://api.rentcast.io/v1/avm/rent/long-term"
-
-    def __init__(self, api_key: str):
-        if not api_key:
-            raise ValueError("RENTCAST_API_KEY is missing")
-        self.api_key = api_key
-
-    def rent_estimate(
-        self,
-        *,
-        address: str,
-        city: str,
-        state: str,
-        zip_code: str,
-        bedrooms: int,
-        bathrooms: float,
-        square_feet: Optional[int],
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {
-            "address": address,
-            "city": city,
-            "state": state,
-            "zip": zip_code,
-            "bedrooms": int(bedrooms or 0),
-            "bathrooms": float(bathrooms or 0),
-        }
-        if square_feet:
-            params["squareFootage"] = int(square_feet)
-
-        qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
-        url = f"{self.BASE}?{qs}"
-
-        resp1 = _http_get_json(url, {"X-Api-Key": self.api_key})
-        if resp1.status == 200:
-            return resp1.data if isinstance(resp1.data, dict) else {"data": resp1.data}
-
-        resp2 = _http_get_json(url, {"Authorization": f"Bearer {self.api_key}"})
-        if resp2.status == 200:
-            return resp2.data if isinstance(resp2.data, dict) else {"data": resp2.data}
-
-        raise RuntimeError(
-            "RentCast rent estimate failed. "
-            f"X-Api-Key status={resp1.status} body={resp1.data} | "
-            f"Bearer status={resp2.status} body={resp2.data}"
-        )
-
-    @staticmethod
-    def pick_estimated_rent(payload: dict[str, Any]) -> Optional[float]:
-        if not isinstance(payload, dict):
-            return None
-        for key in ["rent", "rentEstimate", "estimatedRent", "value"]:
-            if key in payload:
-                try:
-                    return float(payload[key])
-                except Exception:
-                    pass
-        data = payload.get("data")
-        if isinstance(data, dict):
-            for key in ["rent", "rentEstimate", "estimatedRent", "value"]:
-                if key in data:
-                    try:
-                        return float(data[key])
-                    except Exception:
-                        pass
-        return None
-
-    @staticmethod
-    def _extract_comparables(payload: dict[str, Any]) -> list[dict[str, Any]]:
-        if not isinstance(payload, dict):
-            return []
-
-        comps = payload.get("comparables")
-        if isinstance(comps, list):
-            return [c for c in comps if isinstance(c, dict)]
-
-        data = payload.get("data")
-        if isinstance(data, dict) and isinstance(data.get("comparables"), list):
-            return [c for c in data.get("comparables") if isinstance(c, dict)]
-
-        for k in ("comps", "rent_comps", "comparablesList"):
-            v = payload.get(k)
-            if isinstance(v, list):
-                return [c for c in v if isinstance(c, dict)]
-
-        return []
-
-    @staticmethod
-    def _extract_comp_rents(payload: dict[str, Any]) -> list[float]:
-        out: list[float] = []
-        comps = RentCastClient._extract_comparables(payload)
-        for c in comps:
-            for k in ("rent", "price", "rentEstimate", "estimatedRent", "value", "monthlyRent"):
-                v = c.get(k)
-                if v is None:
-                    continue
-                try:
-                    fv = float(v)
-                    if fv > 0:
-                        out.append(fv)
-                        break
-                except Exception:
-                    continue
-        return out
-
-    @staticmethod
-    def pick_rent_reasonableness_proxy(payload: dict[str, Any]) -> Optional[float]:
-        rents = RentCastClient._extract_comp_rents(payload)
-        if rents:
-            try:
-                return float(statistics.median(rents))
-            except Exception:
-                pass
-        return RentCastClient.pick_estimated_rent(payload)
-
-    @staticmethod
-    def derive_hud_entityid_from_comps(payload: dict[str, Any]) -> Optional[str]:
-        comps = RentCastClient._extract_comparables(payload)
-        if not comps:
-            return None
-
-        for c in comps:
-            st = str(c.get("stateFips") or "").strip()
-            co = str(c.get("countyFips") or "").strip()
-            if not (st.isdigit() and co.isdigit()):
-                continue
-            st = st.zfill(2)
-            co = co.zfill(3)
-            return f"{st}{co}99999"
-
-        return None
-
-
 # ---------------------------- Budget helpers ----------------------------
-
 def _rentcast_daily_limit() -> int:
     try:
         v = getattr(settings, "rentcast_daily_limit", None)
@@ -295,109 +86,7 @@ def _rentcast_daily_limit() -> int:
         return 50
 
 
-def _consume_rentcast_call(db: Session) -> dict[str, Any]:
-    provider = "rentcast"
-    today = date.today()
-    limit = _rentcast_daily_limit()
-    remaining_before = get_remaining(db, provider=provider, day=today, daily_limit=limit)
-    remaining_after = consume(db, provider=provider, day=today, daily_limit=limit, calls=1)
-
-    return {
-        "provider": provider,
-        "day": today.isoformat(),
-        "daily_limit": limit,
-        "remaining_before": remaining_before,
-        "remaining_after": remaining_after,
-    }
-
-
-@router.get("/enrich/budget")
-def get_rentcast_budget(
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    provider = "rentcast"
-    today = date.today()
-    limit = _rentcast_daily_limit()
-    remaining = get_remaining(db, provider=provider, day=today, daily_limit=limit)
-    used = max(0, limit - remaining)
-    return {
-        "provider": provider,
-        "day": today.isoformat(),
-        "daily_limit": limit,
-        "used": used,
-        "remaining": remaining,
-    }
-
-
-# ---------------------------- Comps persistence ----------------------------
-
-def _extract_normalized_comps(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    comps = RentCastClient._extract_comparables(payload)
-    out: list[dict[str, Any]] = []
-
-    for c in comps:
-        r = c.get("rent") or c.get("price") or c.get("monthlyRent") or c.get("rentEstimate") or c.get("value")
-        try:
-            rent = float(r)
-        except Exception:
-            continue
-        if rent <= 0:
-            continue
-
-        out.append(
-            {
-                "rent": rent,
-                "source": "rentcast",
-                "address": c.get("address"),
-                "url": c.get("url") or c.get("listingUrl") or c.get("link"),
-                "bedrooms": c.get("bedrooms"),
-                "bathrooms": c.get("bathrooms"),
-                "square_feet": c.get("squareFeet") or c.get("squareFootage") or c.get("sqft"),
-                "notes": None,
-            }
-        )
-    return out
-
-
-def _persist_rentcast_comps_and_get_median(
-    db: Session,
-    *,
-    property_id: int,
-    payload: dict[str, Any],
-    replace_existing: bool = True,
-) -> Optional[float]:
-    comps = _extract_normalized_comps(payload)
-    if not comps:
-        return None
-
-    if replace_existing:
-        db.execute(delete(RentComp).where(RentComp.property_id == property_id, RentComp.source == "rentcast"))
-
-    rents: list[float] = []
-    for c in comps:
-        rc = RentComp(
-            property_id=property_id,
-            rent=float(c["rent"]),
-            source="rentcast",
-            address=c.get("address"),
-            url=c.get("url"),
-            bedrooms=int(c["bedrooms"]) if c.get("bedrooms") is not None else None,
-            bathrooms=float(c["bathrooms"]) if c.get("bathrooms") is not None else None,
-            square_feet=int(c["square_feet"]) if c.get("square_feet") is not None else None,
-            notes=c.get("notes"),
-        )
-        db.add(rc)
-        rents.append(float(c["rent"]))
-
-    try:
-        return float(statistics.median(rents)) if rents else None
-    except Exception:
-        return None
-
-
-# ---------------------------- DB helpers (FIXED for multitenancy) ----------------------------
-
+# ---------------------------- DB helpers (multitenancy-safe) ----------------------------
 def _get_or_create_rent_assumption(db: Session, property_id: int, org_id: int) -> RentAssumption:
     ra = db.scalar(
         select(RentAssumption)
@@ -427,6 +116,7 @@ def _rent_used(strategy: str, market: Optional[float], ceiling: Optional[float])
 
 def _compute_approved_ceiling(ra: RentAssumption) -> Optional[float]:
     try:
+        # If manually set, treat that as authoritative ceiling.
         if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
             return float(ra.approved_rent_ceiling)
 
@@ -439,6 +129,131 @@ def _compute_approved_ceiling(ra: RentAssumption) -> Optional[float]:
         return min(candidates) if candidates else None
     except Exception:
         return None
+
+
+def _emit_rent_trust_signals(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    rentcast_ok: bool | None,
+    rentcast_comps_count: int | None,
+    rentcast_dispersion: float | None,
+    hud_ok: bool | None,
+    has_ceiling: bool,
+    has_market: bool,
+):
+    """
+    This is the “trust loop” wiring:
+    - record raw signals
+    - recompute trust for the property
+    Keep this *best-effort*; enrich should still succeed even if trust system is missing.
+    """
+    try:
+        if rentcast_ok is not None:
+            record_signal(
+                db,
+                org_id=org_id,
+                entity_type="provider",
+                entity_id="rentcast",
+                signal_key="rentcast.success",
+                value=1.0 if rentcast_ok else 0.0,
+                meta={"property_id": property_id},
+            )
+            record_signal(
+                db,
+                org_id=org_id,
+                entity_type="property",
+                entity_id=str(property_id),
+                signal_key="rentcast.success",
+                value=1.0 if rentcast_ok else 0.0,
+                meta={},
+            )
+
+        if rentcast_comps_count is not None:
+            # Normalize: 0 comps => 0, >=10 comps => 1
+            v = max(0.0, min(1.0, float(rentcast_comps_count) / 10.0))
+            record_signal(
+                db,
+                org_id=org_id,
+                entity_type="property",
+                entity_id=str(property_id),
+                signal_key="rentcast.comps.count",
+                value=v,
+                meta={"count": int(rentcast_comps_count)},
+            )
+
+        if rentcast_dispersion is not None:
+            # If you have a helper, use it; otherwise store a generic signal.
+            try:
+                record_dispersion_signal(
+                    db,
+                    org_id=org_id,
+                    entity_type="property",
+                    entity_id=str(property_id),
+                    signal_key="rentcast.comps.dispersion",
+                    dispersion=float(rentcast_dispersion),
+                    meta={},
+                )
+            except Exception:
+                # fallback: invert dispersion into a “quality-ish” score.
+                # heuristic: dispersion 0.0 => 1.0, dispersion 0.5 => 0.5, dispersion >=1.0 => 0.0
+                q = max(0.0, min(1.0, 1.0 - float(rentcast_dispersion)))
+                record_signal(
+                    db,
+                    org_id=org_id,
+                    entity_type="property",
+                    entity_id=str(property_id),
+                    signal_key="rentcast.comps.dispersion",
+                    value=q,
+                    meta={"dispersion": float(rentcast_dispersion)},
+                )
+
+        if hud_ok is not None:
+            record_signal(
+                db,
+                org_id=org_id,
+                entity_type="provider",
+                entity_id="hud",
+                signal_key="hud.success",
+                value=1.0 if hud_ok else 0.0,
+                meta={"property_id": property_id},
+            )
+            record_signal(
+                db,
+                org_id=org_id,
+                entity_type="property",
+                entity_id=str(property_id),
+                signal_key="hud.success",
+                value=1.0 if hud_ok else 0.0,
+                meta={},
+            )
+
+        record_signal(
+            db,
+            org_id=org_id,
+            entity_type="property",
+            entity_id=str(property_id),
+            signal_key="rent.pipeline.has_ceiling",
+            value=1.0 if has_ceiling else 0.0,
+            meta={},
+        )
+        record_signal(
+            db,
+            org_id=org_id,
+            entity_type="property",
+            entity_id=str(property_id),
+            signal_key="rent.pipeline.has_market",
+            value=1.0 if has_market else 0.0,
+            meta={},
+        )
+
+        recompute_and_persist(db, org_id, "property", str(property_id))
+        # Optional: keep provider-level trust up-to-date too
+        recompute_and_persist(db, org_id, "provider", "rentcast")
+        recompute_and_persist(db, org_id, "provider", "hud")
+    except Exception:
+        pass
 
 
 def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "section8") -> RentEnrichOut:
@@ -455,9 +270,18 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
 
     rc_payload: Optional[dict[str, Any]] = None
 
+    # Trust capture vars
+    rentcast_ok: bool | None = None
+    hud_ok: bool | None = None
+    comps_count: int | None = None
+    dispersion: float | None = None
+
     # ---- RentCast market rent + comps + RR proxy (BUDGETED) ----
     try:
-        budget_debug = _consume_rentcast_call(db)
+        provider = "rentcast"
+        today = date.today()
+        limit = _rentcast_daily_limit()
+        budget_debug = consume_rentcast_call(db, provider=provider, day=today, daily_limit=limit)
 
         rc = RentCastClient(getattr(settings, "rentcast_api_key", "") or "")
         rc_payload = rc.rent_estimate(
@@ -469,6 +293,8 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
             bathrooms=float(prop.bathrooms or 0),
             square_feet=prop.square_feet,
         )
+
+        rentcast_ok = True
 
         rentcast_debug = {
             "endpoint": RentCastClient.BASE,
@@ -492,7 +318,33 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
 
         rr_median = None
         if isinstance(rc_payload, dict):
-            rr_median = _persist_rentcast_comps_and_get_median(db, property_id=property_id, payload=rc_payload)
+            # Persist comps and derive median
+            rr_median = persist_rentcast_comps_and_get_median(db, property_id=property_id, payload=rc_payload)
+
+            # Try to infer comps_count + dispersion from payload shape (best-effort).
+            # Different RentCast payloads differ; we keep this defensive.
+            comps = rc_payload.get("comparables") or rc_payload.get("comps") or rc_payload.get("rentComparables")
+            if isinstance(comps, list):
+                comps_count = len(comps)
+                # compute dispersion as iqr/median using “rent” if available
+                rents: list[float] = []
+                for c in comps:
+                    if not isinstance(c, dict):
+                        continue
+                    v = c.get("rent") or c.get("price") or c.get("estimatedRent")
+                    try:
+                        fv = float(v)
+                        if fv > 0:
+                            rents.append(fv)
+                    except Exception:
+                        continue
+                rents.sort()
+                if len(rents) >= 4:
+                    q1 = rents[int(0.25 * (len(rents) - 1))]
+                    q3 = rents[int(0.75 * (len(rents) - 1))]
+                    med = rents[int(0.50 * (len(rents) - 1))]
+                    if med > 0:
+                        dispersion = float(q3 - q1) / float(med)
 
         if rr_median is not None and rr_median > 0:
             if ra.rent_reasonableness_comp != float(rr_median):
@@ -506,8 +358,21 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
                     updated_fields.append("rent_reasonableness_comp")
 
     except ApiBudgetExceeded as e:
+        rentcast_ok = False
+        _emit_rent_trust_signals(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            rentcast_ok=rentcast_ok,
+            rentcast_comps_count=comps_count,
+            rentcast_dispersion=dispersion,
+            hud_ok=hud_ok,
+            has_ceiling=bool(_compute_approved_ceiling(ra)),
+            has_market=bool(ra.market_rent_estimate),
+        )
         raise HTTPException(status_code=429, detail=str(e))
     except Exception as e:
+        rentcast_ok = False
         rentcast_debug = {"error": str(e)}
 
     # ---- HUD FMR (derive entityid from RentCast comps) ----
@@ -523,6 +388,8 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         fmr_data = hud.fmr_for_entityid(entityid)
         fmr_value = hud.pick_bedroom_fmr(fmr_data, int(prop.bedrooms or 0))
 
+        hud_ok = True
+
         hud_debug = {
             "entityid": entityid,
             "bedrooms": int(prop.bedrooms or 0),
@@ -536,6 +403,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
                 updated_fields.append("section8_fmr")
 
     except Exception as e:
+        hud_ok = False
         hud_debug = {"error": str(e)}
 
     # ---- Compute approved_rent_ceiling (only if not manually set) ----
@@ -545,6 +413,20 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
             if new_ceiling is not None and new_ceiling > 0:
                 ra.approved_rent_ceiling = float(new_ceiling)
                 updated_fields.append("approved_rent_ceiling")
+        else:
+            # Trust: manual override exists (do not hide it)
+            try:
+                record_signal(
+                    db,
+                    org_id=org_id,
+                    entity_type="property",
+                    entity_id=str(property_id),
+                    signal_key="property.manual_override.rent_ceiling",
+                    value=0.4,
+                    meta={"approved_rent_ceiling": float(ra.approved_rent_ceiling)},
+                )
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -562,6 +444,19 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
     db.commit()
     db.refresh(ra)
 
+    # ---- Trust wiring (post-commit so “truth exists” when trust is computed) ----
+    _emit_rent_trust_signals(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        rentcast_ok=rentcast_ok,
+        rentcast_comps_count=comps_count,
+        rentcast_dispersion=dispersion,
+        hud_ok=hud_ok,
+        has_ceiling=bool(ceiling),
+        has_market=bool(ra.market_rent_estimate),
+    )
+
     return RentEnrichOut(
         property_id=property_id,
         strategy=strategy,
@@ -578,6 +473,24 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
 
 
 # ---------------------------- ROUTES ----------------------------
+@router.get("/enrich/budget")
+def get_rentcast_budget(
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    provider = "rentcast"
+    today = date.today()
+    limit = _rentcast_daily_limit()
+    remaining = get_remaining(db, provider=provider, day=today, daily_limit=limit)
+    used = max(0, limit - remaining)
+    return {
+        "provider": provider,
+        "day": today.isoformat(),
+        "daily_limit": limit,
+        "used": used,
+        "remaining": remaining,
+    }
+
 
 @router.post("/enrich/batch", response_model=RentEnrichBatchOut)
 def enrich_rent_batch(
@@ -588,12 +501,8 @@ def enrich_rent_batch(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    # org-scoped
     deals = db.scalars(
-        select(Deal)
-        .where(Deal.snapshot_id == snapshot_id)
-        .where(Deal.org_id == p.org_id)
-        .limit(limit)
+        select(Deal).where(Deal.snapshot_id == snapshot_id).where(Deal.org_id == p.org_id).limit(limit)
     ).all()
 
     seen: set[int] = set()

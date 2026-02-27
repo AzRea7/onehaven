@@ -35,6 +35,7 @@ from .routers.agents import router as agents_router
 from .routers.agent_runs import router as agent_runs_router
 from .routers.workflow import router as workflow_router
 from .routers.audit import router as audit_router
+from .routers.trust import router as trust_router
 
 # ✅ SaaS auth + api keys
 from .routers.auth import router as auth_router
@@ -106,3 +107,4 @@ app.include_router(agents_router, prefix=API_PREFIX)
 app.include_router(agent_runs_router, prefix=API_PREFIX)
 app.include_router(workflow_router, prefix=API_PREFIX)
 app.include_router(audit_router, prefix=API_PREFIX)
+app.include_router(trust_router, prefix=API_PREFIX  )

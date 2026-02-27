@@ -46,6 +46,7 @@ class AppUser(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
+
 class OrgMembership(Base):
     __tablename__ = "org_memberships"
     __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_org_memberships_org_user"),)
@@ -513,6 +514,72 @@ class PropertyChecklistItem(Base):
 
     property: Mapped["Property"] = relationship(back_populates="checklist_items")
     checklist: Mapped[Optional["PropertyChecklist"]] = relationship(back_populates="items")
+
+
+# -----------------------------
+# Trust models (NEW)
+# -----------------------------
+class TrustSignal(Base):
+    """
+    Atomic evidence used to compute trust.
+    Examples:
+      - provider:rentcast estimate vs comps dispersion
+      - provider:hud fmr year freshness
+      - agent:hqs_precheck success/failure streak
+      - property:manual overrides
+    """
+
+    __tablename__ = "trust_signals"
+    __table_args__ = (
+        Index("ix_trust_signals_org_entity", "org_id", "entity_type", "entity_id"),
+        Index("ix_trust_signals_org_key", "org_id", "signal_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    # Generic entity pointer: ("property","123") or ("agent","hqs_precheck") or ("provider","rentcast")
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    entity_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+
+    signal_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    signal_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+
+    meta_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class TrustScore(Base):
+    """
+    Aggregated trust score per (org, entity_type, entity_id).
+    Score range convention: 0.0 (no trust) .. 1.0 (high trust)
+    Confidence is optional (0..1), representing stability / data volume.
+    """
+
+    __tablename__ = "trust_scores"
+    __table_args__ = (
+        UniqueConstraint("org_id", "entity_type", "entity_id", name="uq_trust_scores_org_entity"),
+        Index("ix_trust_scores_org_entity", "org_id", "entity_type", "entity_id"),
+        Index("ix_trust_scores_org_score", "org_id", "score"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    components_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 # -----------------------------

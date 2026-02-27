@@ -1,4 +1,3 @@
-# backend/app/config.py
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,7 +11,6 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./onehaven.db"
 
     # ---- CORS (used by main.py) ----
-    # Accepts ["*"] or comma string in env (we normalize in main.py)
     cors_allow_origins: list[str] | str = ["*"]
 
     # ---- Operating Truth / Reproducibility ----
@@ -55,10 +53,10 @@ class Settings(BaseSettings):
 
     rentcast_api_key: str | None = None
     rentcast_base_url: str = "https://api.rentcast.io/v1"
+    rentcast_daily_limit: int = 50
 
     # ---- SaaS Auth / tenancy ----
-    # auth.py expects settings.auth_mode and settings.dev_auto_provision
-    auth_mode: str = "dev"  # dev|jwt (dev uses headers if no JWT)
+    auth_mode: str = "dev"  # dev|jwt
     dev_auto_provision: bool = True
     dev_auto_verify_email: bool = True
 
@@ -70,12 +68,12 @@ class Settings(BaseSettings):
     dev_header_user_email: str = "X-User-Email"
     dev_header_user_role: str = "X-User-Role"
 
-    # ---- API keys (auth.py expects these) ----
+    # ---- API keys ----
     enable_api_keys: bool = False
     api_key_pepper: str = "dev-pepper-change-me"
     api_key_prefix_len: int = 10
 
-    # ---- Plans / billing (auth.py uses default_plan_code fallback) ----
+    # ---- Plans / billing ----
     default_plan_code: str = "free"
 
     # ---- JWT cookie ----
@@ -98,9 +96,24 @@ class Settings(BaseSettings):
     trace_mirror_to_messages: int = 0
 
     def model_post_init(self, __context) -> None:
-        # Back-compat for earlier typo: rent_calibration_apha
+        # Back-compat for earlier typo
         if self.rent_calibration_apha is not None:
             object.__setattr__(self, "rent_calibration_alpha", float(self.rent_calibration_apha))
+
+        env = (self.app_env or "local").strip().lower()
+        is_prod = env in ("prod", "production")
+
+        # Hard fail: no “trustworthy SaaS” if prod still allows dev-bypass auth
+        if is_prod:
+            if (self.auth_mode or "").strip().lower() == "dev":
+                raise ValueError("SECURITY: auth_mode=dev is not allowed in prod")
+            if bool(self.allow_local_auth_bypass):
+                raise ValueError("SECURITY: allow_local_auth_bypass=True is not allowed in prod")
+
+            # Hard fail: wildcard CORS in prod (unless you truly mean public API)
+            origins = self.cors_allow_origins
+            if origins == "*" or origins == ["*"] or (isinstance(origins, str) and "*" in origins):
+                raise ValueError("SECURITY: cors_allow_origins wildcard is not allowed in prod")
 
 
 settings = Settings()

@@ -421,7 +421,30 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Agents
+  // -------------------------
+  // ✅ TRUST (new)
+  // -------------------------
+  trustGet: (
+    entity_type: string,
+    entity_id: string | number,
+    signal?: AbortSignal,
+  ) =>
+    request<any>(`/trust/${entity_type}/${entity_id}`, {
+      cacheTtlMs: 800,
+      signal,
+    }),
+
+  trustEmitSignal: (
+    entity_type: string,
+    entity_id: string | number,
+    payload: { signal_key: string; value: number; meta?: any },
+  ) =>
+    request<any>(`/trust/${entity_type}/${entity_id}/signal`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // Agents (spec list)
   agents: () => requestArray<any>(`/agents`, { cacheTtlMs: 4_000 }),
 
   // Agent Slots
@@ -467,14 +490,25 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Agent Runs
+  // Agent Runs (align to /agents/runs, but keep older endpoints if you still have them)
   agentRunsList: (arg: number | { property_id: number }) => {
     const propertyId = typeof arg === "number" ? arg : arg.property_id;
-    return requestArray<any>(`/agent-runs${qs({ property_id: propertyId })}`, {
+    return requestArray<any>(`/agents/runs${qs({ property_id: propertyId })}`, {
       cacheTtlMs: 800,
     });
   },
 
+  createAgentRun: (payload: {
+    agent_key: string;
+    property_id?: number | null;
+    input_json?: any;
+  }) =>
+    request<any>(`/agents/runs`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // (Older routes kept as-is; if you have them they still work)
   agentRunsPlan: (propertyId: number) =>
     request<any>(`/agent-runs/plan${qs({ property_id: propertyId })}`, {
       method: "POST",
