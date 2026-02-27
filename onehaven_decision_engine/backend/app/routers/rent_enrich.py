@@ -23,12 +23,14 @@ from ..services.rentcast_service import (
     persist_rentcast_comps_and_get_median,
 )
 
+from ..domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used, CeilingCandidate, RentDecision
+
 # Optional trust wiring (no hard dependency)
 try:
     from ..services.trust_service import (
         record_signal,
         recompute_and_persist,
-        record_dispersion_signal,  # optional helper you mentioned
+        record_dispersion_signal,
     )  # type: ignore
 except Exception:  # pragma: no cover
     def record_signal(*args, **kwargs):  # type: ignore
@@ -53,9 +55,16 @@ class RentEnrichOut(BaseModel):
     section8_fmr: Optional[float] = None
 
     rent_reasonableness_comp: Optional[float] = None
+
+    # IMPORTANT: this is the *approved* ceiling (manual override OR computed min(candidates))
     approved_rent_ceiling: Optional[float] = None
 
     rent_used: Optional[float] = None
+
+    # Explainability payload (this is what makes it “pro SaaS” instead of “a number”)
+    cap_reason: str = "none"  # "none" | "capped" | "uncapped"
+    explanation: str = ""
+    ceiling_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
     rentcast_budget: dict[str, Any] = Field(default_factory=dict)
 
@@ -86,6 +95,21 @@ def _rentcast_daily_limit() -> int:
         return 50
 
 
+def _payment_standard_pct() -> float:
+    """
+    Section 8 uses a Payment Standard (often 90%–110% of FMR; sometimes higher by exception).
+    Keep it in config so it’s a constitution-level parameter.
+    """
+    try:
+        v = getattr(settings, "payment_standard_pct", None)
+        if v is None:
+            return 110.0
+        fv = float(v)
+        return fv if fv > 0 else 110.0
+    except Exception:
+        return 110.0
+
+
 # ---------------------------- DB helpers (multitenancy-safe) ----------------------------
 def _get_or_create_rent_assumption(db: Session, property_id: int, org_id: int) -> RentAssumption:
     ra = db.scalar(
@@ -101,36 +125,6 @@ def _get_or_create_rent_assumption(db: Session, property_id: int, org_id: int) -
     return ra
 
 
-def _rent_used(strategy: str, market: Optional[float], ceiling: Optional[float]) -> Optional[float]:
-    strategy = (strategy or "section8").strip().lower()
-    if strategy == "market":
-        return market
-    if market is None and ceiling is None:
-        return None
-    if market is None:
-        return ceiling
-    if ceiling is None:
-        return market
-    return min(market, ceiling)
-
-
-def _compute_approved_ceiling(ra: RentAssumption) -> Optional[float]:
-    try:
-        # If manually set, treat that as authoritative ceiling.
-        if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
-            return float(ra.approved_rent_ceiling)
-
-        candidates: list[float] = []
-        if ra.section8_fmr is not None and float(ra.section8_fmr) > 0:
-            candidates.append(float(ra.section8_fmr))
-        if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-            candidates.append(float(ra.rent_reasonableness_comp))
-
-        return min(candidates) if candidates else None
-    except Exception:
-        return None
-
-
 def _emit_rent_trust_signals(
     db: Session,
     *,
@@ -144,10 +138,10 @@ def _emit_rent_trust_signals(
     has_market: bool,
 ):
     """
-    This is the “trust loop” wiring:
+    “Trust loop” wiring:
     - record raw signals
-    - recompute trust for the property
-    Keep this *best-effort*; enrich should still succeed even if trust system is missing.
+    - recompute trust for the property and providers
+    Best-effort: enrich should still succeed if trust layer is absent.
     """
     try:
         if rentcast_ok is not None:
@@ -171,7 +165,6 @@ def _emit_rent_trust_signals(
             )
 
         if rentcast_comps_count is not None:
-            # Normalize: 0 comps => 0, >=10 comps => 1
             v = max(0.0, min(1.0, float(rentcast_comps_count) / 10.0))
             record_signal(
                 db,
@@ -184,7 +177,6 @@ def _emit_rent_trust_signals(
             )
 
         if rentcast_dispersion is not None:
-            # If you have a helper, use it; otherwise store a generic signal.
             try:
                 record_dispersion_signal(
                     db,
@@ -196,8 +188,6 @@ def _emit_rent_trust_signals(
                     meta={},
                 )
             except Exception:
-                # fallback: invert dispersion into a “quality-ish” score.
-                # heuristic: dispersion 0.0 => 1.0, dispersion 0.5 => 0.5, dispersion >=1.0 => 0.0
                 q = max(0.0, min(1.0, 1.0 - float(rentcast_dispersion)))
                 record_signal(
                     db,
@@ -249,11 +239,20 @@ def _emit_rent_trust_signals(
         )
 
         recompute_and_persist(db, org_id, "property", str(property_id))
-        # Optional: keep provider-level trust up-to-date too
         recompute_and_persist(db, org_id, "provider", "rentcast")
         recompute_and_persist(db, org_id, "provider", "hud")
     except Exception:
         pass
+
+
+def _candidates_to_dicts(cands: list[CeilingCandidate]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for c in cands or []:
+        try:
+            out.append({"type": str(c.type), "value": float(c.value)})
+        except Exception:
+            continue
+    return out
 
 
 def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "section8") -> RentEnrichOut:
@@ -318,15 +317,11 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
 
         rr_median = None
         if isinstance(rc_payload, dict):
-            # Persist comps and derive median
             rr_median = persist_rentcast_comps_and_get_median(db, property_id=property_id, payload=rc_payload)
 
-            # Try to infer comps_count + dispersion from payload shape (best-effort).
-            # Different RentCast payloads differ; we keep this defensive.
             comps = rc_payload.get("comparables") or rc_payload.get("comps") or rc_payload.get("rentComparables")
             if isinstance(comps, list):
                 comps_count = len(comps)
-                # compute dispersion as iqr/median using “rent” if available
                 rents: list[float] = []
                 for c in comps:
                     if not isinstance(c, dict):
@@ -367,7 +362,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
             rentcast_comps_count=comps_count,
             rentcast_dispersion=dispersion,
             hud_ok=hud_ok,
-            has_ceiling=bool(_compute_approved_ceiling(ra)),
+            has_ceiling=bool(ra.approved_rent_ceiling),
             has_market=bool(ra.market_rent_estimate),
         )
         raise HTTPException(status_code=429, detail=str(e))
@@ -406,37 +401,31 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         hud_ok = False
         hud_debug = {"error": str(e)}
 
-    # ---- Compute approved_rent_ceiling (only if not manually set) ----
+    # ---- Compute approved ceiling + rent_used using the SINGLE SOURCE OF TRUTH: rent_rules.py ----
+    payment_standard_pct = _payment_standard_pct()
+
+    approved, candidates = compute_approved_ceiling(
+        section8_fmr=ra.section8_fmr,
+        payment_standard_pct=payment_standard_pct,
+        rent_reasonableness_comp=ra.rent_reasonableness_comp,
+        manual_override=ra.approved_rent_ceiling,  # if already set manually, it wins
+    )
+
+    decision: RentDecision = compute_rent_used(strategy=strategy, market=ra.market_rent_estimate, approved=approved)
+
+    # Persist authoritative values
     try:
-        if ra.approved_rent_ceiling is None:
-            new_ceiling = _compute_approved_ceiling(ra)
-            if new_ceiling is not None and new_ceiling > 0:
-                ra.approved_rent_ceiling = float(new_ceiling)
-                updated_fields.append("approved_rent_ceiling")
-        else:
-            # Trust: manual override exists (do not hide it)
-            try:
-                record_signal(
-                    db,
-                    org_id=org_id,
-                    entity_type="property",
-                    entity_id=str(property_id),
-                    signal_key="property.manual_override.rent_ceiling",
-                    value=0.4,
-                    meta={"approved_rent_ceiling": float(ra.approved_rent_ceiling)},
-                )
-            except Exception:
-                pass
+        # Keep approved_rent_ceiling synced to the approved result ONLY if it wasn't a manual override.
+        # If you want to explicitly track "manual vs computed", add fields later.
+        if ra.approved_rent_ceiling is None and approved is not None:
+            ra.approved_rent_ceiling = float(approved)
+            updated_fields.append("approved_rent_ceiling")
     except Exception:
         pass
 
-    ceiling = _compute_approved_ceiling(ra)
-    rent_used = _rent_used(strategy, ra.market_rent_estimate, ceiling)
-
-    # persist rent_used
     try:
-        if getattr(ra, "rent_used", None) != rent_used:
-            ra.rent_used = rent_used
+        if getattr(ra, "rent_used", None) != decision.rent_used:
+            ra.rent_used = decision.rent_used
             updated_fields.append("rent_used")
     except Exception:
         pass
@@ -444,7 +433,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
     db.commit()
     db.refresh(ra)
 
-    # ---- Trust wiring (post-commit so “truth exists” when trust is computed) ----
+    # ---- Trust wiring (post-commit) ----
     _emit_rent_trust_signals(
         db,
         org_id=org_id,
@@ -453,7 +442,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         rentcast_comps_count=comps_count,
         rentcast_dispersion=dispersion,
         hud_ok=hud_ok,
-        has_ceiling=bool(ceiling),
+        has_ceiling=bool(approved),
         has_market=bool(ra.market_rent_estimate),
     )
 
@@ -463,8 +452,11 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         market_rent_estimate=ra.market_rent_estimate,
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
-        approved_rent_ceiling=ceiling,
-        rent_used=rent_used,
+        approved_rent_ceiling=approved,
+        rent_used=decision.rent_used,
+        cap_reason=decision.cap_reason,
+        explanation=decision.explanation,
+        ceiling_candidates=_candidates_to_dicts(candidates),
         rentcast_budget=budget_debug,
         hud=hud_debug,
         rentcast=rentcast_debug,
