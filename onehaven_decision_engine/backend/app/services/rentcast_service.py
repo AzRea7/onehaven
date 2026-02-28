@@ -12,7 +12,6 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.models import RentComp
-from app.services.api_budget import ApiBudgetExceeded, consume, get_remaining
 
 
 @dataclass(frozen=True)
@@ -38,7 +37,7 @@ def _http_get_json(url: str, headers: dict[str, str], timeout_s: int = 20) -> Ht
 class RentCastClient:
     """
     Small, dependency-free RentCast client.
-    Keeps the same semantics you used in rent_enrich.py:
+    Semantics:
       - tries X-Api-Key header first
       - falls back to Authorization: Bearer
     """
@@ -199,7 +198,6 @@ def persist_rentcast_comps_and_get_median(
         normalized.append(
             {
                 "rent": rent,
-                "source": "rentcast",
                 "address": c.get("address"),
                 "url": c.get("url") or c.get("listingUrl") or c.get("link"),
                 "bedrooms": c.get("bedrooms"),
@@ -217,18 +215,19 @@ def persist_rentcast_comps_and_get_median(
 
     rents: list[float] = []
     for c in normalized:
-        rc = RentComp(
-            property_id=property_id,
-            rent=float(c["rent"]),
-            source="rentcast",
-            address=c.get("address"),
-            url=c.get("url"),
-            bedrooms=int(c["bedrooms"]) if c.get("bedrooms") is not None else None,
-            bathrooms=float(c["bathrooms"]) if c.get("bathrooms") is not None else None,
-            square_feet=int(c["square_feet"]) if c.get("square_feet") is not None else None,
-            notes=c.get("notes"),
+        db.add(
+            RentComp(
+                property_id=property_id,
+                rent=float(c["rent"]),
+                source="rentcast",
+                address=c.get("address"),
+                url=c.get("url"),
+                bedrooms=int(c["bedrooms"]) if c.get("bedrooms") is not None else None,
+                bathrooms=float(c["bathrooms"]) if c.get("bathrooms") is not None else None,
+                square_feet=int(c["square_feet"]) if c.get("square_feet") is not None else None,
+                notes=c.get("notes"),
+            )
         )
-        db.add(rc)
         rents.append(float(c["rent"]))
 
     try:
@@ -237,27 +236,7 @@ def persist_rentcast_comps_and_get_median(
         return None
 
 
-def consume_rentcast_call(
-    db: Session,
-    *,
-    provider: str,
-    day,
-    daily_limit: int,
-) -> dict[str, Any]:
-    remaining_before = get_remaining(db, provider=provider, day=day, daily_limit=daily_limit)
-    remaining_after = consume(db, provider=provider, day=day, daily_limit=daily_limit, calls=1)
-    return {
-        "provider": provider,
-        "day": day.isoformat(),
-        "daily_limit": int(daily_limit),
-        "remaining_before": int(remaining_before),
-        "remaining_after": int(remaining_after),
-    }
-
-
 __all__ = [
-    "ApiBudgetExceeded",
     "RentCastClient",
     "persist_rentcast_comps_and_get_median",
-    "consume_rentcast_call",
 ]

@@ -3,62 +3,113 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import date, datetime, timedelta
+from typing import Any, Optional
 
-from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models_saas import ExternalBudgetLedger
-from app.services.plan_service import get_limits, record_usage
+from app.config import settings
+from app.models import ExternalBudgetLedger, OrgSubscription, Plan
 
 
 @dataclass(frozen=True)
 class BudgetStatus:
-    metric: str
     provider: str
+    metric: str
     limit: int
     used: int
     remaining: int
-    reset_at: str  # ISO timestamp
+    reset_at: str
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+def _loads(s: Optional[str], default: Any) -> Any:
+    if not s:
+        return default
+    try:
+        return json.loads(s)
+    except Exception:
+        return default
 
 
-def _day_window(now: datetime) -> tuple[datetime, datetime]:
-    # Daily window in UTC to avoid DST weirdness.
-    start = datetime(year=now.year, month=now.month, day=now.day, tzinfo=timezone.utc)
-    end = start + timedelta(days=1)
-    return start, end
+def _dumps(v: Any) -> str:
+    try:
+        return json.dumps(v)
+    except Exception:
+        return "{}"
 
 
-def get_external_budget_status(db: Session, *, org_id: int, provider: str, metric_key: str = "external_calls_per_day") -> BudgetStatus:
-    limits = get_limits(db, org_id=org_id)
-    cap = int(limits.get(metric_key, 0) or 0)
+def _today_utc() -> date:
+    return datetime.utcnow().date()
 
-    now = _utcnow()
-    start, end = _day_window(now)
 
-    used = db.scalar(
-        select(func.coalesce(func.sum(ExternalBudgetLedger.cost_units), 0))
-        .where(ExternalBudgetLedger.org_id == int(org_id))
-        .where(ExternalBudgetLedger.provider == str(provider))
-        .where(ExternalBudgetLedger.created_at >= start)
-        .where(ExternalBudgetLedger.created_at < end)
+def _reset_at_iso(day: date) -> str:
+    # Next midnight UTC
+    return datetime.combine(day + timedelta(days=1), datetime.min.time()).isoformat() + "Z"
+
+
+def _plan_limit_for_metric(plan_limits: dict[str, Any], metric_key: str) -> int:
+    """
+    plan_limits_json is a dict. We expect keys like:
+      - external_calls_per_day
+      - agent_runs_per_day
+      - properties
+    """
+    v = plan_limits.get(metric_key)
+    if v is None:
+        # sensible default if missing
+        return int(getattr(settings, "default_external_calls_per_day", 50) or 50)
+    try:
+        return int(v)
+    except Exception:
+        return int(getattr(settings, "default_external_calls_per_day", 50) or 50)
+
+
+def _get_org_plan_limits(db: Session, *, org_id: int) -> dict[str, Any]:
+    sub = db.scalar(select(OrgSubscription).where(OrgSubscription.org_id == int(org_id)))
+    plan_code = (sub.plan_code if sub else None) or "free"
+
+    plan = db.scalar(select(Plan).where(Plan.code == plan_code))
+    if not plan:
+        return {}
+
+    limits = _loads(getattr(plan, "limits_json", None), {})
+    return limits if isinstance(limits, dict) else {}
+
+
+def get_external_budget_status(
+    db: Session,
+    *,
+    org_id: int,
+    provider: str,
+    metric_key: str = "external_calls_per_day",
+) -> BudgetStatus:
+    """
+    Returns used/remaining for today's UTC budget for the provider.
+    Ledger is append-only; we sum cost_units for today.
+    """
+    day = _today_utc()
+    limits = _get_org_plan_limits(db, org_id=int(org_id))
+    limit = _plan_limit_for_metric(limits, metric_key)
+
+    used = int(
+        db.scalar(
+            select(func.coalesce(func.sum(ExternalBudgetLedger.cost_units), 0))
+            .where(ExternalBudgetLedger.org_id == int(org_id))
+            .where(ExternalBudgetLedger.provider == str(provider))
+            .where(func.date(ExternalBudgetLedger.created_at) == day)
+        )
+        or 0
     )
-    used_i = int(used or 0)
 
-    remaining = max(0, cap - used_i) if cap else 10**9  # "unlimited" if cap=0
+    remaining = max(0, int(limit) - int(used))
     return BudgetStatus(
-        metric=metric_key,
         provider=str(provider),
-        limit=int(cap),
-        used=used_i,
+        metric=str(metric_key),
+        limit=int(limit),
+        used=int(used),
         remaining=int(remaining),
-        reset_at=end.isoformat(),
+        reset_at=_reset_at_iso(day),
     )
 
 
@@ -68,30 +119,28 @@ def consume_external_budget(
     org_id: int,
     provider: str,
     units: int = 1,
-    meta: dict[str, Any] | None = None,
+    meta: Optional[dict[str, Any]] = None,
     metric_key: str = "external_calls_per_day",
 ) -> BudgetStatus:
     """
-    Single enforcement point for your "50 calls max" rule (per day), per org.
-
-    Plan limit key (recommended):
-      external_calls_per_day: 50
-
-    If cap is 0 or missing => treated as "unlimited" (dev / internal plans).
+    Atomically enforces daily budget by:
+      1) reading status
+      2) if remaining < units => raise HTTP-ish error payload (handled by router)
+      3) inserting ledger row
     """
-    status = get_external_budget_status(db, org_id=org_id, provider=provider, metric_key=metric_key)
+    from fastapi import HTTPException
 
-    # If limit is 0 => no enforcement.
-    if status.limit <= 0:
-        return status
+    units_i = max(1, int(units))
 
-    if status.used + int(units) > status.limit:
+    status = get_external_budget_status(db, org_id=int(org_id), provider=str(provider), metric_key=metric_key)
+
+    if status.remaining < units_i:
         raise HTTPException(
             status_code=402,
             detail={
                 "code": "plan_limit_exceeded",
-                "metric": metric_key,
-                "provider": provider,
+                "provider": status.provider,
+                "metric": status.metric,
                 "limit": status.limit,
                 "used": status.used,
                 "remaining": status.remaining,
@@ -99,19 +148,14 @@ def consume_external_budget(
             },
         )
 
-    now = _utcnow()
-    db.add(
-        ExternalBudgetLedger(
-            org_id=int(org_id),
-            provider=str(provider),
-            cost_units=int(units),
-            meta_json=json.dumps(meta or {}),
-            created_at=now,
-        )
+    row = ExternalBudgetLedger(
+        org_id=int(org_id),
+        provider=str(provider),
+        cost_units=int(units_i),
+        meta_json=_dumps(meta) if meta else None,
+        created_at=datetime.utcnow(),
     )
+    db.add(row)
+    db.commit()
 
-    # mirror into generic usage meter as well
-    record_usage(db, org_id=org_id, metric="external_calls", units=int(units), meta={"provider": provider})
-
-    # caller commits (or you can commit here if you want "always counted" semantics)
-    return get_external_budget_status(db, org_id=org_id, provider=provider, metric_key=metric_key)
+    return get_external_budget_status(db, org_id=int(org_id), provider=str(provider), metric_key=metric_key)

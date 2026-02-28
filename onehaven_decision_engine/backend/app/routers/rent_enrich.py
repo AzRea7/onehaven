@@ -79,8 +79,6 @@ class RentEnrichBatchOut(BaseModel):
 
 
 def _payment_standard_setting() -> float:
-    # Your config currently uses default_payment_standard_pct = 1.10
-    # rent_rules.py normalizes ratio vs percent.
     try:
         v = getattr(settings, "default_payment_standard_pct", None)
         return float(v) if v is not None else 1.10
@@ -189,9 +187,10 @@ def _emit_rent_trust_signals(
             meta={},
         )
 
-        recompute_and_persist(db, org_id, "property", str(property_id))
-        recompute_and_persist(db, org_id, "provider", "rentcast")
-        recompute_and_persist(db, org_id, "provider", "hud")
+        # ✅ FIX: keyword-only signature
+        recompute_and_persist(db, org_id=org_id, entity_type="property", entity_id=str(property_id))
+        recompute_and_persist(db, org_id=org_id, entity_type="provider", entity_id="rentcast")
+        recompute_and_persist(db, org_id=org_id, entity_type="provider", entity_id="hud")
     except Exception:
         pass
 
@@ -229,7 +228,6 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
     try:
         provider = "rentcast"
 
-        # Single enforcement point:
         status = consume_external_budget(
             db,
             org_id=org_id,
@@ -320,8 +318,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
 
         db.commit()  # commit ledger + rent changes
 
-    except HTTPException as he:
-        # Budget exceeded errors will arrive as HTTPException(402, detail={...})
+    except HTTPException:
         rentcast_ok = False
         _emit_rent_trust_signals(
             db,
@@ -478,7 +475,6 @@ def enrich_rent_batch(
             _enrich_one(db, pid, org_id=p.org_id, strategy=strategy)
             enriched += 1
         except HTTPException as he:
-            # If budget exceeded, stop early
             if he.status_code == 402 and isinstance(he.detail, dict) and he.detail.get("code") == "plan_limit_exceeded":
                 errors.append({"property_id": pid, "error": he.detail, "type": "budget_exceeded"})
                 stopped_early = True

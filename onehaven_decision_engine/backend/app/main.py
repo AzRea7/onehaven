@@ -5,8 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-
-from .middleware.request_id import RequestIdMiddleware
+from .logging_config import configure_logging
+from .middleware.request_id import RequestIDMiddleware
 
 from .routers.health import router as health_router
 from .routers.meta import router as meta_router
@@ -31,14 +31,13 @@ from .routers.cash import router as cash_router
 from .routers.equity import router as equity_router
 from .routers.ops import router as ops_router
 
-from .middleware.structured_logging import StructuredLoggingMiddleware  
 from .routers.agents import router as agents_router
 from .routers.agent_runs import router as agent_runs_router
 from .routers.workflow import router as workflow_router
 from .routers.audit import router as audit_router
 from .routers.trust import router as trust_router
 
-# ✅ SaaS auth + api keys
+# SaaS auth + api keys
 from .routers.auth import router as auth_router
 from .routers.api_keys import router as api_keys_router
 
@@ -55,58 +54,65 @@ def _cors_origins() -> list[str]:
     return ["*"]
 
 
-app = FastAPI(
-    title="OneHaven Decision Engine",
-    version=getattr(settings, "decision_version", "dev"),
-)
+def create_app() -> FastAPI:
+    configure_logging()
 
-# ✅ Request-ID first (observability baseline)
-app.add_middleware(RequestIdMiddleware)
-app.add_middleware(StructuredLoggingMiddleware)
+    app = FastAPI(
+        title="OneHaven Decision Engine",
+        version=getattr(settings, "decision_version", "dev"),
+    )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    # Request-ID first (baseline observability)
+    app.add_middleware(RequestIDMiddleware)
 
-# Core
-app.include_router(health_router, prefix=API_PREFIX)
-app.include_router(meta_router, prefix=API_PREFIX)
-app.include_router(dashboard_router, prefix=API_PREFIX)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins(),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-# Decision engine pipeline
-app.include_router(properties_router, prefix=API_PREFIX)
-app.include_router(deals_router, prefix=API_PREFIX)
-app.include_router(jurisdictions_router, prefix=API_PREFIX)
-app.include_router(evaluate_router, prefix=API_PREFIX)
+    # Core
+    app.include_router(health_router, prefix=API_PREFIX)
+    app.include_router(meta_router, prefix=API_PREFIX)
+    app.include_router(dashboard_router, prefix=API_PREFIX)
 
-# Ingest + rent
-app.include_router(imports_router, prefix=API_PREFIX)
-app.include_router(imports_alias_router, prefix=API_PREFIX)
-app.include_router(rent_router, prefix=API_PREFIX)
-app.include_router(rent_enrich_router, prefix=API_PREFIX)
+    # Decision engine pipeline
+    app.include_router(properties_router, prefix=API_PREFIX)
+    app.include_router(deals_router, prefix=API_PREFIX)
+    app.include_router(jurisdictions_router, prefix=API_PREFIX)
+    app.include_router(evaluate_router, prefix=API_PREFIX)
 
-# Compliance
-app.include_router(compliance_router, prefix=API_PREFIX)
-app.include_router(inspections_router, prefix=API_PREFIX)
+    # Ingest + rent
+    app.include_router(imports_router, prefix=API_PREFIX)
+    app.include_router(imports_alias_router, prefix=API_PREFIX)
+    app.include_router(rent_router, prefix=API_PREFIX)
+    app.include_router(rent_enrich_router, prefix=API_PREFIX)
 
-# Ops
-app.include_router(rehab_router, prefix=API_PREFIX)
-app.include_router(tenants_router, prefix=API_PREFIX)
-app.include_router(cash_router, prefix=API_PREFIX)
-app.include_router(equity_router, prefix=API_PREFIX)
-app.include_router(ops_router, prefix=API_PREFIX)
+    # Compliance
+    app.include_router(compliance_router, prefix=API_PREFIX)
+    app.include_router(inspections_router, prefix=API_PREFIX)
 
-# ✅ SaaS auth + api keys (real principal)
-app.include_router(auth_router, prefix=API_PREFIX)
-app.include_router(api_keys_router, prefix=API_PREFIX)
+    # Ops
+    app.include_router(rehab_router, prefix=API_PREFIX)
+    app.include_router(tenants_router, prefix=API_PREFIX)
+    app.include_router(cash_router, prefix=API_PREFIX)
+    app.include_router(equity_router, prefix=API_PREFIX)
+    app.include_router(ops_router, prefix=API_PREFIX)
 
-# Agents + audit/workflow
-app.include_router(agents_router, prefix=API_PREFIX)
-app.include_router(agent_runs_router, prefix=API_PREFIX)
-app.include_router(workflow_router, prefix=API_PREFIX)
-app.include_router(audit_router, prefix=API_PREFIX)
-app.include_router(trust_router, prefix=API_PREFIX  )
+    # SaaS auth + api keys (real principal)
+    app.include_router(auth_router, prefix=API_PREFIX)
+    app.include_router(api_keys_router, prefix=API_PREFIX)
+
+    # Agents + audit/workflow
+    app.include_router(agents_router, prefix=API_PREFIX)
+    app.include_router(agent_runs_router, prefix=API_PREFIX)
+    app.include_router(workflow_router, prefix=API_PREFIX)
+    app.include_router(audit_router, prefix=API_PREFIX)
+    app.include_router(trust_router, prefix=API_PREFIX)
+
+    return app
+
+
+app = create_app()

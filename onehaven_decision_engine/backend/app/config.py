@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     rentcast_api_key: str | None = None
     rentcast_base_url: str = "https://api.rentcast.io/v1"
-    rentcast_daily_limit: int = 50
+    rentcast_daily_limit: int = 100
 
     # ---- SaaS Auth / tenancy ----
     auth_mode: str = "dev"  # dev|jwt

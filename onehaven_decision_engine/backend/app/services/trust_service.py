@@ -1,3 +1,4 @@
+# backend/app/services/trust_service.py
 from __future__ import annotations
 
 import json
@@ -6,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from sqlalchemy import select, delete, desc
+from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session
 
 from ..models import TrustSignal, TrustScore
@@ -57,7 +58,7 @@ def record_signal(
 ) -> TrustSignal:
     """
     Append-only trust signal stream.
-    value is generally in [0..1], but we clamp to [0..1] for safety.
+    value clamped to [0..1] for safety.
     """
     v = _clamp(float(value), 0.0, 1.0)
     w = max(0.0, float(weight))
@@ -87,53 +88,37 @@ def clear_entity_signals(db: Session, *, org_id: int, entity_type: str, entity_i
 
 
 def _confidence_from_evidence(*, total_weight: float, n_signals: int, newest_at: Optional[datetime]) -> float:
-    """
-    Confidence is separate from score.
-    You can have a high score with low confidence if evidence is sparse/old.
-    """
-    # Evidence amount curve: saturates as weight increases
-    evidence = 1.0 - math.exp(-max(0.0, total_weight) / 6.0)  # ~0.63 at w=6, ~0.86 at w=12
-    # Count curve: saturates with number of signals
+    evidence = 1.0 - math.exp(-max(0.0, total_weight) / 6.0)
     count = 1.0 - math.exp(-max(0, n_signals) / 12.0)
 
     recency = 0.5
     if newest_at:
         age = datetime.utcnow() - newest_at
-        # 0 days -> 1.0, 7 days -> ~0.5, 30 days -> low
         recency = math.exp(-age.total_seconds() / (7.0 * 24 * 3600.0))
 
-    # Blend and clamp
     return _clamp(0.55 * evidence + 0.30 * count + 0.15 * recency, 0.0, 1.0)
 
 
 def _compute_components(signals: list[TrustSignal]) -> dict[str, Any]:
-    """
-    Build explanation payload:
-    - top positive / negative contributors
-    - raw aggregates
-    """
     contribs: list[dict[str, Any]] = []
     for s in signals:
+        v = float(getattr(s, "value", 0.0) or 0.0)
+        w = float(getattr(s, "weight", 1.0) or 1.0)
         contribs.append(
             {
                 "signal_key": s.signal_key,
-                "value": float(getattr(s, "value", 0.0) or 0.0),
-                "weight": float(getattr(s, "weight", 1.0) or 1.0),
+                "value": v,
+                "weight": w,
                 "created_at": s.created_at.isoformat() if getattr(s, "created_at", None) else None,
                 "meta": _loads(getattr(s, "meta_json", None), None),
-                "contribution": float(getattr(s, "value", 0.0) or 0.0) * float(getattr(s, "weight", 1.0) or 1.0),
+                "contribution": v * w,
             }
         )
 
-    # Sort by contribution for positives, and by (value-1)*weight for negatives.
     positives = sorted(contribs, key=lambda x: x["contribution"], reverse=True)
     negatives = sorted(contribs, key=lambda x: (x["value"] - 1.0) * x["weight"])
 
-    return {
-        "top_positive": positives[:3],
-        "top_negative": negatives[:3],
-        "signal_count": len(signals),
-    }
+    return {"top_positive": positives[:3], "top_negative": negatives[:3], "signal_count": len(signals)}
 
 
 def recompute_score(
@@ -144,25 +129,18 @@ def recompute_score(
     entity_id: str,
     lookback_days: int = 90,
 ) -> TrustSnapshot:
-    """
-    Trust score = weighted mean of signal values in [0..1] -> mapped to [0..100].
-    Confidence computed from evidence amount, count, and recency.
-
-    lookback_days prevents ancient signals dominating forever.
-    """
-    org_id = int(org_id)
-    entity_type = str(entity_type)
-    entity_id = str(entity_id)
-
     cutoff = datetime.utcnow() - timedelta(days=int(lookback_days))
-    rows = db.scalars(
-        select(TrustSignal)
-        .where(TrustSignal.org_id == org_id)
-        .where(TrustSignal.entity_type == entity_type)
-        .where(TrustSignal.entity_id == entity_id)
-        .where(TrustSignal.created_at >= cutoff)
-        .order_by(desc(TrustSignal.created_at))
-    ).all()
+
+    rows = list(
+        db.scalars(
+            select(TrustSignal)
+            .where(TrustSignal.org_id == int(org_id))
+            .where(TrustSignal.entity_type == str(entity_type))
+            .where(TrustSignal.entity_id == str(entity_id))
+            .where(TrustSignal.created_at >= cutoff)
+            .order_by(desc(TrustSignal.created_at), desc(TrustSignal.id))
+        ).all()
+    )
 
     total_weight = 0.0
     weighted_sum = 0.0
@@ -185,9 +163,9 @@ def recompute_score(
     components = _compute_components(rows)
 
     return TrustSnapshot(
-        org_id=org_id,
-        entity_type=entity_type,
-        entity_id=entity_id,
+        org_id=int(org_id),
+        entity_type=str(entity_type),
+        entity_id=str(entity_id),
         score_0_100=score_0_100,
         confidence_0_1=confidence,
         components=components,
@@ -205,15 +183,15 @@ def recompute_and_persist(
 ) -> TrustScore:
     snap = recompute_score(db, org_id=org_id, entity_type=entity_type, entity_id=entity_id, lookback_days=lookback_days)
 
-    existing = db.scalar(
+    row = db.scalar(
         select(TrustScore)
-        .where(TrustScore.org_id == snap.org_id)
-        .where(TrustScore.entity_type == snap.entity_type)
-        .where(TrustScore.entity_id == snap.entity_id)
+        .where(TrustScore.org_id == int(snap.org_id))
+        .where(TrustScore.entity_type == str(snap.entity_type))
+        .where(TrustScore.entity_id == str(snap.entity_id))
     )
 
-    if existing is None:
-        existing = TrustScore(
+    if row is None:
+        row = TrustScore(
             org_id=snap.org_id,
             entity_type=snap.entity_type,
             entity_id=snap.entity_id,
@@ -222,15 +200,15 @@ def recompute_and_persist(
             components_json=_dumps(snap.components),
             updated_at=snap.updated_at,
         )
-        db.add(existing)
+        db.add(row)
     else:
-        existing.score = float(snap.score_0_100)
-        existing.confidence = float(snap.confidence_0_1)
-        existing.components_json = _dumps(snap.components)
-        existing.updated_at = snap.updated_at
-        db.add(existing)
+        row.score = float(snap.score_0_100)
+        row.confidence = float(snap.confidence_0_1)
+        row.components_json = _dumps(snap.components)
+        row.updated_at = snap.updated_at
+        db.add(row)
 
-    return existing
+    return row
 
 
 def get_trust_score(

@@ -151,7 +151,6 @@ class Property(Base):
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     valuations: Mapped[List["Valuation"]] = relationship(back_populates="property", cascade="all, delete-orphan")
 
-    # Agents (useful for UI joins later; safe even if you never eager-load)
     agent_runs: Mapped[List["AgentRun"]] = relationship(
         primaryjoin="Property.id==foreign(AgentRun.property_id)",
         viewonly=True,
@@ -162,8 +161,6 @@ class ImportSnapshot(Base):
     __tablename__ = "import_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    # org scoping (Phase 5)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
 
     source: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -326,6 +323,12 @@ class UnderwritingResult(Base):
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), nullable=False)
+
+    rent_explain_run_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("rent_explain_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     decision: Mapped[str] = mapped_column(String(12), nullable=False)
     score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -517,69 +520,61 @@ class PropertyChecklistItem(Base):
 
 
 # -----------------------------
-# Trust models (NEW)
+# Trust models (FIXED to match Alembic 0030_add_trust_tables)
 # -----------------------------
 class TrustSignal(Base):
     """
-    Atomic evidence used to compute trust.
-    Examples:
-      - provider:rentcast estimate vs comps dispersion
-      - provider:hud fmr year freshness
-      - agent:hqs_precheck success/failure streak
-      - property:manual overrides
+    Table created by 0030_add_trust_tables:
+      - value (Float)   <-- IMPORTANT
+      - weight (Float)
+      - meta_json (Text)
+      - created_at (DateTime)
     """
 
     __tablename__ = "trust_signals"
     __table_args__ = (
-        Index("ix_trust_signals_org_entity", "org_id", "entity_type", "entity_id"),
-        Index("ix_trust_signals_org_key", "org_id", "signal_key"),
+        Index("ix_trust_signals_org_entity", "org_id", "entity_type", "entity_id", "created_at"),
+        Index("ix_trust_signals_org_entity_key", "org_id", "entity_type", "entity_id", "signal_key"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    # Generic entity pointer: ("property","123") or ("agent","hqs_precheck") or ("provider","rentcast")
-    entity_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    entity_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    entity_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    entity_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
 
-    signal_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
-    signal_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    signal_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+
+    # MUST be named 'value' to match DB
+    value: Mapped[float] = mapped_column(Float, nullable=False)
     weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
 
     meta_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class TrustScore(Base):
     """
     Aggregated trust score per (org, entity_type, entity_id).
-    Score range convention: 0.0 (no trust) .. 1.0 (high trust)
-    Confidence is optional (0..1), representing stability / data volume.
+    Convention: score is 0..100; confidence is 0..1.
     """
 
     __tablename__ = "trust_scores"
-    __table_args__ = (
-        UniqueConstraint("org_id", "entity_type", "entity_id", name="uq_trust_scores_org_entity"),
-        Index("ix_trust_scores_org_entity", "org_id", "entity_type", "entity_id"),
-        Index("ix_trust_scores_org_score", "org_id", "score"),
-    )
+    __table_args__ = (UniqueConstraint("org_id", "entity_type", "entity_id", name="uq_trust_scores_org_entity"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    entity_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    entity_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
 
-    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
-    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
-    components_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
+    components_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 # -----------------------------
@@ -697,9 +692,6 @@ class Valuation(Base):
     property: Mapped["Property"] = relationship(back_populates="valuations")
 
 
-# -----------------------------
-# Inspection analytics / future ops
-# -----------------------------
 class InspectionEvent(Base):
     __tablename__ = "inspection_events"
 
@@ -741,7 +733,6 @@ class AgentRun(Base):
     input_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     output_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Reliability semantics
     idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -753,7 +744,6 @@ class AgentRun(Base):
 
     created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
 
-    # Approval semantics (mutation agents)
     approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required")  # not_required|pending|approved|rejected
     approved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -769,7 +759,6 @@ class AgentMessage(Base):
 
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    # tie messages to a run/property for querying + SSE
     run_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey("agent_runs.id", ondelete="CASCADE"),

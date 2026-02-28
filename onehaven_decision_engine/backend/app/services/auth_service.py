@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Organization, AppUser, OrgMembership
-from app.models_saas import AuthIdentity
+from app.models import AuthIdentity
 
 
 def _now() -> datetime:

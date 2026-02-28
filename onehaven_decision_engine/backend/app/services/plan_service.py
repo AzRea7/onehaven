@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from app.models_saas import Plan, OrgSubscription, UsageLedger
+from app.models import Plan, OrgSubscription, UsageLedger
 
 
 DEFAULT_PLANS = {

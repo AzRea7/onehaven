@@ -160,7 +160,6 @@ def _has_jurisdiction_signals(reasons: list[str], fr_reasons: list[str], fr_mult
         return True
     if abs(float(fr_mult) - 1.0) > 1e-9:
         return True
-    # Detect if your scoring already injected jurisdiction notes
     for r in reasons:
         if "[Jurisdiction]" in r:
             return True
@@ -191,10 +190,6 @@ def _convert_reject_to_review_when_strong(
     Product rule:
       If underwriting is strong, and the “badness” is operational/compliance/cap related,
       downgrade REJECT -> REVIEW instead of losing the deal.
-
-    We intentionally do NOT convert when:
-      - decision is already PASS/REVIEW
-      - underwriting is not strong
     """
     if decision != "REJECT":
         return decision
@@ -291,7 +286,6 @@ def evaluate_snapshot(
 
             if ra is not None:
                 ra.rent_used = float(gross_rent)
-                # Only auto-fill approved ceiling if empty
                 manual = _to_pos_float(getattr(ra, "approved_rent_ceiling", None))
                 if manual is None and computed_ceiling is not None:
                     ra.approved_rent_ceiling = float(computed_ceiling)
@@ -324,7 +318,6 @@ def evaluate_snapshot(
 
             reasons.extend(rent_notes)
 
-            # If rent was heuristic-estimated, we never allow an autopass
             if estimated and decision == "PASS":
                 decision = "REVIEW"
                 reasons.append("Rent was heuristic-estimated; verify comps/FMR/ceiling before PASS.")
@@ -352,16 +345,13 @@ def evaluate_snapshot(
             if fr_reasons:
                 reasons.extend([f"[Jurisdiction] {r}" for r in fr_reasons])
 
-            # If we literally have no jurisdiction row, we still block PASS → REVIEW
             if jr is None and decision == "PASS":
                 decision = "REVIEW"
                 reasons.append("No jurisdiction row → cannot PASS without compliance friction data.")
 
-            # Apply friction to score
             score = int(round(float(score) * fr_mult))
             score = max(0, min(100, score))
 
-            # ✅ Key product rule: strong UW => friction/cap should produce REVIEW not REJECT
             decision = _convert_reject_to_review_when_strong(
                 decision=decision,
                 reasons=reasons,
@@ -419,8 +409,9 @@ def evaluate_snapshot(
             existing.rent_cap_reason = str(cap_reason or "none")
             existing.fmr_adjusted = float(fmr_adjusted) if fmr_adjusted is not None else None
 
-            if rent_explain_run_id is not None and hasattr(existing, "rent_explain_run_id"):
-                setattr(existing, "rent_explain_run_id", int(rent_explain_run_id))
+            # ✅ schema now has the column, always set it
+            if rent_explain_run_id is not None:
+                existing.rent_explain_run_id = int(rent_explain_run_id)
 
             emit_workflow_event(
                 db,
@@ -433,7 +424,7 @@ def evaluate_snapshot(
                     "property_id": int(d.property_id),
                     "decision": decision,
                     "score": int(score),
-                    "rent_explain_run_id": rent_explain_run_id,
+                    "rent_explain_run_id": int(rent_explain_run_id) if rent_explain_run_id is not None else None,
                     "jurisdiction_multiplier": float(fr_mult),
                 },
             )
@@ -543,9 +534,9 @@ def evaluate_results(
             "reasons_json": r.reasons_json,
             "bedrooms": getattr(p, "bedrooms", None),
             "bathrooms": getattr(p, "bathrooms", None),
+            # ✅ always include now
+            "rent_explain_run_id": r.rent_explain_run_id,
         }
-        if hasattr(r, "rent_explain_run_id"):
-            payload["rent_explain_run_id"] = getattr(r, "rent_explain_run_id")
         out.append(UnderwritingResultOut.model_validate(payload))
 
     return out

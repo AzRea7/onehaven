@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.models import Organization, AppUser, OrgMembership, Property, RentAssumption
-from app.models_saas import Plan, OrgPlan
+from app.models import Plan, OrgPlan
 
 
 @dataclass(frozen=True)
@@ -141,4 +141,3 @@ def seed_demo(
         return SeedResult(org_slug=org_slug, user_email=user_email, plan_code=chosen.code, property_id=property_id)
     finally:
         db.close()
-        

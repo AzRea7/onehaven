@@ -1,17 +1,17 @@
-# routers/trust.py
+# backend/app/routers/trust.py
 from __future__ import annotations
 
 import json
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_owner
 from ..db import get_db
-from ..services.trust_service import record_signal, get_trust_score, recompute_and_persist
+from ..services.trust_service import get_trust_score, recompute_and_persist, record_signal
 
 router = APIRouter(prefix="/trust", tags=["trust"])
 
@@ -51,6 +51,8 @@ def get_trust(
 
     try:
         components = json.loads(row.components_json) if row.components_json else {}
+        if not isinstance(components, dict):
+            components = {}
     except Exception:
         components = {}
 
