@@ -16,11 +16,6 @@ from .config import settings
 from .db import get_db
 from .models import Organization, AppUser, OrgMembership, ApiKey
 
-# -----------------------------------------------------------------------------
-# ✅ COMPAT IMPORT:
-# Your repo defines OrgSubscription (not Subscription).
-# Some older code refers to Subscription. We support both safely.
-# -----------------------------------------------------------------------------
 try:
     from .models import Subscription as Subscription  # type: ignore
 except Exception:
@@ -53,9 +48,6 @@ def require_owner(p: Principal = Depends(lambda: None)) -> Principal:  # overwri
     raise RuntimeError("require_owner not wired")
 
 
-# -------------------------
-# Password hashing (simple)
-# -------------------------
 def _hash_password(password: str) -> str:
     salt = base64.urlsafe_b64encode(hashlib.sha256(str(datetime.utcnow()).encode()).digest())[:16]
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 120_000)
@@ -74,9 +66,6 @@ def _verify_password(password: str, stored: str) -> bool:
         return False
 
 
-# -------------------------
-# JWT helpers
-# -------------------------
 def _jwt_sign(payload: dict[str, Any]) -> str:
     import json
 
@@ -122,9 +111,6 @@ def _jwt_verify(token: str) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-# -------------------------
-# Org + membership helpers
-# -------------------------
 def _resolve_org(db: Session, org_slug: str) -> Organization:
     org = db.scalar(select(Organization).where(Organization.slug == org_slug))
     if org:
@@ -153,8 +139,6 @@ def _get_plan_code_for_org(db: Session, org_id: int) -> str | None:
             if (status is None or str(status) == "active") and plan_code:
                 return str(plan_code)
     except Exception:
-        # ✅ CRITICAL: Any SQL error aborts the transaction in Postgres until rollback.
-        # Swallowing the exception without rollback poisons the session -> InFailedSqlTransaction later.
         try:
             db.rollback()
         except Exception:
@@ -180,9 +164,6 @@ def _principal_from_user(db: Session, *, org_slug: str, user: AppUser) -> Princi
     )
 
 
-# -------------------------
-# API Key helpers
-# -------------------------
 def _hash_api_key(raw: str) -> str:
     api_key_pepper = str(getattr(settings, "api_key_pepper", "dev-pepper-change-me"))
     digest = hmac.new(api_key_pepper.encode(), raw.encode(), hashlib.sha256).digest()
@@ -221,9 +202,6 @@ def _verify_api_key(db: Session, raw: str, org_slug: str) -> Principal:
     )
 
 
-# -------------------------
-# get_principal
-# -------------------------
 def get_principal(
     request: Request,
     db: Session = Depends(get_db),
@@ -231,26 +209,42 @@ def get_principal(
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ) -> Principal:
-    # ✅ allow query fallback for SSE (EventSource can't send headers)
-    org_slug = str(x_org_slug or request.query_params.get("org_slug") or "").strip()
-    if not org_slug:
-        raise HTTPException(status_code=401, detail="Missing X-Org-Slug (active org context).")
+    """
+    FIX:
+    - We no longer fail early when X-Org-Slug is missing.
+    - If JWT exists, we can derive org_slug from JWT claim "org".
+    - API keys + dev auth still require explicit org_slug.
+    """
 
     enable_api_keys = bool(getattr(settings, "enable_api_keys", False))
     jwt_cookie_name = str(getattr(settings, "jwt_cookie_name", "oh_jwt") or "oh_jwt")
     auth_mode = str(getattr(settings, "auth_mode", "dev") or "dev").lower()
 
-    # 1) API key
-    if enable_api_keys and x_api_key:
-        return _verify_api_key(db, raw=str(x_api_key).strip(), org_slug=org_slug)
-
-    # 2) JWT cookie or Bearer token
+    # --- extract token first ---
     token = request.cookies.get(jwt_cookie_name) if jwt_cookie_name else None
     if not token and authorization and str(authorization).lower().startswith("bearer "):
         token = str(authorization).split(" ", 1)[1].strip()
 
+    # --- org_slug: header/query first ---
+    org_slug = str(x_org_slug or request.query_params.get("org_slug") or "").strip()
+
+    # 1) API key auth (requires explicit org)
+    if enable_api_keys and x_api_key:
+        if not org_slug:
+            raise HTTPException(status_code=401, detail="Missing X-Org-Slug (active org context).")
+        return _verify_api_key(db, raw=str(x_api_key).strip(), org_slug=org_slug)
+
+    # 2) JWT cookie/bearer auth
     if token:
         claims = _jwt_verify(token)
+
+        # ✅ fallback org from JWT if header missing
+        if not org_slug:
+            org_slug = str(claims.get("org") or "").strip()
+
+        if not org_slug:
+            raise HTTPException(status_code=401, detail="Missing X-Org-Slug (active org context).")
+
         sub = str(claims.get("sub") or "")
         if not sub:
             raise HTTPException(status_code=401, detail="Token missing sub")
@@ -262,9 +256,11 @@ def get_principal(
 
         return _principal_from_user(db, org_slug=org_slug, user=user)
 
-    # 3) Dev spoofing
+    # 3) Dev spoofing (requires explicit org)
     if auth_mode == "dev":
-        # header first, query fallback for SSE
+        if not org_slug:
+            raise HTTPException(status_code=401, detail="Missing X-Org-Slug (active org context).")
+
         email = (
             (request.headers.get("X-User-Email") or request.query_params.get("user_email") or "")
             .strip()

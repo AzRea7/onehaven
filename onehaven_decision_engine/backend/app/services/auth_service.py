@@ -6,22 +6,22 @@ import hashlib
 import hmac
 import os
 import secrets
-from datetime import datetime, timedelta
-from typing import Any
-
-import jwt  # PyJWT (you already have it for Clerk)
+from datetime import datetime
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Organization, AppUser, OrgMembership
-from app.models import AuthIdentity
+from app.models import Organization, AppUser, OrgMembership, AuthIdentity
 
 
 def _now() -> datetime:
     return datetime.utcnow()
 
 
+# ---------------------------------------------------------------------
+# Password hashing (PBKDF2)
+# ---------------------------------------------------------------------
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     iters = int(os.getenv("AUTH_PBKDF2_ITERS", "210000"))
@@ -43,36 +43,28 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def _jwt_secret() -> str:
-    secret = os.getenv("JWT_SECRET", "").strip()
-    if not secret:
-        raise RuntimeError("JWT_SECRET env var is required for auth_mode=jwt")
-    return secret
+def _has_user_password_col() -> bool:
+    # Avoid importing SQLAlchemy inspector here; keep it simple.
+    return hasattr(AppUser, "password_hash")
 
 
-def create_access_token(*, subject: str, org_slug: str, user_id: int, role: str, minutes: int = 60 * 24) -> str:
-    now = _now()
-    payload: dict[str, Any] = {
-        "sub": subject,
-        "org": org_slug,
-        "uid": int(user_id),
-        "role": str(role),
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=int(minutes))).timestamp()),
-    }
-    return jwt.encode(payload, _jwt_secret(), algorithm="HS256")
+# ---------------------------------------------------------------------
+# Org/User helpers
+# ---------------------------------------------------------------------
+def get_or_create_org(db: Session, org_slug: str, org_name: Optional[str] = None) -> Organization:
+    slug = (org_slug or "").strip()
+    if not slug:
+        raise ValueError("org_slug_required")
 
-
-def decode_access_token(token: str) -> dict[str, Any]:
-    return jwt.decode(token, _jwt_secret(), algorithms=["HS256"])
-
-
-def get_or_create_org(db: Session, org_slug: str, org_name: str | None = None) -> Organization:
-    org_slug = org_slug.strip()
-    org = db.scalar(select(Organization).where(Organization.slug == org_slug))
+    org = db.scalar(select(Organization).where(Organization.slug == slug))
     if org:
         return org
-    org = Organization(slug=org_slug, name=(org_name or org_slug))
+
+    kwargs: dict[str, Any] = {"slug": slug, "name": (org_name or slug)}
+    if hasattr(Organization, "created_at"):
+        kwargs["created_at"] = _now()
+
+    org = Organization(**kwargs)
     db.add(org)
     db.commit()
     db.refresh(org)
@@ -80,63 +72,158 @@ def get_or_create_org(db: Session, org_slug: str, org_name: str | None = None) -
 
 
 def get_or_create_user(db: Session, email: str) -> AppUser:
-    email = email.strip().lower()
-    u = db.scalar(select(AppUser).where(AppUser.email == email))
+    em = (email or "").strip().lower()
+    if not em:
+        raise ValueError("email_required")
+
+    u = db.scalar(select(AppUser).where(AppUser.email == em))
     if u:
         return u
-    u = AppUser(email=email, display_name=email.split("@")[0])
+
+    kwargs: dict[str, Any] = {"email": em, "display_name": em.split("@")[0]}
+    if hasattr(AppUser, "created_at"):
+        kwargs["created_at"] = _now()
+    # do NOT set password here; auth is via AuthIdentity (but we may mirror later)
+    u = AppUser(**kwargs)
     db.add(u)
     db.commit()
     db.refresh(u)
     return u
 
 
-def ensure_membership(db: Session, org_id: int, user_id: int, role: str) -> OrgMembership:
-    mem = db.scalar(select(OrgMembership).where(OrgMembership.org_id == int(org_id), OrgMembership.user_id == int(user_id)))
+def ensure_membership(db: Session, org_id: int, user_id: int, role: str = "owner") -> OrgMembership:
+    mem = db.scalar(
+        select(OrgMembership).where(
+            OrgMembership.org_id == int(org_id),
+            OrgMembership.user_id == int(user_id),
+        )
+    )
     if mem:
         return mem
-    mem = OrgMembership(org_id=int(org_id), user_id=int(user_id), role=str(role))
+
+    kwargs: dict[str, Any] = {"org_id": int(org_id), "user_id": int(user_id), "role": str(role)}
+    if hasattr(OrgMembership, "created_at"):
+        kwargs["created_at"] = _now()
+
+    mem = OrgMembership(**kwargs)
     db.add(mem)
     db.commit()
     db.refresh(mem)
     return mem
 
 
-def register_local_user(db: Session, *, org_slug: str, org_name: str, email: str, password: str) -> dict[str, Any]:
-    org = get_or_create_org(db, org_slug=org_slug, org_name=org_name)
-    user = get_or_create_user(db, email=email)
+# ---------------------------------------------------------------------
+# Public API used by routers/auth.py
+# ---------------------------------------------------------------------
+def register_local_user(
+    db: Session,
+    *,
+    org_slug: str,
+    org_name: Optional[str],
+    email: str,
+    password: str,
+) -> dict[str, Any]:
+    slug = (org_slug or "").strip()
+    em = (email or "").strip().lower()
+    pw = (password or "").strip()
 
-    ident = db.scalar(select(AuthIdentity).where(AuthIdentity.email == email.strip().lower()))
-    if ident:
-        # already exists -> treat as idempotent register (common SaaS behavior)
-        mem = ensure_membership(db, org_id=int(org.id), user_id=int(user.id), role="owner")
-        return {"org_id": int(org.id), "user_id": int(user.id), "role": str(mem.role)}
+    if not slug:
+        raise ValueError("org_slug_required")
+    if not em or not pw:
+        raise ValueError("email_password_required")
 
-    ident = AuthIdentity(email=email.strip().lower(), password_hash=hash_password(password), created_at=_now())
-    db.add(ident)
-    db.commit()
+    org = get_or_create_org(db, org_slug=slug, org_name=org_name)
+    user = get_or_create_user(db, email=em)
+
+    # Create AuthIdentity if missing (idempotent)
+    ident = db.scalar(select(AuthIdentity).where(AuthIdentity.email == em))
+    if ident is None:
+        ident = AuthIdentity(email=em, password_hash=hash_password(pw))
+        if hasattr(AuthIdentity, "created_at"):
+            ident.created_at = _now()
+        db.add(ident)
+        db.commit()
+        db.refresh(ident)
+
+    # OPTIONAL: mirror password into AppUser.password_hash for legacy code paths
+    if _has_user_password_col():
+        if not getattr(user, "password_hash", None):
+            try:
+                user.password_hash = hash_password(pw)  # type: ignore[attr-defined]
+                if hasattr(user, "email_verified"):
+                    # many dev flows assume verified
+                    user.email_verified = True  # type: ignore[attr-defined]
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            except Exception:
+                db.rollback()
 
     mem = ensure_membership(db, org_id=int(org.id), user_id=int(user.id), role="owner")
-    return {"org_id": int(org.id), "user_id": int(user.id), "role": str(mem.role)}
+
+    return {
+        "org_id": int(org.id),
+        "org_slug": str(org.slug),
+        "user_id": int(user.id),
+        "email": str(user.email),
+        "role": str(mem.role),
+    }
 
 
-def login_local_user(db: Session, *, org_slug: str, email: str, password: str) -> dict[str, Any]:
-    email = email.strip().lower()
-    org = db.scalar(select(Organization).where(Organization.slug == org_slug.strip()))
-    if not org:
+def login_local_user(
+    db: Session,
+    *,
+    org_slug: str,
+    email: str,
+    password: str,
+) -> dict[str, Any]:
+    slug = (org_slug or "").strip()
+    em = (email or "").strip().lower()
+    pw = (password or "").strip()
+
+    if not slug:
+        raise ValueError("org_slug_required")
+    if not em or not pw:
+        raise ValueError("email_password_required")
+
+    org = db.scalar(select(Organization).where(Organization.slug == slug))
+    if org is None:
         raise ValueError("org_not_found")
 
-    ident = db.scalar(select(AuthIdentity).where(AuthIdentity.email == email))
-    if not ident or not verify_password(password, ident.password_hash):
+    # Find user
+    user = db.scalar(select(AppUser).where(AppUser.email == em))
+    if user is None:
         raise ValueError("invalid_credentials")
 
-    user = db.scalar(select(AppUser).where(AppUser.email == email))
-    if not user:
-        raise ValueError("user_not_found")
+    # Check password in AuthIdentity first
+    ident = db.scalar(select(AuthIdentity).where(AuthIdentity.email == em))
+    ok = False
+    if ident is not None and getattr(ident, "password_hash", None):
+        ok = verify_password(pw, str(ident.password_hash))
 
-    mem = db.scalar(select(OrgMembership).where(OrgMembership.org_id == int(org.id), OrgMembership.user_id == int(user.id)))
-    if not mem:
+    # Fallback: legacy AppUser.password_hash (if present)
+    if not ok and _has_user_password_col():
+        ph = getattr(user, "password_hash", None)
+        if ph:
+            ok = verify_password(pw, str(ph))
+
+    if not ok:
+        raise ValueError("invalid_credentials")
+
+    # Membership check
+    mem = db.scalar(
+        select(OrgMembership).where(
+            OrgMembership.org_id == int(org.id),
+            OrgMembership.user_id == int(user.id),
+        )
+    )
+    if mem is None:
         raise ValueError("not_a_member")
 
-    token = create_access_token(subject=email, org_slug=str(org.slug), user_id=int(user.id), role=str(mem.role))
-    return {"access_token": token, "org_slug": str(org.slug), "user_id": int(user.id), "role": str(mem.role)}
+    return {
+        "org_id": int(org.id),
+        "org_slug": str(org.slug),
+        "user_id": int(user.id),
+        "email": str(user.email),
+        "role": str(mem.role),
+    }

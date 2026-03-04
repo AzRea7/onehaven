@@ -1,5 +1,12 @@
+// frontend/src/lib/auth.tsx
 import React from "react";
-import { api, setOrgSlug, getOrgSlug } from "./api";
+import {
+  api,
+  setOrgSlug,
+  getOrgSlug,
+  clearApiCache,
+  clearOrgSlug,
+} from "./api";
 
 export type Principal = {
   org_id: number;
@@ -35,6 +42,12 @@ type AuthContextValue = AuthState & {
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
+function must(v: string, name: string) {
+  const s = (v || "").trim();
+  if (!s) throw new Error(`${name} is required`);
+  return s;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<AuthState>({
     loading: true,
@@ -46,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
       const me = (await api.authMe()) as Principal;
+      if (me?.org_slug) setOrgSlug(me.org_slug);
       setState({ loading: false, principal: me, error: null });
     } catch {
       setState({ loading: false, principal: null, error: null });
@@ -59,9 +73,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }) {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      setOrgSlug(args.org_slug);
-      await api.authLogin(args);
-      await refresh();
+      clearApiCache();
+
+      const email = must(args.email, "email").toLowerCase();
+      const password = must(args.password, "password");
+      const org_slug = must(args.org_slug, "org_slug");
+
+      await api.authLogin({ email, password, org_slug });
+
+      // establish org context immediately for /auth/me
+      setOrgSlug(org_slug);
+
+      const me = (await api.authMe()) as Principal;
+      if (me?.org_slug) setOrgSlug(me.org_slug);
+
+      setState({ loading: false, principal: me, error: null });
     } catch (e: any) {
       setState({
         loading: false,
@@ -80,14 +106,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }) {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      setOrgSlug(args.org_slug);
-      await api.authRegister({
-        email: args.email,
-        password: args.password,
-        org_slug: args.org_slug,
-        org_name: args.org_name,
-      });
-      await refresh();
+      clearApiCache();
+
+      const email = must(args.email, "email").toLowerCase();
+      const password = must(args.password, "password");
+      const org_slug = must(args.org_slug, "org_slug");
+      const org_name = (args.org_name || "").trim() || undefined;
+
+      await api.authRegister({ email, password, org_slug, org_name });
+
+      // establish org context immediately for /auth/me
+      setOrgSlug(org_slug);
+
+      const me = (await api.authMe()) as Principal;
+      if (me?.org_slug) setOrgSlug(me.org_slug);
+
+      setState({ loading: false, principal: me, error: null });
     } catch (e: any) {
       setState({
         loading: false,
@@ -101,17 +135,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function logout() {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
+      clearApiCache();
       await api.authLogout();
+    } catch {
+      // ignore
     } finally {
+      clearApiCache();
+      clearOrgSlug();
       setState({ loading: false, principal: null, error: null });
+      window.location.href = "/login";
     }
   }
 
   async function switchOrg(org_slug: string) {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      await api.authSelectOrg(org_slug);
-      setOrgSlug(org_slug);
+      clearApiCache();
+      const slug = must(org_slug, "org_slug");
+      await api.authSelectOrg(slug);
+      setOrgSlug(slug);
       await refresh();
     } catch (e: any) {
       setState((s) => ({
@@ -124,7 +166,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   React.useEffect(() => {
-    if (!localStorage.getItem("org_slug")) setOrgSlug(getOrgSlug());
+    const slug = getOrgSlug();
+    if (slug) setOrgSlug(slug);
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -137,7 +180,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     logout,
     switchOrg,
   };
-
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

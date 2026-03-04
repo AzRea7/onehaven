@@ -2,7 +2,7 @@
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 
 type AuthContext = {
-  orgSlug: string;
+  orgSlug: string; // may be "" when unset
   devEmail?: string;
   devRole?: string;
 };
@@ -16,11 +16,26 @@ export type Principal = {
   plan_code?: string | null;
 };
 
+// ---------------------------------------------
+// Org slug storage policy
+// - If VITE_ORG_SLUG is set: locked dev/org mode
+// - Else: use localStorage, but do NOT force "demo"
+// ---------------------------------------------
 export function getOrgSlug(): string {
   const env = (import.meta as any).env || {};
-  const envOrg = env.VITE_ORG_SLUG as string | undefined;
+  const envOrg = (env.VITE_ORG_SLUG as string | undefined)?.trim();
   if (envOrg) return envOrg;
-  return localStorage.getItem("org_slug") || "demo";
+  return (localStorage.getItem("org_slug") || "").trim();
+}
+
+export function setOrgSlug(slug: string) {
+  const s = (slug || "").trim();
+  if (!s) return;
+  localStorage.setItem("org_slug", s);
+}
+
+export function clearOrgSlug() {
+  localStorage.removeItem("org_slug");
 }
 
 export function buildZillowUrl(property: {
@@ -29,17 +44,11 @@ export function buildZillowUrl(property: {
   state?: string;
 }) {
   if (!property?.address) return null;
-
   const slug =
     `${property.address} ${property.city ?? ""} ${property.state ?? ""}`
       .replace(/,/g, "")
       .replace(/\s+/g, "-");
-
   return `https://www.zillow.com/homes/${slug}_rb/`;
-}
-
-export function setOrgSlug(slug: string) {
-  localStorage.setItem("org_slug", slug);
 }
 
 function getAuth(): AuthContext {
@@ -70,6 +79,11 @@ type CacheEntry = { at: number; value: any };
 const memCache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<any>>();
 
+export function clearApiCache() {
+  memCache.clear();
+  inflight.clear();
+}
+
 function cacheKey(method: string, path: string, body?: any) {
   return `${method}:${path}:${body ?? ""}`;
 }
@@ -89,7 +103,6 @@ function qs(params: Record<string, any>) {
  * ✅ EventSource cannot set headers.
  * So for SSE we pass auth via querystring:
  *   ?org_slug=...&user_email=...&user_role=...
- * Backend must accept these as dev-auth fallbacks.
  */
 function makeEventSource(pathWithQuery: string): EventSource {
   const auth = getAuth();
@@ -99,16 +112,12 @@ function makeEventSource(pathWithQuery: string): EventSource {
     : `${window.location.origin}${API_BASE}`;
   const url = new URL(`${base}${pathWithQuery}`);
 
-  if (!url.searchParams.get("org_slug"))
+  if (auth.orgSlug && !url.searchParams.get("org_slug"))
     url.searchParams.set("org_slug", auth.orgSlug);
-
-  // ✅ dev auth fallbacks for SSE
-  if (auth.devEmail && !url.searchParams.get("user_email")) {
+  if (auth.devEmail && !url.searchParams.get("user_email"))
     url.searchParams.set("user_email", auth.devEmail);
-  }
-  if (auth.devRole && !url.searchParams.get("user_role")) {
+  if (auth.devRole && !url.searchParams.get("user_role"))
     url.searchParams.set("user_role", auth.devRole);
-  }
 
   return new EventSource(url.toString(), { withCredentials: true } as any);
 }
@@ -140,19 +149,30 @@ async function request<T>(
   }
 
   const run = (async () => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(init?.headers as any),
+    };
+
+    // ✅ Only skip org header for true bootstrap endpoints.
+    const isAuthBootstrap =
+      path.startsWith("/auth/login") ||
+      path.startsWith("/auth/register") ||
+      path.startsWith("/auth/logout");
+
+    // Attach org slug everywhere else (including /auth/me, /auth/orgs, /auth/select-org)
+    if (auth.orgSlug && !isAuthBootstrap) {
+      headers["X-Org-Slug"] = auth.orgSlug;
+    }
+
+    // dev auth helpers (optional)
+    if (auth.devEmail) headers["X-User-Email"] = auth.devEmail;
+    if (auth.devRole) headers["X-User-Role"] = auth.devRole;
+
     const res = await fetch(`${API_BASE}${path}`, {
       ...init,
       credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Org-Slug": auth.orgSlug,
-
-        // ✅ browser parity with curl dev auth
-        ...(auth.devEmail ? { "X-User-Email": auth.devEmail } : {}),
-        ...(auth.devRole ? { "X-User-Role": auth.devRole } : {}),
-
-        ...(init?.headers || {}),
-      },
+      headers,
       signal: init?.signal,
     });
 
@@ -166,9 +186,8 @@ async function request<T>(
       ? await res.json()
       : await res.text();
 
-    if (method === "GET" && ttl > 0) {
+    if (method === "GET" && ttl > 0)
       memCache.set(key, { at: Date.now(), value: data });
-    }
     return data as T;
   })();
 
@@ -196,7 +215,7 @@ async function requestArray<T = any>(
 
 export const api = {
   // -------------------------
-  // ✅ AUTH
+  // AUTH
   // -------------------------
   authRegister: (payload: {
     email: string;
@@ -236,13 +255,13 @@ export const api = {
       signal: p.signal,
     }),
 
-  // Property “view” and “bundle”
+  // Property view/bundle
   propertyView: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/view`, { cacheTtlMs: 2_000, signal }),
   propertyBundle: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
 
-  // ✅ Ops summary (closing loops)
+  // Ops
   opsPropertySummary: (
     propertyId: number,
     cashDays: number = 90,
@@ -250,10 +269,7 @@ export const api = {
   ) =>
     request<any>(
       `/ops/property/${propertyId}/summary${qs({ cash_days: cashDays })}`,
-      {
-        cacheTtlMs: 800,
-        signal,
-      },
+      { cacheTtlMs: 800, signal },
     ),
 
   opsGenerateRehabTasks: (propertyId: number) =>
@@ -262,7 +278,7 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  // Deal creation (Phase 1)
+  // Deals
   createDeal: (payload: {
     property_id: number;
     asking_price: number;
@@ -289,7 +305,6 @@ export const api = {
       }),
     }),
 
-  // Deal Intake
   intakeDeal: (payload: any) =>
     request<any>(`/intake/deal`, {
       method: "POST",
@@ -310,11 +325,7 @@ export const api = {
     payment_standard_pct?: number,
   ) =>
     request<any>(
-      `/rent/explain/${propertyId}${qs({
-        strategy,
-        persist: persist ? "true" : "false",
-        payment_standard_pct,
-      })}`,
+      `/rent/explain/${propertyId}${qs({ strategy, persist: persist ? "true" : "false", payment_standard_pct })}`,
       { method: "GET", cacheTtlMs: 0 },
     ),
 
@@ -331,15 +342,11 @@ export const api = {
     limit?: number;
   }) =>
     requestArray<any>(
-      `/evaluate/results${qs({
-        snapshot_id: params.snapshot_id,
-        decision: params.decision,
-        limit: params.limit ?? 100,
-      })}`,
+      `/evaluate/results${qs({ snapshot_id: params.snapshot_id, decision: params.decision, limit: params.limit ?? 100 })}`,
       { cacheTtlMs: 1_000 },
     ),
 
-  // Checklist / Compliance
+  // Compliance
   checklistLatest: (propertyId: number, signal?: AbortSignal) =>
     request<any>(`/compliance/checklist/${propertyId}/latest`, {
       cacheTtlMs: 1_000,
@@ -354,11 +361,7 @@ export const api = {
     const version = opts?.version ?? "v1";
     const persist = opts?.persist ?? true;
     return request<any>(
-      `/compliance/checklist/${propertyId}${qs({
-        strategy,
-        version,
-        persist: persist ? "true" : "false",
-      })}`,
+      `/compliance/checklist/${propertyId}${qs({ strategy, version, persist: persist ? "true" : "false" })}`,
       { method: "POST", body: JSON.stringify({}) },
     );
   },
@@ -397,7 +400,7 @@ export const api = {
   deleteRehabTask: (taskId: number) =>
     request<any>(`/rehab/tasks/${taskId}`, { method: "DELETE" }),
 
-  // Tenants / leases
+  // Tenants/leases
   leases: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/tenants/leases${qs({ property_id: propertyId, limit: 200 })}`,
@@ -436,9 +439,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // -------------------------
-  // ✅ TRUST (new)
-  // -------------------------
+  // Trust
   trustGet: (
     entity_type: string,
     entity_id: string | number,
@@ -459,10 +460,9 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Agents (spec list)
+  // Agents
   agents: () => requestArray<any>(`/agents`, { cacheTtlMs: 4_000 }),
 
-  // Agent Slots
   slotSpecs: (signal?: AbortSignal, cacheTtlMs: number = 10_000) =>
     requestArray<any>(`/agents/slots/specs`, { cacheTtlMs, signal }),
 
@@ -505,7 +505,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Agent Runs (align to /agents/runs, but keep older endpoints if you still have them)
   agentRunsList: (arg: number | { property_id: number }) => {
     const propertyId = typeof arg === "number" ? arg : arg.property_id;
     return requestArray<any>(`/agents/runs${qs({ property_id: propertyId })}`, {
@@ -523,7 +522,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // (Older routes kept as-is; if you have them they still work)
   agentRunsPlan: (propertyId: number) =>
     request<any>(`/agent-runs/plan${qs({ property_id: propertyId })}`, {
       method: "POST",
@@ -532,10 +530,7 @@ export const api = {
 
   agentRunsEnqueue: (propertyId: number, dispatch: boolean = true) =>
     request<any>(
-      `/agent-runs/enqueue${qs({
-        property_id: propertyId,
-        dispatch: dispatch ? "true" : "false",
-      })}`,
+      `/agent-runs/enqueue${qs({ property_id: propertyId, dispatch: dispatch ? "true" : "false" })}`,
       { method: "POST", body: JSON.stringify({}) },
     ),
 
