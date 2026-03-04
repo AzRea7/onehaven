@@ -486,12 +486,7 @@ export default function PropertyView() {
         : "neutral";
 
   const financing = getFinancingType(d?.asking_price);
-  const financingTone =
-    financing === "CASH DEAL"
-      ? "warn"
-      : financing === "DSCR LOAN"
-        ? "neutral"
-        : "neutral";
+  const financingTone = financing === "CASH DEAL" ? "warn" : "neutral";
 
   const heroSub =
     `${p?.city ?? "—"}, ${p?.state ?? "—"} ${p?.zip ?? ""}`.trim();
@@ -539,7 +534,6 @@ export default function PropertyView() {
         subtitle={heroSub}
         tilt={false}
         right={
-          // keep your golem: explicit size, moved up slightly
           <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
             <div className="h-[210px] w-[210px] md:h-[230px] md:w-[230px] translate-y-[-12px] opacity-95">
               <Golem className="h-full w-full" />
@@ -548,7 +542,6 @@ export default function PropertyView() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {/* Primary actions first */}
             <button
               onClick={loadAll}
               className="oh-btn cursor-pointer"
@@ -567,7 +560,6 @@ export default function PropertyView() {
               evaluate
             </button>
 
-            {/* Secondary actions */}
             <button
               onClick={enrich}
               className="oh-btn cursor-pointer"
@@ -618,7 +610,6 @@ export default function PropertyView() {
         }
       />
 
-      {/* Minimal hero “chips” row + image. This is where clutter dies. */}
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
         <div className="oh-panel p-4">
           <div className="text-xs uppercase tracking-widest text-white/45">
@@ -655,7 +646,6 @@ export default function PropertyView() {
           </div>
         </div>
 
-        {/* ABOVE THE FOLD: Reality Loop + Trust */}
         <div className="space-y-4">
           <Panel
             title="Reality Loop"
@@ -843,7 +833,6 @@ export default function PropertyView() {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="gradient-border rounded-2xl p-[1px]">
         <div className="glass rounded-2xl p-2 flex gap-2 flex-wrap">
           {tabs.map((t) => (

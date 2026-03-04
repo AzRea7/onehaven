@@ -165,10 +165,6 @@ def valuation_suggestions(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Phase 4: valuation cadence suggestions for portfolio hygiene.
-    Default: quarterly.
-    """
     must_get_property(db, org_id=p.org_id, property_id=property_id)
 
     latest = db.scalar(

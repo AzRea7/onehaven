@@ -4,7 +4,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Shell from "./components/Shell";
 
 import Dashboard from "./pages/Dashboard";
-import Property from "./pages/Property"; // <-- this is your Properties LIST page
+import Property from "./pages/Property"; // Properties LIST page
 import PropertyView from "./pages/PropertyView";
 
 import Agents from "./pages/Agents";
@@ -59,7 +59,7 @@ export default function App() {
           }
         />
 
-        {/* ✅ Properties list page */}
+        {/* Properties list page */}
         <Route
           path="/properties"
           element={
@@ -69,7 +69,7 @@ export default function App() {
           }
         />
 
-        {/* ✅ Property detail page */}
+        {/* Property detail page */}
         <Route
           path="/properties/:id"
           element={
@@ -79,7 +79,7 @@ export default function App() {
           }
         />
 
-        {/* Optional legacy redirect if anything still links to /property/:id */}
+        {/* Legacy redirect */}
         <Route
           path="/property/:id"
           element={<Navigate to="/properties/:id" replace />}

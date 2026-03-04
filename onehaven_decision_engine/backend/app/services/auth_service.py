@@ -26,7 +26,11 @@ def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     iters = int(os.getenv("AUTH_PBKDF2_ITERS", "210000"))
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iters)
-    return f"pbkdf2_sha256${iters}${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
+    return (
+        f"pbkdf2_sha256${iters}$"
+        f"{base64.b64encode(salt).decode()}$"
+        f"{base64.b64encode(dk).decode()}"
+    )
 
 
 def verify_password(password: str, stored: str) -> bool:
@@ -83,7 +87,7 @@ def get_or_create_user(db: Session, email: str) -> AppUser:
     kwargs: dict[str, Any] = {"email": em, "display_name": em.split("@")[0]}
     if hasattr(AppUser, "created_at"):
         kwargs["created_at"] = _now()
-    # do NOT set password here; auth is via AuthIdentity (but we may mirror later)
+
     u = AppUser(**kwargs)
     db.add(u)
     db.commit()
@@ -92,6 +96,10 @@ def get_or_create_user(db: Session, email: str) -> AppUser:
 
 
 def ensure_membership(db: Session, org_id: int, user_id: int, role: str = "owner") -> OrgMembership:
+    """
+    HARD GUARANTEE: membership exists (idempotent).
+    This must be the single source-of-truth used by register and any dev provisioning flows.
+    """
     mem = db.scalar(
         select(OrgMembership).where(
             OrgMembership.org_id == int(org_id),
@@ -151,7 +159,6 @@ def register_local_user(
             try:
                 user.password_hash = hash_password(pw)  # type: ignore[attr-defined]
                 if hasattr(user, "email_verified"):
-                    # many dev flows assume verified
                     user.email_verified = True  # type: ignore[attr-defined]
                 db.add(user)
                 db.commit()
@@ -190,7 +197,6 @@ def login_local_user(
     if org is None:
         raise ValueError("org_not_found")
 
-    # Find user
     user = db.scalar(select(AppUser).where(AppUser.email == em))
     if user is None:
         raise ValueError("invalid_credentials")
@@ -210,7 +216,6 @@ def login_local_user(
     if not ok:
         raise ValueError("invalid_credentials")
 
-    # Membership check
     mem = db.scalar(
         select(OrgMembership).where(
             OrgMembership.org_id == int(org.id),

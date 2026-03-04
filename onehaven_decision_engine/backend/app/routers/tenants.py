@@ -55,7 +55,7 @@ def list_tenants(
 @router.patch("/{tenant_id}", response_model=TenantOut)
 def update_tenant(
     tenant_id: int,
-    payload: TenantCreate,  # full-update for simplicity
+    payload: TenantCreate,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
@@ -108,11 +108,9 @@ def delete_tenant(tenant_id: int, db: Session = Depends(get_db), p=Depends(get_p
 
 @router.post("/leases", response_model=LeaseOut)
 def create_lease(payload: LeaseCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    # ownership checks (constitutional)
     _ = must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
     _ = must_get_tenant(db, org_id=p.org_id, tenant_id=payload.tenant_id)
 
-    # Phase 4 DoD: block overlapping leases
     ensure_no_lease_overlap(
         db,
         org_id=p.org_id,
@@ -147,7 +145,6 @@ def create_lease(payload: LeaseCreate, db: Session = Depends(get_db), p=Depends(
         payload={"lease_id": row.id, "tenant_id": payload.tenant_id},
     )
 
-    # Phase 4: lease implies we’re now in tenant stage
     advance_stage_if_needed(db, org_id=p.org_id, property_id=payload.property_id, suggested_stage="tenant")
 
     db.commit()
@@ -179,18 +176,16 @@ def list_leases(
 @router.patch("/leases/{lease_id}", response_model=LeaseOut)
 def update_lease(
     lease_id: int,
-    payload: LeaseCreate,  # full-update for simplicity
+    payload: LeaseCreate,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
     row = must_get_lease(db, org_id=p.org_id, lease_id=lease_id)
     before = row.model_dump()
 
-    # if property/tenant changes, validate ownership
     must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
     must_get_tenant(db, org_id=p.org_id, tenant_id=payload.tenant_id)
 
-    # Phase 4 DoD: block overlapping leases (excluding self)
     ensure_no_lease_overlap(
         db,
         org_id=p.org_id,

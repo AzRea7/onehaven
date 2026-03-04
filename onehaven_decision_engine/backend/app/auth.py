@@ -5,7 +5,7 @@ import base64
 import hashlib
 import hmac
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Any
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -46,24 +46,6 @@ def require_operator(p: Principal = Depends(lambda: None)) -> Principal:  # over
 
 def require_owner(p: Principal = Depends(lambda: None)) -> Principal:  # overwritten below
     raise RuntimeError("require_owner not wired")
-
-
-def _hash_password(password: str) -> str:
-    salt = base64.urlsafe_b64encode(hashlib.sha256(str(datetime.utcnow()).encode()).digest())[:16]
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 120_000)
-    return f"pbkdf2_sha256${salt.decode()}${base64.urlsafe_b64encode(dk).decode()}"
-
-
-def _verify_password(password: str, stored: str) -> bool:
-    try:
-        algo, salt_s, hash_s = stored.split("$", 2)
-        if algo != "pbkdf2_sha256":
-            return False
-        salt = salt_s.encode()
-        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 120_000)
-        return hmac.compare_digest(base64.urlsafe_b64encode(dk).decode(), hash_s)
-    except Exception:
-        return False
 
 
 def _jwt_sign(payload: dict[str, Any]) -> str:
@@ -123,16 +105,35 @@ def _get_user_by_email(db: Session, email: str) -> AppUser | None:
 
 
 def _get_membership(db: Session, org_id: int, user_id: int) -> OrgMembership | None:
-    return db.scalar(
-        select(OrgMembership).where(OrgMembership.org_id == org_id, OrgMembership.user_id == user_id)
-    )
+    return db.scalar(select(OrgMembership).where(OrgMembership.org_id == org_id, OrgMembership.user_id == user_id))
+
+
+def _ensure_membership(
+    db: Session,
+    *,
+    org_id: int,
+    user_id: int,
+    role: str = "owner",
+) -> OrgMembership:
+    mem = _get_membership(db, org_id=org_id, user_id=user_id)
+    if mem is not None:
+        return mem
+
+    safe_role = role if role in ROLE_ORDER else "owner"
+    kwargs: dict[str, Any] = {"org_id": int(org_id), "user_id": int(user_id), "role": safe_role}
+    if hasattr(OrgMembership, "created_at"):
+        kwargs["created_at"] = datetime.utcnow()
+
+    mem = OrgMembership(**kwargs)
+    db.add(mem)
+    db.commit()
+    db.refresh(mem)
+    return mem
 
 
 def _get_plan_code_for_org(db: Session, org_id: int) -> str | None:
     try:
-        sub = db.scalar(
-            select(Subscription).where(Subscription.org_id == org_id).order_by(Subscription.id.desc())
-        )
+        sub = db.scalar(select(Subscription).where(Subscription.org_id == org_id).order_by(Subscription.id.desc()))
         if sub is not None:
             status = getattr(sub, "status", None)
             plan_code = getattr(sub, "plan_code", None)
@@ -149,9 +150,13 @@ def _get_plan_code_for_org(db: Session, org_id: int) -> str | None:
 
 def _principal_from_user(db: Session, *, org_slug: str, user: AppUser) -> Principal:
     org = _resolve_org(db, org_slug=org_slug)
+
     mem = _get_membership(db, org_id=int(org.id), user_id=int(user.id))
     if mem is None:
-        raise HTTPException(status_code=403, detail="Not a member of this org")
+        raise HTTPException(
+            status_code=403,
+            detail=f"Not a member of org (org_slug={org_slug}, org_id={int(org.id)}, user_id={int(user.id)})",
+        )
 
     plan_code = _get_plan_code_for_org(db, org_id=int(org.id))
     return Principal(
@@ -202,6 +207,18 @@ def _verify_api_key(db: Session, raw: str, org_slug: str) -> Principal:
     )
 
 
+def _resolve_active_org_slug(
+    request: Request,
+    *,
+    claims: dict[str, Any] | None,
+    x_org_slug: Optional[str],
+) -> str:
+    org_slug = str(x_org_slug or request.query_params.get("org_slug") or "").strip()
+    if not org_slug and claims:
+        org_slug = str(claims.get("org") or "").strip()
+    return org_slug
+
+
 def get_principal(
     request: Request,
     db: Session = Depends(get_db),
@@ -209,41 +226,27 @@ def get_principal(
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ) -> Principal:
-    """
-    FIX:
-    - We no longer fail early when X-Org-Slug is missing.
-    - If JWT exists, we can derive org_slug from JWT claim "org".
-    - API keys + dev auth still require explicit org_slug.
-    """
-
     enable_api_keys = bool(getattr(settings, "enable_api_keys", False))
-    jwt_cookie_name = str(getattr(settings, "jwt_cookie_name", "oh_jwt") or "oh_jwt")
+    jwt_cookie_name = str(getattr(settings, "jwt_cookie_name", "onehaven_jwt") or "onehaven_jwt")
     auth_mode = str(getattr(settings, "auth_mode", "dev") or "dev").lower()
 
-    # --- extract token first ---
     token = request.cookies.get(jwt_cookie_name) if jwt_cookie_name else None
     if not token and authorization and str(authorization).lower().startswith("bearer "):
         token = str(authorization).split(" ", 1)[1].strip()
 
-    # --- org_slug: header/query first ---
-    org_slug = str(x_org_slug or request.query_params.get("org_slug") or "").strip()
-
-    # 1) API key auth (requires explicit org)
+    # 1) API keys
     if enable_api_keys and x_api_key:
+        org_slug = str(x_org_slug or request.query_params.get("org_slug") or "").strip()
         if not org_slug:
             raise HTTPException(status_code=401, detail="Missing X-Org-Slug (active org context).")
         return _verify_api_key(db, raw=str(x_api_key).strip(), org_slug=org_slug)
 
-    # 2) JWT cookie/bearer auth
+    # 2) JWT
     if token:
         claims = _jwt_verify(token)
-
-        # ✅ fallback org from JWT if header missing
+        org_slug = _resolve_active_org_slug(request, claims=claims, x_org_slug=x_org_slug)
         if not org_slug:
-            org_slug = str(claims.get("org") or "").strip()
-
-        if not org_slug:
-            raise HTTPException(status_code=401, detail="Missing X-Org-Slug (active org context).")
+            raise HTTPException(status_code=401, detail="Missing org context (X-Org-Slug or org in JWT).")
 
         sub = str(claims.get("sub") or "")
         if not sub:
@@ -256,21 +259,14 @@ def get_principal(
 
         return _principal_from_user(db, org_slug=org_slug, user=user)
 
-    # 3) Dev spoofing (requires explicit org)
+    # 3) Dev spoofing
     if auth_mode == "dev":
+        org_slug = str(x_org_slug or request.query_params.get("org_slug") or "").strip()
         if not org_slug:
             raise HTTPException(status_code=401, detail="Missing X-Org-Slug (active org context).")
 
-        email = (
-            (request.headers.get("X-User-Email") or request.query_params.get("user_email") or "")
-            .strip()
-            .lower()
-        )
-        role_hint = (
-            (request.headers.get("X-User-Role") or request.query_params.get("user_role") or "owner")
-            .strip()
-            .lower()
-        )
+        email = (request.headers.get("X-User-Email") or request.query_params.get("user_email") or "").strip().lower()
+        role_hint = (request.headers.get("X-User-Role") or request.query_params.get("user_role") or "owner").strip().lower()
         if not email:
             raise HTTPException(status_code=401, detail="Missing X-User-Email for dev auth")
 
@@ -278,14 +274,20 @@ def get_principal(
 
         org = db.scalar(select(Organization).where(Organization.slug == org_slug))
         if org is None and dev_auto_provision:
-            org = Organization(slug=org_slug, name=org_slug, created_at=datetime.utcnow())
+            kwargs: dict[str, Any] = {"slug": org_slug, "name": org_slug}
+            if hasattr(Organization, "created_at"):
+                kwargs["created_at"] = datetime.utcnow()
+            org = Organization(**kwargs)
             db.add(org)
             db.commit()
             db.refresh(org)
 
         user = _get_user_by_email(db, email=email)
         if user is None and dev_auto_provision:
-            user = AppUser(email=email, display_name=email.split("@")[0], created_at=datetime.utcnow())
+            kwargs: dict[str, Any] = {"email": email, "display_name": email.split("@")[0]}
+            if hasattr(AppUser, "created_at"):
+                kwargs["created_at"] = datetime.utcnow()
+            user = AppUser(**kwargs)
             db.add(user)
             db.commit()
             db.refresh(user)
@@ -293,22 +295,14 @@ def get_principal(
         if org is None or user is None:
             raise HTTPException(status_code=401, detail="Dev auth could not provision user/org")
 
-        mem = db.scalar(
-            select(OrgMembership).where(
-                OrgMembership.org_id == int(org.id),
-                OrgMembership.user_id == int(user.id),
-            )
-        )
+        mem = _get_membership(db, org_id=int(org.id), user_id=int(user.id))
         if mem is None and dev_auto_provision:
-            mem = OrgMembership(
+            mem = _ensure_membership(
+                db,
                 org_id=int(org.id),
                 user_id=int(user.id),
                 role=role_hint if role_hint in ROLE_ORDER else "owner",
-                created_at=datetime.utcnow(),
             )
-            db.add(mem)
-            db.commit()
-            db.refresh(mem)
 
         if mem is None:
             raise HTTPException(status_code=403, detail="Not a member of this org")
@@ -334,3 +328,15 @@ def require_operator(p: Principal = Depends(get_principal)) -> Principal:
 def require_owner(p: Principal = Depends(get_principal)) -> Principal:
     _require_role(p, "owner")
     return p
+
+
+def issue_jwt_for_user(*, user_id: int, org_slug: str) -> str:
+    ttl_minutes = int(getattr(settings, "jwt_ttl_minutes", 60 * 24 * 7))  # default 7 days
+    exp = int((datetime.utcnow() + timedelta(minutes=ttl_minutes)).timestamp())
+    payload = {
+        "sub": str(user_id),
+        "org": str(org_slug),
+        "exp": exp,
+        "iat": int(datetime.utcnow().timestamp()),
+    }
+    return _jwt_sign(payload)

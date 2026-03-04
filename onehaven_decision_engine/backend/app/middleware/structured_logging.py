@@ -14,8 +14,6 @@ log = logging.getLogger("onehaven.request")
 
 
 def _json_log(payload: dict) -> None:
-    # Keep it simple: one JSON line per request.
-    # Works in Docker, works in CloudWatch, works in ELK, works everywhere.
     try:
         log.info(json.dumps(payload, default=str))
     except Exception:
@@ -24,21 +22,18 @@ def _json_log(payload: dict) -> None:
 
 class StructuredLoggingMiddleware(BaseHTTPMiddleware):
     """
-    Emits one structured log line per request with:
-      request_id, org_id, user_id, method, path, status_code, latency_ms
+    Emits one JSON log line per request with:
+      request_id, method, path, status_code, latency_ms, org_slug, user_email
 
-    Assumes RequestIdMiddleware sets request.state.request_id.
+    Assumes RequestIDMiddleware sets request.state.request_id.
     """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         t0 = time.time()
 
-        # Best-effort principal extraction:
-        # - in dev mode you use headers
-        # - in jwt mode your auth dependency sets principal inside handlers
-        # For "request log line", headers are good enough (and stable).
-        org_slug = request.headers.get("X-Org-Slug")
-        user_email = request.headers.get("X-User-Email")
+        # Prefer headers, fall back to querystring (important for EventSource)
+        org_slug = (request.headers.get("X-Org-Slug") or request.query_params.get("org_slug") or "").strip() or None
+        user_email = (request.headers.get("X-User-Email") or request.query_params.get("user_email") or "").strip() or None
 
         request_id: Optional[str] = getattr(request.state, "request_id", None)
 
@@ -49,7 +44,6 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
             return response
         finally:
             latency_ms = int((time.time() - t0) * 1000)
-
             _json_log(
                 {
                     "event": "http_request",

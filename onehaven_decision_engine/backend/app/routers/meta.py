@@ -22,7 +22,6 @@ def _read_doc(name: str) -> str:
 
 @router.get("/whoami", response_model=dict)
 def whoami(principal=Depends(get_principal)):
-    # This matches what your frontend expects and what your pipeline script prints.
     return {
         "org_id": principal.org_id,
         "org_slug": principal.org_slug,

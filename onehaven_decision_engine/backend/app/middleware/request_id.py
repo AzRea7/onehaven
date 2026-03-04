@@ -23,6 +23,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     - Accepts incoming X-Request-ID (preferred) or X-Request-Id (common variant)
     - Otherwise generates UUID4
     - Stores in ContextVar so logging can retrieve it anywhere
+    - ALSO stores on request.state.request_id for other middleware
     """
 
     header_out = "X-Request-ID"
@@ -33,6 +34,8 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             rid = str(uuid.uuid4())
 
         token = request_id_ctx.set(rid)
+        request.state.request_id = rid  # ✅ critical for middleware chain
+
         try:
             resp = await call_next(request)
             resp.headers[self.header_out] = rid

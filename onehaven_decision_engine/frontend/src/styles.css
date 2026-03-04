@@ -19,9 +19,6 @@
   --ring: 99 102 241;
 }
 
-/* frontend/src/index.css */
-/* add these near the top (or anywhere global) */
-
 /* ✅ Global pointer policy (so you don’t have to remember to add cursor-pointer) */
 a,
 button,

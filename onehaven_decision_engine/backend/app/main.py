@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .logging_config import configure_logging
 from .middleware.request_id import RequestIDMiddleware
+from .middleware.structured_logging import StructuredLoggingMiddleware
 
 from .routers.health import router as health_router
 from .routers.meta import router as meta_router
@@ -45,12 +46,32 @@ API_PREFIX = "/api"
 
 
 def _cors_origins() -> list[str]:
-    val = getattr(settings, "cors_allow_origins", ["*"])
+    """
+    settings.cors_allow_origins can be:
+      - "*" (string)
+      - "http://localhost:5173,http://127.0.0.1:5173" (string CSV)
+      - ["http://localhost:5173", ...] (list)
+    """
+    val = getattr(settings, "cors_allow_origins", None)
+
+    # sensible dev default (works with Vite on 5173 + nginx on 8080)
+    if val is None:
+        return [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+        ]
+
     if isinstance(val, str):
         v = val.strip()
-        return ["*"] if v == "*" else [x.strip() for x in v.split(",") if x.strip()]
+        if v == "*":
+            return ["*"]
+        return [x.strip() for x in v.split(",") if x.strip()]
+
     if isinstance(val, list) and val:
-        return val
+        return [str(x).strip() for x in val if str(x).strip()]
+
     return ["*"]
 
 
@@ -62,13 +83,21 @@ def create_app() -> FastAPI:
         version=getattr(settings, "decision_version", "dev"),
     )
 
-    # Request-ID first (baseline observability)
+    # Observability first
     app.add_middleware(RequestIDMiddleware)
+    app.add_middleware(StructuredLoggingMiddleware)
+
+    origins = _cors_origins()
+
+    # ✅ CRITICAL:
+    # If origins == ["*"], you CANNOT use credentials/cookies cross-origin.
+    # Browsers will refuse Set-Cookie + refuse sending cookies.
+    allow_creds = origins != ["*"]
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_cors_origins(),
-        allow_credentials=True,
+        allow_origins=origins,
+        allow_credentials=allow_creds,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -101,7 +130,7 @@ def create_app() -> FastAPI:
     app.include_router(equity_router, prefix=API_PREFIX)
     app.include_router(ops_router, prefix=API_PREFIX)
 
-    # SaaS auth + api keys (real principal)
+    # SaaS auth + api keys
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(api_keys_router, prefix=API_PREFIX)
 

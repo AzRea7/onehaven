@@ -29,14 +29,72 @@ def _ensure_default_plan_seeded(db: Session) -> None:
             return
         db.add(Plan(code=code, name=name, limits_json=str(limits).replace("'", '"'), created_at=_now()))
 
-    upsert("free", "Free", {"max_properties": 3, "agent_runs_per_day": 20, "external_calls_per_day": 50, "max_concurrent_runs": 2})
-    upsert("starter", "Starter", {"max_properties": 25, "agent_runs_per_day": 200, "external_calls_per_day": 500, "max_concurrent_runs": 5})
+    upsert(
+        "free",
+        "Free",
+        {"max_properties": 3, "agent_runs_per_day": 20, "external_calls_per_day": 50, "max_concurrent_runs": 2},
+    )
+    upsert(
+        "starter",
+        "Starter",
+        {"max_properties": 25, "agent_runs_per_day": 200, "external_calls_per_day": 500, "max_concurrent_runs": 5},
+    )
     db.commit()
 
 
+def _cookie_name() -> str:
+    # Keep your debug-cookie output consistent with what the backend actually uses.
+    return str(getattr(settings, "jwt_cookie_name", "onehaven_jwt") or "onehaven_jwt")
+
+
+def _is_localhost(request: Request) -> bool:
+    host = (request.headers.get("host") or "").lower()
+    return host.startswith("localhost") or host.startswith("127.0.0.1")
+
+
+def _is_https(request: Request) -> bool:
+    xf_proto = (request.headers.get("x-forwarded-proto") or "").lower().strip()
+    if xf_proto:
+        return xf_proto == "https"
+    return request.url.scheme == "https"
+
+
+def _set_auth_cookie(response: Response, request: Request, token: str) -> None:
+    """
+    Cookie correctness rules (browser enforced):
+      - SameSite=None requires Secure=True
+      - Secure=True cookies will NOT be stored on http://localhost
+    So for localhost dev, force: secure=False, samesite='lax'
+    """
+    name = _cookie_name()
+    max_age = int(getattr(settings, "jwt_exp_minutes", 60)) * 60
+
+    secure_setting = bool(getattr(settings, "jwt_cookie_secure", False))
+    samesite_setting = str(getattr(settings, "jwt_cookie_samesite", "lax") or "lax").lower()
+
+    if _is_localhost(request) or not _is_https(request):
+        secure = False
+        samesite = "lax"
+    else:
+        secure = secure_setting
+        if samesite_setting == "none" and not secure:
+            samesite = "lax"
+        else:
+            samesite = samesite_setting
+
+    response.set_cookie(
+        name,
+        token,
+        httponly=True,
+        secure=secure,
+        samesite=samesite,
+        max_age=max_age,
+        path="/",
+    )
+
+
 def _cookie_token(request: Request) -> Optional[str]:
-    cookie_name = str(getattr(settings, "jwt_cookie_name", "oh_jwt") or "oh_jwt")
-    return request.cookies.get(cookie_name)
+    return request.cookies.get(_cookie_name())
 
 
 def _require_user_id_from_cookie(request: Request) -> int:
@@ -74,7 +132,10 @@ def _principal(db: Session, *, user_id: int, org_slug: str) -> PrincipalOut:
         )
     )
     if mem is None:
-        raise HTTPException(status_code=403, detail="Not a member of org")
+        raise HTTPException(
+            status_code=403,
+            detail=f"Not a member of org (org_slug={org_slug}, org_id={int(org.id)}, user_id={int(user_id)})",
+        )
 
     user = db.scalar(select(AppUser).where(AppUser.id == int(user_id)))
     if user is None:
@@ -90,7 +151,7 @@ def _principal(db: Session, *, user_id: int, org_slug: str) -> PrincipalOut:
 
 
 @router.post("/register")
-def register(payload: dict[str, Any], response: Response, db: Session = Depends(get_db)):
+def register(payload: dict[str, Any], request: Request, response: Response, db: Session = Depends(get_db)):
     _ensure_default_plan_seeded(db)
 
     email = str(payload.get("email") or "").strip().lower()
@@ -101,9 +162,8 @@ def register(payload: dict[str, Any], response: Response, db: Session = Depends(
     if not email or not password or not org_slug:
         raise HTTPException(status_code=400, detail="email, password, org_slug required")
 
-    # 1) Create or fetch org/user/identity
     try:
-        out = auth_service.register_local_user(
+        auth_service.register_local_user(
             db,
             org_slug=org_slug,
             org_name=org_name,
@@ -113,12 +173,12 @@ def register(payload: dict[str, Any], response: Response, db: Session = Depends(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # 2) Hard-guarantee membership exists (no assumptions)
     org = db.scalar(select(Organization).where(Organization.slug == org_slug))
     user = db.scalar(select(AppUser).where(AppUser.email == email))
     if org is None or user is None:
         raise HTTPException(status_code=500, detail="register_inconsistent_state")
 
+    # guarantee membership (idempotent)
     mem = db.scalar(
         select(OrgMembership).where(
             OrgMembership.org_id == int(org.id),
@@ -126,15 +186,14 @@ def register(payload: dict[str, Any], response: Response, db: Session = Depends(
         )
     )
     if mem is None:
-        kwargs = {"org_id": int(org.id), "user_id": int(user.id), "role": "owner"}
-        if hasattr(OrgMembership, "created_at"):
-            kwargs["created_at"] = _now()
-        mem = OrgMembership(**kwargs)
-        db.add(mem)
-        db.commit()
-        db.refresh(mem)
+        auth_service.ensure_membership(db, org_id=int(org.id), user_id=int(user.id), role="owner")
+        mem = db.scalar(
+            select(OrgMembership).where(
+                OrgMembership.org_id == int(org.id),
+                OrgMembership.user_id == int(user.id),
+            )
+        )
 
-    # 3) Ensure subscription exists
     sub = db.scalar(select(OrgSubscription).where(OrgSubscription.org_id == int(org.id)))
     if sub is None:
         db.add(
@@ -147,24 +206,15 @@ def register(payload: dict[str, Any], response: Response, db: Session = Depends(
         )
         db.commit()
 
-    # 4) Set cookie with correct org claim
-    exp = int((_now() + timedelta(minutes=int(settings.jwt_exp_minutes))).timestamp())
+    exp = int((_now() + timedelta(minutes=int(getattr(settings, "jwt_exp_minutes", 60)))).timestamp())
     token = _jwt_sign({"sub": str(user.id), "org": str(org.slug), "exp": exp})
-    response.set_cookie(
-        settings.jwt_cookie_name,
-        token,
-        httponly=True,
-        secure=bool(settings.jwt_cookie_secure),
-        samesite=str(settings.jwt_cookie_samesite),
-        max_age=int(settings.jwt_exp_minutes) * 60,
-        path="/",
-    )
+    _set_auth_cookie(response, request, token)
 
-    return {"ok": True, "user_id": int(user.id), "org_slug": str(org.slug), "role": str(mem.role)}
+    return {"ok": True, "user_id": int(user.id), "org_slug": str(org.slug), "role": str(mem.role if mem else "owner")}
 
 
 @router.post("/login")
-def login(payload: dict[str, Any], response: Response, db: Session = Depends(get_db)):
+def login(payload: dict[str, Any], request: Request, response: Response, db: Session = Depends(get_db)):
     email = str(payload.get("email") or "").strip().lower()
     password = str(payload.get("password") or "").strip()
     org_slug = str(payload.get("org_slug") or "").strip()
@@ -184,24 +234,16 @@ def login(payload: dict[str, Any], response: Response, db: Session = Depends(get
             raise HTTPException(status_code=403, detail="Not a member of org")
         raise HTTPException(status_code=401, detail=msg)
 
-    exp = int((_now() + timedelta(minutes=int(settings.jwt_exp_minutes))).timestamp())
+    exp = int((_now() + timedelta(minutes=int(getattr(settings, "jwt_exp_minutes", 60)))).timestamp())
     token = _jwt_sign({"sub": str(out["user_id"]), "org": str(out["org_slug"]), "exp": exp})
-    response.set_cookie(
-        settings.jwt_cookie_name,
-        token,
-        httponly=True,
-        secure=bool(settings.jwt_cookie_secure),
-        samesite=str(settings.jwt_cookie_samesite),
-        max_age=int(settings.jwt_exp_minutes) * 60,
-        path="/",
-    )
+    _set_auth_cookie(response, request, token)
 
     return {"ok": True, "user_id": int(out["user_id"]), "org_slug": str(out["org_slug"]), "role": str(out["role"])}
 
 
 @router.post("/logout")
 def logout(response: Response):
-    response.delete_cookie(settings.jwt_cookie_name, path="/")
+    response.delete_cookie(_cookie_name(), path="/")
     return {"ok": True}
 
 
@@ -209,12 +251,21 @@ def logout(response: Response):
 def me(request: Request, db: Session = Depends(get_db)):
     user_id = _require_user_id_from_cookie(request)
 
-    # Use header if present; else cookie claim
-    org_slug = (request.headers.get("X-Org-Slug") or "").strip() or _org_from_cookie(request)
-    if not org_slug:
+    header_slug = (request.headers.get("X-Org-Slug") or "").strip() or None
+    cookie_slug = _org_from_cookie(request)
+
+    if not header_slug and not cookie_slug:
         raise HTTPException(status_code=401, detail="Missing org context. Login again or select org.")
 
-    return _principal(db, user_id=user_id, org_slug=org_slug)
+    if header_slug:
+        try:
+            return _principal(db, user_id=user_id, org_slug=header_slug)
+        except HTTPException as e:
+            if e.status_code in (401, 403) and cookie_slug and cookie_slug != header_slug:
+                return _principal(db, user_id=user_id, org_slug=cookie_slug)
+            raise
+
+    return _principal(db, user_id=user_id, org_slug=str(cookie_slug))
 
 
 @router.get("/orgs")
@@ -252,16 +303,27 @@ def select_org(org_slug: str, request: Request, response: Response, db: Session 
     if mem is None:
         raise HTTPException(status_code=403, detail="Not a member of that org")
 
-    exp = int((_now() + timedelta(minutes=int(settings.jwt_exp_minutes))).timestamp())
+    exp = int((_now() + timedelta(minutes=int(getattr(settings, "jwt_exp_minutes", 60)))).timestamp())
     token = _jwt_sign({"sub": str(user_id), "org": str(org.slug), "exp": exp})
-    response.set_cookie(
-        settings.jwt_cookie_name,
-        token,
-        httponly=True,
-        secure=bool(settings.jwt_cookie_secure),
-        samesite=str(settings.jwt_cookie_samesite),
-        max_age=int(settings.jwt_exp_minutes) * 60,
-        path="/",
-    )
+    _set_auth_cookie(response, request, token)
 
     return {"ok": True, "org_slug": str(org.slug), "role": str(mem.role)}
+
+
+@router.get("/debug-cookie")
+def debug_cookie(request: Request):
+    """
+    DEV ONLY endpoint.
+    It answers: does the backend actually receive the auth cookie?
+    """
+    name = _cookie_name()
+    raw = request.cookies.get(name)
+    return {
+        "cookie_name": name,
+        "has_cookie": bool(raw),
+        "cookie_len": len(raw) if raw else 0,
+        "host": request.headers.get("host"),
+        "x_forwarded_proto": request.headers.get("x-forwarded-proto"),
+        "scheme": request.url.scheme,
+        "is_localhost": _is_localhost(request),
+    }

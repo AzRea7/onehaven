@@ -154,13 +154,17 @@ async function request<T>(
       ...(init?.headers as any),
     };
 
-    // ✅ Only skip org header for true bootstrap endpoints.
+    // ✅ Treat "session bootstrap" auth endpoints as NO-ORG-HEADER endpoints.
+    // Reason: /auth/me resolves org from cookie claim and should not be poisoned by stale X-Org-Slug.
     const isAuthBootstrap =
       path.startsWith("/auth/login") ||
       path.startsWith("/auth/register") ||
-      path.startsWith("/auth/logout");
+      path.startsWith("/auth/logout") ||
+      path.startsWith("/auth/me") ||
+      path.startsWith("/auth/orgs") ||
+      path.startsWith("/auth/select-org");
 
-    // Attach org slug everywhere else (including /auth/me, /auth/orgs, /auth/select-org)
+    // Attach org slug everywhere else
     if (auth.orgSlug && !isAuthBootstrap) {
       headers["X-Org-Slug"] = auth.orgSlug;
     }
@@ -214,9 +218,63 @@ async function requestArray<T = any>(
 }
 
 export const api = {
-  // -------------------------
+  get: <T = any>(
+    path: string,
+    init?: { cacheTtlMs?: number; signal?: AbortSignal },
+  ) =>
+    request<T>(path, {
+      method: "GET",
+      cacheTtlMs: init?.cacheTtlMs ?? 0,
+      signal: init?.signal,
+    }),
+
+  post: <T = any>(
+    path: string,
+    body?: any,
+    init?: { cacheTtlMs?: number; signal?: AbortSignal },
+  ) =>
+    request<T>(path, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+      cacheTtlMs: init?.cacheTtlMs,
+      signal: init?.signal,
+    }),
+
+  put: <T = any>(
+    path: string,
+    body?: any,
+    init?: { cacheTtlMs?: number; signal?: AbortSignal },
+  ) =>
+    request<T>(path, {
+      method: "PUT",
+      body: JSON.stringify(body ?? {}),
+      cacheTtlMs: init?.cacheTtlMs,
+      signal: init?.signal,
+    }),
+
+  patch: <T = any>(
+    path: string,
+    body?: any,
+    init?: { cacheTtlMs?: number; signal?: AbortSignal },
+  ) =>
+    request<T>(path, {
+      method: "PATCH",
+      body: JSON.stringify(body ?? {}),
+      cacheTtlMs: init?.cacheTtlMs,
+      signal: init?.signal,
+    }),
+
+  delete: <T = any>(
+    path: string,
+    init?: { cacheTtlMs?: number; signal?: AbortSignal },
+  ) =>
+    request<T>(path, {
+      method: "DELETE",
+      cacheTtlMs: init?.cacheTtlMs,
+      signal: init?.signal,
+    }),
+
   // AUTH
-  // -------------------------
   authRegister: (payload: {
     email: string;
     password: string;

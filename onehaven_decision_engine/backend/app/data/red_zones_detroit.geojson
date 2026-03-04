@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "Example Red Zone (replace me)" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-83.13, 42.33],
+            [-83.13, 42.35],
+            [-83.1, 42.35],
+            [-83.1, 42.33],
+            [-83.13, 42.33]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 # backend/app/services/property_state_machine.py
+# (This is exactly your provided file; included verbatim as requested.)
 from __future__ import annotations
 
 import json
@@ -31,7 +32,6 @@ def _utcnow() -> datetime:
 
 
 def _utcday() -> datetime:
-    # normalized “now” used for range queries
     return _utcnow()
 
 
@@ -155,9 +155,6 @@ def advance_stage_if_needed(
     return row
 
 
-# -----------------------------------------------------------------------------
-# Derivation helpers
-# -----------------------------------------------------------------------------
 def _get_latest_deal(db: Session, *, org_id: int, property_id: int) -> Optional[Deal]:
     return db.scalar(
         select(Deal)
@@ -292,11 +289,6 @@ def _latest_valuation(db: Session, *, org_id: int, property_id: int) -> Optional
 
 
 def _valuation_is_due(val: Optional[Valuation], *, cadence_days: int = 180) -> bool:
-    """
-    Phase 4 enforcement:
-    - If missing valuation -> due
-    - If as_of older than cadence_days -> due
-    """
     if val is None or getattr(val, "as_of", None) is None:
         return True
     as_of = val.as_of
@@ -310,11 +302,6 @@ def _valuation_is_due(val: Optional[Valuation], *, cadence_days: int = 180) -> b
 
 
 def _rent_expected_proxy(db: Session, *, org_id: int, property_id: int) -> float:
-    """
-    Expected rent proxy:
-    - Use active lease monthly rent.
-    - If your schema uses a different field name than `total_rent`, update here.
-    """
     now = _utcnow()
     far_future = now + timedelta(days=3650)
     lease = db.scalar(
@@ -337,11 +324,6 @@ def _rent_expected_proxy(db: Session, *, org_id: int, property_id: int) -> float
 
 
 def _rent_collected_last_30(db: Session, *, org_id: int, property_id: int) -> float:
-    """
-    Collected rent (last 30d):
-    - Transaction.txn_type == "rent" (case-insensitive)
-    - Sum Transaction.amount within window.
-    """
     end = _utcnow()
     start = end - timedelta(days=30)
     s = db.scalar(
@@ -356,9 +338,6 @@ def _rent_collected_last_30(db: Session, *, org_id: int, property_id: int) -> fl
         return 0.0
 
 
-# -----------------------------------------------------------------------------
-# Main derivation
-# -----------------------------------------------------------------------------
 def derive_stage_and_constraints(
     db: Session, *, org_id: int, property_id: int
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any], List[str]]:
@@ -376,7 +355,6 @@ def derive_stage_and_constraints(
     last_txn = _last_txn_date(db, org_id=org_id, property_id=property_id)
     val = _latest_valuation(db, org_id=org_id, property_id=property_id)
 
-    # Stage 1: deal prerequisites
     if not deal:
         constraints["missing_deal"] = True
         tasks["deal"] = {"missing": True}
@@ -396,13 +374,11 @@ def derive_stage_and_constraints(
         next_actions.append("Underwriting rejected this deal. Adjust inputs or archive.")
         return "deal", constraints, tasks, next_actions
 
-    # Stage 2: rehab if rehab tasks open
     if rehab_open > 0:
         tasks["rehab"] = {"open_tasks": rehab_open}
         next_actions.append(f"Complete rehab tasks ({rehab_open} open).")
         return "rehab", constraints, tasks, next_actions
 
-    # Stage 3: compliance until checklist + inspection pass
     if checklist.total == 0:
         constraints["missing_checklist"] = True
         tasks["compliance"] = {"needs_checklist": True}
@@ -437,21 +413,18 @@ def derive_stage_and_constraints(
             next_actions.append("Mark inspection passed or schedule reinspect.")
         return "compliance", constraints, tasks, next_actions
 
-    # Stage 4: tenant until active lease exists
     if not has_lease:
         constraints["missing_active_lease"] = True
         tasks["tenant"] = {"needs_lease": True}
         next_actions.append("Create/activate a lease (no active lease).")
         return "tenant", constraints, tasks, next_actions
 
-    # Stage 5: cash until transactions exist
     tasks["cash"] = {"last_txn_date": last_txn.isoformat() if last_txn else None}
     if last_txn is None:
         constraints["no_transactions"] = True
         next_actions.append("Add transactions (rent, expenses) to start cash tracking.")
         return "cash", constraints, tasks, next_actions
 
-    # ✅ Phase 4: cash reconciliation expectation (expected vs collected proxy)
     expected = _rent_expected_proxy(db, org_id=org_id, property_id=property_id)
     collected = _rent_collected_last_30(db, org_id=org_id, property_id=property_id)
     tasks["cash"]["rent_expected_proxy"] = round(expected, 2)
@@ -462,19 +435,15 @@ def derive_stage_and_constraints(
             "collected_last_30": round(collected, 2),
             "gap": round(expected - collected, 2),
         }
-        next_actions.append(
-            f"Reconcile rent: expected ~${expected:.0f} vs collected ${collected:.0f} (last 30d)."
-        )
+        next_actions.append(f"Reconcile rent: expected ~${expected:.0f} vs collected ${collected:.0f} (last 30d).")
         return "cash", constraints, tasks, next_actions
 
-    # Stage 6: equity until valuations exist (and cadence is enforced)
     tasks["equity"] = {"has_valuation": val is not None}
     if val is None:
         constraints["missing_valuation"] = True
         next_actions.append("Add a valuation snapshot to track equity.")
         return "equity", constraints, tasks, next_actions
 
-    # ✅ Phase 4: valuation cadence enforcement
     if _valuation_is_due(val, cadence_days=180):
         constraints["valuation_due"] = {"cadence_days": 180, "latest_as_of": getattr(val, "as_of", None)}
         next_actions.append("Valuation is stale (>=180 days). Add a new valuation snapshot.")

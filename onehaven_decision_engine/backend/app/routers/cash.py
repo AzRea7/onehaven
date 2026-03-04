@@ -52,7 +52,6 @@ def create_txn(payload: TransactionCreate, db: Session = Depends(get_db), p=Depe
         payload={"transaction_id": row.id, "txn_type": row.txn_type, "amount": row.amount},
     )
 
-    # Phase 4: cash activity pushes you into cash stage
     advance_stage_if_needed(db, org_id=p.org_id, property_id=row.property_id, suggested_stage="cash")
 
     db.commit()
@@ -83,7 +82,7 @@ def list_txns(
 @router.patch("/transactions/{transaction_id}", response_model=TransactionOut)
 def update_txn(
     transaction_id: int,
-    payload: TransactionCreate,  # full-update for simplicity
+    payload: TransactionCreate,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
@@ -162,14 +161,6 @@ def cash_rollup(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Phase 4: portfolio-grade cash rollups (simple v1).
-    Returns months with:
-      - expected rent (leases)
-      - collected income (transactions)
-      - expenses/capex (transactions)
-      - net + delta vs expected
-    """
     must_get_property(db, org_id=p.org_id, property_id=property_id)
 
     leases = db.scalars(
@@ -192,7 +183,6 @@ def cash_rollup(
             return datetime(y + 1, 1, 1)
         return datetime(y, m + 1, 1)
 
-    # Expected rent: if a lease overlaps a month, add total_rent for that month (v1)
     for l in leases:
         start = l.start_date
         end = l.end_date or datetime(2100, 1, 1)
@@ -204,7 +194,6 @@ def cash_rollup(
             if overlaps:
                 expected[f"{year}-{m:02d}"] += float(l.total_rent or 0.0)
 
-    # Collected + expenses from transactions
     for t in txns:
         d = t.txn_date or datetime.utcnow()
         if d.year != year:
@@ -219,7 +208,6 @@ def cash_rollup(
         elif typ in {"expense", "capex"}:
             expenses[key] += abs(amt) if amt < 0 else amt
         else:
-            # heuristic: positive => income, negative => expense
             if amt >= 0:
                 collected[key] += amt
             else:
