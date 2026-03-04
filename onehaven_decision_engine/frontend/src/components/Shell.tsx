@@ -1,8 +1,13 @@
+// frontend/src/components/Shell.tsx
 import React from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import clsx from "clsx";
+
 import AuroraBackground from "./AuroraBackground";
 import AgentSlots from "./AgentSlots";
+import AppHeader from "./AppHeader";
+import AppFooter from "./AppFooter";
+
 import { useAuth } from "../lib/auth";
 import { getOrgSlug } from "../lib/api";
 
@@ -74,14 +79,19 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <div className="relative h-full w-full">
         <AuroraBackground />
 
-        {/* Top bar (subtle) */}
-        <div className="absolute top-0 left-0 right-0 z-20 px-5 py-4">
-          <div className="max-w-[1400px] mx-auto flex items-center justify-end">
-            <TopRightStatus />
-          </div>
+        {/* Header (now “real” layout, not absolute overlay) */}
+        <div className="relative z-20">
+          {/* If your AppHeader supports children, this just works.
+              If it uses different props, keep the wrapper and adjust inside AppHeader. */}
+          <AppHeader>
+            <div className="max-w-[1400px] mx-auto px-5 py-4 flex items-center justify-end">
+              <TopRightStatus />
+            </div>
+          </AppHeader>
         </div>
 
-        <div className="relative h-full w-full flex overflow-hidden pt-16">
+        {/* Body */}
+        <div className="relative z-10 h-[calc(100%-64px)] w-full flex overflow-hidden">
           {/* Sidebar */}
           <aside className="w-80 p-5 flex flex-col gap-5 border-r border-white/10 bg-black/45 backdrop-blur-xl overflow-y-auto">
             <div className="gradient-border rounded-2xl glass p-4">
@@ -117,7 +127,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               ))}
             </nav>
 
-            {/* ✅ Only show “operational” widgets when authed and not on auth screens */}
+            {/* Operational widgets only when authed */}
             {principal && !inAuthScreen ? <AgentSlots /> : null}
 
             <div className="mt-auto text-xs text-zinc-500 leading-relaxed">
@@ -131,6 +141,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           {/* Main */}
           <main className="flex-1 overflow-y-auto">
             <div className="min-h-full">{children}</div>
+
+            {/* Footer */}
+            <AppFooter />
           </main>
         </div>
       </div>

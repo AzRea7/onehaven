@@ -1,3 +1,4 @@
+// frontend/src/pages/PropertyView.tsx
 import React from "react";
 import { useParams } from "react-router-dom";
 import { api, buildZillowUrl } from "../lib/api";
@@ -7,6 +8,7 @@ import PageHero from "../components/PageHero";
 import Golem from "../components/Golem";
 import PropertyImage from "../components/PropertyImage";
 import { getFinancingType } from "../lib/dealRules";
+import PageShell from "../components/PageShell";
 
 const tabs = [
   "Deal",
@@ -165,28 +167,28 @@ function ChecklistItemCard({
           <button
             disabled={busy}
             onClick={() => onUpdate({ status: "in_progress" })}
-            className="oh-btn"
+            className="oh-btn cursor-pointer"
           >
             working
           </button>
           <button
             disabled={busy}
             onClick={() => onUpdate({ status: "done" })}
-            className="oh-btn oh-btn-good"
+            className="oh-btn oh-btn-good cursor-pointer"
           >
             done
           </button>
           <button
             disabled={busy}
             onClick={() => onUpdate({ status: "failed" })}
-            className="oh-btn oh-btn-bad"
+            className="oh-btn oh-btn-bad cursor-pointer"
           >
             fail
           </button>
           <button
             disabled={busy}
             onClick={() => onUpdate({ status: "blocked" })}
-            className="oh-btn oh-btn-warn"
+            className="oh-btn oh-btn-warn cursor-pointer"
           >
             blocked
           </button>
@@ -212,7 +214,7 @@ function ChecklistItemCard({
                 href={item.proof_url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs underline text-white/80"
+                className="text-xs underline text-white/80 cursor-pointer"
               >
                 open
               </a>
@@ -263,7 +265,7 @@ function AgentsDrawer({
       <div
         onClick={onClose}
         className={[
-          "absolute inset-0 bg-black/60 transition-opacity",
+          "absolute inset-0 bg-black/60 transition-opacity cursor-pointer",
           open ? "opacity-100" : "opacity-0",
         ].join(" ")}
       />
@@ -278,7 +280,7 @@ function AgentsDrawer({
       >
         <div className="p-4 border-b border-white/10 flex items-center justify-between">
           <div className="text-sm font-semibold text-white">Agent Slots</div>
-          <button className="oh-btn" onClick={onClose}>
+          <button className="oh-btn cursor-pointer" onClick={onClose}>
             close
           </button>
         </div>
@@ -524,7 +526,7 @@ export default function PropertyView() {
       : [];
 
   return (
-    <div className="relative space-y-5">
+    <PageShell className="relative space-y-5">
       <AgentsDrawer
         open={agentsOpen}
         onClose={() => setAgentsOpen(false)}
@@ -549,7 +551,7 @@ export default function PropertyView() {
             {/* Primary actions first */}
             <button
               onClick={loadAll}
-              className="oh-btn"
+              className="oh-btn cursor-pointer"
               disabled={!!busy}
               title="Refresh"
             >
@@ -558,7 +560,7 @@ export default function PropertyView() {
 
             <button
               onClick={evaluate}
-              className="oh-btn oh-btn-primary"
+              className="oh-btn oh-btn-primary cursor-pointer"
               disabled={!!busy || !d}
               title="Evaluate"
             >
@@ -568,7 +570,7 @@ export default function PropertyView() {
             {/* Secondary actions */}
             <button
               onClick={enrich}
-              className="oh-btn"
+              className="oh-btn cursor-pointer"
               disabled={!!busy || !d}
               title="Rent enrich"
             >
@@ -576,7 +578,7 @@ export default function PropertyView() {
             </button>
             <button
               onClick={explain}
-              className="oh-btn"
+              className="oh-btn cursor-pointer"
               disabled={!!busy || !d}
               title="Rent explain (persisted)"
             >
@@ -584,7 +586,7 @@ export default function PropertyView() {
             </button>
             <button
               onClick={createDealQuick}
-              className="oh-btn"
+              className="oh-btn cursor-pointer"
               disabled={!!busy}
               title="Create a deal if missing"
             >
@@ -598,7 +600,7 @@ export default function PropertyView() {
                 href={zillowUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="oh-btn"
+                className="oh-btn cursor-pointer"
                 title="Open Zillow (new tab)"
               >
                 Zillow ↗
@@ -606,7 +608,7 @@ export default function PropertyView() {
             )}
 
             <button
-              className="oh-btn"
+              className="oh-btn cursor-pointer"
               onClick={() => setAgentsOpen(true)}
               title="Open agent slots drawer"
             >
@@ -719,7 +721,7 @@ export default function PropertyView() {
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <button
                     onClick={generateChecklist}
-                    className="oh-btn oh-btn-primary"
+                    className="oh-btn oh-btn-primary cursor-pointer"
                     disabled={!!busy || !d}
                     title="Generate and persist checklist"
                   >
@@ -727,7 +729,7 @@ export default function PropertyView() {
                   </button>
                   <button
                     onClick={generateRehabFromGaps}
-                    className="oh-btn"
+                    className="oh-btn cursor-pointer"
                     disabled={!!busy}
                     title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
                   >
@@ -849,7 +851,7 @@ export default function PropertyView() {
               key={t}
               onClick={() => setTab(t)}
               className={[
-                "px-3 py-2 rounded-xl border text-sm transition focus-ring",
+                "px-3 py-2 rounded-xl border text-sm transition focus-ring cursor-pointer",
                 tab === t
                   ? "bg-white/[0.07] text-white border-white/[0.18]"
                   : "text-white/70 border-white/10 hover:bg-white/[0.04] hover:border-white/[0.14]",
@@ -861,7 +863,7 @@ export default function PropertyView() {
         </div>
       </div>
 
-      {/* Tab content: unchanged core behavior */}
+      {/* Tab content */}
       {tab === "Deal" && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -993,7 +995,7 @@ export default function PropertyView() {
           right={
             <button
               onClick={generateRehabFromGaps}
-              className="oh-btn"
+              className="oh-btn cursor-pointer"
               disabled={!!busy}
               title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
             >
@@ -1050,20 +1052,20 @@ export default function PropertyView() {
                     setErr(String(e?.message || e)),
                   )
                 }
-                className="oh-btn"
+                className="oh-btn cursor-pointer"
               >
                 refresh
               </button>
               <button
                 onClick={generateChecklist}
-                className="oh-btn oh-btn-primary"
+                className="oh-btn oh-btn-primary cursor-pointer"
                 disabled={!!busy || !d}
               >
                 generate
               </button>
               <button
                 onClick={generateRehabFromGaps}
-                className="oh-btn"
+                className="oh-btn cursor-pointer"
                 disabled={!!busy}
                 title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
               >
@@ -1214,6 +1216,6 @@ export default function PropertyView() {
           )}
         </Panel>
       )}
-    </div>
+    </PageShell>
   );
 }

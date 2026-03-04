@@ -19,6 +19,31 @@
   --ring: 99 102 241;
 }
 
+/* frontend/src/index.css */
+/* add these near the top (or anywhere global) */
+
+/* ✅ Global pointer policy (so you don’t have to remember to add cursor-pointer) */
+a,
+button,
+[role="button"],
+summary,
+select,
+option,
+label,
+input[type="checkbox"],
+input[type="radio"] {
+  cursor: pointer;
+}
+
+/* Inputs should remain text-cursor */
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="password"],
+textarea {
+  cursor: text;
+}
+
 html, body, #root { height: 100%; }
 
 body {

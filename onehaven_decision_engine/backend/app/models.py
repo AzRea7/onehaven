@@ -32,20 +32,23 @@ class Organization(Base):
     slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow) 
 
 class AppUser(Base):
     __tablename__ = "app_users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=True)
     email: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")  # user|admin
     display_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
+    org = relationship("Organization", backref="users")
 
 class OrgMembership(Base):
     __tablename__ = "org_memberships"
@@ -83,7 +86,7 @@ class PropertyState(Base):
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
     property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id"), index=True, nullable=False)
 
-    current_stage: Mapped[str] = mapped_column(String(30), nullable=False, default="deal")
+    current_stage: Mapped[str] = mapped_column(String(64), nullable=False, default="import")
     constraints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     outstanding_tasks_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -109,6 +112,14 @@ class WorkflowEvent(Base):
 # -----------------------------
 class Property(Base):
     __tablename__ = "properties"
+    __table_args__ = (
+        # keep existing uniqueness semantics if you already rely on them;
+        # if you currently have an explicit unique constraint elsewhere, remove this.
+        UniqueConstraint("org_id", "address", "city", "state", "zip", name="uq_properties_org_addr"),
+        Index("ix_properties_org_state", "org_id", "state"),
+        Index("ix_properties_org_county", "org_id", "county"),
+        Index("ix_properties_org_is_red_zone", "org_id", "is_red_zone"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
@@ -126,7 +137,28 @@ class Property(Base):
     has_garage: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     property_type: Mapped[str] = mapped_column(String(60), nullable=False, default="single_family")
 
+    # -----------------------------
+    # NEW: geo + jurisdiction + risk
+    # -----------------------------
+    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # For your “county filter”
+    county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
+    # Detroit “danger zone” boolean
+    is_red_zone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Crime metrics (you can compute from dataset; keep nullable until populated)
+    crime_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crime_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Sex offender proximity metric
+    offender_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # -----------------------------
+
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     deals: Mapped[List["Deal"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     rent_assumption: Mapped[Optional["RentAssumption"]] = relationship(
@@ -172,7 +204,11 @@ class ImportSnapshot(Base):
 
 class Deal(Base):
     __tablename__ = "deals"
-    __table_args__ = (UniqueConstraint("org_id", "source_fingerprint", name="uq_deals_org_source_fingerprint"),)
+    __table_args__ = (
+        UniqueConstraint("org_id", "source_fingerprint", name="uq_deals_org_source_fingerprint"),
+        Index("ix_deals_org_property", "org_id", "property_id"),
+        Index("ix_deals_org_created_at", "org_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
@@ -197,12 +233,26 @@ class Deal(Base):
     term_years: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     down_payment_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.20)
 
+    # -----------------------------
+    # NEW: pipeline gating fields
+    # -----------------------------
+    # decision: buy/pass/watch (decision stage)
+    decision: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    # acquisition stage (rehab is locked until these are set)
+    purchase_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    closing_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # if you want explicit loan details separate from “financing_type”
+    loan_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # -----------------------------
+
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     property: Mapped["Property"] = relationship(back_populates="deals")
     results: Mapped[List["UnderwritingResult"]] = relationship(back_populates="deal", cascade="all, delete-orphan")
     snapshot: Mapped[Optional["ImportSnapshot"]] = relationship(back_populates="deals")
-
 
 # -----------------------------
 # Rent

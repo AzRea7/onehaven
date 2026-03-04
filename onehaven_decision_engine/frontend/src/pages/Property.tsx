@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
 import VirtualList from "../components/VirtualList";
+import PageShell from "../components/PageShell";
+import FilterBar from "../components/FilterBar";
 
 type Row = any;
 
@@ -20,11 +22,6 @@ function clsDecision(d?: string) {
   return "border-red-400/25 bg-red-400/10 text-red-200";
 }
 
-/**
- * Financing rule:
- * < 75,000 => CASH DEAL
- * >= 75,000 => DSCR LOAN
- */
 function getFinancingType(price?: number | null) {
   if (price == null || !Number.isFinite(Number(price))) return "unknown";
   if (Number(price) < 75000) return "CASH DEAL";
@@ -45,7 +42,6 @@ export default function Properties() {
     "ALL" | "PASS" | "REVIEW" | "REJECT"
   >("ALL");
 
-  // NEW: financing filter
   const [financing, setFinancing] = React.useState<FinancingFilter>("ALL");
 
   const abortRef = React.useRef<AbortController | null>(null);
@@ -92,8 +88,6 @@ export default function Properties() {
       if (needle && !hay.includes(needle)) return false;
       if (decision !== "ALL" && d !== decision) return false;
 
-      // ---- NEW: financing filter ----
-      // price source priority: deal.asking_price -> property.price -> underwriting asking/purchase if present
       const priceRaw =
         deal?.asking_price ??
         deal?.price ??
@@ -102,11 +96,10 @@ export default function Properties() {
         u?.estimated_purchase_price ??
         null;
 
-      const fin = getFinancingType(priceRaw == null ? null : Number(priceRaw)); // "CASH DEAL" | "DSCR LOAN" | "unknown"
+      const fin = getFinancingType(priceRaw == null ? null : Number(priceRaw));
 
       if (financing === "CASH") return fin === "CASH DEAL";
       if (financing === "DSCR") return fin === "DSCR LOAN";
-      // financing === "ALL"
       return true;
     });
   }, [rows, deferredQ, decision, financing]);
@@ -174,111 +167,113 @@ export default function Properties() {
   }, []);
 
   return (
-    <div className="space-y-6">
-      <PageHero
-        eyebrow="Portfolio"
-        title="Properties"
-        subtitle="Scan and triage. Filter by decision, search by address, then click into the cockpit view."
-        actions={
-          <>
-            <button onClick={refresh} className="oh-btn" title="Refresh">
-              sync
-            </button>
-            <span className="oh-badge border-green-400/25 bg-green-400/10 text-green-200">
-              PASS {counts.PASS}
-            </span>
-            <span className="oh-badge border-yellow-300/25 bg-yellow-300/10 text-yellow-100">
-              REVIEW {counts.REVIEW}
-            </span>
-            <span className="oh-badge border-red-400/25 bg-red-400/10 text-red-200">
-              REJECT {counts.REJECT}
-            </span>
-          </>
-        }
-      />
+    <PageShell>
+      <div className="space-y-6">
+        <PageHero
+          eyebrow="Portfolio"
+          title="Properties"
+          subtitle="Scan and triage. Filter by decision, search by address, then click into the cockpit view."
+          actions={
+            <>
+              <button onClick={refresh} className="oh-btn" title="Refresh">
+                sync
+              </button>
+              <span className="oh-badge border-green-400/25 bg-green-400/10 text-green-200">
+                PASS {counts.PASS}
+              </span>
+              <span className="oh-badge border-yellow-300/25 bg-yellow-300/10 text-yellow-100">
+                REVIEW {counts.REVIEW}
+              </span>
+              <span className="oh-badge border-red-400/25 bg-red-400/10 text-red-200">
+                REJECT {counts.REJECT}
+              </span>
+            </>
+          }
+        />
 
-      <div className="oh-panel p-4" style={{ contain: "layout paint" }}>
-        <div className="flex items-center gap-3 flex-wrap">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search address, city, zip…"
-            className="oh-input focus-ring max-w-xl"
-          />
+        {/* Use your new FilterBar as the consistent control surface */}
+        <FilterBar>
+          <div className="flex items-center gap-3 flex-wrap w-full">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search address, city, zip…"
+              className="oh-input focus-ring max-w-xl"
+            />
 
-          <select
-            value={decision}
-            onChange={(e) => setDecision(e.target.value as any)}
-            className="oh-input focus-ring max-w-[220px]"
-          >
-            <option value="ALL">All decisions</option>
-            <option value="PASS">PASS</option>
-            <option value="REVIEW">REVIEW</option>
-            <option value="REJECT">REJECT</option>
-          </select>
+            <select
+              value={decision}
+              onChange={(e) => setDecision(e.target.value as any)}
+              className="oh-input focus-ring max-w-[220px]"
+            >
+              <option value="ALL">All decisions</option>
+              <option value="PASS">PASS</option>
+              <option value="REVIEW">REVIEW</option>
+              <option value="REJECT">REJECT</option>
+            </select>
 
-          {/* NEW: Financing filter */}
-          <select
-            value={financing}
-            onChange={(e) => setFinancing(e.target.value as any)}
-            className="oh-input focus-ring max-w-[240px]"
-            title="Filter by financing type (<$75k cash, >=$75k DSCR)"
-          >
-            <option value="ALL">All financing</option>
-            <option value="CASH">Cash deals (&lt; $75k)</option>
-            <option value="DSCR">DSCR loans (≥ $75k)</option>
-          </select>
+            <select
+              value={financing}
+              onChange={(e) => setFinancing(e.target.value as any)}
+              className="oh-input focus-ring max-w-[240px]"
+              title="Filter by financing type (<$75k cash, >=$75k DSCR)"
+            >
+              <option value="ALL">All financing</option>
+              <option value="CASH">Cash deals (&lt; $75k)</option>
+              <option value="DSCR">DSCR loans (≥ $75k)</option>
+            </select>
 
-          <div className="text-xs text-white/45 ml-auto">
-            Showing{" "}
-            <span className="text-white/80 font-semibold">
-              {filtered.length}
-            </span>{" "}
-            of{" "}
-            <span className="text-white/80 font-semibold">{rows.length}</span>
+            <div className="text-xs text-white/45 ml-auto">
+              Showing{" "}
+              <span className="text-white/80 font-semibold">
+                {filtered.length}
+              </span>{" "}
+              of{" "}
+              <span className="text-white/80 font-semibold">{rows.length}</span>
+            </div>
           </div>
-        </div>
+        </FilterBar>
+
+        {err && (
+          <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
+            {err}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="oh-panel p-5">
+            <div className="text-sm text-white/70">Loading properties…</div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="oh-panel p-5">
+            <div className="text-sm text-white/70">No matching properties.</div>
+            <div className="text-xs text-white/45 mt-2">
+              Try clearing filters or import/create deals first.
+            </div>
+          </div>
+        ) : (
+          <div className="oh-panel p-2" style={{ contain: "layout paint" }}>
+            <div className="grid grid-cols-[1fr_120px_120px_120px] gap-2 px-3 py-2 text-[11px] uppercase tracking-[0.22em] text-white/45">
+              <div>Property</div>
+              <div className="text-right">Decision</div>
+              <div className="text-right">DSCR</div>
+              <div className="text-right">Cash Flow</div>
+            </div>
+
+            <div className="hr my-1" />
+
+            <VirtualList
+              items={filtered}
+              itemHeight={rowHeight}
+              overscan={8}
+              itemKey={(r) => String(r?.property?.id ?? Math.random())}
+              className="rounded-xl"
+              style={{ height: "calc(100vh - 380px)" }}
+              renderRow={(item) => renderRow(item)}
+            />
+          </div>
+        )}
       </div>
-
-      {err && (
-        <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
-          {err}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="oh-panel p-5">
-          <div className="text-sm text-white/70">Loading properties…</div>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="oh-panel p-5">
-          <div className="text-sm text-white/70">No matching properties.</div>
-          <div className="text-xs text-white/45 mt-2">
-            Try clearing filters or import/create deals first.
-          </div>
-        </div>
-      ) : (
-        <div className="oh-panel p-2" style={{ contain: "layout paint" }}>
-          <div className="grid grid-cols-[1fr_120px_120px_120px] gap-2 px-3 py-2 text-[11px] uppercase tracking-[0.22em] text-white/45">
-            <div>Property</div>
-            <div className="text-right">Decision</div>
-            <div className="text-right">DSCR</div>
-            <div className="text-right">Cash Flow</div>
-          </div>
-
-          <div className="hr my-1" />
-
-          <VirtualList
-            items={filtered}
-            itemHeight={rowHeight}
-            overscan={8}
-            itemKey={(r) => String(r?.property?.id ?? Math.random())}
-            className="rounded-xl"
-            style={{ height: "calc(100vh - 380px)" }}
-            renderRow={(item) => renderRow(item)}
-          />
-        </div>
-      )}
-    </div>
+    </PageShell>
   );
 }

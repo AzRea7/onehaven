@@ -1,5 +1,6 @@
 # backend/app/schemas.py
-# (only the changed/needed portion is shown here as a FULL FILE replacement; safe drop-in)
+# FULL FILE replacement (updated to match the new pipeline fields + geo/risk + workflow state payload)
+
 from __future__ import annotations
 
 import json
@@ -80,6 +81,17 @@ class PropertyCreate(BaseModel):
     has_garage: bool = False
     property_type: str = "single_family"
 
+    # NEW (optional on create; typically computed later)
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    county: Optional[str] = None
+
+    # NEW risk metadata
+    is_red_zone: bool = False
+    crime_density: Optional[float] = None
+    crime_score: Optional[float] = None
+    offender_count: Optional[int] = None
+
 
 class DealCreate(BaseModel):
     property_id: int
@@ -99,11 +111,18 @@ class DealCreate(BaseModel):
     source_raw_json: Optional[str] = None
     source: Optional[str] = None
 
+    # NEW: pipeline gating fields (decision + acquisition)
+    decision: Optional[Literal["buy", "pass", "watch"]] = None
+    purchase_price: Optional[float] = None
+    closing_date: Optional[datetime] = None
+    loan_amount: Optional[float] = None
+
 
 class DealOut(DealCreate):
     id: int
     org_id: Optional[int] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -302,6 +321,8 @@ class PropertyOut(PropertyCreate):
     org_id: Optional[int] = None
     rent_assumption: Optional[RentAssumptionOut] = None
     rent_comps: List[RentCompOut] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -338,7 +359,6 @@ class UnderwritingResultOut(BaseModel):
     bedrooms: Optional[int] = None
     bathrooms: Optional[float] = None
 
-    # Optional if your model later adds it
     rent_explain_run_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -479,6 +499,51 @@ class PropertyViewOut(BaseModel):
     jurisdiction_friction: dict
     last_underwriting_result: Optional[UnderwritingResultOut] = None
     checklist: Optional[ChecklistOut] = None
+
+
+# --------------------
+# Workflow State (NEW)
+# --------------------
+WorkflowStage = Literal[
+    "import",
+    "deal_analysis",
+    "decision",
+    "acquisition",
+    "rehab_planning",
+    "rehab_execution",
+    "compliance",
+    "tenant_placement",
+    "lease_active",
+    "cashflow",
+    "equity",
+]
+
+
+class WorkflowStateOut(BaseModel):
+    property_id: int
+    current_stage: WorkflowStage
+    suggested_stage: WorkflowStage
+
+    constraints: Dict[str, Any] = Field(default_factory=dict)
+    outstanding_tasks: Dict[str, Any] = Field(default_factory=dict)
+    next_actions: List[str] = Field(default_factory=list)
+
+    updated_at: Optional[str] = None
+    stage_order: List[str] = Field(default_factory=list)
+
+
+class WorkflowDecisionIn(BaseModel):
+    decision: Literal["buy", "pass", "watch"]
+
+
+class WorkflowAcquisitionIn(BaseModel):
+    purchase_price: float = Field(ge=0)
+    closing_date: datetime
+    financing_type: Optional[str] = None
+    loan_amount: Optional[float] = Field(default=None, ge=0)
+    interest_rate: Optional[float] = Field(default=None, ge=0)
+    term_years: Optional[int] = Field(default=None, ge=1, le=50)
+    down_payment_pct: Optional[float] = Field(default=None, ge=0, le=1)
 
 
 # --------------------
