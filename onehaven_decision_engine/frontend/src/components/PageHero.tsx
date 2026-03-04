@@ -1,15 +1,7 @@
-// frontend/src/components/PageHero.tsx
 import React from "react";
 import clsx from "clsx";
 import { HoverTilt } from "./Artwork";
 
-/**
- * PageHero
- * - OpenClaw-ish “eyebrow + headline + subhead + right hero art”
- * - Right side supports absolute-positioned content (your BrickBuilder wrapper)
- * - Optional HoverTilt on the art container for a subtle “alive” feel
- * - Perf safe: no state loops, no heavy effects
- */
 export default function PageHero({
   eyebrow,
   title,
@@ -17,7 +9,7 @@ export default function PageHero({
   right,
   actions,
   className,
-  tilt = true,
+  tilt = false, // default OFF for perf; enable per-page if you really want it
 }: {
   eyebrow?: string;
   title: string;
@@ -48,7 +40,7 @@ export default function PageHero({
         <div className="flex items-start justify-between gap-6 flex-wrap">
           <div className="max-w-2xl">
             {eyebrow && (
-              <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-400">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/55">
                 {eyebrow}
               </div>
             )}
@@ -58,7 +50,7 @@ export default function PageHero({
             </div>
 
             {subtitle && (
-              <div className="mt-2 text-sm text-zinc-400 leading-relaxed">
+              <div className="mt-2 text-sm text-white/60 leading-relaxed">
                 {subtitle}
               </div>
             )}
@@ -72,7 +64,6 @@ export default function PageHero({
 
           {right && (
             <RightShell>
-              {/* This wrapper makes your `absolute inset-0 ...` layout work */}
               <div className="relative w-full h-full">{right}</div>
             </RightShell>
           )}

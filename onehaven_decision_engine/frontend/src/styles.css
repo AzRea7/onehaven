@@ -5,22 +5,29 @@
 :root {
   color-scheme: dark;
 
-  /* brand tints */
+  /* OpenClaw-ish tints */
   --tint-a: 255 88 122;   /* pink */
   --tint-b: 120 90 255;   /* violet */
   --tint-c: 35 255 200;   /* mint */
+
+  /* readable neutrals */
+  --bg0: 5 6 10;
+  --fg0: 244 244 245;
+  --fg1: 212 212 216;
+  --fg2: 148 163 184;
+
+  --ring: 99 102 241;
 }
 
 html, body, #root { height: 100%; }
 
 body {
-  background: #05060a;
-  color: rgb(244 244 245);
+  background: rgb(var(--bg0));
+  color: rgb(var(--fg0));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Single background stack: no heavy masks / no grids */
 #root {
   position: relative;
   isolation: isolate;
@@ -31,8 +38,11 @@ body {
     linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,0.65));
 }
 
+/* selection */
+::selection { background: rgba(var(--ring) / 0.35); }
+
 @layer components {
-  /* Panels/cards used across app */
+  /* Base glass surface */
   .glass {
     @apply bg-white/[0.03] border border-white/[0.10] backdrop-blur-lg;
     box-shadow:
@@ -40,17 +50,27 @@ body {
       0 18px 60px rgba(0,0,0,0.45);
   }
 
-  /* Used by most cards; adds nice hover border without full-screen GPU murder */
+  /* Subtle hover that doesn’t trigger GPU thrash */
+  .glass-hover {
+    transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+    will-change: transform;
+  }
+  .glass-hover:hover {
+    border-color: rgba(255,255,255,0.16);
+    background: rgba(255,255,255,0.045);
+    transform: translateY(-1px);
+  }
+
+  /* Gradient border (lighter cost): animate only on hover, slower otherwise */
   .gradient-border {
     position: relative;
   }
-
   .gradient-border::before {
     content: "";
     position: absolute;
-    inset: -2px;
+    inset: -1px;
     border-radius: 18px;
-    padding: 2px;
+    padding: 1px;
     background: linear-gradient(
       135deg,
       rgba(var(--tint-b) / 0.55),
@@ -58,34 +78,22 @@ body {
       rgba(var(--tint-c) / 0.30),
       rgba(var(--tint-b) / 0.55)
     );
-    background-size: 200% 200%;
-    animation: borderShift 8s linear infinite;
+    background-size: 180% 180%;
+    opacity: 0.85;
 
-    /* border-only mask (local to card) */
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
-
     pointer-events: none;
-  }
 
+    animation: borderShift 16s linear infinite;
+  }
   .gradient-border:hover::before {
-    animation-duration: 3.2s;
-    filter: brightness(1.04) saturate(1.15);
+    animation-duration: 5.5s;
+    filter: brightness(1.05) saturate(1.08);
   }
 
-  /* Optional tilt helper (if you use it) */
-  .hover-tilt {
-    transform:
-      perspective(900px)
-      rotateX(var(--rx, 0deg))
-      rotateY(var(--ry, 0deg))
-      translateZ(0);
-    transition: transform 140ms ease-out;
-    will-change: transform;
-  }
-
-  /* “OneHaven UI” helpers used in your pages */
+  /* OneHaven UI primitives */
   .oh-panel {
     @apply rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-lg;
     box-shadow:
@@ -93,9 +101,7 @@ body {
       0 18px 60px rgba(0,0,0,0.45);
   }
 
-  .oh-panel-solid {
-    @apply rounded-2xl border backdrop-blur-lg;
-  }
+  .oh-panel-solid { @apply rounded-2xl border backdrop-blur-lg; }
 
   .oh-badge {
     @apply text-[11px] px-3 py-1 rounded-full border border-white/10 bg-white/5 text-zinc-200;
@@ -104,20 +110,10 @@ body {
   .oh-btn {
     @apply text-[11px] px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition;
   }
-
-  .oh-btn-primary {
-    @apply border-white/15 bg-white/[0.08] hover:bg-white/[0.12];
-  }
-
-  .oh-btn-good {
-    @apply border-green-400/25 bg-green-400/10 hover:bg-green-400/15 text-green-100;
-  }
-  .oh-btn-warn {
-    @apply border-yellow-300/25 bg-yellow-300/10 hover:bg-yellow-300/15 text-yellow-100;
-  }
-  .oh-btn-bad {
-    @apply border-red-400/25 bg-red-400/10 hover:bg-red-400/15 text-red-100;
-  }
+  .oh-btn-primary { @apply border-white/15 bg-white/[0.08] hover:bg-white/[0.12]; }
+  .oh-btn-good { @apply border-green-400/25 bg-green-400/10 hover:bg-green-400/15 text-green-100; }
+  .oh-btn-warn { @apply border-yellow-300/25 bg-yellow-300/10 hover:bg-yellow-300/15 text-yellow-100; }
+  .oh-btn-bad { @apply border-red-400/25 bg-red-400/10 hover:bg-red-400/15 text-red-100; }
 
   .oh-input {
     @apply w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-zinc-100 outline-none;
@@ -126,6 +122,12 @@ body {
   .oh-textarea {
     @apply w-full min-h-[90px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-zinc-100 outline-none;
   }
+
+  .focus-ring:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(var(--ring), 0.28);
+    border-color: rgba(var(--ring), 0.40);
+  }
 }
 
 /* cheap static noise */
@@ -133,7 +135,7 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.035;
+  opacity: 0.030;
   mix-blend-mode: overlay;
   transform: translateZ(0);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='1' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E");
@@ -150,12 +152,14 @@ body {
   100% { transform: translate3d(0,0,0); }
 }
 
-.oh-hero-art {
-  transform: translate3d(0,0,0);
-  will-change: transform, opacity;
-}
-
 /* scrollbars */
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.14) transparent; }
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 999px; }
-*::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }
+*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+*::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}

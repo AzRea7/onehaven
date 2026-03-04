@@ -23,6 +23,21 @@ export function getOrgSlug(): string {
   return localStorage.getItem("org_slug") || "demo";
 }
 
+export function buildZillowUrl(property: {
+  address?: string;
+  city?: string;
+  state?: string;
+}) {
+  if (!property?.address) return null;
+
+  const slug =
+    `${property.address} ${property.city ?? ""} ${property.state ?? ""}`
+      .replace(/,/g, "")
+      .replace(/\s+/g, "-");
+
+  return `https://www.zillow.com/homes/${slug}_rb/`;
+}
+
 export function setOrgSlug(slug: string) {
   localStorage.setItem("org_slug", slug);
 }

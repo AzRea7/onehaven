@@ -1,12 +1,14 @@
+// frontend/src/App.tsx
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import Shell from "./components/Shell";
 
 import Dashboard from "./pages/Dashboard";
-import Property from "./pages/Property";
+import Property from "./pages/Property"; // <-- this is your Properties LIST page
+import PropertyView from "./pages/PropertyView";
+
 import Agents from "./pages/Agents";
 import Constitution from "./pages/Constitution";
-import PropertyView from "./pages/PropertyView";
 import DealIntake from "./pages/DealIntake";
 import Jurisdictions from "./pages/Jurisdictions";
 
@@ -47,6 +49,7 @@ export default function App() {
             </Protected>
           }
         />
+
         <Route
           path="/jurisdictions"
           element={
@@ -56,14 +59,17 @@ export default function App() {
           }
         />
 
+        {/* ✅ Properties list page */}
         <Route
-          path="/property/:id"
+          path="/properties"
           element={
             <Protected>
               <Property />
             </Protected>
           }
         />
+
+        {/* ✅ Property detail page */}
         <Route
           path="/properties/:id"
           element={
@@ -71,6 +77,12 @@ export default function App() {
               <PropertyView />
             </Protected>
           }
+        />
+
+        {/* Optional legacy redirect if anything still links to /property/:id */}
+        <Route
+          path="/property/:id"
+          element={<Navigate to="/properties/:id" replace />}
         />
 
         <Route
@@ -81,6 +93,7 @@ export default function App() {
             </Protected>
           }
         />
+
         <Route
           path="/constitution"
           element={

@@ -1,10 +1,12 @@
-// frontend/src/pages/PropertyView.tsx
 import React from "react";
 import { useParams } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, buildZillowUrl } from "../lib/api";
+
 import AgentSlots from "../components/AgentSlots";
 import PageHero from "../components/PageHero";
-import BrickBuilder from "../components/BrickBuilder";
+import Golem from "../components/Golem";
+import PropertyImage from "../components/PropertyImage";
+import { getFinancingType } from "../lib/dealRules";
 
 const tabs = [
   "Deal",
@@ -27,15 +29,30 @@ function pct01(v: any) {
   return `${Math.round(n * 100)}%`;
 }
 
-function Badge({ children }: { children: React.ReactNode }) {
+const Badge = React.memo(function Badge({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "good" | "warn" | "bad";
+}) {
+  const cls =
+    tone === "good"
+      ? "border-green-400/20 bg-green-400/10 text-green-200"
+      : tone === "warn"
+        ? "border-yellow-300/20 bg-yellow-300/10 text-yellow-100"
+        : tone === "bad"
+          ? "border-red-400/20 bg-red-400/10 text-red-200"
+          : "border-white/10 bg-white/5 text-white/80";
+
   return (
-    <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/5 text-zinc-200">
+    <span className={`text-[11px] px-2 py-1 rounded-full border ${cls}`}>
       {children}
     </span>
   );
-}
+});
 
-function Panel({
+const Panel = React.memo(function Panel({
   title,
   right,
   children,
@@ -45,33 +62,60 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <div className="oh-panel p-5">
+    <div className="oh-panel p-5" style={{ contain: "layout paint" }}>
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold">{title}</div>
+        <div className="text-sm font-semibold text-white">{title}</div>
         {right ? <div>{right}</div> : null}
       </div>
       <div className="mt-3 space-y-2">{children}</div>
     </div>
   );
-}
+});
 
-function Row({ k, v }: { k: string; v: any }) {
+const Row = React.memo(function Row({ k, v }: { k: string; v: any }) {
   return (
     <div className="flex items-center justify-between gap-4 text-sm">
-      <div className="text-zinc-500">{k}</div>
-      <div className="text-zinc-200 font-medium text-right">{v}</div>
+      <div className="text-white/55">{k}</div>
+      <div className="text-white/85 font-medium text-right">{v}</div>
     </div>
   );
-}
+});
 
-function ProgressBar({ value }: { value: number }) {
+const ProgressBar = React.memo(function ProgressBar({
+  value,
+}: {
+  value: number;
+}) {
   const pct = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
   return (
     <div className="h-2 rounded-full bg-white/10 overflow-hidden">
       <div className="h-2 bg-white/60" style={{ width: `${pct * 100}%` }} />
     </div>
   );
-}
+});
+
+const TrustPill = React.memo(function TrustPill({
+  score,
+}: {
+  score: number | null;
+}) {
+  const s =
+    score == null ? null : Math.max(0, Math.min(100, Math.round(score)));
+  const cls =
+    s == null
+      ? "border-white/10 bg-white/[0.03] text-white/70"
+      : s >= 80
+        ? "border-green-400/20 bg-green-400/10 text-green-200"
+        : s >= 55
+          ? "border-yellow-300/20 bg-yellow-300/10 text-yellow-100"
+          : "border-red-400/20 bg-red-400/10 text-red-200";
+
+  return (
+    <span className={`text-[11px] px-2 py-1 rounded-full border ${cls}`}>
+      {s == null ? "—" : `Trust ${s}`}
+    </span>
+  );
+});
 
 function ChecklistItemCard({
   item,
@@ -99,17 +143,20 @@ function ChecklistItemCard({
             : "border-white/10 bg-white/[0.03]";
 
   return (
-    <div className={`rounded-2xl border ${border} p-4`}>
+    <div
+      className={`rounded-2xl border ${border} p-4`}
+      style={{ contain: "layout paint" }}
+    >
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-zinc-100">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-white">
             {item?.description || item?.title || item?.item_code}
           </div>
-          <div className="text-xs text-zinc-400 mt-1">
+          <div className="text-xs text-white/55 mt-1">
             {item?.category ? `${item.category} · ` : ""}
-            <span className="text-zinc-200">{item?.item_code}</span>
+            <span className="text-white/85">{item?.item_code}</span>
             {" · "}
-            status: <span className="text-zinc-200">{status}</span>
+            status: <span className="text-white/85">{status}</span>
             {item?.marked_by ? ` · by ${item.marked_by}` : ""}
           </div>
         </div>
@@ -148,12 +195,12 @@ function ChecklistItemCard({
 
       <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
         <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-          <div className="text-[11px] text-zinc-500">Proof URL</div>
+          <div className="text-[11px] text-white/45">Proof URL</div>
           <div className="mt-2 flex items-center gap-2">
             <input
               defaultValue={item?.proof_url || ""}
               placeholder="https://..."
-              className="oh-input"
+              className="oh-input focus-ring"
               onBlur={(e) => {
                 const val = e.target.value.trim();
                 onUpdate({ proof_url: val ? val : null }).catch(() => {});
@@ -165,7 +212,7 @@ function ChecklistItemCard({
                 href={item.proof_url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs underline text-zinc-200"
+                className="text-xs underline text-white/80"
               >
                 open
               </a>
@@ -174,11 +221,11 @@ function ChecklistItemCard({
         </div>
 
         <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-          <div className="text-[11px] text-zinc-500">Notes</div>
+          <div className="text-[11px] text-white/45">Notes</div>
           <textarea
             defaultValue={item?.notes || ""}
             placeholder="What changed? What remains?"
-            className="oh-textarea"
+            className="oh-textarea focus-ring"
             onBlur={(e) => {
               const val = e.target.value.trim();
               onUpdate({ notes: val ? val : null }).catch(() => {});
@@ -191,22 +238,55 @@ function ChecklistItemCard({
   );
 }
 
-function TrustPill({ score }: { score: number | null }) {
-  const s =
-    score == null ? null : Math.max(0, Math.min(100, Math.round(score)));
-  const cls =
-    s == null
-      ? "border-white/10 bg-white/[0.03] text-zinc-300"
-      : s >= 80
-        ? "border-green-400/20 bg-green-400/10 text-green-200"
-        : s >= 55
-          ? "border-yellow-300/20 bg-yellow-300/10 text-yellow-100"
-          : "border-red-400/20 bg-red-400/10 text-red-200";
-
+/**
+ * Agents Drawer:
+ * - still available quickly from PropertyView
+ * - collapsed by default = cleaner + less scrolling
+ */
+function AgentsDrawer({
+  open,
+  onClose,
+  propertyId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  propertyId: number;
+}) {
   return (
-    <span className={`text-[11px] px-2 py-1 rounded-full border ${cls}`}>
-      {s == null ? "—" : `Trust ${s}`}
-    </span>
+    <div
+      className={[
+        "fixed inset-0 z-[60] transition",
+        open ? "pointer-events-auto" : "pointer-events-none",
+      ].join(" ")}
+      aria-hidden={!open}
+    >
+      <div
+        onClick={onClose}
+        className={[
+          "absolute inset-0 bg-black/60 transition-opacity",
+          open ? "opacity-100" : "opacity-0",
+        ].join(" ")}
+      />
+      <div
+        className={[
+          "absolute right-0 top-0 h-full w-[420px] max-w-[92vw]",
+          "border-l border-white/10 bg-black/70 backdrop-blur-xl",
+          "transition-transform",
+          open ? "translate-x-0" : "translate-x-full",
+        ].join(" ")}
+        style={{ contain: "layout paint" }}
+      >
+        <div className="p-4 border-b border-white/10 flex items-center justify-between">
+          <div className="text-sm font-semibold text-white">Agent Slots</div>
+          <button className="oh-btn" onClick={onClose}>
+            close
+          </button>
+        </div>
+        <div className="p-4 overflow-auto h-[calc(100%-64px)]">
+          <AgentSlots propertyId={propertyId} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -227,6 +307,8 @@ export default function PropertyView() {
   const [checklist, setChecklist] = React.useState<any | null>(null);
   const [checkBusyCode, setCheckBusyCode] = React.useState<string | null>(null);
 
+  const [agentsOpen, setAgentsOpen] = React.useState(false);
+
   const abortRef = React.useRef<AbortController | null>(null);
 
   const v = bundle?.view;
@@ -243,7 +325,7 @@ export default function PropertyView() {
 
   const noDeal = err?.toLowerCase().includes("no deal found for property");
 
-  async function loadAll() {
+  const loadAll = React.useCallback(async () => {
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -251,7 +333,6 @@ export default function PropertyView() {
     try {
       setErr(null);
 
-      // Load bundle + ops + trust in parallel
       const [out, opsOut, trustOut] = await Promise.all([
         api.propertyBundle(propertyId, ac.signal),
         api.opsPropertySummary(propertyId, 90, ac.signal).catch(() => null),
@@ -284,7 +365,7 @@ export default function PropertyView() {
       setTrust(null);
       setErr(String(e.message || e));
     }
-  }
+  }, [propertyId]);
 
   React.useEffect(() => {
     if (!Number.isFinite(propertyId)) {
@@ -293,23 +374,25 @@ export default function PropertyView() {
     }
     loadAll();
     return () => abortRef.current?.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propertyId]);
+  }, [propertyId, loadAll]);
 
-  async function doAction(label: string, fn: () => Promise<any>) {
-    try {
-      setBusy(label);
-      setErr(null);
-      await fn();
-      await loadAll();
-    } catch (e: any) {
-      setErr(String(e.message || e));
-    } finally {
-      setBusy(null);
-    }
-  }
+  const doAction = React.useCallback(
+    async (label: string, fn: () => Promise<any>) => {
+      try {
+        setBusy(label);
+        setErr(null);
+        await fn();
+        await loadAll();
+      } catch (e: any) {
+        setErr(String(e.message || e));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [loadAll],
+  );
 
-  async function createDealQuick() {
+  const createDealQuick = React.useCallback(async () => {
     const askingStr = prompt("Asking price?", "120000");
     if (!askingStr) return;
     const asking = Number(askingStr);
@@ -326,24 +409,23 @@ export default function PropertyView() {
         strategy: "section8",
       });
     });
-  }
+  }, [doAction, propertyId]);
 
-  async function enrich() {
+  const enrich = React.useCallback(async () => {
     await doAction("Enriching rent…", () =>
       api.enrichProperty(propertyId, d?.strategy || "section8"),
     );
-  }
-  async function explain() {
+  }, [doAction, propertyId, d?.strategy]);
+
+  const explain = React.useCallback(async () => {
     await doAction("Explaining rent…", () =>
       api.explainProperty(propertyId, d?.strategy || "section8", true),
     );
-  }
+  }, [doAction, propertyId, d?.strategy]);
 
-  // Runtime fallback kept
-  async function evaluate() {
+  const evaluate = React.useCallback(async () => {
     await doAction("Evaluating…", async () => {
       const strategy = d?.strategy || "section8";
-
       const maybeEvalProperty = (api as any).evaluateProperty;
       if (typeof maybeEvalProperty === "function") {
         return await maybeEvalProperty(propertyId, strategy);
@@ -360,58 +442,74 @@ export default function PropertyView() {
       }
 
       throw new Error(
-        "No evaluation method available. api.evaluateProperty is missing and no snapshot_id was found in the bundle/view. Add evaluateProperty back to api.ts OR include snapshot_id in propertyBundle response.",
+        "No evaluation method available. api.evaluateProperty is missing and no snapshot_id was found in the bundle/view.",
       );
     });
-  }
+  }, [doAction, propertyId, d?.strategy, bundle]);
 
-  async function refreshChecklist() {
+  const refreshChecklist = React.useCallback(async () => {
     const latest = await api.checklistLatest(propertyId);
     setChecklist(latest);
-  }
+  }, [propertyId]);
 
-  async function generateChecklist() {
+  const generateChecklist = React.useCallback(async () => {
     await doAction("Generating checklist…", async () => {
       await api.generateChecklist(propertyId, {
         strategy: d?.strategy || "section8",
         persist: true,
       });
     });
-  }
+  }, [doAction, propertyId, d?.strategy]);
 
-  async function generateRehabFromGaps() {
+  const generateRehabFromGaps = React.useCallback(async () => {
     await doAction("Generating rehab tasks from gaps…", async () => {
       await api.opsGenerateRehabTasks(propertyId);
     });
-  }
+  }, [doAction, propertyId]);
 
   const checklistItems = checklist?.items ?? v?.checklist?.items ?? [];
 
+  // --- Minimal hero summary ---
   const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
-  const heroSub = `${p?.city ?? "—"}, ${p?.state ?? "—"} ${p?.zip ?? ""} · ${
-    p?.bedrooms ?? "—"
-  }bd · Strategy: ${((d?.strategy || "section8") as string).toUpperCase()} · Decision: ${
-    r?.decision ?? "—"
-  } · Score: ${r?.score ?? "—"} · DSCR: ${r?.dscr?.toFixed?.(2) ?? "—"}`;
+  const zillowUrl = p ? buildZillowUrl(p) : null;
 
-  // Ops-derived bits (safe defaults)
+  const decision = (r?.decision ?? "—") as string;
+  const decisionTone =
+    String(decision).toLowerCase().includes("pass") ||
+    String(decision).toLowerCase().includes("surviv")
+      ? "good"
+      : String(decision).toLowerCase().includes("fail") ||
+          String(decision).toLowerCase().includes("reject")
+        ? "bad"
+        : "neutral";
+
+  const financing = getFinancingType(d?.asking_price);
+  const financingTone =
+    financing === "CASH DEAL"
+      ? "warn"
+      : financing === "DSCR LOAN"
+        ? "neutral"
+        : "neutral";
+
+  const heroSub =
+    `${p?.city ?? "—"}, ${p?.state ?? "—"} ${p?.zip ?? ""}`.trim();
+
   const stage = ops?.stage || "deal";
   const cp = ops?.checklist_progress || {};
   const insp = ops?.inspection || {};
   const cash30 = ops?.cash?.last_30_days || {};
-  const cash90 = ops?.cash?.last_90_days || ops?.cash?.last_90_days || {};
   const equity = ops?.equity || null;
   const nextActions: string[] = Array.isArray(ops?.next_actions)
     ? ops.next_actions
     : [];
 
-  // Trust bits (defensive)
   const trustScore =
     trust?.score != null
       ? Number(trust.score)
       : trust?.trust_score != null
         ? Number(trust.trust_score)
         : null;
+
   const trustConfidence =
     trust?.confidence ?? trust?.confidence_label ?? trust?.band ?? null;
   const positives: any[] = Array.isArray(trust?.top_positive)
@@ -427,13 +525,28 @@ export default function PropertyView() {
 
   return (
     <div className="relative space-y-5">
+      <AgentsDrawer
+        open={agentsOpen}
+        onClose={() => setAgentsOpen(false)}
+        propertyId={propertyId}
+      />
+
       <PageHero
         eyebrow="Property"
         title={heroTitle}
         subtitle={heroSub}
-        right={<BrickBuilder />}
+        tilt={false}
+        right={
+          // keep your golem: explicit size, moved up slightly
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
+            <div className="h-[210px] w-[210px] md:h-[230px] md:w-[230px] translate-y-[-12px] opacity-95">
+              <Golem className="h-full w-full" />
+            </div>
+          </div>
+        }
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Primary actions first */}
             <button
               onClick={loadAll}
               className="oh-btn"
@@ -442,14 +555,17 @@ export default function PropertyView() {
             >
               sync
             </button>
+
             <button
-              onClick={createDealQuick}
-              className="oh-btn"
-              disabled={!!busy}
-              title="Create a deal if missing"
+              onClick={evaluate}
+              className="oh-btn oh-btn-primary"
+              disabled={!!busy || !d}
+              title="Evaluate"
             >
-              {busy?.includes("Creating") ? "creating…" : "+ deal"}
+              evaluate
             </button>
+
+            {/* Secondary actions */}
             <button
               onClick={enrich}
               className="oh-btn"
@@ -467,19 +583,252 @@ export default function PropertyView() {
               explain
             </button>
             <button
-              onClick={evaluate}
-              className="oh-btn oh-btn-primary"
-              disabled={!!busy || !d}
-              title="Evaluate"
+              onClick={createDealQuick}
+              className="oh-btn"
+              disabled={!!busy}
+              title="Create a deal if missing"
             >
-              evaluate
+              {busy?.includes("Creating") ? "creating…" : "+ deal"}
             </button>
-          </>
+
+            <span className="hidden md:inline-block w-2" />
+
+            {zillowUrl && (
+              <a
+                href={zillowUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="oh-btn"
+                title="Open Zillow (new tab)"
+              >
+                Zillow ↗
+              </a>
+            )}
+
+            <button
+              className="oh-btn"
+              onClick={() => setAgentsOpen(true)}
+              title="Open agent slots drawer"
+            >
+              agents
+            </button>
+          </div>
         }
       />
 
+      {/* Minimal hero “chips” row + image. This is where clutter dies. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
+        <div className="oh-panel p-4">
+          <div className="text-xs uppercase tracking-widest text-white/45">
+            House
+          </div>
+          <div className="mt-3">
+            <PropertyImage
+              address={p?.address}
+              city={p?.city}
+              state={p?.state}
+              zip={p?.zip}
+              className="h-[220px] w-full"
+              roundedClassName="rounded-2xl"
+            />
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Badge tone={decisionTone}>Decision: {decision}</Badge>
+            <Badge>Score: {r?.score ?? "—"}</Badge>
+            <Badge>DSCR: {r?.dscr?.toFixed?.(2) ?? "—"}</Badge>
+            <Badge tone={financingTone}>{financing}</Badge>
+          </div>
+
+          <div className="mt-3 text-xs text-white/45">
+            Strategy:{" "}
+            <span className="text-white/80 font-semibold">
+              {String(d?.strategy || "section8").toUpperCase()}
+            </span>
+            {" · "}
+            Stage:{" "}
+            <span className="text-white/80 font-semibold">
+              {String(stage).toUpperCase()}
+            </span>
+          </div>
+        </div>
+
+        {/* ABOVE THE FOLD: Reality Loop + Trust */}
+        <div className="space-y-4">
+          <Panel
+            title="Reality Loop"
+            right={
+              <div className="flex flex-wrap items-center gap-2 justify-end">
+                {cp?.total != null ? (
+                  <Badge>
+                    Checklist {cp.done ?? 0}/{cp.total ?? 0} (
+                    {pct01(cp.pct_done)})
+                  </Badge>
+                ) : (
+                  <Badge>Checklist —</Badge>
+                )}
+                {insp?.latest ? (
+                  <Badge tone={insp.latest.passed ? "good" : "warn"}>
+                    Inspection {insp.latest.passed ? "PASSED" : "OPEN"} · fails{" "}
+                    {insp.open_failed_items ?? 0}
+                  </Badge>
+                ) : (
+                  <Badge>Inspection NONE</Badge>
+                )}
+              </div>
+            }
+          >
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">Checklist</div>
+                <div className="mt-2">
+                  <Row
+                    k="Done"
+                    v={`${cp.done ?? 0}/${cp.total ?? 0} (${pct01(cp.pct_done)})`}
+                  />
+                  <div className="mt-2">
+                    <ProgressBar value={Number(cp.pct_done || 0)} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">Cash (30d)</div>
+                <div className="mt-2 space-y-1">
+                  <Row k="Income" v={money(cash30.income)} />
+                  <Row k="Net" v={money(cash30.net)} />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">Equity</div>
+                <div className="mt-2 space-y-1">
+                  <Row
+                    k="Value"
+                    v={equity ? money(equity.estimated_value) : "—"}
+                  />
+                  <Row
+                    k="Equity"
+                    v={equity ? money(equity.estimated_equity) : "—"}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">One-click</div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={generateChecklist}
+                    className="oh-btn oh-btn-primary"
+                    disabled={!!busy || !d}
+                    title="Generate and persist checklist"
+                  >
+                    checklist
+                  </button>
+                  <button
+                    onClick={generateRehabFromGaps}
+                    className="oh-btn"
+                    disabled={!!busy}
+                    title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
+                  >
+                    rehab gaps
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <div className="text-xs text-white/45 mb-2">Next actions</div>
+              {nextActions.length ? (
+                <div className="space-y-2">
+                  {nextActions.slice(0, 5).map((a, i) => (
+                    <div
+                      key={i}
+                      className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-white/80"
+                    >
+                      {a}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-white/55">
+                  No blockers detected.
+                </div>
+              )}
+            </div>
+          </Panel>
+
+          <Panel title="Trust" right={<TrustPill score={trustScore} />}>
+            {trust == null ? (
+              <div className="text-sm text-white/55">
+                Trust is not available yet.
+                {trustErr ? (
+                  <div className="mt-2 text-xs text-white/45">{trustErr}</div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Row
+                  k="Score"
+                  v={trustScore != null ? `${Math.round(trustScore)}/100` : "—"}
+                />
+                <Row k="Confidence" v={trustConfidence ?? "—"} />
+
+                <div className="grid grid-cols-1 gap-2">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <div className="text-[11px] text-white/45 mb-2">
+                      Top positives
+                    </div>
+                    {positives.length ? (
+                      <div className="space-y-1">
+                        {positives.slice(0, 2).map((x: any, i: number) => (
+                          <div key={i} className="text-sm text-white/80">
+                            •{" "}
+                            {x.signal_key ||
+                              x.key ||
+                              x.name ||
+                              JSON.stringify(x)}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-white/55">—</div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <div className="text-[11px] text-white/45 mb-2">
+                      Top negatives
+                    </div>
+                    {negatives.length ? (
+                      <div className="space-y-1">
+                        {negatives.slice(0, 2).map((x: any, i: number) => (
+                          <div key={i} className="text-sm text-white/80">
+                            •{" "}
+                            {x.signal_key ||
+                              x.key ||
+                              x.name ||
+                              JSON.stringify(x)}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-white/55">—</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="text-xs text-white/45">
+                  Trust reflects completeness + consistency of the pipeline.
+                </div>
+              </div>
+            )}
+          </Panel>
+        </div>
+      </div>
+
       {busy && (
-        <div className="oh-panel-solid p-4 border-white/10 bg-white/5 text-zinc-200">
+        <div className="oh-panel-solid p-4 border-white/10 bg-white/5 text-white/80">
           {busy}
         </div>
       )}
@@ -492,201 +841,7 @@ export default function PropertyView() {
         </div>
       )}
 
-      {/* Reality + Trust + Slots */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <div className="lg:col-span-2">
-          <Panel
-            title="Reality Loop (auto-derived)"
-            right={
-              <div className="flex flex-wrap items-center gap-2 justify-end">
-                <Badge>Stage: {String(stage).toUpperCase()}</Badge>
-                {cp?.total != null ? (
-                  <Badge>
-                    Checklist: {cp.done ?? 0}/{cp.total ?? 0} (
-                    {pct01(cp.pct_done)})
-                  </Badge>
-                ) : null}
-                {insp?.latest ? (
-                  <Badge>
-                    Inspection: {insp.latest.passed ? "PASSED" : "NOT PASSED"} ·
-                    fails {insp.open_failed_items ?? 0}
-                  </Badge>
-                ) : (
-                  <Badge>Inspection: NONE</Badge>
-                )}
-              </div>
-            }
-          >
-            <div className="space-y-3">
-              <div>
-                <Row
-                  k="Checklist progress"
-                  v={`${cp.done ?? 0}/${cp.total ?? 0} (${pct01(cp.pct_done)})`}
-                />
-                <div className="mt-2">
-                  <ProgressBar value={Number(cp.pct_done || 0)} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="text-xs text-zinc-500">Cash rollup (30d)</div>
-                  <div className="mt-2 space-y-1">
-                    <Row k="Income" v={money(cash30.income)} />
-                    <Row k="Expense" v={money(cash30.expense)} />
-                    <Row k="Capex" v={money(cash30.capex)} />
-                    <Row k="Net" v={money(cash30.net)} />
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="text-xs text-zinc-500">Equity snapshot</div>
-                  <div className="mt-2 space-y-1">
-                    <Row
-                      k="As of"
-                      v={
-                        equity?.as_of ? String(equity.as_of).slice(0, 10) : "—"
-                      }
-                    />
-                    <Row
-                      k="Value"
-                      v={equity ? money(equity.estimated_value) : "—"}
-                    />
-                    <Row
-                      k="Loan"
-                      v={equity ? money(equity.loan_balance) : "—"}
-                    />
-                    <Row
-                      k="Equity"
-                      v={equity ? money(equity.estimated_equity) : "—"}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={generateChecklist}
-                  className="oh-btn oh-btn-primary"
-                  disabled={!!busy || !d}
-                  title="Generate and persist checklist"
-                >
-                  checklist generate
-                </button>
-                <button
-                  onClick={generateRehabFromGaps}
-                  className="oh-btn"
-                  disabled={!!busy}
-                  title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
-                >
-                  rehab from gaps
-                </button>
-              </div>
-
-              <div className="pt-2">
-                <div className="text-xs text-zinc-500 mb-2">Next actions</div>
-                {nextActions.length ? (
-                  <div className="space-y-2">
-                    {nextActions.slice(0, 8).map((a, i) => (
-                      <div
-                        key={i}
-                        className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-zinc-200"
-                      >
-                        {a}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-zinc-400">
-                    No blockers detected.
-                  </div>
-                )}
-              </div>
-            </div>
-          </Panel>
-        </div>
-
-        <div className="space-y-3">
-          {/* ✅ NEW: Trust Card (visible or it rots) */}
-          <Panel title="Trust" right={<TrustPill score={trustScore} />}>
-            {trust == null ? (
-              <div className="text-sm text-zinc-400">
-                Trust is not available yet.
-                {trustErr ? (
-                  <div className="mt-2 text-xs text-zinc-500">{trustErr}</div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <Row
-                  k="Score"
-                  v={trustScore != null ? `${Math.round(trustScore)}/100` : "—"}
-                />
-                <Row k="Confidence" v={trustConfidence ?? "—"} />
-                <div className="grid grid-cols-1 gap-2">
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                    <div className="text-[11px] text-zinc-500 mb-2">
-                      Top positives
-                    </div>
-                    {positives.length ? (
-                      <div className="space-y-1">
-                        {positives.slice(0, 3).map((x: any, i: number) => (
-                          <div key={i} className="text-sm text-zinc-200">
-                            •{" "}
-                            {x.signal_key ||
-                              x.key ||
-                              x.name ||
-                              JSON.stringify(x)}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-zinc-400">—</div>
-                    )}
-                  </div>
-
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                    <div className="text-[11px] text-zinc-500 mb-2">
-                      Top negatives
-                    </div>
-                    {negatives.length ? (
-                      <div className="space-y-1">
-                        {negatives.slice(0, 3).map((x: any, i: number) => (
-                          <div key={i} className="text-sm text-zinc-200">
-                            •{" "}
-                            {x.signal_key ||
-                              x.key ||
-                              x.name ||
-                              JSON.stringify(x)}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-zinc-400">—</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="text-xs text-zinc-500">
-                  Trust is computed from stored signals (providers, pipeline
-                  completeness, overrides).
-                </div>
-              </div>
-            )}
-          </Panel>
-
-          <AgentSlots propertyId={propertyId} />
-
-          <Panel title="Ops intent">
-            <div className="text-sm text-zinc-300 leading-relaxed">
-              This panel is the loop-closer: it turns backend truth into UI
-              truth (readiness + next actions), so agents and humans work the
-              same queue.
-            </div>
-          </Panel>
-        </div>
-      </div>
-
+      {/* Tabs */}
       <div className="gradient-border rounded-2xl p-[1px]">
         <div className="glass rounded-2xl p-2 flex gap-2 flex-wrap">
           {tabs.map((t) => (
@@ -694,10 +849,10 @@ export default function PropertyView() {
               key={t}
               onClick={() => setTab(t)}
               className={[
-                "px-3 py-2 rounded-xl border text-sm transition",
+                "px-3 py-2 rounded-xl border text-sm transition focus-ring",
                 tab === t
-                  ? "bg-white/[0.07] text-zinc-100 border-white/[0.18] shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
-                  : "text-zinc-300 border-white/10 hover:bg-white/[0.04] hover:border-white/[0.14]",
+                  ? "bg-white/[0.07] text-white border-white/[0.18]"
+                  : "text-white/70 border-white/10 hover:bg-white/[0.04] hover:border-white/[0.14]",
               ].join(" ")}
             >
               {t}
@@ -706,10 +861,10 @@ export default function PropertyView() {
         </div>
       </div>
 
-      {/* Deal */}
+      {/* Tab content: unchanged core behavior */}
       {tab === "Deal" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
             <Panel title="Underwriting">
               <Row
                 k="Gross rent used"
@@ -789,18 +944,18 @@ export default function PropertyView() {
 
             <Panel title="Jurisdiction Friction">
               <Row k="Multiplier" v={friction?.multiplier ?? "—"} />
-              <div className="mt-2 text-xs text-zinc-500">Reasons</div>
-              <ul className="mt-1 text-sm text-zinc-200 space-y-1 list-disc pl-5">
+              <div className="mt-2 text-xs text-white/45">Reasons</div>
+              <ul className="mt-1 text-sm text-white/80 space-y-1 list-disc pl-5">
                 {(friction?.reasons ?? []).map((x: string, i: number) => (
                   <li key={i}>{x}</li>
                 ))}
                 {(friction?.reasons ?? []).length === 0 && (
-                  <li className="text-zinc-500">—</li>
+                  <li className="text-white/55">—</li>
                 )}
               </ul>
             </Panel>
 
-            <Panel title="Raw deal">
+            <Panel title="Deal inputs">
               <Row
                 k="Asking"
                 v={d?.asking_price != null ? money(d.asking_price) : "—"}
@@ -820,19 +975,18 @@ export default function PropertyView() {
             </Panel>
           </div>
 
-          <div className="space-y-3">
-            <Panel title="What’s next">
-              <div className="text-sm text-zinc-300 leading-relaxed">
-                Now that Ops Summary is present, the next step is to let a slot
-                “accept” a Next Action and persist that as a WorkflowEvent +
-                assignment.
+          <div className="space-y-4">
+            <Panel title="Guidance">
+              <div className="text-sm text-white/70 leading-relaxed">
+                Use this tab when you’re tuning underwriting and rent
+                assumptions. The “Reality Loop” above tells you whether the
+                property is operationally ready.
               </div>
             </Panel>
           </div>
         </div>
       )}
 
-      {/* Rehab */}
       {tab === "Rehab" && (
         <Panel
           title="Rehab Tasks"
@@ -848,21 +1002,22 @@ export default function PropertyView() {
           }
         >
           {rehab.length === 0 ? (
-            <div className="text-sm text-zinc-400">No rehab tasks yet.</div>
+            <div className="text-sm text-white/55">No rehab tasks yet.</div>
           ) : (
             <div className="space-y-2">
               {rehab.map((t: any) => (
                 <div
                   key={t.id}
                   className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                  style={{ contain: "layout paint" }}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="font-semibold text-zinc-100">{t.title}</div>
-                    <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/5 text-zinc-300">
+                    <div className="font-semibold text-white">{t.title}</div>
+                    <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/5 text-white/70">
                       {t.status}
                     </span>
                   </div>
-                  <div className="text-xs text-zinc-400 mt-1">
+                  <div className="text-xs text-white/55 mt-1">
                     {t.deadline
                       ? `Due: ${new Date(t.deadline).toLocaleDateString()}`
                       : "No deadline"}{" "}
@@ -872,7 +1027,7 @@ export default function PropertyView() {
                       : "No estimate"}
                   </div>
                   {t.notes && (
-                    <div className="text-sm text-zinc-300 mt-2">{t.notes}</div>
+                    <div className="text-sm text-white/70 mt-2">{t.notes}</div>
                   )}
                 </div>
               ))}
@@ -881,13 +1036,12 @@ export default function PropertyView() {
         </Panel>
       )}
 
-      {/* Compliance */}
       {tab === "Compliance" && (
         <Panel title="Compliance / Checklist">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-sm text-zinc-300">
-              Checklist items are editable (status/proof/notes) and write audit
-              + workflow events.
+            <div className="text-sm text-white/70">
+              Update status/proof/notes. This should feed ops readiness and
+              trust.
             </div>
             <div className="flex gap-2">
               <button
@@ -920,9 +1074,9 @@ export default function PropertyView() {
 
           <div className="mt-4 space-y-2">
             {checklistItems.length === 0 ? (
-              <div className="text-sm text-zinc-400">
+              <div className="text-sm text-white/55">
                 No checklist found yet. Click{" "}
-                <span className="text-zinc-200 font-semibold">generate</span> to
+                <span className="text-white font-semibold">generate</span> to
                 create one.
               </div>
             ) : (
@@ -941,7 +1095,6 @@ export default function PropertyView() {
                       );
                       await refreshChecklist();
 
-                      // refresh ops + trust too (since progress + overrides can affect trust/confidence)
                       const [opsOut, trustOut] = await Promise.all([
                         api
                           .opsPropertySummary(propertyId, 90)
@@ -961,34 +1114,34 @@ export default function PropertyView() {
         </Panel>
       )}
 
-      {/* Tenant */}
       {tab === "Tenant" && (
         <Panel title="Leases">
           {leases.length === 0 ? (
-            <div className="text-sm text-zinc-400">No leases yet.</div>
+            <div className="text-sm text-white/55">No leases yet.</div>
           ) : (
             <div className="space-y-2">
               {leases.map((l: any) => (
                 <div
                   key={l.id}
                   className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                  style={{ contain: "layout paint" }}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="font-semibold text-zinc-100">
+                    <div className="font-semibold text-white">
                       Tenant #{l.tenant_id}
                     </div>
-                    <div className="text-sm text-zinc-200 font-semibold">
+                    <div className="text-sm text-white/85 font-semibold">
                       {money(l.total_rent)}
                     </div>
                   </div>
-                  <div className="text-xs text-zinc-400 mt-1">
+                  <div className="text-xs text-white/55 mt-1">
                     Start: {new Date(l.start_date).toLocaleDateString()}{" "}
                     {l.end_date
                       ? `· End: ${new Date(l.end_date).toLocaleDateString()}`
                       : ""}
                   </div>
                   {l.notes && (
-                    <div className="text-sm text-zinc-300 mt-2">{l.notes}</div>
+                    <div className="text-sm text-white/70 mt-2">{l.notes}</div>
                   )}
                 </div>
               ))}
@@ -997,27 +1150,27 @@ export default function PropertyView() {
         </Panel>
       )}
 
-      {/* Cash */}
       {tab === "Cash" && (
         <Panel title="Transactions">
           {txns.length === 0 ? (
-            <div className="text-sm text-zinc-400">No transactions yet.</div>
+            <div className="text-sm text-white/55">No transactions yet.</div>
           ) : (
             <div className="space-y-2">
               {txns.map((t: any) => (
                 <div
                   key={t.id}
                   className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                  style={{ contain: "layout paint" }}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="text-zinc-100 font-semibold">
+                    <div className="text-white font-semibold">
                       {t.txn_type || t.type || "txn"}
                     </div>
-                    <div className="text-zinc-200 font-semibold">
+                    <div className="text-white/85 font-semibold">
                       {money(t.amount)}
                     </div>
                   </div>
-                  <div className="text-xs text-zinc-400 mt-1">
+                  <div className="text-xs text-white/55 mt-1">
                     {t.txn_date
                       ? new Date(t.txn_date).toLocaleDateString()
                       : "—"}{" "}
@@ -1030,27 +1183,27 @@ export default function PropertyView() {
         </Panel>
       )}
 
-      {/* Equity */}
       {tab === "Equity" && (
         <Panel title="Valuations">
           {vals.length === 0 ? (
-            <div className="text-sm text-zinc-400">No valuations yet.</div>
+            <div className="text-sm text-white/55">No valuations yet.</div>
           ) : (
             <div className="space-y-2">
               {vals.map((v2: any) => (
                 <div
                   key={v2.id}
                   className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                  style={{ contain: "layout paint" }}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="text-zinc-100 font-semibold">
+                    <div className="text-white font-semibold">
                       {v2.as_of ? new Date(v2.as_of).toLocaleDateString() : "—"}
                     </div>
-                    <div className="text-zinc-200 font-semibold">
+                    <div className="text-white/85 font-semibold">
                       {money(v2.estimated_value)}
                     </div>
                   </div>
-                  <div className="text-xs text-zinc-400 mt-1">
+                  <div className="text-xs text-white/55 mt-1">
                     Loan:{" "}
                     {v2.loan_balance != null ? money(v2.loan_balance) : "—"}{" "}
                     {v2.notes ? `· ${v2.notes}` : ""}
