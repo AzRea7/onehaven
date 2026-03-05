@@ -50,3 +50,13 @@ A “PASS” means:
 - a human can actually move it forward
 - with a clear checklist of the next actions
 - and the biggest risks stated plainly
+
+## Jurisdiction Reality Layer (Michigan)
+
+OneHaven maintains an operational “jurisdiction reality” model (profiles by state/county/city).
+It is used to predict process friction and sequencing risk (timelines, re-inspection likelihood, paperwork complexity).
+
+See:
+- `/meta/docs/michigan_jurisdictions`
+
+This is an operational heuristic based on repeatable outcomes and user-entered learnings, not legal advice.

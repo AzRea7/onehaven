@@ -1,6 +1,5 @@
 # backend/app/schemas.py
-# FULL FILE replacement (updated to match the new pipeline fields + geo/risk + workflow state payload)
-
+# FULL FILE replacement (updated to match your current API + policy models)
 from __future__ import annotations
 
 import json
@@ -81,12 +80,12 @@ class PropertyCreate(BaseModel):
     has_garage: bool = False
     property_type: str = "single_family"
 
-    # NEW (optional on create; typically computed later)
+    # optional on create; typically computed later
     lat: Optional[float] = None
     lng: Optional[float] = None
     county: Optional[str] = None
 
-    # NEW risk metadata
+    # risk metadata
     is_red_zone: bool = False
     crime_density: Optional[float] = None
     crime_score: Optional[float] = None
@@ -111,7 +110,7 @@ class DealCreate(BaseModel):
     source_raw_json: Optional[str] = None
     source: Optional[str] = None
 
-    # NEW: pipeline gating fields (decision + acquisition)
+    # pipeline gating fields (decision + acquisition)
     decision: Optional[Literal["buy", "pass", "watch"]] = None
     purchase_price: Optional[float] = None
     closing_date: Optional[datetime] = None
@@ -156,7 +155,7 @@ class DealIntakeOut(BaseModel):
 
 
 # --------------------
-# Rent Assumptions / Jurisdiction
+# Rent Assumptions / Jurisdiction (rules)
 # --------------------
 class RentAssumptionUpsert(BaseModel):
     market_rent_estimate: Optional[float] = None
@@ -499,6 +498,50 @@ class PropertyViewOut(BaseModel):
     jurisdiction_friction: dict
     last_underwriting_result: Optional[UnderwritingResultOut] = None
     checklist: Optional[ChecklistOut] = None
+
+
+# --------------------
+# Jurisdiction Profiles (policy playbooks / overrides)
+# --------------------
+class JurisdictionProfileIn(BaseModel):
+    state: str = "MI"
+    county: Optional[str] = None
+    city: Optional[str] = None
+
+    friction_multiplier: float = 1.0
+    pha_name: Optional[str] = None
+    policy: Dict[str, Any] = Field(default_factory=dict)
+    notes: Optional[str] = None
+
+
+class JurisdictionProfileOut(BaseModel):
+    id: int
+    scope: str  # "global" | "org"
+    org_id: Optional[int] = None
+
+    state: str
+    county: Optional[str] = None
+    city: Optional[str] = None
+
+    friction_multiplier: float = 1.0
+    pha_name: Optional[str] = None
+    policy: Dict[str, Any] = Field(default_factory=dict)
+    notes: Optional[str] = None
+
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class JurisdictionProfileResolveOut(BaseModel):
+    matched: bool
+    scope: Optional[str] = None
+    match_level: Optional[str] = None  # city|county|state|None
+
+    friction_multiplier: float = 1.0
+    pha_name: Optional[str] = None
+    policy: Dict[str, Any] = Field(default_factory=dict)
+    notes: Optional[str] = None
+    profile_id: Optional[int] = None
 
 
 # --------------------

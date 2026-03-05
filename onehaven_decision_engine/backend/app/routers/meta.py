@@ -37,6 +37,7 @@ def disclaimer():
         "statement": "Operational intelligence based on public rules and historical outcomes. Not legal advice.",
         "docs": {
             "operating_principles": "/meta/docs/operating_principles",
+            "michigan_jurisdictions": "/meta/docs/michigan_jurisdictions",
             "terms": "/meta/docs/terms",
             "pricing": "/meta/docs/pricing",
         },
@@ -45,7 +46,18 @@ def disclaimer():
 
 @router.get("/docs/operating_principles", response_model=dict)
 def operating_principles():
-    return {"name": "operating_principles.md", "content": _read_doc("operating_principles.md")}
+    return {
+        "name": "operating_principles.md",
+        "content": _read_doc("operating_principles.md"),
+    }
+
+
+@router.get("/docs/michigan_jurisdictions", response_model=dict)
+def michigan_jurisdictions():
+    return {
+        "name": "michigan_jurisdictions.md",
+        "content": _read_doc("michigan_jurisdictions.md"),
+    }
 
 
 @router.get("/docs/terms", response_model=dict)

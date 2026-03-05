@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
+import sqlalchemy as sa
 from sqlalchemy import (
     Date,
     DateTime,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,55 +23,54 @@ from .db import Base
 
 class JurisdictionProfile(Base):
     """
-    Your versioned, source-backed truth for "how Section 8 is done here".
-    This is NOT the same as JurisdictionRule friction scoring.
-    This is: PHA + packet + inspection cadence + local overlays + utility handling.
+    Jurisdiction Profiles = operational reality model:
+      - global defaults (org_id is NULL)
+      - org overrides (org_id = organizations.id)
+
+    Matching specificity:
+      city+state > county+state > state-only
+
+    This model is intentionally simple:
+      - friction_multiplier: the "time/complexity drag" factor
+      - policy_json: structured notes your agents/UI can use
     """
 
     __tablename__ = "jurisdiction_profiles"
     __table_args__ = (
-        UniqueConstraint("org_id", "key", "effective_date", name="uq_jp_org_key_effective"),
+        # Note: Postgres treats NULLs as distinct in UNIQUE constraints, so duplicates
+        # for global rows are possible. We also enforce uniqueness in the service logic.
+        UniqueConstraint("org_id", "state", "county", "city", name="uq_jp_scope_state_county_city"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
+    # NULL => global default row
+    org_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("organizations.id"), index=True, nullable=True
+    )
 
-    # e.g. "mi_detroit_wayne_hud_hcv", "mi_royal_oak_oakland_hcv"
-    key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
-
-    # Human-friendly
-    name: Mapped[str] = mapped_column(String(180), nullable=False)
-
-    # Matching hints (lightweight, deterministic)
     state: Mapped[str] = mapped_column(String(2), nullable=False, default="MI")
     county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
-    zip_prefix: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # "482" or "48067"
 
-    # PHA / Program identity
+    friction_multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+
     pha_name: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
-    pha_code: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    program_type: Mapped[str] = mapped_column(String(40), nullable=False, default="hcv")  # hcv|pbv|other
 
-    # Payment standard knobs (varies by PHA; store what you know)
-    payment_standard_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    uses_safmr: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)  # 0/1 for sqlite friendliness
+    # store arbitrary structured policy blob as JSON string
+    policy_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Inspection cadence and packet expectations (JSON stored as text for simplicity)
-    # Store lists/dicts as JSON strings. Agents will treat as structured truth.
-    inspection_cadence_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    packet_requirements_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    local_overlays_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    utility_allowance_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    # Governance fields
-    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
-    source_urls_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # list[str]
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    # DB-safe timestamps:
+    # - created_at uses server_default now() so inserts outside ORM still get populated
+    # - updated_at is set by service logic (and optionally by ORM onupdate)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=sa.text("now()")
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, onupdate=datetime.utcnow
+    )
 
 
 class HqsRule(Base):
@@ -82,19 +83,14 @@ class HqsRule(Base):
     __table_args__ = (UniqueConstraint("code", name="uq_hqs_rules_code"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-
-    # stable code you control, e.g. "HQS_SMOKE_DETECTOR"
     code: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
-    category: Mapped[str] = mapped_column(String(40), nullable=False)  # safety|electrical|plumbing|egress|interior|exterior|structure|sanitary|thermal
-
-    # fail/advisory; agents treat "fail" as needs remediation before inspection readiness
+    category: Mapped[str] = mapped_column(String(40), nullable=False)
     severity: Mapped[str] = mapped_column(String(20), nullable=False, default="fail")
-
     description: Mapped[str] = mapped_column(String(260), nullable=False)
-    evidence_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # list[str]
-    remediation_hints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # list[str]
 
-    # Governance
+    evidence_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    remediation_hints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     source_urls_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     effective_date: Mapped[date] = mapped_column(Date, nullable=False, default=date(2026, 1, 1))
 
@@ -102,9 +98,6 @@ class HqsRule(Base):
 class HqsAddendumRule(Base):
     """
     Local addendum overlay for a jurisdiction profile.
-    Use this to:
-      - add extra items
-      - override severity/description for an existing code
     """
 
     __tablename__ = "hqs_addendum_rules"
@@ -113,10 +106,15 @@ class HqsAddendumRule(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
+    org_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), index=True, nullable=False
+    )
 
     jurisdiction_profile_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("jurisdiction_profiles.id", ondelete="CASCADE"), index=True, nullable=False
+        Integer,
+        ForeignKey("jurisdiction_profiles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
     )
 
     code: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
@@ -133,8 +131,6 @@ class HqsAddendumRule(Base):
 class HudFmrRecord(Base):
     """
     Cached HUD Fair Market Rent (FMR) / SAFMR-like records.
-    Agents should NOT call HUD live during underwriting; they should use cache
-    and create "needs_refresh" next-actions when stale.
     """
 
     __tablename__ = "hud_fmr_records"
@@ -144,22 +140,110 @@ class HudFmrRecord(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    # Matching keys (keep it flexible)
     state: Mapped[str] = mapped_column(String(2), nullable=False, index=True)
-    area_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)  # e.g. "Detroit-Warren-Dearborn, MI HUD Metro FMR Area"
+    area_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     bedrooms: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
 
     fmr: Mapped[float] = mapped_column(Float, nullable=False)
 
-    # provenance
     source: Mapped[str] = mapped_column(String(80), nullable=False, default="hud_user_api")
     fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     raw_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+class PolicySource(Base):
+    """
+    Evidence store.
+    A PolicySource is a fetched artifact (HTML/PDF/etc) with hash + metadata.
+    """
 
-# -------------------------------------------------------------------
-# Compatibility aliases (older imports)
-# -------------------------------------------------------------------
-# Some modules still import `HqsAddendum`. The canonical model is `HqsAddendumRule`.
+    __tablename__ = "policy_sources"
+    __table_args__ = (
+        Index("ix_policy_sources_state_county_city", "state", "county", "city"),
+        Index("ix_policy_sources_org_state", "org_id", "state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # NULL => global evidence usable by all orgs
+    org_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("organizations.id"), index=True, nullable=True
+    )
+
+    state: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    pha_name: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    program_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)  # "hcv", "pbv", etc.
+
+    publisher: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(260), nullable=True)
+
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    content_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    # Where raw bytes/text are stored in container filesystem
+    raw_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Light extracted text (optional). Keep small; PDFs usually empty here.
+    extracted_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"))
+
+
+class PolicyAssertion(Base):
+    """
+    Actionable statements derived from PolicySource, then human-reviewed.
+
+    IMPORTANT:
+    - Your underwriting logic should only read review_status="verified".
+    - Everything else is draft.
+    """
+
+    __tablename__ = "policy_assertions"
+    __table_args__ = (
+        Index("ix_policy_assertions_scope", "state", "county", "city"),
+        Index("ix_policy_assertions_status", "review_status"),
+        Index("ix_policy_assertions_rule_key", "rule_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # NULL => global rule
+    org_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("organizations.id"), index=True, nullable=True
+    )
+
+    source_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("policy_sources.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+
+    state: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    pha_name: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    program_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+
+    rule_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    value_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
+
+    # "extracted" | "reviewed" | "verified" | "rejected"
+    review_status: Mapped[str] = mapped_column(String(40), nullable=False, default="extracted")
+    review_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    extracted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"))
+# Compatibility alias (older imports)
 HqsAddendum = HqsAddendumRule

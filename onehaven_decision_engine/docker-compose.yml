@@ -29,6 +29,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - ./docs:/app/docs
     environment:
       ALEMBIC_CONFIG: /app/app/alembic.ini
       DATABASE_URL: ${DATABASE_URL}

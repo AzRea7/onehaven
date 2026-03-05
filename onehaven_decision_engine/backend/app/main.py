@@ -42,11 +42,17 @@ from .routers.trust import router as trust_router
 from .routers.auth import router as auth_router
 from .routers.api_keys import router as api_keys_router
 
+# ✅ NEW: Jurisdiction Profiles (global defaults + org overrides)
+from .routers.jurisdiction_profiles import router as jurisdiction_profiles_router
+from .routers.policy_seed import router as policy_seed_router
+from .routers.policy_evidence import router as policy_evidence_router
+from .routers.policy import router as policy_router
+
+
 API_PREFIX = "/api"
 
 
 def _dev_origin_allowlist() -> list[str]:
-    # covers: Vite dev, nginx dev/prod, and common localhost variants
     return [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -58,24 +64,14 @@ def _dev_origin_allowlist() -> list[str]:
 
 
 def _cors_origins() -> list[str]:
-    """
-    settings.cors_allow_origins can be:
-      - "*" (string)  -> DANGEROUS with cookies; we auto-fix to dev allowlist
-      - "http://localhost:5173,http://127.0.0.1:5173" (string CSV)
-      - ["http://localhost:5173", ...] (list)
-    """
     val = getattr(settings, "cors_allow_origins", None)
 
-    # sensible dev default (works with Vite on 5173 + nginx on 8080)
     if val is None:
         return _dev_origin_allowlist()
 
     if isinstance(val, str):
         v = val.strip()
         if v == "*":
-            # ✅ IMPORTANT:
-            # "*" + cookies/credentials is blocked by browsers.
-            # Instead of silently breaking auth, treat "*" as "dev allowlist".
             return _dev_origin_allowlist()
         return [x.strip() for x in v.split(",") if x.strip()]
 
@@ -102,9 +98,6 @@ def create_app() -> FastAPI:
 
     origins = _cors_origins()
 
-    # ✅ We are intentionally NOT supporting allow_origins=["*"] here,
-    # because cookie-based auth requires allow_credentials=True,
-    # and browsers disallow "*" with credentials.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -152,6 +145,12 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(api_keys_router, prefix=API_PREFIX)
 
+    # ✅ NEW: Jurisdiction Profiles
+    app.include_router(jurisdiction_profiles_router, prefix=API_PREFIX)
+    app.include_router(policy_seed_router, prefix=API_PREFIX)
+    app.include_router(policy_evidence_router, prefix=API_PREFIX)
+    app.include_router(policy_router, prefix=API_PREFIX)
+    
     return app
 
 

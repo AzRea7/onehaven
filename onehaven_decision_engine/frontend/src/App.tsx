@@ -4,16 +4,18 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Shell from "./components/Shell";
 
 import Dashboard from "./pages/Dashboard";
-import Property from "./pages/Property"; // Properties LIST page
+import Property from "./pages/Property";
 import PropertyView from "./pages/PropertyView";
 
 import Agents from "./pages/Agents";
 import Constitution from "./pages/Constitution";
 import DealIntake from "./pages/DealIntake";
 import Jurisdictions from "./pages/Jurisdictions";
+import JurisdictionProfiles from "./pages/JurisdictionProfiles";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import PolicyReview from "./pages/PolicyReview";
 
 import { AuthGate } from "./lib/auth";
 
@@ -59,6 +61,15 @@ export default function App() {
           }
         />
 
+        <Route
+          path="/jurisdiction-profiles"
+          element={
+            <Protected>
+              <JurisdictionProfiles />
+            </Protected>
+          }
+        />
+
         {/* Properties list page */}
         <Route
           path="/properties"
@@ -99,6 +110,15 @@ export default function App() {
           element={
             <Protected>
               <Constitution />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/policy-review"
+          element={
+            <Protected>
+              <PolicyReview />
             </Protected>
           }
         />

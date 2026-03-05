@@ -172,24 +172,23 @@ async function request<T>(
     if (auth.devEmail) headers["X-User-Email"] = auth.devEmail;
     if (auth.devRole) headers["X-User-Role"] = auth.devRole;
 
-        const res = await fetch(`${API_BASE}${path}`, {
-          ...init,
-          credentials: "include",
-          headers,
-          signal: init?.signal,
-        });
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      credentials: "include",
+      headers,
+      signal: init?.signal,
+    });
 
-        // ✅ Special-case /auth/me: 401 just means "not logged in"
-        if (!res.ok) {
-          const text = await res.text();
+    // ✅ Special-case /auth/me: 401 just means "not logged in"
+    if (!res.ok) {
+      const text = await res.text();
 
-          if (res.status === 401 && path.startsWith("/auth/me")) {
-            // return a consistent "no principal" signal without throwing
-            return null as any as T;
-          }
+      if (res.status === 401 && path.startsWith("/auth/me")) {
+        return null as any as T;
+      }
 
-          throw new Error(`${res.status} ${res.statusText}: ${text}`);
-        }
+      throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    }
 
     const ct = res.headers.get("content-type") || "";
     const data = ct.includes("application/json")
@@ -389,7 +388,11 @@ export const api = {
     payment_standard_pct?: number,
   ) =>
     request<any>(
-      `/rent/explain/${propertyId}${qs({ strategy, persist: persist ? "true" : "false", payment_standard_pct })}`,
+      `/rent/explain/${propertyId}${qs({
+        strategy,
+        persist: persist ? "true" : "false",
+        payment_standard_pct,
+      })}`,
       { method: "GET", cacheTtlMs: 0 },
     ),
 
@@ -407,7 +410,9 @@ export const api = {
   }) =>
     requestArray<any>(
       `/evaluate/results${qs({ snapshot_id: params.snapshot_id, decision: params.decision, limit: params.limit ?? 100 })}`,
-      { cacheTtlMs: 1_000 },
+      {
+        cacheTtlMs: 1_000,
+      },
     ),
 
   // Compliance
@@ -426,7 +431,10 @@ export const api = {
     const persist = opts?.persist ?? true;
     return request<any>(
       `/compliance/checklist/${propertyId}${qs({ strategy, version, persist: persist ? "true" : "false" })}`,
-      { method: "POST", body: JSON.stringify({}) },
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
     );
   },
 
@@ -595,7 +603,10 @@ export const api = {
   agentRunsEnqueue: (propertyId: number, dispatch: boolean = true) =>
     request<any>(
       `/agent-runs/enqueue${qs({ property_id: propertyId, dispatch: dispatch ? "true" : "false" })}`,
-      { method: "POST", body: JSON.stringify({}) },
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
     ),
 
   agentRunsDispatchOne: (runId: number) =>
@@ -603,29 +614,157 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
-
   agentRunsApprove: (runId: number) =>
     request<any>(`/agent-runs/${runId}/approve`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
-
   agentRunsReject: (runId: number, reason: string) =>
     request<any>(`/agent-runs/${runId}/reject${qs({ reason })}`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
-
   agentRunsApply: (runId: number) =>
     request<any>(`/agent-runs/${runId}/apply`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
-
   agentRunsStream: (runId: number) =>
     makeEventSource(`/agent-runs/${runId}/stream`),
 
-  // Jurisdictions
+  // Jurisdictions (rules)
+  // Policy evidence / catalog / extraction / review
+  policyCatalog: (focus: string = "se_mi") =>
+    request<any>(`/policy/catalog${qs({ focus })}`, {
+      method: "GET",
+      cacheTtlMs: 10_000,
+    }),
+
+  policyCatalogIngest: (payload?: { focus?: string; org_scope?: boolean }) =>
+    request<any>(
+      `/policy/catalog/ingest${qs({
+        focus: payload?.focus ?? "se_mi",
+        org_scope: payload?.org_scope ? "true" : "false",
+      })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
+  policyCollectSource: (payload: {
+    url: string;
+    state?: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    program_type?: string | null;
+    publisher?: string | null;
+    title?: string | null;
+    notes?: string | null;
+    org_scope?: boolean;
+  }) =>
+    request<any>(`/policy/sources/collect`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  policySources: (params?: {
+    limit?: number;
+    state?: string;
+    county?: string;
+    city?: string;
+    include_global?: boolean;
+  }) =>
+    requestArray<any>(
+      `/policy/sources${qs({
+        limit: params?.limit ?? 100,
+        state: params?.state,
+        county: params?.county,
+        city: params?.city,
+        include_global:
+          params?.include_global === undefined
+            ? "true"
+            : params.include_global
+              ? "true"
+              : "false",
+      })}`,
+      { cacheTtlMs: 1_000 },
+    ),
+
+  policyExtractAssertions: (payload: {
+    source_id: number;
+    org_scope?: boolean;
+  }) =>
+    request<any>(`/policy/assertions/extract`, {
+      method: "POST",
+      body: JSON.stringify({
+        source_id: payload.source_id,
+        org_scope: payload.org_scope ?? false,
+      }),
+    }),
+
+  policyAssertions: (params?: {
+    review_status?: string;
+    rule_key?: string;
+    state?: string;
+    county?: string;
+    city?: string;
+    include_global?: boolean;
+    limit?: number;
+  }) =>
+    requestArray<any>(
+      `/policy/assertions${qs({
+        review_status: params?.review_status,
+        rule_key: params?.rule_key,
+        state: params?.state,
+        county: params?.county,
+        city: params?.city,
+        include_global:
+          params?.include_global === undefined
+            ? "true"
+            : params.include_global
+              ? "true"
+              : "false",
+        limit: params?.limit ?? 200,
+      })}`,
+      { cacheTtlMs: 800 },
+    ),
+
+  policyReviewAssertion: (
+    assertionId: number,
+    payload: {
+      review_status: string;
+      confidence?: number;
+      value?: any;
+      review_notes?: string | null;
+    },
+  ) =>
+    request<any>(`/policy/assertions/${assertionId}/review`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  policyBuildProfile: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+    notes?: string | null;
+  }) =>
+    request<any>(`/policy/profiles/build`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        notes: payload.notes ?? null,
+      }),
+    }),
+
   listJurisdictionRules: (includeGlobal: boolean, state: string = "MI") => {
     const scope = includeGlobal ? "all" : "org";
     return requestArray<any>(`/jurisdictions/rules${qs({ scope, state })}`, {
@@ -656,4 +795,63 @@ export const api = {
       { method: "DELETE" },
     );
   },
+
+  // ✅ Jurisdiction Profiles (global defaults + org overrides)
+  listJurisdictionProfiles: (includeGlobal: boolean, state: string = "MI") =>
+    requestArray<any>(
+      `/jurisdiction-profiles${qs({ include_global: includeGlobal ? "true" : "false", state })}`,
+      {
+        cacheTtlMs: 2_000,
+      },
+    ),
+
+  resolveJurisdictionProfile: (payload: {
+    city?: string | null;
+    county?: string | null;
+    state: string;
+  }) =>
+    request<any>(
+      `/jurisdiction-profiles/resolve${qs({
+        city: payload.city ?? undefined,
+        county: payload.county ?? undefined,
+        state: payload.state,
+      })}`,
+      { method: "GET", cacheTtlMs: 0 },
+    ),
+
+  upsertJurisdictionProfile: (payload: {
+    state: string;
+    city?: string | null;
+    county?: string | null;
+    friction_multiplier: number;
+    pha_name?: string | null;
+    policy?: any;
+    notes?: string | null;
+  }) =>
+    request<any>(`/jurisdiction-profiles`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        city: payload.city ?? null,
+        county: payload.county ?? null,
+        friction_multiplier: payload.friction_multiplier,
+        pha_name: payload.pha_name ?? null,
+        policy: payload.policy ?? {},
+        notes: payload.notes ?? null,
+      }),
+    }),
+
+  deleteJurisdictionProfile: (payload: {
+    state: string;
+    city?: string | null;
+    county?: string | null;
+  }) =>
+    request<any>(
+      `/jurisdiction-profiles${qs({
+        state: payload.state,
+        city: payload.city ?? undefined,
+        county: payload.county ?? undefined,
+      })}`,
+      { method: "DELETE" },
+    ),
 };
