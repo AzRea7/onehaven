@@ -45,10 +45,22 @@ from .routers.api_keys import router as api_keys_router
 API_PREFIX = "/api"
 
 
+def _dev_origin_allowlist() -> list[str]:
+    # covers: Vite dev, nginx dev/prod, and common localhost variants
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+
+
 def _cors_origins() -> list[str]:
     """
     settings.cors_allow_origins can be:
-      - "*" (string)
+      - "*" (string)  -> DANGEROUS with cookies; we auto-fix to dev allowlist
       - "http://localhost:5173,http://127.0.0.1:5173" (string CSV)
       - ["http://localhost:5173", ...] (list)
     """
@@ -56,23 +68,24 @@ def _cors_origins() -> list[str]:
 
     # sensible dev default (works with Vite on 5173 + nginx on 8080)
     if val is None:
-        return [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:8080",
-            "http://127.0.0.1:8080",
-        ]
+        return _dev_origin_allowlist()
 
     if isinstance(val, str):
         v = val.strip()
         if v == "*":
-            return ["*"]
+            # ✅ IMPORTANT:
+            # "*" + cookies/credentials is blocked by browsers.
+            # Instead of silently breaking auth, treat "*" as "dev allowlist".
+            return _dev_origin_allowlist()
         return [x.strip() for x in v.split(",") if x.strip()]
 
     if isinstance(val, list) and val:
-        return [str(x).strip() for x in val if str(x).strip()]
+        cleaned = [str(x).strip() for x in val if str(x).strip()]
+        if cleaned == ["*"]:
+            return _dev_origin_allowlist()
+        return cleaned
 
-    return ["*"]
+    return _dev_origin_allowlist()
 
 
 def create_app() -> FastAPI:
@@ -89,15 +102,13 @@ def create_app() -> FastAPI:
 
     origins = _cors_origins()
 
-    # ✅ CRITICAL:
-    # If origins == ["*"], you CANNOT use credentials/cookies cross-origin.
-    # Browsers will refuse Set-Cookie + refuse sending cookies.
-    allow_creds = origins != ["*"]
-
+    # ✅ We are intentionally NOT supporting allow_origins=["*"] here,
+    # because cookie-based auth requires allow_credentials=True,
+    # and browsers disallow "*" with credentials.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_credentials=allow_creds,
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -130,16 +141,16 @@ def create_app() -> FastAPI:
     app.include_router(equity_router, prefix=API_PREFIX)
     app.include_router(ops_router, prefix=API_PREFIX)
 
-    # SaaS auth + api keys
-    app.include_router(auth_router, prefix=API_PREFIX)
-    app.include_router(api_keys_router, prefix=API_PREFIX)
-
-    # Agents + audit/workflow
+    # Agents + workflow
     app.include_router(agents_router, prefix=API_PREFIX)
     app.include_router(agent_runs_router, prefix=API_PREFIX)
     app.include_router(workflow_router, prefix=API_PREFIX)
     app.include_router(audit_router, prefix=API_PREFIX)
     app.include_router(trust_router, prefix=API_PREFIX)
+
+    # SaaS auth + api keys
+    app.include_router(auth_router, prefix=API_PREFIX)
+    app.include_router(api_keys_router, prefix=API_PREFIX)
 
     return app
 

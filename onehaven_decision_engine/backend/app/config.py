@@ -1,3 +1,4 @@
+# backend/app/config.py
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -60,8 +61,8 @@ class Settings(BaseSettings):
     dev_auto_provision: bool = True
     dev_auto_verify_email: bool = True
 
-    # Keep older flag too; some code may use it.
-    allow_local_auth_bypass: bool = True
+    # ✅ allow dev-bypass in local/dev ONLY when explicitly enabled via env
+    allow_local_auth_bypass: bool = False
 
     # Dev header names
     dev_header_org_slug: str = "X-Org-Slug"
@@ -103,14 +104,13 @@ class Settings(BaseSettings):
         env = (self.app_env or "local").strip().lower()
         is_prod = env in ("prod", "production")
 
-        # Hard fail: no “trustworthy SaaS” if prod still allows dev-bypass auth
+        # Hard fail in prod only
         if is_prod:
             if (self.auth_mode or "").strip().lower() == "dev":
                 raise ValueError("SECURITY: auth_mode=dev is not allowed in prod")
             if bool(self.allow_local_auth_bypass):
                 raise ValueError("SECURITY: allow_local_auth_bypass=True is not allowed in prod")
 
-            # Hard fail: wildcard CORS in prod (unless you truly mean public API)
             origins = self.cors_allow_origins
             if origins == "*" or origins == ["*"] or (isinstance(origins, str) and "*" in origins):
                 raise ValueError("SECURITY: cors_allow_origins wildcard is not allowed in prod")

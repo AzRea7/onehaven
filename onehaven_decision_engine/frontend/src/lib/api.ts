@@ -19,7 +19,7 @@ export type Principal = {
 // ---------------------------------------------
 // Org slug storage policy
 // - If VITE_ORG_SLUG is set: locked dev/org mode
-// - Else: use localStorage, but do NOT force "demo"
+// - Else: use localStorage
 // ---------------------------------------------
 export function getOrgSlug(): string {
   const env = (import.meta as any).env || {};
@@ -154,17 +154,16 @@ async function request<T>(
       ...(init?.headers as any),
     };
 
-    // ✅ Treat "session bootstrap" auth endpoints as NO-ORG-HEADER endpoints.
-    // Reason: /auth/me resolves org from cookie claim and should not be poisoned by stale X-Org-Slug.
+    // ✅ Keep login/register/logout/select-org/orgs as "bootstrap"
+    // BUT DO NOT exclude /auth/me — we NEED org context there in dev-mode
     const isAuthBootstrap =
       path.startsWith("/auth/login") ||
       path.startsWith("/auth/register") ||
       path.startsWith("/auth/logout") ||
-      path.startsWith("/auth/me") ||
       path.startsWith("/auth/orgs") ||
       path.startsWith("/auth/select-org");
 
-    // Attach org slug everywhere else
+    // Attach org slug everywhere else (INCLUDING /auth/me)
     if (auth.orgSlug && !isAuthBootstrap) {
       headers["X-Org-Slug"] = auth.orgSlug;
     }
@@ -173,17 +172,24 @@ async function request<T>(
     if (auth.devEmail) headers["X-User-Email"] = auth.devEmail;
     if (auth.devRole) headers["X-User-Role"] = auth.devRole;
 
-    const res = await fetch(`${API_BASE}${path}`, {
-      ...init,
-      credentials: "include",
-      headers,
-      signal: init?.signal,
-    });
+        const res = await fetch(`${API_BASE}${path}`, {
+          ...init,
+          credentials: "include",
+          headers,
+          signal: init?.signal,
+        });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`${res.status} ${res.statusText}: ${text}`);
-    }
+        // ✅ Special-case /auth/me: 401 just means "not logged in"
+        if (!res.ok) {
+          const text = await res.text();
+
+          if (res.status === 401 && path.startsWith("/auth/me")) {
+            // return a consistent "no principal" signal without throwing
+            return null as any as T;
+          }
+
+          throw new Error(`${res.status} ${res.statusText}: ${text}`);
+        }
 
     const ct = res.headers.get("content-type") || "";
     const data = ct.includes("application/json")

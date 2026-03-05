@@ -55,13 +55,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     error: null,
   });
 
+  // ✅ must be inside component
+  const logoutInFlight = React.useRef(false);
+
   async function refresh() {
+    // If we're in the middle of logging out, don't spam /auth/me
+    if (logoutInFlight.current) {
+      setState({ loading: false, principal: null, error: null });
+      return;
+    }
+
     setState((s) => ({ ...s, loading: true, error: null }));
+
     try {
-      const me = (await api.authMe()) as Principal;
+      const me = (await api.authMe()) as Principal | null;
+
       if (me?.org_slug) setOrgSlug(me.org_slug);
       setState({ loading: false, principal: me, error: null });
     } catch {
+      // If auth fails, clear stale org context so we stop sending "demo"
+      clearOrgSlug();
+      clearApiCache();
       setState({ loading: false, principal: null, error: null });
     }
   }
@@ -71,7 +85,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     password: string;
     org_slug: string;
   }) {
+    logoutInFlight.current = false;
     setState((s) => ({ ...s, loading: true, error: null }));
+
     try {
       clearApiCache();
 
@@ -79,16 +95,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const password = must(args.password, "password");
       const org_slug = must(args.org_slug, "org_slug");
 
-      await api.authLogin({ email, password, org_slug });
-
-      // establish org context immediately for /auth/me
+      // set local org first (so header is correct immediately)
       setOrgSlug(org_slug);
 
-      const me = (await api.authMe()) as Principal;
+      await api.authLogin({ email, password, org_slug });
+
+      const me = (await api.authMe()) as Principal | null;
       if (me?.org_slug) setOrgSlug(me.org_slug);
 
       setState({ loading: false, principal: me, error: null });
     } catch (e: any) {
+      clearOrgSlug();
+      clearApiCache();
       setState({
         loading: false,
         principal: null,
@@ -104,7 +122,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     org_slug: string;
     org_name?: string;
   }) {
+    logoutInFlight.current = false;
     setState((s) => ({ ...s, loading: true, error: null }));
+
     try {
       clearApiCache();
 
@@ -113,16 +133,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const org_slug = must(args.org_slug, "org_slug");
       const org_name = (args.org_name || "").trim() || undefined;
 
-      await api.authRegister({ email, password, org_slug, org_name });
-
-      // establish org context immediately for /auth/me
       setOrgSlug(org_slug);
 
-      const me = (await api.authMe()) as Principal;
+      await api.authRegister({ email, password, org_slug, org_name });
+
+      const me = (await api.authMe()) as Principal | null;
       if (me?.org_slug) setOrgSlug(me.org_slug);
 
       setState({ loading: false, principal: me, error: null });
     } catch (e: any) {
+      clearOrgSlug();
+      clearApiCache();
       setState({
         loading: false,
         principal: null,
@@ -133,7 +154,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function logout() {
+    logoutInFlight.current = true;
     setState((s) => ({ ...s, loading: true, error: null }));
+
     try {
       clearApiCache();
       await api.authLogout();
@@ -148,12 +171,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function switchOrg(org_slug: string) {
+    logoutInFlight.current = false;
     setState((s) => ({ ...s, loading: true, error: null }));
+
     try {
       clearApiCache();
       const slug = must(org_slug, "org_slug");
+
       await api.authSelectOrg(slug);
+
+      // set the context immediately so refresh sends X-Org-Slug
       setOrgSlug(slug);
+
       await refresh();
     } catch (e: any) {
       setState((s) => ({
@@ -180,6 +209,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     logout,
     switchOrg,
   };
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
