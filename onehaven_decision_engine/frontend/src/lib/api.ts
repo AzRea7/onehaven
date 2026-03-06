@@ -2,7 +2,7 @@
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 
 type AuthContext = {
-  orgSlug: string; // may be "" when unset
+  orgSlug: string;
   devEmail?: string;
   devRole?: string;
 };
@@ -16,11 +16,6 @@ export type Principal = {
   plan_code?: string | null;
 };
 
-// ---------------------------------------------
-// Org slug storage policy
-// - If VITE_ORG_SLUG is set: locked dev/org mode
-// - Else: use localStorage
-// ---------------------------------------------
 export function getOrgSlug(): string {
   const env = (import.meta as any).env || {};
   const envOrg = (env.VITE_ORG_SLUG as string | undefined)?.trim();
@@ -58,15 +53,6 @@ function getAuth(): AuthContext {
   return { orgSlug: getOrgSlug(), devEmail, devRole };
 }
 
-/**
- * Some endpoints may return:
- * - Array directly
- * - {items: [...]}
- * - {rows: [...]}
- * - {data: [...]}
- *
- * To prevent "n.map is not a function", always normalize.
- */
 function asArray<T = any>(x: any): T[] {
   if (Array.isArray(x)) return x;
   if (x && Array.isArray(x.items)) return x.items;
@@ -88,7 +74,6 @@ function cacheKey(method: string, path: string, body?: any) {
   return `${method}:${path}:${body ?? ""}`;
 }
 
-// Helpers for querystring
 function qs(params: Record<string, any>) {
   const sp = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
@@ -99,11 +84,6 @@ function qs(params: Record<string, any>) {
   return s ? `?${s}` : "";
 }
 
-/**
- * ✅ EventSource cannot set headers.
- * So for SSE we pass auth via querystring:
- *   ?org_slug=...&user_email=...&user_role=...
- */
 function makeEventSource(pathWithQuery: string): EventSource {
   const auth = getAuth();
 
@@ -112,12 +92,15 @@ function makeEventSource(pathWithQuery: string): EventSource {
     : `${window.location.origin}${API_BASE}`;
   const url = new URL(`${base}${pathWithQuery}`);
 
-  if (auth.orgSlug && !url.searchParams.get("org_slug"))
+  if (auth.orgSlug && !url.searchParams.get("org_slug")) {
     url.searchParams.set("org_slug", auth.orgSlug);
-  if (auth.devEmail && !url.searchParams.get("user_email"))
+  }
+  if (auth.devEmail && !url.searchParams.get("user_email")) {
     url.searchParams.set("user_email", auth.devEmail);
-  if (auth.devRole && !url.searchParams.get("user_role"))
+  }
+  if (auth.devRole && !url.searchParams.get("user_role")) {
     url.searchParams.set("user_role", auth.devRole);
+  }
 
   return new EventSource(url.toString(), { withCredentials: true } as any);
 }
@@ -154,8 +137,6 @@ async function request<T>(
       ...(init?.headers as any),
     };
 
-    // ✅ Keep login/register/logout/select-org/orgs as "bootstrap"
-    // BUT DO NOT exclude /auth/me — we NEED org context there in dev-mode
     const isAuthBootstrap =
       path.startsWith("/auth/login") ||
       path.startsWith("/auth/register") ||
@@ -163,12 +144,10 @@ async function request<T>(
       path.startsWith("/auth/orgs") ||
       path.startsWith("/auth/select-org");
 
-    // Attach org slug everywhere else (INCLUDING /auth/me)
     if (auth.orgSlug && !isAuthBootstrap) {
       headers["X-Org-Slug"] = auth.orgSlug;
     }
 
-    // dev auth helpers (optional)
     if (auth.devEmail) headers["X-User-Email"] = auth.devEmail;
     if (auth.devRole) headers["X-User-Role"] = auth.devRole;
 
@@ -179,7 +158,6 @@ async function request<T>(
       signal: init?.signal,
     });
 
-    // ✅ Special-case /auth/me: 401 just means "not logged in"
     if (!res.ok) {
       const text = await res.text();
 
@@ -195,8 +173,9 @@ async function request<T>(
       ? await res.json()
       : await res.text();
 
-    if (method === "GET" && ttl > 0)
+    if (method === "GET" && ttl > 0) {
       memCache.set(key, { at: Date.now(), value: data });
+    }
     return data as T;
   })();
 
@@ -279,7 +258,6 @@ export const api = {
       signal: init?.signal,
     }),
 
-  // AUTH
   authRegister: (payload: {
     email: string;
     password: string;
@@ -311,20 +289,17 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  // Dashboard / properties
   dashboardProperties: (p: { limit: number; signal?: AbortSignal }) =>
     requestArray<any>(`/dashboard/properties?limit=${p.limit ?? 100}`, {
       cacheTtlMs: 3_000,
       signal: p.signal,
     }),
 
-  // Property view/bundle
   propertyView: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/view`, { cacheTtlMs: 2_000, signal }),
   propertyBundle: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
 
-  // Ops
   opsPropertySummary: (
     propertyId: number,
     cashDays: number = 90,
@@ -341,7 +316,6 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  // Deals
   createDeal: (payload: {
     property_id: number;
     asking_price: number;
@@ -374,7 +348,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Rent
   enrichProperty: (propertyId: number, strategy: string = "section8") =>
     request<any>(`/rent/enrich${qs({ property_id: propertyId, strategy })}`, {
       method: "POST",
@@ -396,7 +369,6 @@ export const api = {
       { method: "GET", cacheTtlMs: 0 },
     ),
 
-  // Evaluate
   evaluateRun: (snapshotId: number, strategy: string = "section8") =>
     request<any>(`/evaluate/run${qs({ snapshot_id: snapshotId, strategy })}`, {
       method: "POST",
@@ -409,13 +381,14 @@ export const api = {
     limit?: number;
   }) =>
     requestArray<any>(
-      `/evaluate/results${qs({ snapshot_id: params.snapshot_id, decision: params.decision, limit: params.limit ?? 100 })}`,
-      {
-        cacheTtlMs: 1_000,
-      },
+      `/evaluate/results${qs({
+        snapshot_id: params.snapshot_id,
+        decision: params.decision,
+        limit: params.limit ?? 100,
+      })}`,
+      { cacheTtlMs: 1_000 },
     ),
 
-  // Compliance
   checklistLatest: (propertyId: number, signal?: AbortSignal) =>
     request<any>(`/compliance/checklist/${propertyId}/latest`, {
       cacheTtlMs: 1_000,
@@ -430,7 +403,11 @@ export const api = {
     const version = opts?.version ?? "v1";
     const persist = opts?.persist ?? true;
     return request<any>(
-      `/compliance/checklist/${propertyId}${qs({ strategy, version, persist: persist ? "true" : "false" })}`,
+      `/compliance/checklist/${propertyId}${qs({
+        strategy,
+        version,
+        persist: persist ? "true" : "false",
+      })}`,
       {
         method: "POST",
         body: JSON.stringify({}),
@@ -452,7 +429,6 @@ export const api = {
       { method: "PATCH", body: JSON.stringify(payload) },
     ),
 
-  // Rehab
   rehabTasks: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/rehab/tasks${qs({ property_id: propertyId, limit: 500 })}`,
@@ -472,7 +448,6 @@ export const api = {
   deleteRehabTask: (taskId: number) =>
     request<any>(`/rehab/tasks/${taskId}`, { method: "DELETE" }),
 
-  // Tenants/leases
   leases: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/tenants/leases${qs({ property_id: propertyId, limit: 200 })}`,
@@ -485,7 +460,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Cash
   txns: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/cash/transactions${qs({ property_id: propertyId, limit: 1000 })}`,
@@ -498,7 +472,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Equity
   valuations: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/equity/valuations${qs({ property_id: propertyId, limit: 200 })}`,
@@ -511,7 +484,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Trust
   trustGet: (
     entity_type: string,
     entity_id: string | number,
@@ -532,7 +504,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Agents
   agents: () => requestArray<any>(`/agents`, { cacheTtlMs: 4_000 }),
 
   slotSpecs: (signal?: AbortSignal, cacheTtlMs: number = 10_000) =>
@@ -602,7 +573,10 @@ export const api = {
 
   agentRunsEnqueue: (propertyId: number, dispatch: boolean = true) =>
     request<any>(
-      `/agent-runs/enqueue${qs({ property_id: propertyId, dispatch: dispatch ? "true" : "false" })}`,
+      `/agent-runs/enqueue${qs({
+        property_id: propertyId,
+        dispatch: dispatch ? "true" : "false",
+      })}`,
       {
         method: "POST",
         body: JSON.stringify({}),
@@ -632,9 +606,8 @@ export const api = {
   agentRunsStream: (runId: number) =>
     makeEventSource(`/agent-runs/${runId}/stream`),
 
-  // Jurisdictions (rules)
-  // Policy evidence / catalog / extraction / review
-  policyCatalog: (focus: string = "se_mi") =>
+  // Policy / evidence / coverage / brief
+  policyCatalog: (focus: string = "se_mi_extended") =>
     request<any>(`/policy/catalog${qs({ focus })}`, {
       method: "GET",
       cacheTtlMs: 10_000,
@@ -643,7 +616,7 @@ export const api = {
   policyCatalogIngest: (payload?: { focus?: string; org_scope?: boolean }) =>
     request<any>(
       `/policy/catalog/ingest${qs({
-        focus: payload?.focus ?? "se_mi",
+        focus: payload?.focus ?? "se_mi_extended",
         org_scope: payload?.org_scope ? "true" : "false",
       })}`,
       {
@@ -674,14 +647,18 @@ export const api = {
     state?: string;
     county?: string;
     city?: string;
+    pha_name?: string;
+    program_type?: string;
     include_global?: boolean;
   }) =>
-    requestArray<any>(
+    request<any>(
       `/policy/sources${qs({
         limit: params?.limit ?? 100,
         state: params?.state,
         county: params?.county,
         city: params?.city,
+        pha_name: params?.pha_name,
+        program_type: params?.program_type,
         include_global:
           params?.include_global === undefined
             ? "true"
@@ -707,19 +684,27 @@ export const api = {
   policyAssertions: (params?: {
     review_status?: string;
     rule_key?: string;
+    rule_family?: string;
+    assertion_type?: string;
     state?: string;
     county?: string;
     city?: string;
+    pha_name?: string;
+    program_type?: string;
     include_global?: boolean;
     limit?: number;
   }) =>
-    requestArray<any>(
+    request<any>(
       `/policy/assertions${qs({
         review_status: params?.review_status,
         rule_key: params?.rule_key,
+        rule_family: params?.rule_family,
+        assertion_type: params?.assertion_type,
         state: params?.state,
         county: params?.county,
         city: params?.city,
+        pha_name: params?.pha_name,
+        program_type: params?.program_type,
         include_global:
           params?.include_global === undefined
             ? "true"
@@ -738,6 +723,9 @@ export const api = {
       confidence?: number;
       value?: any;
       review_notes?: string | null;
+      verification_reason?: string | null;
+      stale_after?: string | null;
+      superseded_by_assertion_id?: number | null;
     },
   ) =>
     request<any>(`/policy/assertions/${assertionId}/review`, {
@@ -765,6 +753,55 @@ export const api = {
       }),
     }),
 
+  policyCoverage: (params: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+  }) =>
+    request<any>(
+      `/policy/coverage${qs({
+        state: params.state,
+        county: params.county ?? undefined,
+        city: params.city ?? undefined,
+        pha_name: params.pha_name ?? undefined,
+        org_scope: params.org_scope ? "true" : "false",
+      })}`,
+      { method: "GET", cacheTtlMs: 0 },
+    ),
+
+  policyRefreshCoverage: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+    notes?: string | null;
+  }) =>
+    request<any>(`/policy/coverage`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  policyBrief: (params: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+  }) =>
+    request<any>(
+      `/policy/brief${qs({
+        state: params.state,
+        county: params.county ?? undefined,
+        city: params.city ?? undefined,
+        pha_name: params.pha_name ?? undefined,
+        org_scope: params.org_scope ? "true" : "false",
+      })}`,
+      { method: "GET", cacheTtlMs: 0 },
+    ),
+
   listJurisdictionRules: (includeGlobal: boolean, state: string = "MI") => {
     const scope = includeGlobal ? "all" : "org";
     return requestArray<any>(`/jurisdictions/rules${qs({ scope, state })}`, {
@@ -785,8 +822,9 @@ export const api = {
     }),
 
   deleteJurisdictionRule: (idOrPayload: any) => {
-    if (typeof idOrPayload === "number")
+    if (typeof idOrPayload === "number") {
       throw new Error("deleteJurisdictionRule requires a rule object.");
+    }
     const city = idOrPayload.city;
     const state = idOrPayload.state || "MI";
     if (!city) throw new Error("deleteJurisdictionRule missing city");
@@ -796,13 +834,13 @@ export const api = {
     );
   },
 
-  // ✅ Jurisdiction Profiles (global defaults + org overrides)
   listJurisdictionProfiles: (includeGlobal: boolean, state: string = "MI") =>
     requestArray<any>(
-      `/jurisdiction-profiles${qs({ include_global: includeGlobal ? "true" : "false", state })}`,
-      {
-        cacheTtlMs: 2_000,
-      },
+      `/jurisdiction-profiles${qs({
+        include_global: includeGlobal ? "true" : "false",
+        state,
+      })}`,
+      { cacheTtlMs: 2_000 },
     ),
 
   resolveJurisdictionProfile: (payload: {

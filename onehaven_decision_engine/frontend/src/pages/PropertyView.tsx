@@ -7,6 +7,7 @@ import AgentSlots from "../components/AgentSlots";
 import PageHero from "../components/PageHero";
 import Golem from "../components/Golem";
 import PropertyImage from "../components/PropertyImage";
+import PropertyCompliancePanel from "../components/PropertyCompliancePanel";
 import { getFinancingType } from "../lib/dealRules";
 import PageShell from "../components/PageShell";
 
@@ -471,7 +472,6 @@ export default function PropertyView() {
 
   const checklistItems = checklist?.items ?? v?.checklist?.items ?? [];
 
-  // --- Minimal hero summary ---
   const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
   const zillowUrl = p ? buildZillowUrl(p) : null;
 
@@ -852,7 +852,6 @@ export default function PropertyView() {
         </div>
       </div>
 
-      {/* Tab content */}
       {tab === "Deal" && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1028,81 +1027,95 @@ export default function PropertyView() {
       )}
 
       {tab === "Compliance" && (
-        <Panel title="Compliance / Checklist">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-sm text-white/70">
-              Update status/proof/notes. This should feed ops readiness and
-              trust.
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() =>
-                  refreshChecklist().catch((e) =>
-                    setErr(String(e?.message || e)),
-                  )
-                }
-                className="oh-btn cursor-pointer"
-              >
-                refresh
-              </button>
-              <button
-                onClick={generateChecklist}
-                className="oh-btn oh-btn-primary cursor-pointer"
-                disabled={!!busy || !d}
-              >
-                generate
-              </button>
-              <button
-                onClick={generateRehabFromGaps}
-                className="oh-btn cursor-pointer"
-                disabled={!!busy}
-                title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
-              >
-                rehab from gaps
-              </button>
-            </div>
-          </div>
+        <div className="space-y-4">
+          <PropertyCompliancePanel
+            property={{
+              id: p?.id ?? propertyId,
+              state: p?.state,
+              county: p?.county,
+              city: p?.city,
+              strategy: d?.strategy,
+            }}
+          />
 
-          <div className="mt-4 space-y-2">
-            {checklistItems.length === 0 ? (
-              <div className="text-sm text-white/55">
-                No checklist found yet. Click{" "}
-                <span className="text-white font-semibold">generate</span> to
-                create one.
+          <Panel title="Compliance / Checklist">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-sm text-white/70">
+                Update status/proof/notes. This should feed ops readiness and
+                trust.
               </div>
-            ) : (
-              checklistItems.map((it: any) => (
-                <ChecklistItemCard
-                  key={it.item_code}
-                  item={it}
-                  busy={checkBusyCode === it.item_code}
-                  onUpdate={async (patch) => {
-                    try {
-                      setCheckBusyCode(it.item_code);
-                      await api.updateChecklistItem(
-                        propertyId,
-                        it.item_code,
-                        patch,
-                      );
-                      await refreshChecklist();
+              <div className="flex gap-2">
+                <button
+                  onClick={() =>
+                    refreshChecklist().catch((e) =>
+                      setErr(String(e?.message || e)),
+                    )
+                  }
+                  className="oh-btn cursor-pointer"
+                >
+                  refresh
+                </button>
+                <button
+                  onClick={generateChecklist}
+                  className="oh-btn oh-btn-primary cursor-pointer"
+                  disabled={!!busy || !d}
+                >
+                  generate
+                </button>
+                <button
+                  onClick={generateRehabFromGaps}
+                  className="oh-btn cursor-pointer"
+                  disabled={!!busy}
+                  title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
+                >
+                  rehab from gaps
+                </button>
+              </div>
+            </div>
 
-                      const [opsOut, trustOut] = await Promise.all([
-                        api
-                          .opsPropertySummary(propertyId, 90)
-                          .catch(() => null),
-                        api.trustGet("property", propertyId).catch(() => null),
-                      ]);
-                      setOps(opsOut);
-                      setTrust(trustOut);
-                    } finally {
-                      setCheckBusyCode(null);
-                    }
-                  }}
-                />
-              ))
-            )}
-          </div>
-        </Panel>
+            <div className="mt-4 space-y-2">
+              {checklistItems.length === 0 ? (
+                <div className="text-sm text-white/55">
+                  No checklist found yet. Click{" "}
+                  <span className="text-white font-semibold">generate</span> to
+                  create one.
+                </div>
+              ) : (
+                checklistItems.map((it: any) => (
+                  <ChecklistItemCard
+                    key={it.item_code}
+                    item={it}
+                    busy={checkBusyCode === it.item_code}
+                    onUpdate={async (patch) => {
+                      try {
+                        setCheckBusyCode(it.item_code);
+                        await api.updateChecklistItem(
+                          propertyId,
+                          it.item_code,
+                          patch,
+                        );
+                        await refreshChecklist();
+
+                        const [opsOut, trustOut] = await Promise.all([
+                          api
+                            .opsPropertySummary(propertyId, 90)
+                            .catch(() => null),
+                          api
+                            .trustGet("property", propertyId)
+                            .catch(() => null),
+                        ]);
+                        setOps(opsOut);
+                        setTrust(trustOut);
+                      } finally {
+                        setCheckBusyCode(null);
+                      }
+                    }}
+                  />
+                ))
+              )}
+            </div>
+          </Panel>
+        </div>
       )}
 
       {tab === "Tenant" && (

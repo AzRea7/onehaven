@@ -1,4 +1,3 @@
-# backend/app/services/policy_source_service.py
 from __future__ import annotations
 
 import hashlib
@@ -11,7 +10,7 @@ from typing import Optional
 import httpx
 from sqlalchemy.orm import Session
 
-from app.policy_models import PolicySource
+from app.policy_models import PolicyAssertion, PolicySource, PolicySourceVersion
 
 
 def _norm(s: Optional[str]) -> Optional[str]:
@@ -22,7 +21,7 @@ def _norm(s: Optional[str]) -> Optional[str]:
 
 
 def _norm_state(s: Optional[str]) -> Optional[str]:
-    if not s:
+    if s is None:
         return None
     v = s.strip().upper()
     return v or None
@@ -43,23 +42,39 @@ def _sha256(b: bytes) -> str:
 
 
 def _safe_text_from_html(html: str, max_len: int = 20_000) -> str:
-    """
-    Very lightweight HTML -> text.
-    Not perfect. We rely on human review for anything important.
-    """
-    # drop scripts/styles
     html = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
     html = re.sub(r"(?is)<style.*?>.*?</style>", " ", html)
-    # tags -> spaces
     text = re.sub(r"(?is)<[^>]+>", " ", html)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:max_len]
 
 
+def _ssl_verify_setting() -> bool:
+    raw = os.getenv("POLICY_FETCH_VERIFY_SSL", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _invalidate_verified_assertions_for_source(db: Session, source_id: int) -> None:
+    rows = (
+        db.query(PolicyAssertion)
+        .filter(PolicyAssertion.source_id == source_id)
+        .filter(PolicyAssertion.review_status == "verified")
+        .all()
+    )
+    now = datetime.utcnow()
+    for a in rows:
+        a.review_status = "needs_recheck"
+        a.review_notes = (a.review_notes or "") + " | source_changed=content_sha256_changed"
+        a.stale_after = now
+        a.reviewed_at = now
+
+
 @dataclass
 class CollectResult:
     source: PolicySource
-    changed: bool  # content hash changed vs existing row (if you collected same URL before)
+    changed: bool
+    fetch_ok: bool = True
+    fetch_error: Optional[str] = None
 
 
 def collect_url(
@@ -77,33 +92,43 @@ def collect_url(
     notes: Optional[str] = None,
     timeout_s: float = 20.0,
 ) -> CollectResult:
-    """
-    Fetch a URL, store raw artifact to /app/policy_raw/YYYY-MM-DD/{id}.{ext},
-    store hash + metadata in PolicySource.
-
-    This is your evidence capture step.
-    """
     st = _norm_state(state)
     cnty = _norm_county(county)
     cty = _norm_city(city)
-
     url = url.strip()
 
-    with httpx.Client(follow_redirects=True, timeout=timeout_s, headers={"User-Agent": "OneHavenPolicyCollector/1.0"}) as client:
-        resp = client.get(url)
+    verify_ssl = _ssl_verify_setting()
 
-    content_type = (resp.headers.get("content-type") or "").split(";")[0].strip() or None
-    status = int(resp.status_code)
-    body = resp.content or b""
+    content_type: Optional[str] = None
+    status: Optional[int] = None
+    body: bytes = b""
+    resp_text: Optional[str] = None
+    fetch_error: Optional[str] = None
+
+    try:
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=timeout_s,
+            verify=verify_ssl,
+            headers={"User-Agent": "OneHavenPolicyCollector/1.0"},
+        ) as client:
+            resp = client.get(url)
+            status = int(resp.status_code)
+            content_type = (resp.headers.get("content-type") or "").split(";")[0].strip() or None
+            body = resp.content or b""
+            try:
+                resp_text = resp.text
+            except Exception:
+                resp_text = None
+    except Exception as e:
+        fetch_error = f"{type(e).__name__}: {e}"
 
     digest = _sha256(body) if body else None
 
-    # Create new row every collect? For now: upsert by URL+org_id scope.
-    # This keeps latest version per URL; you can later add PolicySourceVersion if needed.
     existing = (
         db.query(PolicySource)
-        .filter(PolicySource.org_id.is_(org_id) if org_id is None else PolicySource.org_id == org_id)
         .filter(PolicySource.url == url)
+        .filter(PolicySource.org_id.is_(None) if org_id is None else PolicySource.org_id == org_id)
         .first()
     )
 
@@ -125,7 +150,7 @@ def collect_url(
             http_status=status,
             retrieved_at=now,
             content_sha256=digest,
-            notes=_norm(notes),
+            notes=_norm(notes if not fetch_error else f"{notes or ''} | fetch_error={fetch_error}".strip(" |")),
         )
         db.add(row)
         db.commit()
@@ -144,47 +169,80 @@ def collect_url(
         row.http_status = status
         row.retrieved_at = now
         row.content_sha256 = digest
-        row.notes = _norm(notes) or row.notes
+        if fetch_error:
+            row.notes = _norm(f"{row.notes or ''} | fetch_error={fetch_error}".strip(" |"))
+        else:
+            row.notes = _norm(notes) or row.notes
+
+        if changed:
+            _invalidate_verified_assertions_for_source(db, row.id)
+
         db.commit()
         db.refresh(row)
 
-    # Write raw file
-    day = now.strftime("%Y-%m-%d")
-    base_dir = f"/app/policy_raw/{day}"
-    os.makedirs(base_dir, exist_ok=True)
-
-    ext = "bin"
-    if content_type:
-        if "pdf" in content_type:
-            ext = "pdf"
-        elif "html" in content_type:
-            ext = "html"
-        elif "json" in content_type:
-            ext = "json"
-        elif "text" in content_type:
-            ext = "txt"
-
-    raw_path = f"{base_dir}/{row.id}.{ext}"
-    try:
-        with open(raw_path, "wb") as f:
-            f.write(body)
-        row.raw_path = raw_path
-    except Exception:
-        # don't fail the request if filesystem write fails
-        row.raw_path = None
-
-    # Best-effort extracted text for HTML/text
+    raw_path: Optional[str] = None
     extracted_text: Optional[str] = None
-    try:
-        if content_type and ("html" in content_type):
-            extracted_text = _safe_text_from_html(resp.text)
-        elif content_type and content_type.startswith("text/"):
-            extracted_text = (resp.text or "")[:20_000]
-    except Exception:
-        extracted_text = None
 
-    row.extracted_text = extracted_text
+    if not fetch_error:
+        day = now.strftime("%Y-%m-%d")
+        base_dir = f"/app/policy_raw/{day}"
+        os.makedirs(base_dir, exist_ok=True)
+
+        ext = "bin"
+        if content_type:
+            ct = content_type.lower()
+            if "pdf" in ct:
+                ext = "pdf"
+            elif "html" in ct:
+                ext = "html"
+            elif "json" in ct:
+                ext = "json"
+            elif "text" in ct:
+                ext = "txt"
+
+        raw_path = f"{base_dir}/{row.id}.{ext}"
+        try:
+            with open(raw_path, "wb") as f:
+                f.write(body)
+            row.raw_path = raw_path
+        except Exception:
+            row.raw_path = None
+            raw_path = None
+
+        try:
+            if content_type and ("html" in content_type.lower()) and resp_text:
+                extracted_text = _safe_text_from_html(resp_text)
+            elif content_type and content_type.lower().startswith("text/") and resp_text:
+                extracted_text = resp_text[:20_000]
+        except Exception:
+            extracted_text = None
+
+        row.extracted_text = extracted_text
+        db.commit()
+        db.refresh(row)
+
+    db.query(PolicySourceVersion).filter(
+        PolicySourceVersion.source_id == row.id
+    ).update({"is_current": False}, synchronize_session=False)
+
+    db.add(
+        PolicySourceVersion(
+            source_id=row.id,
+            retrieved_at=now,
+            http_status=status,
+            content_sha256=digest,
+            raw_path=raw_path,
+            content_type=content_type,
+            fetch_error=fetch_error,
+            extracted_text=extracted_text,
+            is_current=True,
+        )
+    )
     db.commit()
-    db.refresh(row)
 
-    return CollectResult(source=row, changed=changed)
+    return CollectResult(
+        source=row,
+        changed=changed,
+        fetch_ok=fetch_error is None,
+        fetch_error=fetch_error,
+    )
