@@ -1,13 +1,14 @@
-// frontend/src/pages/Jurisdictions.tsx
 import React from "react";
 import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
 import GlassCard from "../components/GlassCard";
+import PageShell from "../components/PageShell";
 
 type Rule = any;
 
 function parseMaybeJsonArray(v: any): string[] {
   if (Array.isArray(v)) return v.map(String);
+
   if (typeof v === "string") {
     try {
       const parsed = JSON.parse(v);
@@ -15,12 +16,13 @@ function parseMaybeJsonArray(v: any): string[] {
     } catch {
       // fall through
     }
-    // allow comma-separated fallback
+
     return v
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
   }
+
   return [];
 }
 
@@ -105,7 +107,7 @@ export default function Jurisdictions() {
     setBusy(true);
     setErr(null);
     try {
-      await api.deleteJurisdictionRule(rule); // pass rule (city/state)
+      await api.deleteJurisdictionRule(rule);
       await refresh();
     } catch (e: any) {
       setErr(String(e.message || e));
@@ -115,7 +117,7 @@ export default function Jurisdictions() {
   }
 
   return (
-    <div className="space-y-6">
+    <PageShell className="space-y-6">
       <PageHero
         eyebrow="Phase 2"
         title="Jurisdiction Rules"
@@ -191,6 +193,7 @@ export default function Jurisdictions() {
           const failPoints = parseMaybeJsonArray(
             r.typical_fail_points_json ?? r.typical_fail_points,
           );
+
           return (
             <GlassCard key={r.id}>
               <div className="flex items-start justify-between gap-4">
@@ -226,6 +229,6 @@ export default function Jurisdictions() {
           );
         })}
       </div>
-    </div>
+    </PageShell>
   );
 }

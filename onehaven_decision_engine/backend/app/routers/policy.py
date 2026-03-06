@@ -10,8 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_principal, require_owner
 from app.db import get_db
-from app.policy_models import PolicyAssertion, PolicySource
-from app.services.policy_catalog import catalog_mi_authoritative
+from app.policy_models import JurisdictionCoverageStatus, PolicyAssertion, PolicySource
+from app.services.policy_catalog import (
+    catalog_for_market,
+    catalog_mi_authoritative,
+    catalog_municipalities,
+)
 from app.services.policy_coverage_service import (
     compute_coverage_status,
     upsert_coverage_status,
@@ -21,7 +25,12 @@ from app.services.policy_projection_service import (
     build_property_compliance_brief,
     project_verified_assertions_to_profile,
 )
-from app.services.policy_source_service import collect_url
+from app.services.policy_source_service import (
+    collect_catalog_all_municipalities,
+    collect_catalog_for_focus,
+    collect_catalog_for_market,
+    collect_url,
+)
 
 router = APIRouter(prefix="/policy", tags=["policy"])
 
@@ -57,6 +66,14 @@ class ReviewIn(BaseModel):
     superseded_by_assertion_id: Optional[int] = None
 
 
+class BatchReviewIn(BaseModel):
+    assertion_ids: list[int]
+    review_status: str
+    confidence: Optional[float] = None
+    review_notes: Optional[str] = None
+    verification_reason: Optional[str] = None
+
+
 class BuildProfileIn(BaseModel):
     state: str = "MI"
     county: Optional[str] = None
@@ -73,6 +90,14 @@ class CoverageUpsertIn(BaseModel):
     pha_name: Optional[str] = None
     org_scope: bool = False
     notes: Optional[str] = None
+
+
+class MarketIn(BaseModel):
+    state: str = "MI"
+    county: Optional[str] = None
+    city: Optional[str] = None
+    org_scope: bool = False
+    focus: str = "se_mi_extended"
 
 
 def _loads(s: Optional[str], default: Any = None) -> Any:
@@ -109,6 +134,19 @@ def get_catalog(
     return {"focus": focus, "items": [item.__dict__ for item in items]}
 
 
+@router.get("/catalog/municipalities")
+def get_catalog_municipalities(
+    focus: str = Query("se_mi_extended"),
+    principal=Depends(get_principal),
+):
+    items = catalog_mi_authoritative(focus=focus)
+    return {
+        "focus": focus,
+        "count": len(catalog_municipalities(items)),
+        "items": catalog_municipalities(items),
+    }
+
+
 @router.post("/catalog/ingest")
 def ingest_catalog(
     focus: str = Query("se_mi_extended"),
@@ -116,60 +154,86 @@ def ingest_catalog(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    items = catalog_mi_authoritative(focus=focus)
     target_org_id = principal.org_id if org_scope else None
 
-    results = []
-    ok_count = 0
-    failed_count = 0
+    results = collect_catalog_for_focus(
+        db,
+        org_id=target_org_id,
+        focus=focus,
+    )
 
-    for item in items:
-        try:
-            res = collect_url(
-                db,
-                org_id=target_org_id,
-                url=item.url,
-                state=item.state,
-                county=item.county,
-                city=item.city,
-                pha_name=item.pha_name,
-                program_type=item.program_type,
-                publisher=item.publisher,
-                title=item.title,
-                notes=item.notes,
-            )
-            results.append(
-                {
-                    "source_id": res.source.id,
-                    "changed": res.changed,
-                    "url": item.url,
-                    "fetch_ok": res.fetch_ok,
-                    "fetch_error": res.fetch_error,
-                }
-            )
-            if res.fetch_ok:
-                ok_count += 1
-            else:
-                failed_count += 1
-        except Exception as e:
-            failed_count += 1
-            results.append(
-                {
-                    "source_id": None,
-                    "changed": False,
-                    "url": item.url,
-                    "fetch_ok": False,
-                    "fetch_error": f"{type(e).__name__}: {e}",
-                }
-            )
+    payload = [
+        {
+            "source_id": r.source.id,
+            "changed": r.changed,
+            "url": r.source.url,
+            "fetch_ok": r.fetch_ok,
+            "fetch_error": r.fetch_error,
+        }
+        for r in results
+    ]
 
     return {
         "ok": True,
         "focus": focus,
+        "count": len(payload),
+        "ok_count": sum(1 for r in payload if r["fetch_ok"]),
+        "failed_count": sum(1 for r in payload if not r["fetch_ok"]),
+        "results": payload,
+    }
+
+
+@router.post("/catalog/collect/market")
+def collect_catalog_market(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+    results = collect_catalog_for_market(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        focus=payload.focus,
+    )
+    return {
+        "ok": True,
+        "state": payload.state,
+        "county": _norm_lower(payload.county),
+        "city": _norm_lower(payload.city),
         "count": len(results),
-        "ok_count": ok_count,
-        "failed_count": failed_count,
-        "results": results,
+        "ok_count": sum(1 for r in results if r.fetch_ok),
+        "failed_count": sum(1 for r in results if not r.fetch_ok),
+        "results": [
+            {
+                "source_id": r.source.id,
+                "url": r.source.url,
+                "changed": r.changed,
+                "fetch_ok": r.fetch_ok,
+                "fetch_error": r.fetch_error,
+            }
+            for r in results
+        ],
+    }
+
+
+@router.post("/catalog/collect/all")
+def collect_catalog_all(
+    focus: str = Query("se_mi_extended"),
+    org_scope: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    target_org_id = principal.org_id if org_scope else None
+    return {
+        "ok": True,
+        **collect_catalog_all_municipalities(
+            db,
+            org_id=target_org_id,
+            focus=focus,
+        ),
     }
 
 
@@ -300,6 +364,97 @@ def extract_assertions(
     return {"ok": True, "created": len(created), "ids": [a.id for a in created]}
 
 
+@router.post("/extract/market")
+def extract_market(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    q = db.query(PolicySource)
+
+    if payload.org_scope:
+        q = q.filter(PolicySource.org_id == principal.org_id)
+    else:
+        q = q.filter(PolicySource.org_id.is_(None))
+
+    q = q.filter(PolicySource.state == _norm_state(payload.state))
+    if payload.county:
+        q = q.filter(PolicySource.county == _norm_lower(payload.county))
+    if payload.city:
+        q = q.filter(PolicySource.city == _norm_lower(payload.city))
+
+    rows = q.order_by(PolicySource.id.asc()).all()
+
+    created_ids: list[int] = []
+    results: list[dict] = []
+
+    for src in rows:
+        created = extract_assertions_for_source(
+            db,
+            source=src,
+            org_id=principal.org_id,
+            org_scope=payload.org_scope,
+        )
+        created_ids.extend([a.id for a in created])
+        results.append(
+            {
+                "source_id": src.id,
+                "url": src.url,
+                "created": len(created),
+            }
+        )
+
+    return {
+        "ok": True,
+        "state": _norm_state(payload.state),
+        "county": _norm_lower(payload.county),
+        "city": _norm_lower(payload.city),
+        "source_count": len(rows),
+        "assertion_count_created": len(created_ids),
+        "results": results,
+    }
+
+
+@router.post("/extract/all")
+def extract_all(
+    focus: str = Query("se_mi_extended"),
+    org_scope: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    markets = catalog_municipalities(catalog_mi_authoritative(focus=focus))
+    out: list[dict] = []
+    total_created = 0
+
+    for market in markets:
+        payload = MarketIn(
+            state=market["state"] or "MI",
+            county=market["county"],
+            city=market["city"],
+            org_scope=org_scope,
+            focus=focus,
+        )
+        resp = extract_market(payload=payload, db=db, principal=principal)
+        total_created += int(resp["assertion_count_created"])
+        out.append(
+            {
+                "state": resp["state"],
+                "county": resp["county"],
+                "city": resp["city"],
+                "source_count": resp["source_count"],
+                "assertion_count_created": resp["assertion_count_created"],
+            }
+        )
+
+    return {
+        "ok": True,
+        "focus": focus,
+        "municipality_count": len(out),
+        "assertion_count_created": total_created,
+        "markets": out,
+    }
+
+
 @router.get("/assertions")
 def list_assertions(
     limit: int = Query(200, ge=1, le=500),
@@ -413,6 +568,47 @@ def review_assertion(
     return {"ok": True, "id": a.id, "review_status": a.review_status}
 
 
+@router.post("/assertions/review/batch")
+def review_assertions_batch(
+    payload: BatchReviewIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    if not payload.assertion_ids:
+        raise HTTPException(status_code=400, detail="assertion_ids required")
+
+    rows = (
+        db.query(PolicyAssertion)
+        .filter(PolicyAssertion.id.in_(payload.assertion_ids))
+        .all()
+    )
+
+    updated: list[int] = []
+    now = datetime.utcnow()
+
+    for a in rows:
+        if a.org_id is not None and a.org_id != principal.org_id:
+            continue
+        a.review_status = payload.review_status
+        if payload.confidence is not None:
+            a.confidence = float(payload.confidence)
+        if payload.review_notes is not None:
+            a.review_notes = payload.review_notes
+        if payload.verification_reason is not None:
+            a.verification_reason = payload.verification_reason
+        a.reviewed_by_user_id = principal.user_id
+        a.reviewed_at = now
+        updated.append(a.id)
+
+    db.commit()
+    return {
+        "ok": True,
+        "requested_count": len(payload.assertion_ids),
+        "updated_count": len(updated),
+        "updated_ids": updated,
+    }
+
+
 @router.post("/profiles/build")
 def build_profile_from_verified_assertions(
     payload: BuildProfileIn,
@@ -447,6 +643,58 @@ def build_profile_from_verified_assertions(
     }
 
 
+@router.post("/profiles/build/all")
+def build_profiles_all(
+    focus: str = Query("se_mi_extended"),
+    org_scope: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    target_org_id = principal.org_id if org_scope else None
+    markets = catalog_municipalities(catalog_mi_authoritative(focus=focus))
+
+    out: list[dict] = []
+    ready = 0
+    partial = 0
+
+    for market in markets:
+        row = project_verified_assertions_to_profile(
+            db,
+            org_id=target_org_id,
+            state=market["state"] or "MI",
+            county=market["county"],
+            city=market["city"],
+            notes=f"Projected from verified policy assertions for {market['city']}, {market['county']}, {market['state']}.",
+        )
+        policy = _loads(row.policy_json, {})
+        coverage = policy.get("coverage", {})
+        if coverage.get("production_readiness") == "ready":
+            ready += 1
+        else:
+            partial += 1
+
+        out.append(
+            {
+                "profile_id": row.id,
+                "state": row.state,
+                "county": row.county,
+                "city": row.city,
+                "friction_multiplier": row.friction_multiplier,
+                "production_readiness": coverage.get("production_readiness"),
+                "coverage_status": coverage.get("coverage_status"),
+            }
+        )
+
+    return {
+        "ok": True,
+        "focus": focus,
+        "municipality_count": len(out),
+        "ready_count": ready,
+        "partial_count": partial,
+        "items": out,
+    }
+
+
 @router.get("/coverage")
 def get_coverage_status(
     state: str = Query("MI"),
@@ -466,6 +714,43 @@ def get_coverage_status(
         city=city,
         pha_name=pha_name,
     )
+
+
+@router.get("/coverage/all")
+def get_coverage_all(
+    focus: str = Query("se_mi_extended"),
+    org_scope: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    target_org_id = principal.org_id if org_scope else None
+    markets = catalog_municipalities(catalog_mi_authoritative(focus=focus))
+
+    items = []
+    for market in markets:
+        coverage = compute_coverage_status(
+            db,
+            org_id=target_org_id,
+            state=market["state"] or "MI",
+            county=market["county"],
+            city=market["city"],
+            pha_name=None,
+        )
+        items.append(
+            {
+                "state": market["state"],
+                "county": market["county"],
+                "city": market["city"],
+                **coverage,
+            }
+        )
+
+    return {
+        "ok": True,
+        "focus": focus,
+        "count": len(items),
+        "items": items,
+    }
 
 
 @router.post("/coverage")

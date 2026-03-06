@@ -276,6 +276,41 @@ def upsert_profile(
     db.refresh(row)
     return row
 
+def resolve_operational_policy(
+    db: Session,
+    *,
+    org_id: int,
+    city: Optional[str],
+    county: Optional[str],
+    state: str = "MI",
+) -> dict[str, Any]:
+    from app.services.policy_projection_service import build_property_compliance_brief
+
+    base = resolve_profile(
+        db,
+        org_id=org_id,
+        city=city,
+        county=county,
+        state=state,
+    )
+
+    brief = build_property_compliance_brief(
+        db,
+        org_id=None,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=base.get("pha_name"),
+    )
+
+    return {
+        **base,
+        "coverage": brief.get("coverage", {}),
+        "brief": brief.get("compliance", {}),
+        "blocking_items": brief.get("blocking_items", []),
+        "required_actions": brief.get("required_actions", []),
+        "evidence_links": brief.get("evidence_links", []),
+    }
 
 def delete_profile(
     db: Session,

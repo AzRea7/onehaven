@@ -1,6 +1,6 @@
-// onehaven_decision_engine/frontend/src/pages/JurisdictionProfiles.tsx
 import React from "react";
 import PageHero from "../components/PageHero";
+import PageShell from "../components/PageShell";
 import { api } from "../lib/api";
 
 function pretty(v: any) {
@@ -18,21 +18,19 @@ export default function JurisdictionProfiles() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Resolve tester
   const [testCity, setTestCity] = React.useState("Detroit");
   const [testCounty, setTestCounty] = React.useState("Wayne");
   const [resolved, setResolved] = React.useState<any | null>(null);
 
-  // Editor
-  const [city, setCity] = React.useState<string>("");
-  const [county, setCounty] = React.useState<string>("");
+  const [city, setCity] = React.useState("");
+  const [county, setCounty] = React.useState("");
   const [friction, setFriction] = React.useState<number>(1.0);
-  const [phaName, setPhaName] = React.useState<string>("");
-  const [policyJson, setPolicyJson] = React.useState<string>(
+  const [phaName, setPhaName] = React.useState("");
+  const [policyJson, setPolicyJson] = React.useState(
     pretty({
       summary: "Org override profile.",
       licensing: {
-        typical: "Fill with what you *actually* see in this jurisdiction.",
+        typical: "Fill with what you actually see in this jurisdiction.",
       },
       inspections: {
         typical: "Fill with your observed re-inspection patterns.",
@@ -40,7 +38,7 @@ export default function JurisdictionProfiles() {
       notes: ["Keep it operational. You can get more formal later."],
     }),
   );
-  const [notes, setNotes] = React.useState<string>("");
+  const [notes, setNotes] = React.useState("");
 
   async function refresh() {
     setLoading(true);
@@ -73,6 +71,7 @@ export default function JurisdictionProfiles() {
   async function saveProfile() {
     setError(null);
     let policy: any = {};
+
     try {
       policy = policyJson ? JSON.parse(policyJson) : {};
     } catch {
@@ -112,11 +111,10 @@ export default function JurisdictionProfiles() {
 
   React.useEffect(() => {
     refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includeGlobal, state]);
 
   return (
-    <div className="px-4 md:px-6 py-6 max-w-[1200px] mx-auto space-y-6">
+    <PageShell className="space-y-6">
       <PageHero
         title="Jurisdiction Profiles"
         subtitle="Encode Michigan city/county/PHA reality as a reusable operational model (global defaults + org overrides)."
@@ -155,7 +153,6 @@ export default function JurisdictionProfiles() {
         </button>
       </div>
 
-      {/* Resolve tester */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
         <div className="text-white font-semibold text-sm">Resolve Tester</div>
         <div className="flex flex-wrap gap-3 items-center">
@@ -178,6 +175,7 @@ export default function JurisdictionProfiles() {
             Resolve
           </button>
         </div>
+
         {resolved ? (
           <pre className="text-xs text-white/80 whitespace-pre-wrap bg-black/30 border border-white/10 rounded-xl p-3 overflow-auto">
             {pretty(resolved)}
@@ -185,7 +183,6 @@ export default function JurisdictionProfiles() {
         ) : null}
       </div>
 
-      {/* Editor */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
         <div className="text-white font-semibold text-sm">
           Create / Update Org Override
@@ -246,7 +243,6 @@ export default function JurisdictionProfiles() {
         </div>
       </div>
 
-      {/* Table */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
         <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
           <div className="text-white font-semibold text-sm">Profiles</div>
@@ -308,6 +304,6 @@ export default function JurisdictionProfiles() {
         Docs:{" "}
         <span className="text-white/70">/meta/docs/michigan_jurisdictions</span>
       </div>
-    </div>
+    </PageShell>
   );
 }

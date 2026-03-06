@@ -1,4 +1,3 @@
-# backend/app/services/policy_extractor_service.py
 from __future__ import annotations
 
 import json
@@ -15,6 +14,77 @@ def _dumps(v: Any) -> str:
         return json.dumps(v, ensure_ascii=False)
     except Exception:
         return "{}"
+
+
+def _rule_family_for(rule_key: str) -> str:
+    mapping = {
+        "document_reference": "document_reference",
+        "federal_hcv_regulations_anchor": "federal_hcv",
+        "federal_nspire_anchor": "federal_nspire",
+        "federal_notice_anchor": "federal_notice",
+        "mi_statute_anchor": "mi_landlord_tenant",
+        "rental_registration_required": "rental_registration",
+        "certificate_required_before_occupancy": "certificate_before_occupancy",
+        "inspection_program_exists": "inspection_program",
+        "property_maintenance_enforcement_anchor": "property_maintenance",
+        "building_safety_division_anchor": "building_safety",
+        "building_division_anchor": "building_division",
+        "pha_admin_plan_anchor": "pha_admin_plan",
+        "pha_administrator_changed": "pha_admin_transfer",
+        "pha_landlord_packet_required": "pha_landlord_workflow",
+        "mshda_program_anchor": "mshda_program",
+        "hap_contract_and_tenancy_addendum_required": "voucher_lease_packet",
+        "landlord_payment_timing_reference": "landlord_payment_timing",
+    }
+    return mapping.get(rule_key, rule_key)
+
+
+def _assertion_type_for(rule_key: str) -> str:
+    if rule_key == "document_reference":
+        return "document_reference"
+    if rule_key.endswith("_anchor"):
+        return "anchor"
+    if rule_key == "pha_administrator_changed":
+        return "superseding_notice"
+    return "operational"
+
+
+def _priority_for(rule_key: str) -> int:
+    if rule_key in {
+        "rental_registration_required",
+        "certificate_required_before_occupancy",
+        "inspection_program_exists",
+        "hap_contract_and_tenancy_addendum_required",
+        "pha_landlord_packet_required",
+    }:
+        return 10
+    if rule_key in {
+        "pha_administrator_changed",
+        "landlord_payment_timing_reference",
+    }:
+        return 20
+    if rule_key.endswith("_anchor"):
+        return 50
+    return 100
+
+
+def _source_rank_for(source: PolicySource) -> int:
+    url = (source.url or "").lower()
+    publisher = (source.publisher or "").lower()
+
+    if "ecfr.gov" in url:
+        return 10
+    if "federalregister.gov" in url:
+        return 20
+    if "legislature.mi.gov" in url:
+        return 30
+    if "michigan.gov/mshda" in url:
+        return 40
+    if ".gov" in url:
+        return 50
+    if "housing commission" in publisher or "dhcmi.org" in url:
+        return 60
+    return 100
 
 
 def _add_assertion(
@@ -37,8 +107,12 @@ def _add_assertion(
             pha_name=source.pha_name,
             program_type=source.program_type,
             rule_key=rule_key,
+            rule_family=_rule_family_for(rule_key),
+            assertion_type=_assertion_type_for(rule_key),
             value_json=_dumps(value),
             confidence=confidence,
+            priority=_priority_for(rule_key),
+            source_rank=_source_rank_for(source),
             review_status="extracted",
             extracted_at=now,
         )
@@ -393,7 +467,11 @@ def extract_assertions_for_source(
 
     # Livonia
     if "livonia.gov" in url:
-        if "inspection-building-enforcement" in url or "rental-guide" in url or "rental-license-application" in url:
+        if (
+            "inspection-building-enforcement" in url
+            or "rental-guide" in url
+            or "rental-license-application" in url
+        ):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,

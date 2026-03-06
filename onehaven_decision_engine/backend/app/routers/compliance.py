@@ -29,7 +29,11 @@ from ..schemas import (
     ChecklistTemplateItemUpsert,
     PropertyChecklistOut,
 )
-from ..services.compliance_service import run_hqs as run_hqs_service
+from ..services.compliance_service import (
+    generate_policy_tasks_for_property,
+    run_hqs as run_hqs_service,
+)
+from ..services.policy_projection_service import build_property_compliance_brief
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -518,6 +522,43 @@ def run_hqs_summary_only(property_id: int, db: Session = Depends(get_db), p=Depe
         "fail_codes": fail_codes,
     }
 
+@router.get("/property/{property_id}/brief", response_model=dict)
+def property_compliance_brief(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    return build_property_compliance_brief(
+        db,
+        org_id=None,
+        state=prop.state or "MI",
+        county=getattr(prop, "county", None),
+        city=prop.city,
+        pha_name=None,
+    )
+
+
+@router.post("/property/{property_id}/tasks/from-policy", response_model=dict)
+def create_tasks_from_policy(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(require_owner),
+):
+    try:
+        return generate_policy_tasks_for_property(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            property_id=property_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"policy task generation failed: {e}")
 
 @router.patch("/checklist/{property_id}/items/{item_code}", response_model=ChecklistItemOut)
 def update_checklist_item(

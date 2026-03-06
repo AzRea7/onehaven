@@ -100,6 +100,7 @@ export default function PolicyReview() {
   async function refresh() {
     setLoading(true);
     setErr(null);
+
     try {
       const ares = await api.policyAssertions({
         review_status: reviewStatus || undefined,
@@ -126,7 +127,9 @@ export default function PolicyReview() {
       });
 
       const map: Record<number, Source> = {};
-      for (const s of sres?.items ?? []) map[s.id] = s;
+      for (const s of sres?.items ?? []) {
+        map[s.id] = s;
+      }
       setSourcesById(map);
 
       const cov = await api.policyCoverage({
@@ -146,7 +149,6 @@ export default function PolicyReview() {
 
   React.useEffect(() => {
     refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function mark(
@@ -377,16 +379,19 @@ export default function PolicyReview() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-semibold">{a.rule_key}</span>
+
                     {a.rule_family ? (
                       <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px]">
                         {a.rule_family}
                       </span>
                     ) : null}
+
                     {a.assertion_type ? (
                       <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px]">
                         {a.assertion_type}
                       </span>
                     ) : null}
+
                     <span
                       className={`rounded-full border px-2 py-0.5 text-[11px] ${badge.cls}`}
                     >
@@ -487,16 +492,19 @@ export default function PolicyReview() {
                     <span>{src?.publisher || "none"}</span>
                   )}
                 </div>
+
                 {src?.retrieved_at ? (
                   <div className="mt-1 opacity-70">
                     retrieved: {new Date(src.retrieved_at).toLocaleString()}
                   </div>
                 ) : null}
+
                 {src?.http_status == null ? (
                   <div className="mt-1 text-yellow-200">
                     fetch warning / incomplete source fetch
                   </div>
                 ) : null}
+
                 {src?.notes ? (
                   <div className="mt-1 opacity-70">{src.notes}</div>
                 ) : null}

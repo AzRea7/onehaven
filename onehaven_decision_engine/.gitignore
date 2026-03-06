@@ -70,6 +70,8 @@ tmp/
 temp/
 exports/
 
+**/policy_raw/
+
 **/node_modules/
 **/dist/
 **/build/

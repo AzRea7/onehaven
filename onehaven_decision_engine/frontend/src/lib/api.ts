@@ -1,4 +1,3 @@
-// frontend/src/lib/api.ts
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 
 type AuthContext = {
@@ -39,10 +38,12 @@ export function buildZillowUrl(property: {
   state?: string;
 }) {
   if (!property?.address) return null;
+
   const slug =
     `${property.address} ${property.city ?? ""} ${property.state ?? ""}`
       .replace(/,/g, "")
       .replace(/\s+/g, "-");
+
   return `https://www.zillow.com/homes/${slug}_rb/`;
 }
 
@@ -77,7 +78,7 @@ function cacheKey(method: string, path: string, body?: any) {
 function qs(params: Record<string, any>) {
   const sp = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
-    if (v === undefined || v === null) return;
+    if (v === undefined || v === null || v === "") return;
     sp.set(k, String(v));
   });
   const s = sp.toString();
@@ -90,6 +91,7 @@ function makeEventSource(pathWithQuery: string): EventSource {
   const base = API_BASE.startsWith("http")
     ? API_BASE
     : `${window.location.origin}${API_BASE}`;
+
   const url = new URL(`${base}${pathWithQuery}`);
 
   if (auth.orgSlug && !url.searchParams.get("org_slug")) {
@@ -118,12 +120,14 @@ async function request<T>(
   const method = (init?.method || "GET").toUpperCase();
   const ttl = init?.cacheTtlMs ?? (method === "GET" ? 4_000 : 0);
 
-  const bodyKey = typeof init?.body === "string" ? init?.body : undefined;
+  const bodyKey = typeof init?.body === "string" ? init.body : undefined;
   const key = cacheKey(method, path, bodyKey);
 
   if (method === "GET" && ttl > 0) {
     const hit = memCache.get(key);
-    if (hit && Date.now() - hit.at < ttl) return hit.value as T;
+    if (hit && Date.now() - hit.at < ttl) {
+      return hit.value as T;
+    }
   }
 
   if (method === "GET") {
@@ -147,7 +151,6 @@ async function request<T>(
     if (auth.orgSlug && !isAuthBootstrap) {
       headers["X-Org-Slug"] = auth.orgSlug;
     }
-
     if (auth.devEmail) headers["X-User-Email"] = auth.devEmail;
     if (auth.devRole) headers["X-User-Role"] = auth.devRole;
 
@@ -176,6 +179,7 @@ async function request<T>(
     if (method === "GET" && ttl > 0) {
       memCache.set(key, { at: Date.now(), value: data });
     }
+
     return data as T;
   })();
 
@@ -276,7 +280,10 @@ export const api = {
     }),
 
   authLogout: () =>
-    request<any>(`/auth/logout`, { method: "POST", body: JSON.stringify({}) }),
+    request<any>(`/auth/logout`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
 
   authMe: () => request<any>(`/auth/me`, { method: "GET", cacheTtlMs: 0 }),
 
@@ -290,13 +297,14 @@ export const api = {
     }),
 
   dashboardProperties: (p: { limit: number; signal?: AbortSignal }) =>
-    requestArray<any>(`/dashboard/properties?limit=${p.limit ?? 100}`, {
+    requestArray<any>(`/dashboard/properties${qs({ limit: p.limit ?? 100 })}`, {
       cacheTtlMs: 3_000,
       signal: p.signal,
     }),
 
   propertyView: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/view`, { cacheTtlMs: 2_000, signal }),
+
   propertyBundle: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
 
@@ -369,6 +377,12 @@ export const api = {
       { method: "GET", cacheTtlMs: 0 },
     ),
 
+  evaluateProperty: (propertyId: number, strategy: string = "section8") =>
+    request<any>(`/evaluate/property/${propertyId}${qs({ strategy })}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
   evaluateRun: (snapshotId: number, strategy: string = "section8") =>
     request<any>(`/evaluate/run${qs({ snapshot_id: snapshotId, strategy })}`, {
       method: "POST",
@@ -402,6 +416,7 @@ export const api = {
     const strategy = opts?.strategy ?? "section8";
     const version = opts?.version ?? "v1";
     const persist = opts?.persist ?? true;
+
     return request<any>(
       `/compliance/checklist/${propertyId}${qs({
         strategy,
@@ -426,7 +441,10 @@ export const api = {
   ) =>
     request<any>(
       `/compliance/checklist/${propertyId}/items/${encodeURIComponent(itemCode)}`,
-      { method: "PATCH", body: JSON.stringify(payload) },
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
     ),
 
   rehabTasks: (propertyId: number, signal?: AbortSignal) =>
@@ -440,11 +458,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
   updateRehabTask: (taskId: number, payload: any) =>
     request<any>(`/rehab/tasks/${taskId}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+
   deleteRehabTask: (taskId: number) =>
     request<any>(`/rehab/tasks/${taskId}`, { method: "DELETE" }),
 
@@ -588,25 +608,172 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+
   agentRunsApprove: (runId: number) =>
     request<any>(`/agent-runs/${runId}/approve`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
+
   agentRunsReject: (runId: number, reason: string) =>
     request<any>(`/agent-runs/${runId}/reject${qs({ reason })}`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
+
   agentRunsApply: (runId: number) =>
     request<any>(`/agent-runs/${runId}/apply`, {
       method: "POST",
       body: JSON.stringify({}),
     }),
+
   agentRunsStream: (runId: number) =>
     makeEventSource(`/agent-runs/${runId}/stream`),
 
-  // Policy / evidence / coverage / brief
+  policyCatalogMunicipalities: (focus: string = "se_mi_extended") =>
+    request<any>(`/policy/catalog/municipalities${qs({ focus })}`, {
+      method: "GET",
+      cacheTtlMs: 10_000,
+    }),
+
+  policyCollectCatalogMarket: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    org_scope?: boolean;
+    focus?: string;
+  }) =>
+    request<any>(`/policy/catalog/collect/market`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        org_scope: payload.org_scope ?? false,
+        focus: payload.focus ?? "se_mi_extended",
+      }),
+    }),
+
+  policyCollectCatalogAll: (payload?: {
+    focus?: string;
+    org_scope?: boolean;
+  }) =>
+    request<any>(
+      `/policy/catalog/collect/all${qs({
+        focus: payload?.focus ?? "se_mi_extended",
+        org_scope: payload?.org_scope ? "true" : "false",
+      })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
+  policyExtractMarket: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    org_scope?: boolean;
+    focus?: string;
+  }) =>
+    request<any>(`/policy/extract/market`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        org_scope: payload.org_scope ?? false,
+        focus: payload.focus ?? "se_mi_extended",
+      }),
+    }),
+
+  policyExtractAll: (payload?: { focus?: string; org_scope?: boolean }) =>
+    request<any>(
+      `/policy/extract/all${qs({
+        focus: payload?.focus ?? "se_mi_extended",
+        org_scope: payload?.org_scope ? "true" : "false",
+      })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
+  policyReviewAssertionsBatch: (payload: {
+    assertion_ids: number[];
+    review_status: string;
+    confidence?: number;
+    review_notes?: string | null;
+    verification_reason?: string | null;
+  }) =>
+    request<any>(`/policy/assertions/review/batch`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  policyBuildProfilesAll: (payload?: { focus?: string; org_scope?: boolean }) =>
+    request<any>(
+      `/policy/profiles/build/all${qs({
+        focus: payload?.focus ?? "se_mi_extended",
+        org_scope: payload?.org_scope ? "true" : "false",
+      })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
+  policyCoverageAll: (params?: { focus?: string; org_scope?: boolean }) =>
+    request<any>(
+      `/policy/coverage/all${qs({
+        focus: params?.focus ?? "se_mi_extended",
+        org_scope: params?.org_scope ? "true" : "false",
+      })}`,
+      { method: "GET", cacheTtlMs: 0 },
+    ),
+
+  policyEvidenceMarket: (params: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    include_global?: boolean;
+  }) =>
+    request<any>(
+      `/policy-evidence/market${qs({
+        state: params.state,
+        county: params.county ?? undefined,
+        city: params.city ?? undefined,
+        include_global:
+          params.include_global === undefined
+            ? "true"
+            : params.include_global
+              ? "true"
+              : "false",
+      })}`,
+      { method: "GET", cacheTtlMs: 0 },
+    ),
+
+  policyReviewQueue: (params?: { focus?: string; org_scope?: boolean }) =>
+    request<any>(
+      `/policy-evidence/review-queue${qs({
+        focus: params?.focus ?? "se_mi_extended",
+        org_scope: params?.org_scope ? "true" : "false",
+      })}`,
+      { method: "GET", cacheTtlMs: 0 },
+    ),
+
+  compliancePropertyBrief: (propertyId: number) =>
+    request<any>(`/compliance/property/${propertyId}/brief`, {
+      method: "GET",
+      cacheTtlMs: 500,
+    }),
+
+  complianceCreateTasksFromPolicy: (propertyId: number) =>
+    request<any>(`/compliance/property/${propertyId}/tasks/from-policy`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
   policyCatalog: (focus: string = "se_mi_extended") =>
     request<any>(`/policy/catalog${qs({ focus })}`, {
       method: "GET",
@@ -825,9 +992,12 @@ export const api = {
     if (typeof idOrPayload === "number") {
       throw new Error("deleteJurisdictionRule requires a rule object.");
     }
+
     const city = idOrPayload.city;
     const state = idOrPayload.state || "MI";
+
     if (!city) throw new Error("deleteJurisdictionRule missing city");
+
     return request<any>(
       `/jurisdictions/rule${qs({ city, state, scope: "org" })}`,
       { method: "DELETE" },

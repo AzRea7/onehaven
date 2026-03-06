@@ -18,6 +18,8 @@ from ..models import (
     WorkflowEvent,
 )
 
+from ..services.policy_projection_service import build_property_compliance_brief
+
 
 def _latest_inspection_passed(db: Session, *, property_id: int) -> bool:
     latest = db.scalar(
@@ -69,6 +71,150 @@ def _ensure_rehab_task(
     )
     return True
 
+def _normalize_policy_task_title(title: str) -> str:
+    return " ".join((title or "").strip().lower().split())
+
+
+def _ensure_policy_task(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    title: str,
+    category: str,
+    priority: str,
+    notes: str,
+) -> bool:
+    normalized = _normalize_policy_task_title(title)
+    existing = db.scalar(
+        select(RehabTask).where(
+            RehabTask.org_id == org_id,
+            RehabTask.property_id == property_id,
+            RehabTask.title == title,
+        )
+    )
+    if existing:
+        return False
+
+    now = datetime.utcnow()
+    db.add(
+        RehabTask(
+            org_id=org_id,
+            property_id=property_id,
+            title=title,
+            category=category,
+            status="open",
+            priority=priority,
+            estimated_cost=None,
+            actual_cost=None,
+            notes=notes,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    return True
+
+
+def generate_policy_tasks_for_property(
+    db: Session,
+    *,
+    org_id: int,
+    actor_user_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == org_id))
+    if not prop:
+        raise ValueError("property not found")
+
+    brief = build_property_compliance_brief(
+        db,
+        org_id=None,
+        state=prop.state or "MI",
+        county=getattr(prop, "county", None),
+        city=prop.city,
+        pha_name=None,
+    )
+
+    created: list[dict[str, Any]] = []
+
+    def _add(title: str, *, category: str, priority: str, notes: str) -> None:
+        if _ensure_policy_task(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            title=title,
+            category=category,
+            priority=priority,
+            notes=notes,
+        ):
+            created.append(
+                {
+                    "title": title,
+                    "category": category,
+                    "priority": priority,
+                }
+            )
+
+    for action in brief.get("required_actions", []):
+        title = str(action.get("title") or "").strip()
+        if not title:
+            continue
+        key = str(action.get("key") or "")
+        category = "compliance"
+        if "inspection" in key:
+            category = "inspection"
+        _add(
+            title,
+            category=category,
+            priority="high",
+            notes="Generated from policy compliance brief required_actions.",
+        )
+
+    for blocker in brief.get("blocking_items", []):
+        title = str(blocker.get("title") or "").strip()
+        if not title:
+            continue
+        _add(
+            title,
+            category="compliance_blocker",
+            priority="high",
+            notes="Generated from policy compliance brief blocking_items.",
+        )
+
+    payload = {
+        "property_id": property_id,
+        "created": created,
+        "count": len(created),
+        "brief": brief,
+    }
+
+    now = datetime.utcnow()
+    db.add(
+        WorkflowEvent(
+            org_id=org_id,
+            property_id=property_id,
+            actor_user_id=actor_user_id,
+            event_type="policy_tasks_generated",
+            payload_json=json.dumps(payload),
+            created_at=now,
+        )
+    )
+
+    db.add(
+        AuditEvent(
+            org_id=org_id,
+            actor_user_id=actor_user_id,
+            action="policy_tasks_generated",
+            entity_type="property",
+            entity_id=str(property_id),
+            before_json=None,
+            after_json=json.dumps(payload),
+            created_at=now,
+        )
+    )
+
+    db.commit()
+    return payload
 
 def run_hqs(
     db: Session,

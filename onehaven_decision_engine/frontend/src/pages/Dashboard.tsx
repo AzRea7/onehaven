@@ -1,4 +1,3 @@
-// frontend/src/pages/Dashboard.tsx
 import React from "react";
 import { TrendingUp, ShieldCheck, Bot, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -64,6 +63,7 @@ export default function Dashboard() {
         limit: 80,
         signal: ac.signal,
       });
+
       setRows(Array.isArray(data) ? data : []);
       setLastSync(Date.now());
     } catch (e: any) {
@@ -78,7 +78,9 @@ export default function Dashboard() {
     refresh(false);
 
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") refresh(true);
+      if (document.visibilityState === "visible") {
+        refresh(true);
+      }
     }, 60_000);
 
     return () => {
@@ -88,14 +90,19 @@ export default function Dashboard() {
   }, [refresh]);
 
   const { pass, review, reject, survivors } = React.useMemo(() => {
-    let pass = 0,
-      review = 0,
-      reject = 0;
+    let pass = 0;
+    let review = 0;
+    let reject = 0;
+
     for (const r of rows || []) {
       const d = r?.last_underwriting_result?.decision || "REJECT";
-      if (d === "PASS") pass++;
-      else if (d === "REVIEW") review++;
-      else reject++;
+      if (d === "PASS") {
+        pass++;
+      } else if (d === "REVIEW") {
+        review++;
+      } else {
+        reject++;
+      }
     }
 
     const survivors = (rows || [])
@@ -103,8 +110,10 @@ export default function Dashboard() {
       .sort((a, b) => {
         const da = a?.last_underwriting_result?.decision || "REJECT";
         const db = b?.last_underwriting_result?.decision || "REJECT";
+
         const wa = da === "PASS" ? 2 : da === "REVIEW" ? 1 : 0;
         const wb = db === "PASS" ? 2 : db === "REVIEW" ? 1 : 0;
+
         return wb - wa;
       })
       .slice(0, 8);
@@ -137,7 +146,7 @@ export default function Dashboard() {
               <div className="text-[11px] text-white/45 px-2 py-2">
                 {lastSync
                   ? `last sync: ${new Date(lastSync).toLocaleTimeString()}`
-                  : " "}
+                  : ""}
               </div>
             </>
           }
@@ -170,7 +179,7 @@ export default function Dashboard() {
             </div>
 
             <div className="mt-5 h-[140px] relative overflow-visible">
-              <HoverTilt className="absolute -right-10 -top-14 h-[220px] w-[220px] opacity-95">
+              <HoverTilt className="absolute -right-10 top-14 h-[220px] w-[220px] opacity-95">
                 <OrbDealEngine className="animate-[floatSoft_7.5s_ease-in-out_infinite]" />
               </HoverTilt>
             </div>
@@ -196,7 +205,7 @@ export default function Dashboard() {
             </div>
 
             <div className="mt-5 h-[140px] relative overflow-visible">
-              <HoverTilt className="absolute -right-10 -top-14 h-[220px] w-[220px] opacity-95">
+              <HoverTilt className="absolute -right-10 top-14 h-[220px] w-[220px] opacity-95">
                 <Section8Badge className="animate-[floatSoft_8s_ease-in-out_infinite]" />
               </HoverTilt>
             </div>
@@ -222,7 +231,7 @@ export default function Dashboard() {
             </div>
 
             <div className="mt-5 h-[140px] relative overflow-visible">
-              <HoverTilt className="absolute -right-10 -top-14 h-[220px] w-[220px] opacity-95">
+              <HoverTilt className="absolute -right-10 top-14 h-[220px] w-[220px] opacity-95">
                 <AgentClaw className="animate-[floatSoft_7.7s_ease-in-out_infinite]" />
               </HoverTilt>
             </div>
@@ -245,7 +254,7 @@ export default function Dashboard() {
             </div>
 
             <div className="relative h-[140px] w-[220px] overflow-visible">
-              <HoverTilt className="absolute -right-8 -top-[65px] h-[210px] w-[260px] opacity-95">
+              <HoverTilt className="absolute -right-8 top-[65px] h-[210px] w-[260px] opacity-95">
                 <BuildStack />
               </HoverTilt>
             </div>
@@ -278,17 +287,15 @@ export default function Dashboard() {
               </div>
             ) : survivors.length === 0 ? (
               <div className="text-sm text-white/55">
-                No rows yet. Run ingest/enrich/evaluate, then refresh.
+                No rows yet. Run ingest / enrich / evaluate, then refresh.
               </div>
             ) : (
               survivors.map((row) => {
                 const p = row.property!;
                 const d = row.deal;
                 const r = row.last_underwriting_result;
-
                 const decision = r?.decision ?? "REJECT";
                 const tone = toneForDecision(decision);
-
                 const badge =
                   tone === "good"
                     ? "border-green-400/25 bg-green-400/10 text-green-200"
@@ -325,7 +332,7 @@ export default function Dashboard() {
                           {r?.score != null ? ` · ${r.score}` : ""}
                         </span>
                         <div className="text-[11px] text-white/45">
-                          {r?.dscr != null ? `DSCR ${r.dscr.toFixed(2)}` : " "}
+                          {r?.dscr != null ? `DSCR ${r.dscr.toFixed(2)}` : ""}
                         </div>
                       </div>
                     </div>

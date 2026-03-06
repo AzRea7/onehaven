@@ -1,5 +1,3 @@
-# backend/app/services/property_state_machine.py
-# (This is exactly your provided file; included verbatim as requested.)
 from __future__ import annotations
 
 import json
@@ -23,6 +21,7 @@ from ..models import (
     UnderwritingResult,
     Valuation,
 )
+from ..services.policy_projection_service import build_property_compliance_brief
 
 STAGE_ORDER = ["deal", "rehab", "compliance", "tenant", "cash", "equity"]
 
@@ -94,12 +93,21 @@ class InspectionStatus:
     exists: bool
     latest_passed: bool
     open_failed_items: int
+    latest_inspection_id: Optional[int] = None
+    latest_inspection_date: Optional[str] = None
 
     def as_dict(self) -> dict:
         return {
             "exists": self.exists,
             "latest_passed": self.latest_passed,
             "open_failed_items": self.open_failed_items,
+            "latest": {
+                "id": self.latest_inspection_id,
+                "inspection_date": self.latest_inspection_date,
+                "passed": self.latest_passed,
+            }
+            if self.exists
+            else None,
         }
 
 
@@ -164,17 +172,24 @@ def _get_latest_deal(db: Session, *, org_id: int, property_id: int) -> Optional[
     )
 
 
-def _get_latest_underwriting(db: Session, *, org_id: int, property_id: int) -> Optional[UnderwritingResult]:
+def _get_latest_underwriting(
+    db: Session, *, org_id: int, property_id: int
+) -> Optional[UnderwritingResult]:
     return db.scalar(
         select(UnderwritingResult)
         .join(Deal, Deal.id == UnderwritingResult.deal_id)
-        .where(UnderwritingResult.org_id == org_id, Deal.property_id == property_id)
+        .where(
+            UnderwritingResult.org_id == org_id,
+            Deal.property_id == property_id,
+        )
         .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
         .limit(1)
     )
 
 
-def _compute_checklist_progress(db: Session, *, org_id: int, property_id: int) -> ChecklistProgress:
+def _compute_checklist_progress(
+    db: Session, *, org_id: int, property_id: int
+) -> ChecklistProgress:
     rows = db.scalars(
         select(PropertyChecklistItem.status).where(
             PropertyChecklistItem.org_id == org_id,
@@ -184,6 +199,7 @@ def _compute_checklist_progress(db: Session, *, org_id: int, property_id: int) -
 
     total = len(rows)
     todo = inprog = blocked = failed = done = 0
+
     for s in rows:
         st = (s or "todo").lower().strip()
         if st == "done":
@@ -197,19 +213,33 @@ def _compute_checklist_progress(db: Session, *, org_id: int, property_id: int) -
         else:
             todo += 1
 
-    return ChecklistProgress(total=total, todo=todo, in_progress=inprog, blocked=blocked, failed=failed, done=done)
+    return ChecklistProgress(
+        total=total,
+        todo=todo,
+        in_progress=inprog,
+        blocked=blocked,
+        failed=failed,
+        done=done,
+    )
 
 
-def _get_latest_inspection(db: Session, *, org_id: int, property_id: int) -> Optional[Inspection]:
+def _get_latest_inspection(
+    db: Session, *, org_id: int, property_id: int
+) -> Optional[Inspection]:
     return db.scalar(
         select(Inspection)
-        .where(Inspection.org_id == org_id, Inspection.property_id == property_id)
+        .where(
+            Inspection.org_id == org_id,
+            Inspection.property_id == property_id,
+        )
         .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
         .limit(1)
     )
 
 
-def _open_failed_inspection_items(db: Session, *, org_id: int, property_id: int) -> int:
+def _open_failed_inspection_items(
+    db: Session, *, org_id: int, property_id: int
+) -> int:
     return int(
         db.scalar(
             select(func.count(InspectionItem.id))
@@ -226,17 +256,40 @@ def _open_failed_inspection_items(db: Session, *, org_id: int, property_id: int)
     )
 
 
-def _compute_inspection_status(db: Session, *, org_id: int, property_id: int) -> InspectionStatus:
+def _compute_inspection_status(
+    db: Session, *, org_id: int, property_id: int
+) -> InspectionStatus:
     insp = _get_latest_inspection(db, org_id=org_id, property_id=property_id)
     if not insp:
-        return InspectionStatus(exists=False, latest_passed=False, open_failed_items=0)
+        return InspectionStatus(
+            exists=False,
+            latest_passed=False,
+            open_failed_items=0,
+            latest_inspection_id=None,
+            latest_inspection_date=None,
+        )
 
-    open_failed = _open_failed_inspection_items(db, org_id=org_id, property_id=property_id)
+    open_failed = _open_failed_inspection_items(
+        db, org_id=org_id, property_id=property_id
+    )
     passed = bool(getattr(insp, "passed", False))
     if open_failed > 0:
         passed = False
 
-    return InspectionStatus(exists=True, latest_passed=passed, open_failed_items=open_failed)
+    inspection_date = None
+    if getattr(insp, "inspection_date", None):
+        try:
+            inspection_date = insp.inspection_date.isoformat()
+        except Exception:
+            inspection_date = str(insp.inspection_date)
+
+    return InspectionStatus(
+        exists=True,
+        latest_passed=passed,
+        open_failed_items=open_failed,
+        latest_inspection_id=getattr(insp, "id", None),
+        latest_inspection_date=inspection_date,
+    )
 
 
 def _rehab_open_count(db: Session, *, org_id: int, property_id: int) -> int:
@@ -282,7 +335,10 @@ def _last_txn_date(db: Session, *, org_id: int, property_id: int) -> Optional[da
 def _latest_valuation(db: Session, *, org_id: int, property_id: int) -> Optional[Valuation]:
     return db.scalar(
         select(Valuation)
-        .where(Valuation.org_id == org_id, Valuation.property_id == property_id)
+        .where(
+            Valuation.org_id == org_id,
+            Valuation.property_id == property_id,
+        )
         .order_by(desc(Valuation.as_of), desc(Valuation.id))
         .limit(1)
     )
@@ -291,10 +347,13 @@ def _latest_valuation(db: Session, *, org_id: int, property_id: int) -> Optional
 def _valuation_is_due(val: Optional[Valuation], *, cadence_days: int = 180) -> bool:
     if val is None or getattr(val, "as_of", None) is None:
         return True
+
     as_of = val.as_of
     if isinstance(as_of, datetime):
         as_of = as_of.date()
+
     today = _utcnow().date()
+
     try:
         return (today - as_of).days >= cadence_days
     except Exception:
@@ -304,6 +363,7 @@ def _valuation_is_due(val: Optional[Valuation], *, cadence_days: int = 180) -> b
 def _rent_expected_proxy(db: Session, *, org_id: int, property_id: int) -> float:
     now = _utcnow()
     far_future = now + timedelta(days=3650)
+
     lease = db.scalar(
         select(Lease)
         .where(
@@ -317,6 +377,7 @@ def _rent_expected_proxy(db: Session, *, org_id: int, property_id: int) -> float
     )
     if not lease:
         return 0.0
+
     try:
         return float(getattr(lease, "total_rent", 0.0) or 0.0)
     except Exception:
@@ -326,12 +387,14 @@ def _rent_expected_proxy(db: Session, *, org_id: int, property_id: int) -> float
 def _rent_collected_last_30(db: Session, *, org_id: int, property_id: int) -> float:
     end = _utcnow()
     start = end - timedelta(days=30)
+
     s = db.scalar(
         select(func.coalesce(func.sum(Transaction.amount), 0.0))
         .where(Transaction.org_id == org_id, Transaction.property_id == property_id)
         .where(Transaction.txn_date >= start, Transaction.txn_date <= end)
         .where(func.lower(Transaction.txn_type) == "rent")
     )
+
     try:
         return float(s or 0.0)
     except Exception:
@@ -354,6 +417,31 @@ def derive_stage_and_constraints(
     has_lease = _has_active_lease(db, org_id=org_id, property_id=property_id)
     last_txn = _last_txn_date(db, org_id=org_id, property_id=property_id)
     val = _latest_valuation(db, org_id=org_id, property_id=property_id)
+
+    prop = db.scalar(
+        select(Property).where(
+            Property.org_id == org_id,
+            Property.id == property_id,
+        )
+    )
+
+    policy_brief = None
+    if prop is not None:
+        policy_brief = build_property_compliance_brief(
+            db,
+            org_id=None,
+            state=prop.state or "MI",
+            county=getattr(prop, "county", None),
+            city=prop.city,
+            pha_name=None,
+        )
+        tasks["policy"] = {
+            "production_readiness": policy_brief.get("coverage", {}).get(
+                "production_readiness"
+            ),
+            "blocking_items": policy_brief.get("blocking_items", []),
+            "required_actions": policy_brief.get("required_actions", []),
+        }
 
     if not deal:
         constraints["missing_deal"] = True
@@ -385,7 +473,10 @@ def derive_stage_and_constraints(
         next_actions.append("Generate compliance checklist (no checklist items found).")
         return "compliance", constraints, tasks, next_actions
 
-    tasks["compliance"] = {"checklist": checklist.as_dict(), "inspection": insp.as_dict()}
+    tasks["compliance"] = {
+        "checklist": checklist.as_dict(),
+        "inspection": insp.as_dict(),
+    }
 
     if checklist.failed > 0:
         constraints["checklist_failed_items"] = checklist.failed
@@ -420,6 +511,7 @@ def derive_stage_and_constraints(
         return "tenant", constraints, tasks, next_actions
 
     tasks["cash"] = {"last_txn_date": last_txn.isoformat() if last_txn else None}
+
     if last_txn is None:
         constraints["no_transactions"] = True
         next_actions.append("Add transactions (rent, expenses) to start cash tracking.")
@@ -429,23 +521,30 @@ def derive_stage_and_constraints(
     collected = _rent_collected_last_30(db, org_id=org_id, property_id=property_id)
     tasks["cash"]["rent_expected_proxy"] = round(expected, 2)
     tasks["cash"]["rent_collected_last_30"] = round(collected, 2)
+
     if expected > 0 and collected + 1e-6 < expected:
         constraints["rent_reconciliation_gap"] = {
             "expected_proxy": round(expected, 2),
             "collected_last_30": round(collected, 2),
             "gap": round(expected - collected, 2),
         }
-        next_actions.append(f"Reconcile rent: expected ~${expected:.0f} vs collected ${collected:.0f} (last 30d).")
+        next_actions.append(
+            f"Reconcile rent: expected ~${expected:.0f} vs collected ${collected:.0f} (last 30d)."
+        )
         return "cash", constraints, tasks, next_actions
 
     tasks["equity"] = {"has_valuation": val is not None}
+
     if val is None:
         constraints["missing_valuation"] = True
         next_actions.append("Add a valuation snapshot to track equity.")
         return "equity", constraints, tasks, next_actions
 
     if _valuation_is_due(val, cadence_days=180):
-        constraints["valuation_due"] = {"cadence_days": 180, "latest_as_of": getattr(val, "as_of", None)}
+        constraints["valuation_due"] = {
+            "cadence_days": 180,
+            "latest_as_of": getattr(val, "as_of", None),
+        }
         next_actions.append("Valuation is stale (>=180 days). Add a new valuation snapshot.")
         return "equity", constraints, tasks, next_actions
 
@@ -453,7 +552,9 @@ def derive_stage_and_constraints(
 
 
 def sync_property_state(db: Session, *, org_id: int, property_id: int) -> PropertyState:
-    suggested, constraints, tasks, _ = derive_stage_and_constraints(db, org_id=org_id, property_id=property_id)
+    suggested, constraints, tasks, _ = derive_stage_and_constraints(
+        db, org_id=org_id, property_id=property_id
+    )
     return advance_stage_if_needed(
         db,
         org_id=org_id,
@@ -471,8 +572,10 @@ def get_state_payload(
     property_id: int,
     recompute: bool = True,
 ) -> Dict[str, Any]:
-    row = sync_property_state(db, org_id=org_id, property_id=property_id) if recompute else ensure_state_row(
-        db, org_id=org_id, property_id=property_id
+    row = (
+        sync_property_state(db, org_id=org_id, property_id=property_id)
+        if recompute
+        else ensure_state_row(db, org_id=org_id, property_id=property_id)
     )
 
     suggested, constraints_live, tasks_live, next_actions = derive_stage_and_constraints(
@@ -483,14 +586,22 @@ def get_state_payload(
         "property_id": property_id,
         "current_stage": _clamp_stage(getattr(row, "current_stage", "deal")),
         "suggested_stage": suggested,
-        "constraints": constraints_live if recompute else _loads_json(getattr(row, "constraints_json", None)),
-        "outstanding_tasks": tasks_live if recompute else _loads_json(getattr(row, "outstanding_tasks_json", None)),
+        "constraints": constraints_live
+        if recompute
+        else _loads_json(getattr(row, "constraints_json", None)),
+        "outstanding_tasks": tasks_live
+        if recompute
+        else _loads_json(getattr(row, "outstanding_tasks_json", None)),
         "next_actions": next_actions,
-        "updated_at": getattr(row, "updated_at", None).isoformat() if getattr(row, "updated_at", None) else None,
+        "updated_at": getattr(row, "updated_at", None).isoformat()
+        if getattr(row, "updated_at", None)
+        else None,
     }
 
 
-def compute_and_persist_stage(db: Session, *, org_id: int, property: Property) -> PropertyState:
+def compute_and_persist_stage(
+    db: Session, *, org_id: int, property: Property
+) -> PropertyState:
     row = sync_property_state(db, org_id=org_id, property_id=property.id)
     db.commit()
     db.refresh(row)

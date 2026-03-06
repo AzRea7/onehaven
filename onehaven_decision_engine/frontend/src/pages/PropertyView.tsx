@@ -1,4 +1,3 @@
-// frontend/src/pages/PropertyView.tsx
 import React from "react";
 import { useParams } from "react-router-dom";
 import { api, buildZillowUrl } from "../lib/api";
@@ -158,8 +157,7 @@ function ChecklistItemCard({
           <div className="text-xs text-white/55 mt-1">
             {item?.category ? `${item.category} · ` : ""}
             <span className="text-white/85">{item?.item_code}</span>
-            {" · "}
-            status: <span className="text-white/85">{status}</span>
+            {" · "}status: <span className="text-white/85">{status}</span>
             {item?.marked_by ? ` · by ${item.marked_by}` : ""}
           </div>
         </div>
@@ -241,11 +239,6 @@ function ChecklistItemCard({
   );
 }
 
-/**
- * Agents Drawer:
- * - still available quickly from PropertyView
- * - collapsed by default = cleaner + less scrolling
- */
 function AgentsDrawer({
   open,
   onClose,
@@ -326,7 +319,7 @@ export default function PropertyView() {
   const txns = bundle?.transactions || [];
   const vals = bundle?.valuations || [];
 
-  const noDeal = err?.toLowerCase().includes("no deal found for property");
+  const noDeal = (err || "").toLowerCase().includes("nodealfoundforproperty");
 
   const loadAll = React.useCallback(async () => {
     abortRef.current?.abort();
@@ -398,6 +391,7 @@ export default function PropertyView() {
   const createDealQuick = React.useCallback(async () => {
     const askingStr = prompt("Asking price?", "120000");
     if (!askingStr) return;
+
     const asking = Number(askingStr);
     if (!Number.isFinite(asking) || asking <= 0) {
       setErr("Invalid asking price.");
@@ -430,6 +424,7 @@ export default function PropertyView() {
     await doAction("Evaluating…", async () => {
       const strategy = d?.strategy || "section8";
       const maybeEvalProperty = (api as any).evaluateProperty;
+
       if (typeof maybeEvalProperty === "function") {
         return await maybeEvalProperty(propertyId, strategy);
       }
@@ -509,11 +504,13 @@ export default function PropertyView() {
 
   const trustConfidence =
     trust?.confidence ?? trust?.confidence_label ?? trust?.band ?? null;
+
   const positives: any[] = Array.isArray(trust?.top_positive)
     ? trust.top_positive
     : Array.isArray(trust?.positives)
       ? trust.positives
       : [];
+
   const negatives: any[] = Array.isArray(trust?.top_negative)
     ? trust.top_negative
     : Array.isArray(trust?.negatives)
@@ -568,6 +565,7 @@ export default function PropertyView() {
             >
               enrich
             </button>
+
             <button
               onClick={explain}
               className="oh-btn cursor-pointer"
@@ -576,6 +574,7 @@ export default function PropertyView() {
             >
               explain
             </button>
+
             <button
               onClick={createDealQuick}
               className="oh-btn cursor-pointer"
@@ -615,6 +614,7 @@ export default function PropertyView() {
           <div className="text-xs uppercase tracking-widest text-white/45">
             House
           </div>
+
           <div className="mt-3">
             <PropertyImage
               address={p?.address}
@@ -638,8 +638,7 @@ export default function PropertyView() {
             <span className="text-white/80 font-semibold">
               {String(d?.strategy || "section8").toUpperCase()}
             </span>
-            {" · "}
-            Stage:{" "}
+            {" · "}Stage:{" "}
             <span className="text-white/80 font-semibold">
               {String(stage).toUpperCase()}
             </span>
@@ -659,6 +658,7 @@ export default function PropertyView() {
                 ) : (
                   <Badge>Checklist —</Badge>
                 )}
+
                 {insp?.latest ? (
                   <Badge tone={insp.latest.passed ? "good" : "warn"}>
                     Inspection {insp.latest.passed ? "PASSED" : "OPEN"} · fails{" "}
@@ -828,7 +828,7 @@ export default function PropertyView() {
       {err && (
         <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
           {noDeal
-            ? "No deal exists for this property yet. Click “+ deal” to create one, then run enrich/explain/evaluate."
+            ? 'No deal exists for this property yet. Click "+ deal" to create one, then run enrich/explain/evaluate.'
             : err}
         </div>
       )}
@@ -969,7 +969,7 @@ export default function PropertyView() {
             <Panel title="Guidance">
               <div className="text-sm text-white/70 leading-relaxed">
                 Use this tab when you’re tuning underwriting and rent
-                assumptions. The “Reality Loop” above tells you whether the
+                assumptions. The Reality Loop above tells you whether the
                 property is operationally ready.
               </div>
             </Panel>
@@ -1041,8 +1041,8 @@ export default function PropertyView() {
           <Panel title="Compliance / Checklist">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="text-sm text-white/70">
-                Update status/proof/notes. This should feed ops readiness and
-                trust.
+                Update status, proof, and notes. This should feed ops readiness
+                and trust.
               </div>
               <div className="flex gap-2">
                 <button
@@ -1139,9 +1139,9 @@ export default function PropertyView() {
                     </div>
                   </div>
                   <div className="text-xs text-white/55 mt-1">
-                    Start: {new Date(l.start_date).toLocaleDateString()}{" "}
+                    Start: {new Date(l.start_date).toLocaleDateString()}
                     {l.end_date
-                      ? `· End: ${new Date(l.end_date).toLocaleDateString()}`
+                      ? ` · End: ${new Date(l.end_date).toLocaleDateString()}`
                       : ""}
                   </div>
                   {l.notes && (
@@ -1177,8 +1177,8 @@ export default function PropertyView() {
                   <div className="text-xs text-white/55 mt-1">
                     {t.txn_date
                       ? new Date(t.txn_date).toLocaleDateString()
-                      : "—"}{" "}
-                    {t.memo ? `· ${t.memo}` : ""}
+                      : "—"}
+                    {t.memo ? ` · ${t.memo}` : ""}
                   </div>
                 </div>
               ))}
@@ -1209,8 +1209,8 @@ export default function PropertyView() {
                   </div>
                   <div className="text-xs text-white/55 mt-1">
                     Loan:{" "}
-                    {v2.loan_balance != null ? money(v2.loan_balance) : "—"}{" "}
-                    {v2.notes ? `· ${v2.notes}` : ""}
+                    {v2.loan_balance != null ? money(v2.loan_balance) : "—"}
+                    {v2.notes ? ` · ${v2.notes}` : ""}
                   </div>
                 </div>
               ))}

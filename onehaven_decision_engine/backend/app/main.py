@@ -45,7 +45,7 @@ from .routers.api_keys import router as api_keys_router
 # ✅ NEW: Jurisdiction Profiles (global defaults + org overrides)
 from .routers.jurisdiction_profiles import router as jurisdiction_profiles_router
 from .routers.policy_seed import router as policy_seed_router
-
+from .routers.policy_evidence import router as policy_evidence_router
 from .routers.policy import router as policy_router
 
 
@@ -149,7 +149,8 @@ def create_app() -> FastAPI:
     app.include_router(jurisdiction_profiles_router, prefix=API_PREFIX)
     app.include_router(policy_seed_router, prefix=API_PREFIX)
     app.include_router(policy_router, prefix=API_PREFIX)
-    
+    app.include_router(policy_evidence_router, prefix=API_PREFIX)
+
     return app
 
 

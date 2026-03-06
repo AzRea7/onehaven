@@ -11,6 +11,12 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.policy_models import PolicyAssertion, PolicySource, PolicySourceVersion
+from app.services.policy_catalog import (
+    PolicyCatalogItem,
+    catalog_for_market,
+    catalog_mi_authoritative,
+    catalog_municipalities,
+)
 
 
 def _norm(s: Optional[str]) -> Optional[str]:
@@ -42,8 +48,8 @@ def _sha256(b: bytes) -> str:
 
 
 def _safe_text_from_html(html: str, max_len: int = 20_000) -> str:
-    html = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
-    html = re.sub(r"(?is)<style.*?>.*?</style>", " ", html)
+    html = re.sub(r"(?is)<script.*?>.*?</script>", "", html)
+    html = re.sub(r"(?is)<style.*?>.*?</style>", "", html)
     text = re.sub(r"(?is)<[^>]+>", " ", html)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:max_len]
@@ -64,7 +70,7 @@ def _invalidate_verified_assertions_for_source(db: Session, source_id: int) -> N
     now = datetime.utcnow()
     for a in rows:
         a.review_status = "needs_recheck"
-        a.review_notes = (a.review_notes or "") + " | source_changed=content_sha256_changed"
+        a.review_notes = ((a.review_notes or "") + " | source_changed=content_sha256_changed").strip()
         a.stale_after = now
         a.reviewed_at = now
 
@@ -246,3 +252,123 @@ def collect_url(
         fetch_ok=fetch_error is None,
         fetch_error=fetch_error,
     )
+
+
+def collect_catalog_item(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    item: PolicyCatalogItem,
+    timeout_s: float = 20.0,
+) -> CollectResult:
+    return collect_url(
+        db,
+        org_id=org_id,
+        url=item.url,
+        state=item.state,
+        county=item.county,
+        city=item.city,
+        pha_name=item.pha_name,
+        program_type=item.program_type,
+        publisher=item.publisher,
+        title=item.title,
+        notes=item.notes,
+        timeout_s=timeout_s,
+    )
+
+
+def collect_catalog_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str = "MI",
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    timeout_s: float = 20.0,
+) -> list[CollectResult]:
+    items = catalog_for_market(state=state, county=county, city=city, focus=focus)
+    out: list[CollectResult] = []
+    for item in items:
+        out.append(
+            collect_catalog_item(
+                db,
+                org_id=org_id,
+                item=item,
+                timeout_s=timeout_s,
+            )
+        )
+    return out
+
+
+def collect_catalog_for_focus(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    focus: str = "se_mi_extended",
+    timeout_s: float = 20.0,
+) -> list[CollectResult]:
+    items = catalog_mi_authoritative(focus=focus)
+    out: list[CollectResult] = []
+    for item in items:
+        out.append(
+            collect_catalog_item(
+                db,
+                org_id=org_id,
+                item=item,
+                timeout_s=timeout_s,
+            )
+        )
+    return out
+
+
+def collect_catalog_all_municipalities(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    focus: str = "se_mi_extended",
+    timeout_s: float = 20.0,
+) -> dict:
+    items = catalog_mi_authoritative(focus=focus)
+    municipalities = catalog_municipalities(items)
+
+    results: list[dict] = []
+    total_sources = 0
+    ok_count = 0
+    failed_count = 0
+
+    for market in municipalities:
+        market_results = collect_catalog_for_market(
+            db,
+            org_id=org_id,
+            state=market["state"] or "MI",
+            county=market["county"],
+            city=market["city"],
+            focus=focus,
+            timeout_s=timeout_s,
+        )
+
+        total_sources += len(market_results)
+        ok_count += sum(1 for r in market_results if r.fetch_ok)
+        failed_count += sum(1 for r in market_results if not r.fetch_ok)
+
+        results.append(
+            {
+                "state": market["state"],
+                "county": market["county"],
+                "city": market["city"],
+                "source_count": len(market_results),
+                "ok_count": sum(1 for r in market_results if r.fetch_ok),
+                "failed_count": sum(1 for r in market_results if not r.fetch_ok),
+                "source_ids": [r.source.id for r in market_results],
+            }
+        )
+
+    return {
+        "focus": focus,
+        "municipality_count": len(municipalities),
+        "total_sources": total_sources,
+        "ok_count": ok_count,
+        "failed_count": failed_count,
+        "markets": results,
+    }

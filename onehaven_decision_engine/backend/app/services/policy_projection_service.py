@@ -127,8 +127,8 @@ def _pick_winners(
 
     families: dict[str, list[PolicyAssertion]] = {}
     for a in assertions:
-      fam = a.rule_family or _rule_family(a.rule_key)
-      families.setdefault(fam, []).append(a)
+        fam = a.rule_family or _rule_family(a.rule_key)
+        families.setdefault(fam, []).append(a)
 
     winners: list[PolicyAssertion] = []
     for _, group in families.items():
@@ -194,7 +194,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
         actions.append(
             {
                 "key": "obtain_certificate_before_occupancy",
-                "title": "Obtain required certificate / compliance approval before occupancy",
+                "title": "Obtain required certificate/compliance approval before occupancy",
                 "severity": "required",
             }
         )
@@ -233,6 +233,101 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
     return actions, blockers
 
 
+def _query_inherited_assertions(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    statuses: Optional[list[str]] = None,
+) -> list[PolicyAssertion]:
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = pha_name.strip() if pha_name else None
+
+    q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
+
+    if org_id is None:
+        q = q.filter(PolicyAssertion.org_id.is_(None))
+    else:
+        q = q.filter((PolicyAssertion.org_id == org_id) | (PolicyAssertion.org_id.is_(None)))
+
+    if statuses:
+        q = q.filter(PolicyAssertion.review_status.in_(statuses))
+
+    rows = q.all()
+
+    out: list[PolicyAssertion] = []
+    for a in rows:
+        if a.city is not None and cty != a.city:
+            continue
+        if a.county is not None and cnty != a.county:
+            continue
+        if a.pha_name is not None and pha != a.pha_name:
+            continue
+        out.append(a)
+
+    return out
+
+
+def _query_local_assertions_any_status(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> list[PolicyAssertion]:
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = pha_name.strip() if pha_name else None
+
+    q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
+
+    if org_id is None:
+        q = q.filter(PolicyAssertion.org_id.is_(None))
+    else:
+        q = q.filter((PolicyAssertion.org_id == org_id) | (PolicyAssertion.org_id.is_(None)))
+
+    if cnty is None:
+        q = q.filter(PolicyAssertion.county.is_(None))
+    else:
+        q = q.filter(PolicyAssertion.county == cnty)
+
+    if cty is None:
+        q = q.filter(PolicyAssertion.city.is_(None))
+    else:
+        q = q.filter(PolicyAssertion.city == cty)
+
+    if pha is not None:
+        q = q.filter((PolicyAssertion.pha_name == pha) | (PolicyAssertion.pha_name.is_(None)))
+
+    return q.all()
+
+
+def _compute_local_rule_statuses(local_assertions: list[PolicyAssertion]) -> dict[str, str]:
+    core = [
+        "rental_registration_required",
+        "inspection_program_exists",
+        "certificate_required_before_occupancy",
+    ]
+    out: dict[str, str] = {}
+    for rule_key in core:
+        rows = [a for a in local_assertions if a.rule_key == rule_key]
+        if any(a.review_status == "verified" for a in rows):
+            out[rule_key] = "yes"
+        elif rows:
+            out[rule_key] = "unknown"
+        else:
+            out[rule_key] = "unknown"
+    return out
+
+
 def build_policy_summary(
     db: Session,
     assertions: list[PolicyAssertion],
@@ -261,6 +356,18 @@ def build_policy_summary(
         city=city,
         pha_name=pha_name,
     )
+
+    local_all = _query_local_assertions_any_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+
+    local_verified = [a for a in local_all if a.review_status == "verified"]
+    local_rule_statuses = _compute_local_rule_statuses(local_all)
 
     verified_rules: list[dict[str, Any]] = []
     evidence_links: list[dict[str, Any]] = []
@@ -307,49 +414,15 @@ def build_policy_summary(
             "pha_name": pha_name,
         },
         "coverage": coverage,
-        "verified_rule_count": len(verified_rules),
+        "verified_rule_count_effective": len(verified_rules),
+        "verified_rule_count_local": len(local_verified),
+        "local_rule_statuses": local_rule_statuses,
         "verified_rules": verified_rules,
         "required_actions": actions,
         "blocking_items": blockers,
         "evidence_links": evidence_links,
         "source_ids": source_ids,
     }
-
-
-def _query_inherited_verified_assertions(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str],
-) -> list[PolicyAssertion]:
-    st = _norm_state(state)
-    cnty = _norm_lower(county)
-    cty = _norm_lower(city)
-    pha = pha_name.strip() if pha_name else None
-
-    q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
-    if org_id is None:
-        q = q.filter(PolicyAssertion.org_id.is_(None))
-    else:
-        q = q.filter((PolicyAssertion.org_id == org_id) | (PolicyAssertion.org_id.is_(None)))
-
-    q = q.filter(PolicyAssertion.review_status == "verified")
-    rows = q.all()
-
-    out: list[PolicyAssertion] = []
-    for a in rows:
-        if a.city is not None and cty != a.city:
-            continue
-        if a.county is not None and cnty != a.county:
-            continue
-        if a.pha_name is not None and pha != a.pha_name:
-            continue
-        out.append(a)
-
-    return out
 
 
 def project_verified_assertions_to_profile(
@@ -367,13 +440,14 @@ def project_verified_assertions_to_profile(
     cty = _norm_lower(city)
     pha = pha_name.strip() if pha_name else None
 
-    assertions = _query_inherited_verified_assertions(
+    assertions = _query_inherited_assertions(
         db,
         org_id=org_id,
         state=st,
         county=cnty,
         city=cty,
         pha_name=pha,
+        statuses=["verified"],
     )
 
     policy_json = build_policy_summary(
@@ -438,13 +512,14 @@ def build_property_compliance_brief(
     cty = _norm_lower(city)
     pha = pha_name.strip() if pha_name else None
 
-    assertions = _query_inherited_verified_assertions(
+    assertions = _query_inherited_assertions(
         db,
         org_id=org_id,
         state=st,
         county=cnty,
         city=cty,
         pha_name=pha,
+        statuses=["verified"],
     )
 
     summary = build_policy_summary(
@@ -457,7 +532,7 @@ def build_property_compliance_brief(
         pha_name=pha,
     )
 
-    keys = {r["rule_key"] for r in summary["verified_rules"]}
+    local_statuses = summary["local_rule_statuses"]
 
     market_parts = []
     if city:
@@ -468,42 +543,49 @@ def build_property_compliance_brief(
 
     compliance = {
         "market_label": ", ".join(market_parts),
-        "registration_required": "rental_registration_required" in keys,
-        "inspection_required": "inspection_program_exists" in keys,
-        "certificate_required_before_occupancy": "certificate_required_before_occupancy" in keys,
+        "registration_required": local_statuses.get("rental_registration_required", "unknown"),
+        "inspection_required": local_statuses.get("inspection_program_exists", "unknown"),
+        "certificate_required_before_occupancy": local_statuses.get("certificate_required_before_occupancy", "unknown"),
         "pha_specific_workflow": any(
-            k in keys
-            for k in {
+            r["rule_key"] in {
                 "pha_admin_plan_anchor",
                 "pha_administrator_changed",
                 "pha_landlord_packet_required",
                 "hap_contract_and_tenancy_addendum_required",
             }
+            for r in summary["verified_rules"]
         ),
         "coverage_confidence": summary["coverage"]["confidence_label"],
         "production_readiness": summary["coverage"]["production_readiness"],
     }
 
     explanation_parts = []
-    if compliance["registration_required"]:
+    if compliance["registration_required"] == "yes":
         explanation_parts.append("local rental registration appears required")
-    if compliance["inspection_required"]:
+    elif compliance["registration_required"] == "unknown":
+        explanation_parts.append("local rental registration is still under review")
+
+    if compliance["inspection_required"] == "yes":
         explanation_parts.append("a local inspection workflow appears required")
-    if compliance["certificate_required_before_occupancy"]:
-        explanation_parts.append(
-            "certificate/compliance approval appears required before normal lease-up"
-        )
+    elif compliance["inspection_required"] == "unknown":
+        explanation_parts.append("inspection requirements are still under review")
+
+    if compliance["certificate_required_before_occupancy"] == "yes":
+        explanation_parts.append("certificate/compliance approval appears required before normal lease-up")
+    elif compliance["certificate_required_before_occupancy"] == "unknown":
+        explanation_parts.append("certificate-before-occupancy requirements are still under review")
+
     if compliance["pha_specific_workflow"]:
-        explanation_parts.append("voucher/PHA workflow requirements may also apply")
+        explanation_parts.append("voucher / PHA workflow requirements may also apply")
 
     explanation = (
         f"This property resolves to {compliance['market_label']}. "
         + (
-            "Current verified rules indicate " + ", ".join(explanation_parts) + ". "
+            "Current verified and extracted rules indicate " + ", ".join(explanation_parts) + "."
             if explanation_parts
-            else "Verified market-specific compliance rules are still limited. "
+            else "Verified market-specific compliance rules are still limited."
         )
-        + f"Coverage confidence is {compliance['coverage_confidence']}; production readiness is {compliance['production_readiness']}."
+        + f" Coverage confidence is {compliance['coverage_confidence']}; production readiness is {compliance['production_readiness']}."
     )
 
     return {
@@ -521,4 +603,7 @@ def build_property_compliance_brief(
         "evidence_links": summary["evidence_links"],
         "coverage": summary["coverage"],
         "verified_rules": summary["verified_rules"],
+        "local_rule_statuses": summary["local_rule_statuses"],
+        "verified_rule_count_local": summary["verified_rule_count_local"],
+        "verified_rule_count_effective": summary["verified_rule_count_effective"],
     }
