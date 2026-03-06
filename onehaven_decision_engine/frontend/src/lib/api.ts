@@ -302,6 +302,13 @@ export const api = {
       signal: p.signal,
     }),
 
+  properties: (params?: Record<string, any>, signal?: AbortSignal) =>
+    request<any>(`/properties${qs(params || {})}`, {
+      method: "GET",
+      cacheTtlMs: 1_500,
+      signal,
+    }),
+
   propertyView: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/view`, { cacheTtlMs: 2_000, signal }),
 
@@ -317,6 +324,13 @@ export const api = {
       `/ops/property/${propertyId}/summary${qs({ cash_days: cashDays })}`,
       { cacheTtlMs: 800, signal },
     ),
+
+  opsRollups: (params?: Record<string, any>, signal?: AbortSignal) =>
+    request<any>(`/ops/rollups${qs(params || {})}`, {
+      method: "GET",
+      cacheTtlMs: 800,
+      signal,
+    }),
 
   opsGenerateRehabTasks: (propertyId: number) =>
     request<any>(`/ops/property/${propertyId}/generate_rehab_tasks`, {
@@ -351,7 +365,7 @@ export const api = {
     }),
 
   intakeDeal: (payload: any) =>
-    request<any>(`/intake/deal`, {
+    request<any>(`/deals/intake`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),

@@ -1,28 +1,49 @@
-# backend/app/routers/cash.py
 from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, desc
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Transaction, Lease
-from ..schemas import TransactionCreate, TransactionOut
 from ..domain.audit import emit_audit
-
-from ..services.ownership import must_get_property
+from ..models import Lease, Transaction
+from ..schemas import TransactionCreate, TransactionOut
 from ..services.events_facade import wf
-from ..services.property_state_machine import advance_stage_if_needed
+from ..services.ownership import must_get_property
+from ..services.property_state_machine import sync_property_state
+from ..services.stage_guard import require_stage
 
 router = APIRouter(prefix="/cash", tags=["cash"])
 
 
+def _txn_payload(row: Transaction) -> dict:
+    return {
+        "id": row.id,
+        "property_id": row.property_id,
+        "txn_date": row.txn_date.isoformat() if row.txn_date else None,
+        "txn_type": row.txn_type,
+        "amount": row.amount,
+        "memo": row.memo,
+    }
+
+
 @router.post("/transactions", response_model=TransactionOut)
-def create_txn(payload: TransactionCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+def create_txn(
+    payload: TransactionCreate,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=payload.property_id,
+        min_stage="lease",
+        action="create cash transaction",
+    )
 
     data = payload.model_dump()
     data["org_id"] = p.org_id
@@ -30,8 +51,7 @@ def create_txn(payload: TransactionCreate, db: Session = Depends(get_db), p=Depe
 
     row = Transaction(**data)
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     emit_audit(
         db,
@@ -41,7 +61,7 @@ def create_txn(payload: TransactionCreate, db: Session = Depends(get_db), p=Depe
         entity_type="Transaction",
         entity_id=str(row.id),
         before=None,
-        after=row.model_dump(),
+        after=_txn_payload(row),
     )
     wf(
         db,
@@ -52,9 +72,10 @@ def create_txn(payload: TransactionCreate, db: Session = Depends(get_db), p=Depe
         payload={"transaction_id": row.id, "txn_type": row.txn_type, "amount": row.amount},
     )
 
-    advance_stage_if_needed(db, org_id=p.org_id, property_id=row.property_id, suggested_stage="cash")
+    sync_property_state(db, org_id=p.org_id, property_id=row.property_id)
 
     db.commit()
+    db.refresh(row)
     return row
 
 
@@ -70,12 +91,19 @@ def list_txns(
 
     if property_id is not None:
         must_get_property(db, org_id=p.org_id, property_id=property_id)
+        require_stage(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            min_stage="lease",
+            action="view cash transactions",
+        )
         q = q.where(Transaction.property_id == property_id)
 
     if txn_type:
         q = q.where(Transaction.txn_type == txn_type)
 
-    q = q.order_by(desc(Transaction.txn_date)).limit(limit)
+    q = q.order_by(desc(Transaction.txn_date), desc(Transaction.id)).limit(limit)
     return list(db.scalars(q).all())
 
 
@@ -90,17 +118,25 @@ def update_txn(
     if not row:
         raise HTTPException(status_code=404, detail="transaction not found")
 
-    before = row.model_dump()
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=row.property_id,
+        min_stage="lease",
+        action="update cash transaction",
+    )
+
+    before = _txn_payload(row)
 
     must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
 
+    old_property_id = row.property_id
     data = payload.model_dump()
     for k, v in data.items():
         setattr(row, k, v)
 
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     emit_audit(
         db,
@@ -110,7 +146,7 @@ def update_txn(
         entity_type="Transaction",
         entity_id=str(row.id),
         before=before,
-        after=row.model_dump(),
+        after=_txn_payload(row),
     )
     wf(
         db,
@@ -120,15 +156,36 @@ def update_txn(
         property_id=row.property_id,
         payload={"transaction_id": row.id, "txn_type": row.txn_type, "amount": row.amount},
     )
+
+    sync_property_state(db, org_id=p.org_id, property_id=row.property_id)
+    if old_property_id != row.property_id:
+        sync_property_state(db, org_id=p.org_id, property_id=old_property_id)
+
     db.commit()
+    db.refresh(row)
     return row
 
 
 @router.delete("/transactions/{transaction_id}")
-def delete_txn(transaction_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+def delete_txn(
+    transaction_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     row = db.scalar(select(Transaction).where(Transaction.id == transaction_id, Transaction.org_id == p.org_id))
     if not row:
         raise HTTPException(status_code=404, detail="transaction not found")
+
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=row.property_id,
+        min_stage="lease",
+        action="delete cash transaction",
+    )
+
+    prop_id = row.property_id
+    before = _txn_payload(row)
 
     emit_audit(
         db,
@@ -137,7 +194,7 @@ def delete_txn(transaction_id: int, db: Session = Depends(get_db), p=Depends(get
         action="transaction.delete",
         entity_type="Transaction",
         entity_id=str(row.id),
-        before=row.model_dump(),
+        before=before,
         after=None,
     )
     wf(
@@ -150,6 +207,10 @@ def delete_txn(transaction_id: int, db: Session = Depends(get_db), p=Depends(get
     )
 
     db.delete(row)
+    db.flush()
+
+    sync_property_state(db, org_id=p.org_id, property_id=prop_id)
+
     db.commit()
     return {"ok": True}
 
@@ -162,6 +223,13 @@ def cash_rollup(
     p=Depends(get_principal),
 ):
     must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="lease",
+        action="view cash rollup",
+    )
 
     leases = db.scalars(
         select(Lease).where(Lease.org_id == p.org_id, Lease.property_id == property_id)

@@ -1,4 +1,3 @@
-# backend/app/routers/compliance.py
 from __future__ import annotations
 
 import json
@@ -34,10 +33,11 @@ from ..services.compliance_service import (
     run_hqs as run_hqs_service,
 )
 from ..services.policy_projection_service import build_property_compliance_brief
+from ..services.property_state_machine import sync_property_state
+from ..services.stage_guard import require_stage
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
-# Fallback template (used only if DB templates not present)
 _SECTION8_TEMPLATE: list[dict] = [
     {"category": "Electrical", "item_code": "GFCI", "description": "GFCI protection near sinks / wet areas", "severity": 3, "common_fail": True},
     {"category": "Electrical", "item_code": "OUTLET_COVERS", "description": "Missing/broken outlet/switch covers", "severity": 2, "common_fail": True},
@@ -52,6 +52,13 @@ _SECTION8_TEMPLATE: list[dict] = [
 ]
 
 _ALLOWED_STATUS = {"todo", "in_progress", "done", "blocked", "failed"}
+
+
+def _must_get_property(db: Session, *, org_id: int, property_id: int) -> Property:
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == org_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+    return prop
 
 
 def _applies(cond: dict | None, *, year_built: int | None, has_garage: bool, property_type: str) -> bool:
@@ -85,7 +92,12 @@ def _items_from_templates(prop: Property, tmpl_rows: list[ChecklistTemplateItem]
             except Exception:
                 cond = None
 
-        if not _applies(cond, year_built=prop.year_built, has_garage=prop.has_garage, property_type=prop.property_type):
+        if not _applies(
+            cond,
+            year_built=prop.year_built,
+            has_garage=prop.has_garage,
+            property_type=prop.property_type,
+        ):
             continue
 
         items.append(
@@ -180,14 +192,6 @@ def _summarize_status(items: list[PropertyChecklistItem]) -> dict:
 
 
 def _is_template_version_locked(db: Session, *, org_id: int, strategy: str, version: str) -> bool:
-    """
-    Phase 3 governance DoD:
-    - Once ANY inspections exist for an org, v1 templates become immutable.
-    - This prevents changing what “pass/fail” historically meant.
-
-    Rule:
-      lock if version == "v1" AND there exists Inspection(org_id=org_id)
-    """
     if (version or "").strip().lower() != "v1":
         return False
 
@@ -214,7 +218,6 @@ def list_templates(
 def upsert_template(payload: ChecklistTemplateItemUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
     require_owner(p)
 
-    # ✅ Phase 3 governance: freeze v1 once inspections exist.
     if _is_template_version_locked(db, org_id=p.org_id, strategy=payload.strategy, version=payload.version):
         raise HTTPException(
             status_code=409,
@@ -265,9 +268,14 @@ def generate_checklist(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="property not found")
+    prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="generate compliance checklist",
+    )
 
     tmpl = db.scalars(
         select(ChecklistTemplateItem)
@@ -304,13 +312,13 @@ def generate_checklist(
                 strategy=strategy,
                 version=version,
                 generated_at=out.generated_at,
-                items_json=json.dumps([i.model_dump() for i in items]),
+                items_json=json.dumps([i.model_dump() for i in items], default=str),
             )
             db.add(row)
             db.flush()
         else:
             row.generated_at = out.generated_at
-            row.items_json = json.dumps([i.model_dump() for i in items])
+            row.items_json = json.dumps([i.model_dump() for i in items], default=str)
             db.add(row)
             db.flush()
 
@@ -351,6 +359,18 @@ def generate_checklist(
                 existing.updated_at = now
                 db.add(existing)
 
+        db.add(
+            WorkflowEvent(
+                org_id=p.org_id,
+                property_id=property_id,
+                actor_user_id=p.user_id,
+                event_type="compliance.checklist_generated",
+                payload_json=json.dumps({"strategy": strategy, "version": version}),
+                created_at=now,
+            )
+        )
+
+        sync_property_state(db, org_id=p.org_id, property_id=property_id)
         db.commit()
         out.items = _merge_state(db, org_id=p.org_id, property_id=property_id, items=out.items)
 
@@ -359,9 +379,14 @@ def generate_checklist(
 
 @router.get("/checklist/{property_id}/latest", response_model=PropertyChecklistOut)
 def get_latest_checklist(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="property not found")
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view compliance checklist",
+    )
 
     row = db.scalar(
         select(PropertyChecklist)
@@ -394,9 +419,14 @@ def get_latest_checklist(property_id: int, db: Session = Depends(get_db), p=Depe
 
 @router.get("/status/{property_id}", response_model=dict)
 def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="property not found")
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view compliance status",
+    )
 
     items = db.scalars(
         select(PropertyChecklistItem).where(
@@ -438,8 +468,17 @@ def run_compliance_hqs(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="run compliance HQS",
+    )
+
     try:
-        return run_hqs_service(
+        result = run_hqs_service(
             db,
             org_id=p.org_id,
             actor_user_id=p.user_id,
@@ -447,6 +486,9 @@ def run_compliance_hqs(
             property_id=property_id,
             auto_create_rehab_tasks=auto_create_rehab_tasks,
         )
+        sync_property_state(db, org_id=p.org_id, property_id=property_id)
+        db.commit()
+        return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -460,9 +502,7 @@ def compliance_timeline(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="property not found")
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
 
     rows = db.scalars(
         select(WorkflowEvent)
@@ -493,9 +533,14 @@ def compliance_timeline(
 
 @router.get("/run_hqs/{property_id}", response_model=dict)
 def run_hqs_summary_only(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="property not found")
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view HQS summary",
+    )
 
     items = db.scalars(
         select(PropertyChecklistItem).where(
@@ -522,16 +567,14 @@ def run_hqs_summary_only(property_id: int, db: Session = Depends(get_db), p=Depe
         "fail_codes": fail_codes,
     }
 
+
 @router.get("/property/{property_id}/brief", response_model=dict)
 def property_compliance_brief(
     property_id: int,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="property not found")
-
+    prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
     return build_property_compliance_brief(
         db,
         org_id=None,
@@ -548,17 +591,30 @@ def create_tasks_from_policy(
     db: Session = Depends(get_db),
     p=Depends(require_owner),
 ):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="acquisition",
+        action="create rehab/compliance tasks from policy",
+    )
+
     try:
-        return generate_policy_tasks_for_property(
+        result = generate_policy_tasks_for_property(
             db,
             org_id=p.org_id,
             actor_user_id=p.user_id,
             property_id=property_id,
         )
+        sync_property_state(db, org_id=p.org_id, property_id=property_id)
+        db.commit()
+        return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"policy task generation failed: {e}")
+
 
 @router.patch("/checklist/{property_id}/items/{item_code}", response_model=ChecklistItemOut)
 def update_checklist_item(
@@ -568,9 +624,14 @@ def update_checklist_item(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="property not found")
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="update compliance checklist item",
+    )
 
     row = db.scalar(
         select(PropertyChecklistItem).where(
@@ -639,6 +700,7 @@ def update_checklist_item(
         )
     )
 
+    sync_property_state(db, org_id=p.org_id, property_id=property_id)
     db.commit()
     db.refresh(row)
 

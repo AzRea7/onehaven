@@ -1,8 +1,7 @@
-# onehaven_decision_engine/backend/app/domain/workflow/stages.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Iterable
+from typing import Optional
 
 # Canonical ordered stages (single source of truth)
 STAGES: list[str] = [
@@ -26,18 +25,19 @@ def clamp_stage(stage: Optional[str]) -> str:
     s = (stage or "").strip().lower()
     if s in _RANK:
         return s
-    # Default legacy fallbacks
-    if not s:
-        return "deal"
-    return "deal"
+    return "import"
 
 
 def stage_rank(stage: Optional[str]) -> int:
-    return _RANK.get(clamp_stage(stage), _RANK["deal"])
+    return _RANK.get(clamp_stage(stage), _RANK["import"])
 
 
 def stage_gte(a: Optional[str], b: str) -> bool:
     return stage_rank(a) >= stage_rank(b)
+
+
+def stage_lte(a: Optional[str], b: str) -> bool:
+    return stage_rank(a) <= stage_rank(b)
 
 
 def next_stage(stage: Optional[str]) -> Optional[str]:
@@ -46,6 +46,14 @@ def next_stage(stage: Optional[str]) -> Optional[str]:
     if i >= len(STAGES) - 1:
         return None
     return STAGES[i + 1]
+
+
+def prev_stage(stage: Optional[str]) -> Optional[str]:
+    s = clamp_stage(stage)
+    i = stage_rank(s)
+    if i <= 0:
+        return None
+    return STAGES[i - 1]
 
 
 @dataclass(frozen=True)
@@ -58,12 +66,14 @@ class GateResult:
 def gate_for_next_stage(
     *,
     current_stage: str,
+    has_property: bool,
     has_deal: bool,
     has_underwriting: bool,
     decision_is_buy: bool,
     has_acquisition_fields: bool,
     has_rehab_plan_tasks: bool,
     rehab_blockers_open: bool,
+    rehab_open_tasks: bool,
     compliance_passed: bool,
     tenant_selected: bool,
     lease_active: bool,
@@ -71,40 +81,46 @@ def gate_for_next_stage(
     has_valuation: bool,
 ) -> GateResult:
     """
-    Returns whether you can advance ONE step beyond current_stage.
-    This is the enforcement engine used by:
-      - /workflow/advance
-      - StageGuard in downstream endpoints
-      - UI 'primary CTA' enable/disable
+    Canonical one-step transition gate.
+    Used by /workflow/advance and stage guard helpers.
     """
 
     cur = clamp_stage(current_stage)
     nxt = next_stage(cur)
+
     if not nxt:
         return GateResult(ok=False, blocked_reason="Already at final stage.", allowed_next_stage=None)
 
-    # Gates for each stage transition:
     if nxt == "deal":
-        # leaving import -> deal: needs nothing besides existence
+        if not has_property:
+            return GateResult(ok=False, blocked_reason="Property must exist first.", allowed_next_stage=None)
         return GateResult(ok=True, allowed_next_stage=nxt)
 
     if nxt == "decision":
-        if not has_underwriting and not has_deal:
-            return GateResult(ok=False, blocked_reason="Run Deal Intake / create a Deal first.", allowed_next_stage=None)
+        if not has_deal:
+            return GateResult(ok=False, blocked_reason="Create a deal first.", allowed_next_stage=None)
         if not has_underwriting:
-            return GateResult(ok=False, blocked_reason="Run underwriting evaluation to produce a deal score.", allowed_next_stage=None)
+            return GateResult(ok=False, blocked_reason="Run underwriting evaluation first.", allowed_next_stage=None)
         return GateResult(ok=True, allowed_next_stage=nxt)
 
     if nxt == "acquisition":
         if not has_underwriting:
-            return GateResult(ok=False, blocked_reason="Decision requires underwriting score first.", allowed_next_stage=None)
+            return GateResult(ok=False, blocked_reason="Underwriting result is required first.", allowed_next_stage=None)
         if not decision_is_buy:
-            return GateResult(ok=False, blocked_reason="Decision is not BUY. Acquisition is locked.", allowed_next_stage=None)
+            return GateResult(
+                ok=False,
+                blocked_reason="Only BUY-approved deals can move to acquisition.",
+                allowed_next_stage=None,
+            )
         return GateResult(ok=True, allowed_next_stage=nxt)
 
     if nxt == "rehab_plan":
         if not has_acquisition_fields:
-            return GateResult(ok=False, blocked_reason="Add acquisition details (purchase/close/loan).", allowed_next_stage=None)
+            return GateResult(
+                ok=False,
+                blocked_reason="Add acquisition fields (purchase price / closing date / loan info).",
+                allowed_next_stage=None,
+            )
         return GateResult(ok=True, allowed_next_stage=nxt)
 
     if nxt == "rehab_exec":
@@ -114,31 +130,66 @@ def gate_for_next_stage(
 
     if nxt == "compliance":
         if rehab_blockers_open:
-            return GateResult(ok=False, blocked_reason="Rehab blockers still open. Clear blocking tasks first.", allowed_next_stage=None)
+            return GateResult(
+                ok=False,
+                blocked_reason="Rehab blockers are still open.",
+                allowed_next_stage=None,
+            )
+        if rehab_open_tasks:
+            return GateResult(
+                ok=False,
+                blocked_reason="Complete rehab execution tasks first.",
+                allowed_next_stage=None,
+            )
         return GateResult(ok=True, allowed_next_stage=nxt)
 
     if nxt == "tenant":
         if not compliance_passed:
-            return GateResult(ok=False, blocked_reason="Compliance not passed. Finish HQS checklist / inspection.", allowed_next_stage=None)
+            return GateResult(
+                ok=False,
+                blocked_reason="Compliance is not passed yet.",
+                allowed_next_stage=None,
+            )
         return GateResult(ok=True, allowed_next_stage=nxt)
 
     if nxt == "lease":
         if not tenant_selected:
-            return GateResult(ok=False, blocked_reason="Select/approve a tenant first.", allowed_next_stage=None)
+            return GateResult(
+                ok=False,
+                blocked_reason="Create/select a tenant first.",
+                allowed_next_stage=None,
+            )
         return GateResult(ok=True, allowed_next_stage=nxt)
 
     if nxt == "cash":
         if not lease_active:
-            return GateResult(ok=False, blocked_reason="No active lease. Activate a lease first.", allowed_next_stage=None)
+            return GateResult(
+                ok=False,
+                blocked_reason="Activate a lease first.",
+                allowed_next_stage=None,
+            )
         return GateResult(ok=True, allowed_next_stage=nxt)
 
     if nxt == "equity":
-        # equity is storytelling: valuation snapshot required
+        if not has_cash_txns:
+            return GateResult(
+                ok=False,
+                blocked_reason="Add cash transactions first.",
+                allowed_next_stage=None,
+            )
         if not has_valuation:
-            return GateResult(ok=False, blocked_reason="Add a valuation snapshot to unlock equity tracking.", allowed_next_stage=None)
+            return GateResult(
+                ok=False,
+                blocked_reason="Add a valuation snapshot first.",
+                allowed_next_stage=None,
+            )
         return GateResult(ok=True, allowed_next_stage=nxt)
 
-    return GateResult(ok=False, blocked_reason=f"Unknown gate transition: {cur} -> {nxt}", allowed_next_stage=None)
+    return GateResult(
+        ok=False,
+        blocked_reason=f"Unknown gate transition: {cur} -> {nxt}",
+        allowed_next_stage=None,
+    )
 
 
 def distinct_stages() -> list[str]:

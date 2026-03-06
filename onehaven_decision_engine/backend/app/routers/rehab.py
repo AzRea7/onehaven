@@ -1,18 +1,19 @@
-# backend/app/routers/rehab.py
 from __future__ import annotations
 
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
-from sqlalchemy import select, desc
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Property, RehabTask
-from ..schemas import RehabTaskCreate, RehabTaskOut
 from ..domain.audit import emit_audit
 from ..domain.events import emit_workflow_event
+from ..models import Property, RehabTask
+from ..schemas import RehabTaskCreate, RehabTaskOut
+from ..services.property_state_machine import sync_property_state
+from ..services.stage_guard import require_stage
 
 router = APIRouter(prefix="/rehab", tags=["rehab"])
 
@@ -24,9 +25,31 @@ def _get_property_or_404(db: Session, *, org_id: int, property_id: int) -> Prope
     return prop
 
 
+def _task_payload(row: RehabTask) -> dict:
+    return {
+        "id": row.id,
+        "property_id": row.property_id,
+        "title": row.title,
+        "category": row.category,
+        "inspection_relevant": row.inspection_relevant,
+        "status": row.status,
+        "cost_estimate": row.cost_estimate,
+        "vendor": row.vendor,
+        "deadline": row.deadline.isoformat() if row.deadline else None,
+        "notes": row.notes,
+    }
+
+
 @router.post("/tasks", response_model=RehabTaskOut)
 def create_task(payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     _get_property_or_404(db, org_id=p.org_id, property_id=payload.property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=payload.property_id,
+        min_stage="acquisition",
+        action="create rehab tasks",
+    )
 
     row = RehabTask(
         org_id=p.org_id,
@@ -52,7 +75,7 @@ def create_task(payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depen
         entity_type="RehabTask",
         entity_id=str(row.id),
         before=None,
-        after=row.model_dump(),
+        after=_task_payload(row),
     )
     emit_workflow_event(
         db,
@@ -63,6 +86,7 @@ def create_task(payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depen
         payload={"task_id": int(row.id), "property_id": int(row.property_id), "status": row.status},
     )
 
+    sync_property_state(db, org_id=p.org_id, property_id=row.property_id)
     db.commit()
     db.refresh(row)
     return row
@@ -71,6 +95,14 @@ def create_task(payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depen
 @router.get("/tasks", response_model=list[RehabTaskOut])
 def list_tasks(property_id: int = Query(...), db: Session = Depends(get_db), p=Depends(get_principal)):
     _get_property_or_404(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="acquisition",
+        action="view rehab tasks",
+    )
+
     rows = db.scalars(
         select(RehabTask)
         .where(RehabTask.org_id == p.org_id, RehabTask.property_id == property_id)
@@ -85,11 +117,26 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
     if not row:
         raise HTTPException(status_code=404, detail="rehab task not found")
 
-    before = row.model_dump()
-    old_status = getattr(row, "status", None)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=row.property_id,
+        min_stage="acquisition",
+        action="update rehab tasks",
+    )
+
+    before = _task_payload(row)
+    old_status = (row.status or "").lower()
 
     if payload.property_id != row.property_id:
         _get_property_or_404(db, org_id=p.org_id, property_id=payload.property_id)
+        require_stage(
+            db,
+            org_id=p.org_id,
+            property_id=payload.property_id,
+            min_stage="acquisition",
+            action="move rehab task to another property",
+        )
         row.property_id = payload.property_id
 
     row.title = payload.title
@@ -112,17 +159,22 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
         entity_type="RehabTask",
         entity_id=str(row.id),
         before=before,
-        after=row.model_dump(),
+        after=_task_payload(row),
     )
 
-    if old_status != row.status:
+    if old_status != (row.status or "").lower():
         emit_workflow_event(
             db,
             org_id=p.org_id,
             actor_user_id=p.user_id,
             event_type="rehab_task_status_changed",
             property_id=row.property_id,
-            payload={"task_id": int(row.id), "property_id": int(row.property_id), "from": old_status, "to": row.status},
+            payload={
+                "task_id": int(row.id),
+                "property_id": int(row.property_id),
+                "from": old_status,
+                "to": row.status,
+            },
         )
     else:
         emit_workflow_event(
@@ -134,6 +186,7 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
             payload={"task_id": int(row.id), "property_id": int(row.property_id)},
         )
 
+    sync_property_state(db, org_id=p.org_id, property_id=row.property_id)
     db.commit()
     db.refresh(row)
     return row
@@ -145,7 +198,15 @@ def delete_task(task_id: int, db: Session = Depends(get_db), p=Depends(get_princ
     if not row:
         raise HTTPException(status_code=404, detail="rehab task not found")
 
-    before = row.model_dump()
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=row.property_id,
+        min_stage="acquisition",
+        action="delete rehab tasks",
+    )
+
+    before = _task_payload(row)
     prop_id = int(row.property_id)
 
     db.delete(row)
@@ -170,5 +231,6 @@ def delete_task(task_id: int, db: Session = Depends(get_db), p=Depends(get_princ
         payload={"task_id": int(task_id), "property_id": prop_id},
     )
 
+    sync_property_state(db, org_id=p.org_id, property_id=prop_id)
     db.commit()
     return {"ok": True}

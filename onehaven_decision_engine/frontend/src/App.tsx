@@ -1,4 +1,3 @@
-// frontend/src/App.tsx
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import Shell from "./components/Shell";
@@ -12,6 +11,7 @@ import Constitution from "./pages/Constitution";
 import DealIntake from "./pages/DealIntake";
 import Jurisdictions from "./pages/Jurisdictions";
 import JurisdictionProfiles from "./pages/JurisdictionProfiles";
+import PipelineDrilldown from "./pages/drilldowns/PipelineDrilldown";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -70,7 +70,15 @@ export default function App() {
           }
         />
 
-        {/* Properties list page */}
+        <Route
+          path="/pipeline"
+          element={
+            <Protected>
+              <PipelineDrilldown />
+            </Protected>
+          }
+        />
+
         <Route
           path="/properties"
           element={
@@ -80,7 +88,6 @@ export default function App() {
           }
         />
 
-        {/* Property detail page */}
         <Route
           path="/properties/:id"
           element={
@@ -90,7 +97,6 @@ export default function App() {
           }
         />
 
-        {/* Legacy redirect */}
         <Route
           path="/property/:id"
           element={<Navigate to="/properties/:id" replace />}
@@ -123,7 +129,6 @@ export default function App() {
           }
         />
 
-        {/* Fallback */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Shell>

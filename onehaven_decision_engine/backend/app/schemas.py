@@ -549,15 +549,15 @@ class JurisdictionProfileResolveOut(BaseModel):
 # --------------------
 WorkflowStage = Literal[
     "import",
-    "deal_analysis",
+    "deal",
     "decision",
     "acquisition",
-    "rehab_planning",
-    "rehab_execution",
+    "rehab_plan",
+    "rehab_exec",
     "compliance",
-    "tenant_placement",
-    "lease_active",
-    "cashflow",
+    "tenant",
+    "lease",
+    "cash",
     "equity",
 ]
 
@@ -572,7 +572,22 @@ class WorkflowStateOut(BaseModel):
     next_actions: List[str] = Field(default_factory=list)
 
     updated_at: Optional[str] = None
-    stage_order: List[str] = Field(default_factory=list)
+    last_transitioned_at: Optional[str] = None
+    stage_order: List[str] = Field(
+        default_factory=lambda: [
+            "import",
+            "deal",
+            "decision",
+            "acquisition",
+            "rehab_plan",
+            "rehab_exec",
+            "compliance",
+            "tenant",
+            "lease",
+            "cash",
+            "equity",
+        ]
+    )
 
 
 class WorkflowDecisionIn(BaseModel):
@@ -968,6 +983,7 @@ class PropertyStateOut(BaseModel):
     constraints_json: Optional[str] = None
     outstanding_tasks_json: Optional[str] = None
     updated_at: datetime
+    last_transitioned_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 

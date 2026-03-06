@@ -1,30 +1,58 @@
-# backend/app/routers/tenants.py
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Tenant, Lease
-from ..schemas import TenantCreate, TenantOut, LeaseCreate, LeaseOut
 from ..domain.audit import emit_audit
-
-from ..services.ownership import must_get_property, must_get_tenant, must_get_lease
+from ..models import Lease, Tenant
+from ..schemas import LeaseCreate, LeaseOut, TenantCreate, TenantOut
 from ..services.events_facade import wf
-from ..services.property_state_machine import advance_stage_if_needed
 from ..services.lease_rules import ensure_no_lease_overlap
+from ..services.ownership import must_get_lease, must_get_property, must_get_tenant
+from ..services.property_state_machine import sync_property_state
+from ..services.stage_guard import require_stage
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 
+def _tenant_payload(row: Tenant) -> dict:
+    return {
+        "id": row.id,
+        "full_name": row.full_name,
+        "phone": row.phone,
+        "email": row.email,
+        "voucher_status": row.voucher_status,
+        "notes": row.notes,
+    }
+
+
+def _lease_payload(row: Lease) -> dict:
+    return {
+        "id": row.id,
+        "property_id": row.property_id,
+        "tenant_id": row.tenant_id,
+        "start_date": row.start_date.isoformat() if row.start_date else None,
+        "end_date": row.end_date.isoformat() if row.end_date else None,
+        "total_rent": row.total_rent,
+        "tenant_portion": row.tenant_portion,
+        "housing_authority_portion": row.housing_authority_portion,
+        "hap_contract_status": row.hap_contract_status,
+        "notes": row.notes,
+    }
+
+
 @router.post("", response_model=TenantOut)
-def create_tenant(payload: TenantCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+def create_tenant(
+    payload: TenantCreate,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     row = Tenant(**payload.model_dump(), org_id=p.org_id)
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     emit_audit(
         db,
@@ -34,11 +62,18 @@ def create_tenant(payload: TenantCreate, db: Session = Depends(get_db), p=Depend
         entity_type="Tenant",
         entity_id=str(row.id),
         before=None,
-        after=row.model_dump(),
+        after=_tenant_payload(row),
     )
-    wf(db, org_id=p.org_id, actor_user_id=p.user_id, event_type="tenant.created", payload={"tenant_id": row.id})
-    db.commit()
+    wf(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="tenant.created",
+        payload={"tenant_id": row.id},
+    )
 
+    db.commit()
+    db.refresh(row)
     return row
 
 
@@ -60,14 +95,13 @@ def update_tenant(
     p=Depends(get_principal),
 ):
     row = must_get_tenant(db, org_id=p.org_id, tenant_id=tenant_id)
-    before = row.model_dump()
+    before = _tenant_payload(row)
 
     for k, v in payload.model_dump().items():
         setattr(row, k, v)
 
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     emit_audit(
         db,
@@ -77,16 +111,27 @@ def update_tenant(
         entity_type="Tenant",
         entity_id=str(row.id),
         before=before,
-        after=row.model_dump(),
+        after=_tenant_payload(row),
     )
-    wf(db, org_id=p.org_id, actor_user_id=p.user_id, event_type="tenant.updated", payload={"tenant_id": row.id})
-    db.commit()
+    wf(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="tenant.updated",
+        payload={"tenant_id": row.id},
+    )
 
+    db.commit()
+    db.refresh(row)
     return row
 
 
 @router.delete("/{tenant_id}")
-def delete_tenant(tenant_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+def delete_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     row = must_get_tenant(db, org_id=p.org_id, tenant_id=tenant_id)
 
     emit_audit(
@@ -96,10 +141,16 @@ def delete_tenant(tenant_id: int, db: Session = Depends(get_db), p=Depends(get_p
         action="tenant.delete",
         entity_type="Tenant",
         entity_id=str(row.id),
-        before=row.model_dump(),
+        before=_tenant_payload(row),
         after=None,
     )
-    wf(db, org_id=p.org_id, actor_user_id=p.user_id, event_type="tenant.deleted", payload={"tenant_id": row.id})
+    wf(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="tenant.deleted",
+        payload={"tenant_id": row.id},
+    )
 
     db.delete(row)
     db.commit()
@@ -107,9 +158,21 @@ def delete_tenant(tenant_id: int, db: Session = Depends(get_db), p=Depends(get_p
 
 
 @router.post("/leases", response_model=LeaseOut)
-def create_lease(payload: LeaseCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    _ = must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
-    _ = must_get_tenant(db, org_id=p.org_id, tenant_id=payload.tenant_id)
+def create_lease(
+    payload: LeaseCreate,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
+    must_get_tenant(db, org_id=p.org_id, tenant_id=payload.tenant_id)
+
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=payload.property_id,
+        min_stage="tenant",
+        action="create lease",
+    )
 
     ensure_no_lease_overlap(
         db,
@@ -122,8 +185,7 @@ def create_lease(payload: LeaseCreate, db: Session = Depends(get_db), p=Depends(
 
     row = Lease(**payload.model_dump(), org_id=p.org_id)
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     emit_audit(
         db,
@@ -133,7 +195,7 @@ def create_lease(payload: LeaseCreate, db: Session = Depends(get_db), p=Depends(
         entity_type="Lease",
         entity_id=str(row.id),
         before=None,
-        after=row.model_dump(),
+        after=_lease_payload(row),
     )
 
     wf(
@@ -145,9 +207,10 @@ def create_lease(payload: LeaseCreate, db: Session = Depends(get_db), p=Depends(
         payload={"lease_id": row.id, "tenant_id": payload.tenant_id},
     )
 
-    advance_stage_if_needed(db, org_id=p.org_id, property_id=payload.property_id, suggested_stage="tenant")
+    sync_property_state(db, org_id=p.org_id, property_id=payload.property_id)
 
     db.commit()
+    db.refresh(row)
     return row
 
 
@@ -163,6 +226,13 @@ def list_leases(
 
     if property_id is not None:
         must_get_property(db, org_id=p.org_id, property_id=property_id)
+        require_stage(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            min_stage="tenant",
+            action="view leases",
+        )
         q = q.where(Lease.property_id == property_id)
 
     if tenant_id is not None:
@@ -181,7 +251,15 @@ def update_lease(
     p=Depends(get_principal),
 ):
     row = must_get_lease(db, org_id=p.org_id, lease_id=lease_id)
-    before = row.model_dump()
+    before = _lease_payload(row)
+
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=row.property_id,
+        min_stage="tenant",
+        action="update lease",
+    )
 
     must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
     must_get_tenant(db, org_id=p.org_id, tenant_id=payload.tenant_id)
@@ -195,12 +273,13 @@ def update_lease(
         exclude_lease_id=row.id,
     )
 
+    old_property_id = row.property_id
+
     for k, v in payload.model_dump().items():
         setattr(row, k, v)
 
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     emit_audit(
         db,
@@ -210,7 +289,7 @@ def update_lease(
         entity_type="Lease",
         entity_id=str(row.id),
         before=before,
-        after=row.model_dump(),
+        after=_lease_payload(row),
     )
     wf(
         db,
@@ -220,13 +299,33 @@ def update_lease(
         property_id=row.property_id,
         payload={"lease_id": row.id, "tenant_id": row.tenant_id},
     )
+
+    sync_property_state(db, org_id=p.org_id, property_id=row.property_id)
+    if old_property_id != row.property_id:
+        sync_property_state(db, org_id=p.org_id, property_id=old_property_id)
+
     db.commit()
+    db.refresh(row)
     return row
 
 
 @router.delete("/leases/{lease_id}")
-def delete_lease(lease_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+def delete_lease(
+    lease_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     row = must_get_lease(db, org_id=p.org_id, lease_id=lease_id)
+
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=row.property_id,
+        min_stage="tenant",
+        action="delete lease",
+    )
+
+    prop_id = row.property_id
 
     emit_audit(
         db,
@@ -235,7 +334,7 @@ def delete_lease(lease_id: int, db: Session = Depends(get_db), p=Depends(get_pri
         action="lease.delete",
         entity_type="Lease",
         entity_id=str(row.id),
-        before=row.model_dump(),
+        before=_lease_payload(row),
         after=None,
     )
     wf(
@@ -248,5 +347,9 @@ def delete_lease(lease_id: int, db: Session = Depends(get_db), p=Depends(get_pri
     )
 
     db.delete(row)
+    db.flush()
+
+    sync_property_state(db, org_id=p.org_id, property_id=prop_id)
+
     db.commit()
     return {"ok": True}

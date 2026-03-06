@@ -1,4 +1,3 @@
-// frontend/src/pages/DealIntake.tsx
 import React from "react";
 import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
@@ -16,8 +15,8 @@ export default function DealIntake() {
     year_built: "",
     has_garage: false,
     property_type: "single_family",
-    asking_price: 120000,
-    rehab_estimate: 0,
+    purchase_price: 120000,
+    est_rehab: 0,
     strategy: "section8",
     financing_type: "dscr",
     interest_rate: 0.07,
@@ -29,7 +28,7 @@ export default function DealIntake() {
   const [err, setErr] = React.useState<string | null>(null);
   const [ok, setOk] = React.useState<any>(null);
 
-  function set<K extends keyof typeof form>(k: K, v: any) {
+  function set<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
     setForm((s) => ({ ...s, [k]: v }));
   }
 
@@ -37,30 +36,39 @@ export default function DealIntake() {
     setBusy(true);
     setErr(null);
     setOk(null);
+
     try {
-      const payload: any = {
-        ...form,
-        square_feet: form.square_feet ? Number(form.square_feet) : null,
-        year_built: form.year_built ? Number(form.year_built) : null,
+      const payload = {
+        address: form.address.trim(),
+        city: form.city.trim(),
+        state: form.state.trim() || "MI",
+        zip: form.zip.trim(),
         bedrooms: Number(form.bedrooms),
         bathrooms: Number(form.bathrooms),
-        asking_price: Number(form.asking_price),
-        rehab_estimate: Number(form.rehab_estimate),
+        square_feet: form.square_feet === "" ? null : Number(form.square_feet),
+        year_built: form.year_built === "" ? null : Number(form.year_built),
+        has_garage: Boolean(form.has_garage),
+        property_type: form.property_type,
+        purchase_price: Number(form.purchase_price),
+        est_rehab: Number(form.est_rehab),
+        strategy: form.strategy,
+        financing_type: form.financing_type,
         interest_rate: Number(form.interest_rate),
         term_years: Number(form.term_years),
         down_payment_pct: Number(form.down_payment_pct),
       };
+
       const out = await api.intakeDeal(payload);
       setOk(out);
     } catch (e: any) {
-      setErr(String(e.message || e));
+      setErr(String(e?.message || e));
     } finally {
       setBusy(false);
     }
   }
 
-  const createdDealId = ok?.id ?? ok?.deal_id ?? null;
-  const createdPropertyId = ok?.property_id ?? ok?.property?.id ?? null;
+  const createdDealId = ok?.deal?.id ?? ok?.deal_id ?? null;
+  const createdPropertyId = ok?.property?.id ?? ok?.property_id ?? null;
 
   return (
     <div className="space-y-6">
@@ -78,13 +86,15 @@ export default function DealIntake() {
             ["State", "state", "text"],
             ["ZIP", "zip", "text"],
           ].map(([label, key, type]) => (
-            <label key={key as string} className="space-y-1">
+            <label key={key} className="space-y-1">
               <div className="text-sm text-white/70">{label}</div>
               <input
                 className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
-                type={type as string}
-                value={(form as any)[key as any]}
-                onChange={(e) => set(key as any, e.target.value)}
+                type={type}
+                value={(form as any)[key]}
+                onChange={(e) =>
+                  set(key as keyof typeof form, e.target.value as any)
+                }
               />
             </label>
           ))}
@@ -95,7 +105,7 @@ export default function DealIntake() {
               className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2"
               type="number"
               value={form.bedrooms}
-              onChange={(e) => set("bedrooms", e.target.value)}
+              onChange={(e) => set("bedrooms", Number(e.target.value))}
             />
           </label>
 
@@ -106,27 +116,27 @@ export default function DealIntake() {
               type="number"
               step="0.5"
               value={form.bathrooms}
-              onChange={(e) => set("bathrooms", e.target.value)}
+              onChange={(e) => set("bathrooms", Number(e.target.value))}
             />
           </label>
 
           <label className="space-y-1">
-            <div className="text-sm text-white/70">Asking Price</div>
+            <div className="text-sm text-white/70">Purchase Price</div>
             <input
               className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2"
               type="number"
-              value={form.asking_price}
-              onChange={(e) => set("asking_price", e.target.value)}
+              value={form.purchase_price}
+              onChange={(e) => set("purchase_price", Number(e.target.value))}
             />
           </label>
 
           <label className="space-y-1">
-            <div className="text-sm text-white/70">Rehab Estimate</div>
+            <div className="text-sm text-white/70">Estimated Rehab</div>
             <input
               className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2"
               type="number"
-              value={form.rehab_estimate}
-              onChange={(e) => set("rehab_estimate", e.target.value)}
+              value={form.est_rehab}
+              onChange={(e) => set("est_rehab", Number(e.target.value))}
             />
           </label>
 
@@ -151,7 +161,7 @@ export default function DealIntake() {
           </label>
         </div>
 
-        <div className="mt-5 flex items-center gap-3">
+        <div className="mt-5 flex items-center gap-3 flex-wrap">
           <button
             onClick={submit}
             disabled={busy}

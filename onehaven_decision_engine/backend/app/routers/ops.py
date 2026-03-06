@@ -1,4 +1,3 @@
-# backend/app/routers/ops.py
 from __future__ import annotations
 
 import json
@@ -7,27 +6,26 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, desc, func
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
 from ..db import get_db
 from ..models import (
-    Property,
-    PropertyState,
-    UnderwritingResult,
-    PropertyChecklistItem,
+    Deal,
     Inspection,
     InspectionItem,
-    RehabTask,
     Lease,
+    Property,
+    PropertyChecklistItem,
+    PropertyState,
+    RehabTask,
     Transaction,
+    UnderwritingResult,
     Valuation,
     WorkflowEvent,
-    Deal,
 )
-from ..services.property_state_machine import compute_and_persist_stage
-
+from ..services.property_state_machine import compute_and_persist_stage, get_state_payload
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 
@@ -45,13 +43,9 @@ def _loads(s: Optional[str], default: Any):
         return default
 
 
-def _stage_label(stage: str) -> str:
-    return stage or "deal"
-
-
 def _txn_bucket(txn_type: str) -> str:
     t = (txn_type or "").lower().strip()
-    if t in {"income"}:
+    if t in {"income", "rent"}:
         return "income"
     if t in {"expense"}:
         return "expense"
@@ -97,19 +91,22 @@ def _checklist_progress(db: Session, *, org_id: int, property_id: int) -> Checkl
     return ChecklistProgress(total=total, todo=todo, in_progress=inprog, blocked=blocked, done=done)
 
 
-def _latest_inspection(db: Session, *, property_id: int) -> Optional[Inspection]:
+def _latest_inspection(db: Session, *, org_id: int, property_id: int) -> Optional[Inspection]:
     return db.scalar(
-        select(Inspection).where(Inspection.property_id == property_id).order_by(desc(Inspection.inspection_date), desc(Inspection.id))
+        select(Inspection)
+        .where(Inspection.org_id == org_id, Inspection.property_id == property_id)
+        .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
     )
 
 
-def _open_failed_inspection_items(db: Session, *, property_id: int) -> int:
+def _open_failed_inspection_items(db: Session, *, org_id: int, property_id: int) -> int:
     return int(
         db.scalar(
             select(func.count(InspectionItem.id))
             .select_from(InspectionItem)
             .join(Inspection, Inspection.id == InspectionItem.inspection_id)
             .where(
+                Inspection.org_id == org_id,
                 Inspection.property_id == property_id,
                 InspectionItem.failed.is_(True),
                 InspectionItem.resolved_at.is_(None),
@@ -120,21 +117,22 @@ def _open_failed_inspection_items(db: Session, *, property_id: int) -> int:
 
 
 def _active_lease(db: Session, *, org_id: int, property_id: int) -> Optional[Lease]:
-    now = _now_utc().date()
+    now = _now_utc()
+    far_future = now + timedelta(days=3650)
     return db.scalar(
         select(Lease)
         .where(
             Lease.org_id == org_id,
             Lease.property_id == property_id,
             Lease.start_date <= now,
-            func.coalesce(Lease.end_date, now + timedelta(days=3650)) >= now,
+            func.coalesce(Lease.end_date, far_future) >= now,
         )
         .order_by(desc(Lease.start_date), desc(Lease.id))
     )
 
 
 def _cash_rollup(db: Session, *, org_id: int, property_id: int, days: int) -> dict[str, float]:
-    since = _now_utc().date() - timedelta(days=days)
+    since = _now_utc() - timedelta(days=days)
     txns = db.scalars(
         select(Transaction).where(
             Transaction.org_id == org_id,
@@ -193,46 +191,6 @@ def _rehab_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, A
     }
 
 
-def _next_actions(
-    *,
-    stage: str,
-    checklist: ChecklistProgress,
-    open_failed_items: int,
-    latest_insp: Optional[Inspection],
-    rehab: dict[str, Any],
-    active_lease: Optional[Lease],
-    latest_val: Optional[Valuation],
-) -> list[str]:
-    actions: list[str] = []
-
-    if checklist.total == 0:
-        actions.append("Generate compliance checklist (Phase 3 start).")
-    else:
-        if checklist.done < checklist.total:
-            actions.append(f"Complete checklist items ({checklist.done}/{checklist.total} done).")
-
-    if latest_insp is None:
-        actions.append("Create first inspection record (or schedule inspection).")
-    else:
-        if not bool(latest_insp.passed):
-            actions.append("Resolve failed inspection items, then reinspect.")
-        if open_failed_items > 0:
-            actions.append(f"Resolve {open_failed_items} unresolved failed inspection items.")
-
-    if rehab.get("total", 0) == 0 and (checklist.total > 0 and checklist.done < checklist.total):
-        actions.append("Generate rehab tasks from checklist gaps.")
-    if rehab.get("todo", 0) + rehab.get("in_progress", 0) + rehab.get("blocked", 0) > 0:
-        actions.append("Finish rehab tasks blocking readiness.")
-
-    if active_lease is None and stage in {"compliance", "tenant", "cash", "equity"}:
-        actions.append("Create lease once inspection passes + unit is ready.")
-
-    if latest_val is None and stage in {"cash", "equity"}:
-        actions.append("Add a valuation snapshot to unlock equity storytelling.")
-
-    return actions[:10]
-
-
 @router.get("/property/{property_id}/summary")
 def property_ops_summary(
     property_id: int,
@@ -245,11 +203,12 @@ def property_ops_summary(
         raise HTTPException(status_code=404, detail="property not found")
 
     stage_row: PropertyState = compute_and_persist_stage(db, org_id=p.org_id, property=prop)
-    stage = _stage_label(stage_row.current_stage)
+    state_payload = get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=True)
+    stage = state_payload.get("current_stage") or stage_row.current_stage or "deal"
 
     checklist = _checklist_progress(db, org_id=p.org_id, property_id=property_id)
-    latest_insp = _latest_inspection(db, property_id=property_id)
-    open_failed_items = _open_failed_inspection_items(db, property_id=property_id)
+    latest_insp = _latest_inspection(db, org_id=p.org_id, property_id=property_id)
+    open_failed_items = _open_failed_inspection_items(db, org_id=p.org_id, property_id=property_id)
     rehab = _rehab_summary(db, org_id=p.org_id, property_id=property_id)
     active_lease = _active_lease(db, org_id=p.org_id, property_id=property_id)
 
@@ -284,16 +243,6 @@ def property_ops_summary(
             "created_at": uw.created_at.isoformat() if uw.created_at else None,
         }
 
-    next_actions = _next_actions(
-        stage=stage,
-        checklist=checklist,
-        open_failed_items=open_failed_items,
-        latest_insp=latest_insp,
-        rehab=rehab,
-        active_lease=active_lease,
-        latest_val=val,
-    )
-
     return {
         "property": {
             "id": prop.id,
@@ -301,10 +250,12 @@ def property_ops_summary(
             "city": prop.city,
             "state": prop.state,
             "zip": prop.zip,
+            "county": getattr(prop, "county", None),
             "bedrooms": prop.bedrooms,
             "bathrooms": prop.bathrooms,
             "square_feet": prop.square_feet,
             "year_built": prop.year_built,
+            "is_red_zone": getattr(prop, "is_red_zone", False),
         },
         "stage": stage,
         "stage_updated_at": stage_row.updated_at.isoformat() if stage_row.updated_at else None,
@@ -334,7 +285,7 @@ def property_ops_summary(
         "lease": (
             {
                 "id": active_lease.id,
-                "start_date": active_lease.start_date.isoformat(),
+                "start_date": active_lease.start_date.isoformat() if active_lease.start_date else None,
                 "end_date": active_lease.end_date.isoformat() if active_lease.end_date else None,
                 "total_rent": float(active_lease.total_rent),
                 "tenant_portion": float(active_lease.tenant_portion or 0.0)
@@ -353,7 +304,62 @@ def property_ops_summary(
         },
         "equity": equity,
         "underwriting": underwriting,
-        "next_actions": next_actions,
+        "constraints": state_payload.get("constraints", {}),
+        "outstanding_tasks": state_payload.get("outstanding_tasks", {}),
+        "next_actions": state_payload.get("next_actions", []),
+    }
+
+
+@router.get("/rollups")
+def ops_rollups(
+    state: str | None = Query(default=None),
+    county: str | None = Query(default=None),
+    city: str | None = Query(default=None),
+    stage: str | None = Query(default=None),
+    include_red_zone: bool | None = Query(default=None),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    q = select(Property).where(Property.org_id == p.org_id)
+
+    if state:
+        q = q.where(Property.state == state)
+    if county:
+        q = q.where(Property.county == county)
+    if city:
+        q = q.where(Property.city == city)
+    if include_red_zone is not None:
+        q = q.where(Property.is_red_zone.is_(bool(include_red_zone)))
+
+    props = db.scalars(q).all()
+
+    stage_counts: dict[str, int] = {}
+    rows: list[dict[str, Any]] = []
+
+    for prop in props:
+        compute_and_persist_stage(db, org_id=p.org_id, property=prop)
+        state_payload = get_state_payload(db, org_id=p.org_id, property_id=prop.id, recompute=True)
+        cur_stage = str(state_payload.get("current_stage") or "deal")
+
+        if stage and cur_stage != stage:
+            continue
+
+        stage_counts[cur_stage] = stage_counts.get(cur_stage, 0) + 1
+        rows.append(
+            {
+                "property_id": prop.id,
+                "address": prop.address,
+                "city": prop.city,
+                "state": prop.state,
+                "county": getattr(prop, "county", None),
+                "stage": cur_stage,
+            }
+        )
+
+    return {
+        "stage_counts": stage_counts,
+        "rows": rows,
+        "count": len(rows),
     }
 
 
@@ -384,6 +390,7 @@ def generate_rehab_tasks_from_gaps(
         select(InspectionItem)
         .join(Inspection, Inspection.id == InspectionItem.inspection_id)
         .where(
+            Inspection.org_id == p.org_id,
             Inspection.property_id == property_id,
             InspectionItem.failed.is_(True),
             InspectionItem.resolved_at.is_(None),

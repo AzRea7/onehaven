@@ -1,36 +1,34 @@
-# backend/app/routers/deals.py
 from __future__ import annotations
 
 import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
-from sqlalchemy import select, desc
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Deal, Property, RentAssumption, UnderwritingResult, ImportSnapshot
+from ..domain.audit import emit_audit
+from ..domain.operating_truth_enforcement import enforce_constitution_for_property_and_price
+from ..models import Deal, ImportSnapshot, Property, RentAssumption, UnderwritingResult
 from ..schemas import (
     DealCreate,
-    DealOut,
-    RentAssumptionUpsert,
-    RentAssumptionOut,
-    SurvivorOut,
     DealIntakeIn,
     DealIntakeOut,
+    DealOut,
     PropertyOut,
+    RentAssumptionOut,
+    RentAssumptionUpsert,
+    SurvivorOut,
 )
-from ..domain.operating_truth_enforcement import enforce_constitution_for_property_and_price
+from ..services.events_facade import wf
+from ..services.property_state_machine import sync_property_state
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 
 
 def _get_or_create_manual_snapshot(db: Session, *, org_id: int) -> ImportSnapshot:
-    """
-    Return a stable per-org "manual intake snapshot".
-    FIX: always set org_id to avoid NOT NULL violation.
-    """
     snap = db.scalar(
         select(ImportSnapshot).where(
             ImportSnapshot.org_id == int(org_id),
@@ -47,7 +45,7 @@ def _get_or_create_manual_snapshot(db: Session, *, org_id: int) -> ImportSnapsho
         created_at=datetime.utcnow(),
     )
     db.add(snap)
-    db.flush()  # ensures snap.id exists without forcing a commit
+    db.flush()
     return snap
 
 
@@ -63,6 +61,17 @@ def _require_property_belongs_to_org(db: Session, *, property_id: int, org_id: i
     if not prop or int(prop.org_id) != int(org_id):
         raise HTTPException(status_code=400, detail="Invalid property_id")
     return prop
+
+
+def _maybe_apply_pipeline_fields(d: Deal, data: dict) -> None:
+    if "decision" in data:
+        d.decision = data.get("decision")
+    if "purchase_price" in data:
+        d.purchase_price = data.get("purchase_price")
+    if "closing_date" in data:
+        d.closing_date = data.get("closing_date")
+    if "loan_amount" in data:
+        d.loan_amount = data.get("loan_amount")
 
 
 @router.get("/survivors", response_model=list[SurvivorOut])
@@ -122,7 +131,6 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_p
     if strategy not in {"section8", "market"}:
         raise HTTPException(status_code=400, detail="strategy must be 'section8' or 'market'")
 
-    # ✅ Phase 0 enforcement at intake boundary
     enforce_constitution_for_property_and_price(
         address=payload.address.strip(),
         city=payload.city.strip(),
@@ -133,13 +141,14 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_p
         asking_price=float(payload.purchase_price),
     )
 
-    # Snapshot: must belong to org, else create the per-org manual snapshot.
     snap_id = payload.snapshot_id
     if snap_id is None:
         snap = _get_or_create_manual_snapshot(db, org_id=p.org_id)
         snap_id = int(snap.id)
     else:
         _require_snapshot_belongs_to_org(db, snapshot_id=int(snap_id), org_id=p.org_id)
+
+    now = datetime.utcnow()
 
     prop = Property(
         org_id=p.org_id,
@@ -153,10 +162,11 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_p
         year_built=payload.year_built,
         has_garage=bool(payload.has_garage),
         property_type=(payload.property_type or "single_family").strip(),
-        created_at=datetime.utcnow(),
+        created_at=now,
+        updated_at=now,
     )
     db.add(prop)
-    db.flush()  # ensures prop.id exists
+    db.flush()
 
     d = Deal(
         org_id=p.org_id,
@@ -170,7 +180,8 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_p
         term_years=int(payload.term_years),
         down_payment_pct=float(payload.down_payment_pct),
         snapshot_id=int(snap_id),
-        created_at=datetime.utcnow(),
+        created_at=now,
+        updated_at=now,
     )
     db.add(d)
     db.flush()
@@ -181,10 +192,39 @@ def intake(payload: DealIntakeIn, db: Session = Depends(get_db), p=Depends(get_p
         .where(RentAssumption.org_id == p.org_id)
     )
     if ra is None:
-        ra = RentAssumption(property_id=int(prop.id), org_id=p.org_id, created_at=datetime.utcnow())
+        ra = RentAssumption(
+            property_id=int(prop.id),
+            org_id=p.org_id,
+            created_at=now,
+        )
         db.add(ra)
         db.flush()
 
+    emit_audit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        action="deal.intake",
+        entity_type="Deal",
+        entity_id=str(d.id),
+        before=None,
+        after={
+            "deal_id": d.id,
+            "property_id": prop.id,
+            "strategy": d.strategy,
+            "asking_price": d.asking_price,
+        },
+    )
+    wf.emit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="deal.intake_created",
+        property_id=prop.id,
+        payload={"deal_id": d.id, "property_id": prop.id},
+    )
+
+    sync_property_state(db, org_id=p.org_id, property_id=prop.id)
     db.commit()
     db.refresh(prop)
     db.refresh(d)
@@ -210,7 +250,6 @@ def create_deal(payload: DealCreate, db: Session = Depends(get_db), p=Depends(ge
     else:
         _require_snapshot_belongs_to_org(db, snapshot_id=int(data["snapshot_id"]), org_id=p.org_id)
 
-    # ✅ Phase 0 enforcement at create boundary
     enforce_constitution_for_property_and_price(
         address=prop.address,
         city=prop.city,
@@ -224,6 +263,34 @@ def create_deal(payload: DealCreate, db: Session = Depends(get_db), p=Depends(ge
     data["org_id"] = p.org_id
     d = Deal(**data)
     db.add(d)
+    db.flush()
+
+    emit_audit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        action="deal.create",
+        entity_type="Deal",
+        entity_id=str(d.id),
+        before=None,
+        after={
+            "deal_id": d.id,
+            "property_id": d.property_id,
+            "strategy": d.strategy,
+            "asking_price": d.asking_price,
+            "decision": getattr(d, "decision", None),
+        },
+    )
+    wf.emit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="deal.created",
+        property_id=d.property_id,
+        payload={"deal_id": d.id},
+    )
+
+    sync_property_state(db, org_id=p.org_id, property_id=d.property_id)
     db.commit()
     db.refresh(d)
     return d
@@ -235,6 +302,22 @@ def update_deal(deal_id: int, payload: DealCreate, db: Session = Depends(get_db)
     if not d or int(d.org_id) != int(p.org_id):
         raise HTTPException(status_code=404, detail="Deal not found")
 
+    before = {
+        "property_id": d.property_id,
+        "asking_price": d.asking_price,
+        "estimated_purchase_price": d.estimated_purchase_price,
+        "rehab_estimate": d.rehab_estimate,
+        "strategy": d.strategy,
+        "financing_type": d.financing_type,
+        "interest_rate": d.interest_rate,
+        "term_years": d.term_years,
+        "down_payment_pct": d.down_payment_pct,
+        "decision": getattr(d, "decision", None),
+        "purchase_price": getattr(d, "purchase_price", None),
+        "closing_date": getattr(d, "closing_date", None).isoformat() if getattr(d, "closing_date", None) else None,
+        "loan_amount": getattr(d, "loan_amount", None),
+    }
+
     prop = _require_property_belongs_to_org(db, property_id=int(payload.property_id), org_id=p.org_id)
 
     data = payload.model_dump()
@@ -245,7 +328,6 @@ def update_deal(deal_id: int, payload: DealCreate, db: Session = Depends(get_db)
     if data.get("snapshot_id") is not None:
         _require_snapshot_belongs_to_org(db, snapshot_id=int(data["snapshot_id"]), org_id=p.org_id)
 
-    # ✅ Phase 0 enforcement at edit boundary
     enforce_constitution_for_property_and_price(
         address=prop.address,
         city=prop.city,
@@ -256,7 +338,8 @@ def update_deal(deal_id: int, payload: DealCreate, db: Session = Depends(get_db)
         asking_price=float(data.get("asking_price") or data.get("estimated_purchase_price") or 0.0),
     )
 
-    # Apply changes
+    old_property_id = int(d.property_id)
+
     d.property_id = int(data["property_id"])
     d.asking_price = float(data.get("asking_price") or d.asking_price or 0.0)
     d.estimated_purchase_price = float(data.get("estimated_purchase_price") or d.estimated_purchase_price or 0.0)
@@ -266,13 +349,55 @@ def update_deal(deal_id: int, payload: DealCreate, db: Session = Depends(get_db)
     d.interest_rate = float(data.get("interest_rate") or d.interest_rate or 0.0)
     d.term_years = int(data.get("term_years") or d.term_years or 30)
     d.down_payment_pct = float(data.get("down_payment_pct") or d.down_payment_pct or 0.0)
+    d.updated_at = datetime.utcnow()
 
-    # snapshot:
+    _maybe_apply_pipeline_fields(d, data)
+
     if data.get("snapshot_id") is None:
         snap = _get_or_create_manual_snapshot(db, org_id=p.org_id)
         d.snapshot_id = int(snap.id)
     else:
         d.snapshot_id = int(data["snapshot_id"])
+
+    db.add(d)
+    db.flush()
+
+    emit_audit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        action="deal.update",
+        entity_type="Deal",
+        entity_id=str(d.id),
+        before=before,
+        after={
+            "property_id": d.property_id,
+            "asking_price": d.asking_price,
+            "estimated_purchase_price": d.estimated_purchase_price,
+            "rehab_estimate": d.rehab_estimate,
+            "strategy": d.strategy,
+            "financing_type": d.financing_type,
+            "interest_rate": d.interest_rate,
+            "term_years": d.term_years,
+            "down_payment_pct": d.down_payment_pct,
+            "decision": getattr(d, "decision", None),
+            "purchase_price": getattr(d, "purchase_price", None),
+            "closing_date": getattr(d, "closing_date", None).isoformat() if getattr(d, "closing_date", None) else None,
+            "loan_amount": getattr(d, "loan_amount", None),
+        },
+    )
+    wf.emit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="deal.updated",
+        property_id=d.property_id,
+        payload={"deal_id": d.id},
+    )
+
+    sync_property_state(db, org_id=p.org_id, property_id=d.property_id)
+    if old_property_id != int(d.property_id):
+        sync_property_state(db, org_id=p.org_id, property_id=old_property_id)
 
     db.commit()
     db.refresh(d)
@@ -306,6 +431,18 @@ def upsert_rent(property_id: int, payload: RentAssumptionUpsert, db: Session = D
     else:
         for k, v in data.items():
             setattr(ra, k, v)
+
+    db.flush()
+
+    wf.emit(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        event_type="rent_assumption.updated",
+        property_id=property_id,
+        payload={"property_id": property_id},
+    )
+    sync_property_state(db, org_id=p.org_id, property_id=property_id)
 
     db.commit()
     db.refresh(ra)

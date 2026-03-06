@@ -1,6 +1,12 @@
 import React from "react";
-import { TrendingUp, ShieldCheck, Bot, Sparkles } from "lucide-react";
-import { Link } from "react-router-dom";
+import {
+  TrendingUp,
+  ShieldCheck,
+  Bot,
+  Sparkles,
+  GitBranch,
+} from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import GlassCard from "../components/GlassCard";
 import PageHero from "../components/PageHero";
 import StatPill from "../components/StatPill";
@@ -32,6 +38,10 @@ type DashboardRow = {
   };
 };
 
+type StageRollups = {
+  stage_counts?: Record<string, number>;
+};
+
 function toneForDecision(d?: string) {
   if (d === "PASS") return "good";
   if (d === "REVIEW") return "warn";
@@ -44,10 +54,12 @@ function SkeletonLine() {
 
 export default function Dashboard() {
   const [rows, setRows] = React.useState<DashboardRow[]>([]);
+  const [rollups, setRollups] = React.useState<StageRollups | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [lastSync, setLastSync] = React.useState<number | null>(null);
 
+  const navigate = useNavigate();
   const abortRef = React.useRef<AbortController | null>(null);
 
   const refresh = React.useCallback(async (background = false) => {
@@ -59,12 +71,16 @@ export default function Dashboard() {
       setErr(null);
       if (!background) setLoading(true);
 
-      const data = await api.dashboardProperties({
-        limit: 80,
-        signal: ac.signal,
-      });
+      const [data, roll] = await Promise.all([
+        api.dashboardProperties({
+          limit: 80,
+          signal: ac.signal,
+        }),
+        api.opsRollups({}, ac.signal).catch(() => null),
+      ]);
 
       setRows(Array.isArray(data) ? data : []);
+      setRollups(roll);
       setLastSync(Date.now());
     } catch (e: any) {
       if (String(e?.name) === "AbortError") return;
@@ -89,7 +105,7 @@ export default function Dashboard() {
     };
   }, [refresh]);
 
-  const { pass, review, reject, survivors } = React.useMemo(() => {
+  const { pass, review, reject, survivors, stageCounts } = React.useMemo(() => {
     let pass = 0;
     let review = 0;
     let reject = 0;
@@ -118,8 +134,33 @@ export default function Dashboard() {
       })
       .slice(0, 8);
 
-    return { pass, review, reject, survivors };
-  }, [rows]);
+    const stageCounts = rollups?.stage_counts || {};
+
+    return { pass, review, reject, survivors, stageCounts };
+  }, [rows, rollups]);
+
+  const stageCards = React.useMemo(() => {
+    const ordered = [
+      "deal",
+      "decision",
+      "acquisition",
+      "rehab_plan",
+      "rehab_exec",
+      "compliance",
+      "tenant",
+      "lease",
+      "cash",
+      "equity",
+    ];
+
+    return ordered
+      .filter((s) => stageCounts[s] != null)
+      .map((s) => ({
+        key: s,
+        label: s.replace(/_/g, " "),
+        count: stageCounts[s] ?? 0,
+      }));
+  }, [stageCounts]);
 
   return (
     <PageShell>
@@ -137,7 +178,10 @@ export default function Dashboard() {
           }
           actions={
             <>
-              <button onClick={() => refresh(false)} className="oh-btn">
+              <button
+                onClick={() => refresh(false)}
+                className="oh-btn cursor-pointer"
+              >
                 sync
               </button>
               <StatPill label="PASS" value={`${pass}`} tone="good" />
@@ -264,6 +308,50 @@ export default function Dashboard() {
         <GlassCard>
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
+              <div className="text-sm font-semibold tracking-tight text-white flex items-center gap-2">
+                <GitBranch className="h-4 w-4" />
+                Pipeline drilldown
+              </div>
+              <div className="text-xs text-white/55">
+                See stage distribution and the properties contributing to each
+                stage.
+              </div>
+            </div>
+
+            <Link to="/pipeline" className="oh-btn cursor-pointer">
+              Open pipeline
+            </Link>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3">
+            {stageCards.length === 0 ? (
+              <div className="col-span-full text-sm text-white/55">
+                No stage rollups yet.
+              </div>
+            ) : (
+              stageCards.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() =>
+                    navigate(`/pipeline?stage=${encodeURIComponent(s.key)}`)
+                  }
+                  className="rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.16] transition p-4 text-left cursor-pointer"
+                >
+                  <div className="text-[11px] uppercase tracking-widest text-white/45">
+                    {s.label}
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-white">
+                    {s.count}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </GlassCard>
+
+        <GlassCard>
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
               <div className="text-sm font-semibold tracking-tight text-white">
                 Survivors (quick entry)
               </div>
@@ -273,7 +361,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <Link to="/properties" className="oh-btn">
+            <Link to="/properties" className="oh-btn cursor-pointer">
               View all properties
             </Link>
           </div>

@@ -1,4 +1,3 @@
-# backend/app/routers/inspections.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -9,41 +8,64 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
 from ..db import get_db
+from ..domain.audit import emit_audit
+from ..domain.compliance import compliance_stats, top_fail_points
+from ..domain.compliance.inspection_mapping import map_inspection_code
 from ..models import (
-    Inspector,
     Inspection,
     InspectionItem,
+    Inspector,
     Property,
     PropertyChecklistItem,
     RehabTask,
 )
 from ..schemas import (
-    InspectorUpsert,
-    InspectorOut,
+    ComplianceStatsOut,
     InspectionCreate,
-    InspectionOut,
     InspectionItemCreate,
     InspectionItemOut,
     InspectionItemResolve,
+    InspectionOut,
+    InspectorOut,
+    InspectorUpsert,
     PredictFailPointsOut,
-    ComplianceStatsOut,
 )
-from ..domain.audit import emit_audit
-from ..services.ownership import must_get_property
-
-# IMPORTANT: wf is a WorkflowFacade instance, not a function.
-# So we call wf.emit(...) instead of wf(...)
 from ..services.events_facade import wf
-
-from ..services.property_state_machine import advance_stage_if_needed
-from ..domain.compliance.inspection_mapping import map_inspection_code
-from ..domain.compliance import top_fail_points, compliance_stats
+from ..services.ownership import must_get_property
+from ..services.property_state_machine import sync_property_state
+from ..services.stage_guard import require_stage
 
 router = APIRouter(prefix="/inspections", tags=["inspections"])
 
 
 def _normalize_code(raw: str) -> str:
     return (raw or "").strip().upper().replace(" ", "_")
+
+
+def _inspection_payload(row: Inspection) -> dict:
+    return {
+        "id": row.id,
+        "property_id": row.property_id,
+        "inspector_id": row.inspector_id,
+        "inspection_date": row.inspection_date.isoformat() if row.inspection_date else None,
+        "passed": row.passed,
+        "reinspect_required": row.reinspect_required,
+        "notes": row.notes,
+    }
+
+
+def _inspection_item_payload(row: InspectionItem) -> dict:
+    return {
+        "id": row.id,
+        "inspection_id": row.inspection_id,
+        "code": row.code,
+        "failed": row.failed,
+        "severity": row.severity,
+        "location": row.location,
+        "details": row.details,
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+        "resolution_notes": row.resolution_notes,
+    }
 
 
 @router.put("/inspectors", response_model=InspectorOut)
@@ -86,6 +108,13 @@ def create_inspection(
     _op=Depends(require_operator),
 ) -> InspectionOut:
     must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=payload.property_id,
+        min_stage="compliance",
+        action="create inspection",
+    )
 
     if payload.inspector_id is not None:
         ins = db.get(Inspector, payload.inspector_id)
@@ -102,8 +131,7 @@ def create_inspection(
         notes=payload.notes,
     )
     db.add(insp)
-    db.commit()
-    db.refresh(insp)
+    db.flush()
 
     emit_audit(
         db,
@@ -113,16 +141,10 @@ def create_inspection(
         entity_type="Inspection",
         entity_id=str(insp.id),
         before=None,
-        after={
-            "org_id": insp.org_id,
-            "property_id": insp.property_id,
-            "passed": insp.passed,
-            "reinspect_required": insp.reinspect_required,
-        },
+        after=_inspection_payload(insp),
     )
 
-    # ✅ FIX: WorkflowFacade is not callable; call its method.
-    wf.emit(
+    wf(
         db,
         org_id=p.org_id,
         actor_user_id=p.user_id,
@@ -131,9 +153,10 @@ def create_inspection(
         payload={"inspection_id": insp.id},
     )
 
-    advance_stage_if_needed(db, org_id=p.org_id, property_id=insp.property_id, suggested_stage="compliance")
+    sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
 
     db.commit()
+    db.refresh(insp)
     return insp
 
 
@@ -152,6 +175,14 @@ def add_item(
     if getattr(insp, "org_id", None) != p.org_id:
         must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
 
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+        min_stage="compliance",
+        action="add inspection item",
+    )
+
     prop = db.scalar(select(Property).where(Property.id == insp.property_id, Property.org_id == p.org_id))
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
@@ -169,13 +200,7 @@ def add_item(
 
     before = None
     if existing:
-        before = {
-            "failed": existing.failed,
-            "severity": existing.severity,
-            "location": existing.location,
-            "details": existing.details,
-            "resolved_at": existing.resolved_at.isoformat() if existing.resolved_at else None,
-        }
+        before = _inspection_item_payload(existing)
 
         existing.failed = payload.failed
         existing.severity = payload.severity
@@ -202,8 +227,7 @@ def add_item(
             row.resolved_at = datetime.utcnow()
         db.add(row)
 
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     emit_audit(
         db,
@@ -213,12 +237,7 @@ def add_item(
         entity_type="InspectionItem",
         entity_id=str(row.id),
         before=before,
-        after={
-            "inspection_id": inspection_id,
-            "code": row.code,
-            "failed": row.failed,
-            "severity": row.severity,
-        },
+        after=_inspection_item_payload(row),
     )
 
     if row.failed:
@@ -281,8 +300,7 @@ def add_item(
                     )
                     db.add(task)
 
-            # ✅ FIX: WorkflowFacade is not callable; call its method.
-            wf.emit(
+            wf(
                 db,
                 org_id=p.org_id,
                 actor_user_id=p.user_id,
@@ -295,9 +313,25 @@ def add_item(
                     "rehab_task_title": mapped.rehab_title,
                 },
             )
+    else:
+        wf(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            event_type="inspection.item_upserted",
+            property_id=insp.property_id,
+            payload={
+                "inspection_id": insp.id,
+                "item_id": row.id,
+                "code": row.code,
+                "failed": row.failed,
+            },
+        )
 
-            db.commit()
+    sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
 
+    db.commit()
+    db.refresh(row)
     return row
 
 
@@ -320,18 +354,21 @@ def resolve_item(
     if getattr(insp, "org_id", None) != p.org_id:
         must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
 
-    before = {
-        "failed": item.failed,
-        "resolved_at": item.resolved_at.isoformat() if item.resolved_at else None,
-        "resolution_notes": item.resolution_notes,
-    }
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+        min_stage="compliance",
+        action="resolve inspection item",
+    )
+
+    before = _inspection_item_payload(item)
 
     item.failed = False
     item.resolution_notes = payload.resolution_notes
     item.resolved_at = payload.resolved_at or datetime.utcnow()
 
-    db.commit()
-    db.refresh(item)
+    db.flush()
 
     emit_audit(
         db,
@@ -341,15 +378,10 @@ def resolve_item(
         entity_type="InspectionItem",
         entity_id=str(item.id),
         before=before,
-        after={
-            "failed": item.failed,
-            "resolved_at": item.resolved_at.isoformat() if item.resolved_at else None,
-            "resolution_notes": item.resolution_notes,
-        },
+        after=_inspection_item_payload(item),
     )
 
-    # ✅ FIX: WorkflowFacade is not callable; call its method.
-    wf.emit(
+    wf(
         db,
         org_id=p.org_id,
         actor_user_id=p.user_id,
@@ -358,7 +390,10 @@ def resolve_item(
         payload={"item_id": item.id, "code": item.code},
     )
 
+    sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
+
     db.commit()
+    db.refresh(item)
     return item
 
 

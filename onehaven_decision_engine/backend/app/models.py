@@ -80,17 +80,21 @@ class AuditEvent(Base):
 
 class PropertyState(Base):
     __tablename__ = "property_states"
-    __table_args__ = (UniqueConstraint("org_id", "property_id", name="uq_property_states_org_property"),)
+    __table_args__ = (
+    UniqueConstraint("org_id", "property_id", name="uq_property_states_org_property"),
+    Index("ix_property_states_org_stage", "org_id", "current_stage"),
+)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
     property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id"), index=True, nullable=False)
 
-    current_stage: Mapped[str] = mapped_column(String(64), nullable=False, default="import")
+    current_stage: Mapped[str] = mapped_column(String(64), nullable=False, default="import", index=True)
     constraints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     outstanding_tasks_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    last_transitioned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class WorkflowEvent(Base):
