@@ -20,6 +20,15 @@ const tabs = [
 ] as const;
 type Tab = (typeof tabs)[number];
 
+const TAB_TO_STAGE: Record<Tab, string> = {
+  Deal: "deal",
+  Rehab: "rehab_plan",
+  Compliance: "compliance",
+  Tenant: "tenant",
+  Cash: "cash",
+  Equity: "equity",
+};
+
 function money(v: any) {
   if (v == null || Number.isNaN(Number(v))) return "—";
   return `$${Math.round(Number(v)).toLocaleString()}`;
@@ -29,6 +38,34 @@ function pct01(v: any) {
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
   return `${Math.round(n * 100)}%`;
+}
+
+function stageRank(stage: string | null | undefined) {
+  const order = [
+    "import",
+    "deal",
+    "decision",
+    "acquisition",
+    "rehab_plan",
+    "rehab_exec",
+    "compliance",
+    "tenant",
+    "lease",
+    "cash",
+    "equity",
+  ];
+  const idx = order.indexOf(String(stage || "").toLowerCase());
+  return idx >= 0 ? idx : 0;
+}
+
+function isTabUnlocked(tab: Tab, currentStage: string | null | undefined) {
+  const needed = TAB_TO_STAGE[tab];
+  return stageRank(currentStage) >= stageRank(needed);
+}
+
+function prettyStage(stage: string | null | undefined) {
+  const s = String(stage || "").toLowerCase();
+  return s.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 const Badge = React.memo(function Badge({
@@ -286,6 +323,94 @@ function AgentsDrawer({
   );
 }
 
+function WorkflowRail({
+  workflow,
+  onAdvance,
+  busy,
+}: {
+  workflow: any;
+  onAdvance: () => Promise<void>;
+  busy: boolean;
+}) {
+  const stages = Array.isArray(workflow?.stages) ? workflow.stages : [];
+  const primaryAction = workflow?.primary_action;
+  const gate = workflow?.gate || {};
+
+  return (
+    <Panel
+      title="Workflow"
+      right={
+        primaryAction?.kind === "advance" ? (
+          <button
+            onClick={() => onAdvance().catch(() => {})}
+            disabled={busy}
+            className="oh-btn oh-btn-primary cursor-pointer"
+          >
+            {busy ? "advancing…" : primaryAction?.title || "advance"}
+          </button>
+        ) : (
+          <Badge>{workflow?.current_stage_label || "—"}</Badge>
+        )
+      }
+    >
+      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-2">
+        {stages.map((s: any) => {
+          const status =
+            s.status === "completed"
+              ? "border-green-400/20 bg-green-400/8"
+              : s.status === "current"
+                ? "border-white/25 bg-white/10"
+                : s.status === "next"
+                  ? "border-yellow-300/20 bg-yellow-300/8"
+                  : "border-white/10 bg-white/[0.03]";
+
+          return (
+            <div
+              key={s.key}
+              className={`rounded-2xl border p-3 ${status}`}
+              style={{ contain: "layout paint" }}
+            >
+              <div className="text-[11px] uppercase tracking-wider text-white/45">
+                {s.status}
+              </div>
+              <div className="mt-1 text-sm font-semibold text-white">
+                {s.label}
+              </div>
+              <div className="mt-1 text-xs text-white/55 leading-relaxed">
+                {s.description}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_.9fr] gap-3 pt-2">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="text-xs text-white/45">Primary next move</div>
+          <div className="mt-2 text-sm font-semibold text-white">
+            {primaryAction?.title || "No action required"}
+          </div>
+          <div className="mt-2 text-xs text-white/55">
+            Current stage: {workflow?.current_stage_label || "—"}
+            {workflow?.next_stage_label
+              ? ` · Next stage: ${workflow.next_stage_label}`
+              : ""}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="text-xs text-white/45">Transition gate</div>
+          <div className="mt-2 text-sm text-white/80">
+            {gate?.ok
+              ? `Ready to move into ${gate?.allowed_next_stage_label || gate?.allowed_next_stage || "next stage"}.`
+              : gate?.blocked_reason || "Not ready yet."}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 export default function PropertyView() {
   const { id } = useParams();
   const propertyId = Number(id);
@@ -293,6 +418,7 @@ export default function PropertyView() {
   const [tab, setTab] = React.useState<Tab>("Deal");
   const [bundle, setBundle] = React.useState<any | null>(null);
   const [ops, setOps] = React.useState<any | null>(null);
+  const [workflow, setWorkflow] = React.useState<any | null>(null);
 
   const [trust, setTrust] = React.useState<any | null>(null);
   const [trustErr, setTrustErr] = React.useState<string | null>(null);
@@ -329,9 +455,10 @@ export default function PropertyView() {
     try {
       setErr(null);
 
-      const [out, opsOut, trustOut] = await Promise.all([
+      const [out, opsOut, workflowOut, trustOut] = await Promise.all([
         api.propertyBundle(propertyId, ac.signal),
         api.opsPropertySummary(propertyId, 90, ac.signal).catch(() => null),
+        api.opsPropertyWorkflow(propertyId, ac.signal).catch(() => null),
         api
           .trustGet("property", propertyId, ac.signal)
           .then((x) => {
@@ -346,6 +473,7 @@ export default function PropertyView() {
 
       setBundle(out);
       setOps(opsOut);
+      setWorkflow(workflowOut ?? opsOut?.workflow ?? null);
       setTrust(trustOut);
 
       try {
@@ -358,6 +486,7 @@ export default function PropertyView() {
       if (String(e?.name) === "AbortError") return;
       setBundle(null);
       setOps(null);
+      setWorkflow(null);
       setTrust(null);
       setErr(String(e.message || e));
     }
@@ -371,6 +500,18 @@ export default function PropertyView() {
     loadAll();
     return () => abortRef.current?.abort();
   }, [propertyId, loadAll]);
+
+  React.useEffect(() => {
+    const currentStage = workflow?.current_stage || ops?.stage || "deal";
+    if (!isTabUnlocked(tab, currentStage)) {
+      if (isTabUnlocked("Equity", currentStage)) setTab("Equity");
+      else if (isTabUnlocked("Cash", currentStage)) setTab("Cash");
+      else if (isTabUnlocked("Tenant", currentStage)) setTab("Tenant");
+      else if (isTabUnlocked("Compliance", currentStage)) setTab("Compliance");
+      else if (isTabUnlocked("Rehab", currentStage)) setTab("Rehab");
+      else setTab("Deal");
+    }
+  }, [workflow, ops, tab]);
 
   const doAction = React.useCallback(
     async (label: string, fn: () => Promise<any>) => {
@@ -387,6 +528,12 @@ export default function PropertyView() {
     },
     [loadAll],
   );
+
+  const advanceWorkflow = React.useCallback(async () => {
+    await doAction("Advancing workflow…", async () => {
+      await api.workflowAdvance(propertyId);
+    });
+  }, [doAction, propertyId]);
 
   const createDealQuick = React.useCallback(async () => {
     const askingStr = prompt("Asking price?", "120000");
@@ -486,14 +633,18 @@ export default function PropertyView() {
   const heroSub =
     `${p?.city ?? "—"}, ${p?.state ?? "—"} ${p?.zip ?? ""}`.trim();
 
-  const stage = ops?.stage || "deal";
+  const stage = workflow?.current_stage || ops?.stage || "deal";
+  const stageLabel =
+    workflow?.current_stage_label || ops?.stage_label || prettyStage(stage);
   const cp = ops?.checklist_progress || {};
   const insp = ops?.inspection || {};
   const cash30 = ops?.cash?.last_30_days || {};
   const equity = ops?.equity || null;
   const nextActions: string[] = Array.isArray(ops?.next_actions)
     ? ops.next_actions
-    : [];
+    : Array.isArray(workflow?.next_actions)
+      ? workflow.next_actions
+      : [];
 
   const trustScore =
     trust?.score != null
@@ -516,6 +667,9 @@ export default function PropertyView() {
     : Array.isArray(trust?.negatives)
       ? trust.negatives
       : [];
+
+  const primaryActionTitle =
+    workflow?.primary_action?.title || nextActions[0] || "No immediate action";
 
   return (
     <PageShell className="relative space-y-5">
@@ -584,6 +738,17 @@ export default function PropertyView() {
               {busy?.includes("Creating") ? "creating…" : "+ deal"}
             </button>
 
+            {workflow?.primary_action?.kind === "advance" && (
+              <button
+                onClick={advanceWorkflow}
+                className="oh-btn oh-btn-primary cursor-pointer"
+                disabled={!!busy}
+                title="Advance to the next unlocked workflow stage"
+              >
+                {busy?.includes("Advancing") ? "advancing…" : "advance"}
+              </button>
+            )}
+
             <span className="hidden md:inline-block w-2" />
 
             {zillowUrl && (
@@ -640,12 +805,27 @@ export default function PropertyView() {
             </span>
             {" · "}Stage:{" "}
             <span className="text-white/80 font-semibold">
-              {String(stage).toUpperCase()}
+              {String(stageLabel).toUpperCase()}
             </span>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+            <div className="text-[11px] uppercase tracking-wider text-white/45">
+              Required next move
+            </div>
+            <div className="mt-2 text-sm font-semibold text-white">
+              {primaryActionTitle}
+            </div>
           </div>
         </div>
 
         <div className="space-y-4">
+          <WorkflowRail
+            workflow={workflow}
+            onAdvance={advanceWorkflow}
+            busy={!!busy}
+          />
+
           <Panel
             title="Reality Loop"
             right={
@@ -835,20 +1015,37 @@ export default function PropertyView() {
 
       <div className="gradient-border rounded-2xl p-[1px]">
         <div className="glass rounded-2xl p-2 flex gap-2 flex-wrap">
-          {tabs.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={[
-                "px-3 py-2 rounded-xl border text-sm transition focus-ring cursor-pointer",
-                tab === t
-                  ? "bg-white/[0.07] text-white border-white/[0.18]"
-                  : "text-white/70 border-white/10 hover:bg-white/[0.04] hover:border-white/[0.14]",
-              ].join(" ")}
-            >
-              {t}
-            </button>
-          ))}
+          {tabs.map((t) => {
+            const unlocked = isTabUnlocked(t, stage);
+            const active = tab === t;
+
+            return (
+              <button
+                key={t}
+                onClick={() => {
+                  if (!unlocked) return;
+                  setTab(t);
+                }}
+                disabled={!unlocked}
+                title={
+                  unlocked
+                    ? `Open ${t}`
+                    : `Locked until workflow reaches ${prettyStage(TAB_TO_STAGE[t])}`
+                }
+                className={[
+                  "px-3 py-2 rounded-xl border text-sm transition focus-ring",
+                  unlocked ? "cursor-pointer" : "cursor-not-allowed opacity-50",
+                  active
+                    ? "bg-white/[0.07] text-white border-white/[0.18]"
+                    : unlocked
+                      ? "text-white/70 border-white/10 hover:bg-white/[0.04] hover:border-white/[0.14]"
+                      : "text-white/45 border-white/8 bg-white/[0.02]",
+                ].join(" ")}
+              >
+                {t}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -968,9 +1165,9 @@ export default function PropertyView() {
           <div className="space-y-4">
             <Panel title="Guidance">
               <div className="text-sm text-white/70 leading-relaxed">
-                Use this tab when you’re tuning underwriting and rent
-                assumptions. The Reality Loop above tells you whether the
-                property is operationally ready.
+                Start here. Deal is the first real decision gate in the
+                pipeline. Run enrich, explain, and evaluate before trying to
+                move the property deeper into the workflow.
               </div>
             </Panel>
           </div>
@@ -1041,8 +1238,8 @@ export default function PropertyView() {
           <Panel title="Compliance / Checklist">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="text-sm text-white/70">
-                Update status, proof, and notes. This should feed ops readiness
-                and trust.
+                Update status, proof, and notes. Compliance must be genuinely
+                complete before tenant placement unlocks.
               </div>
               <div className="flex gap-2">
                 <button
@@ -1096,15 +1293,20 @@ export default function PropertyView() {
                         );
                         await refreshChecklist();
 
-                        const [opsOut, trustOut] = await Promise.all([
-                          api
-                            .opsPropertySummary(propertyId, 90)
-                            .catch(() => null),
-                          api
-                            .trustGet("property", propertyId)
-                            .catch(() => null),
-                        ]);
+                        const [opsOut, workflowOut, trustOut] =
+                          await Promise.all([
+                            api
+                              .opsPropertySummary(propertyId, 90)
+                              .catch(() => null),
+                            api
+                              .opsPropertyWorkflow(propertyId)
+                              .catch(() => null),
+                            api
+                              .trustGet("property", propertyId)
+                              .catch(() => null),
+                          ]);
                         setOps(opsOut);
+                        setWorkflow(workflowOut ?? opsOut?.workflow ?? null);
                         setTrust(trustOut);
                       } finally {
                         setCheckBusyCode(null);

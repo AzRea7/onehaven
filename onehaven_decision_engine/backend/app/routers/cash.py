@@ -15,6 +15,7 @@ from ..services.events_facade import wf
 from ..services.ownership import must_get_property
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
+from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/cash", tags=["cash"])
 
@@ -298,4 +299,9 @@ def cash_rollup(
             }
         )
 
-    return {"property_id": property_id, "year": year, "months": months}
+    return {
+        "property_id": property_id,
+        "year": year,
+        "months": months,
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
+    }

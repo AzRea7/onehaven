@@ -8,7 +8,13 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import Session
 
-from ..domain.workflow.stages import STAGES, clamp_stage, gate_for_next_stage, stage_rank
+from ..domain.workflow.stages import (
+    STAGES,
+    clamp_stage,
+    gate_for_next_stage,
+    stage_label,
+    stage_rank,
+)
 from ..models import (
     Deal,
     Inspection,
@@ -18,7 +24,6 @@ from ..models import (
     PropertyChecklistItem,
     PropertyState,
     RehabTask,
-    Tenant,
     Transaction,
     UnderwritingResult,
     Valuation,
@@ -147,8 +152,8 @@ def advance_stage_if_needed(
     constraints: Optional[dict[str, Any]] = None,
     outstanding_tasks: Optional[dict[str, Any]] = None,
 ) -> PropertyState:
-    # Step 2 rule: current_stage should reflect current canonical truth,
-    # not "furthest ever reached". Otherwise the guard becomes decorative.
+    # Canonical truth:
+    # current_stage is the first stage that still needs work.
     return _set_state(
         db,
         org_id=org_id,
@@ -318,6 +323,9 @@ def _rehab_summary(db: Session, *, org_id: int, property_id: int) -> dict:
     done = 0
     blocked = 0
     open_count = 0
+    in_progress = 0
+    todo = 0
+    cost_estimate_sum = 0.0
 
     for r in rows:
         st = (r.status or "todo").strip().lower()
@@ -327,21 +335,30 @@ def _rehab_summary(db: Session, *, org_id: int, property_id: int) -> dict:
             open_count += 1
         if st == "blocked":
             blocked += 1
+        elif st == "in_progress":
+            in_progress += 1
+        elif st != "done":
+            todo += 1
+
+        if getattr(r, "cost_estimate", None) is not None:
+            try:
+                cost_estimate_sum += float(r.cost_estimate or 0.0)
+            except Exception:
+                pass
 
     return {
         "total": total,
+        "todo": todo,
+        "in_progress": in_progress,
         "done": done,
         "open": open_count,
         "blocked": blocked,
+        "cost_estimate_sum": round(cost_estimate_sum, 2),
         "has_plan_tasks": total > 0,
         "has_open_tasks": open_count > 0,
         "has_blockers": blocked > 0,
+        "is_complete": total > 0 and open_count == 0 and blocked == 0,
     }
-
-
-def _has_any_tenant(db: Session, *, org_id: int) -> bool:
-    row = db.scalar(select(Tenant.id).where(Tenant.org_id == org_id).limit(1))
-    return row is not None
 
 
 def _has_any_lease(db: Session, *, org_id: int, property_id: int) -> bool:
@@ -596,7 +613,6 @@ def derive_stage_and_constraints(
             next_actions.append("Mark inspection passed or schedule reinspection.")
         return "compliance", constraints, tasks, next_actions
 
-    # Tenant stage = compliance passed, but no lease yet.
     if not has_any_lease:
         constraints["missing_lease"] = True
         tasks["tenant"] = {"needs_lease": True}
@@ -692,14 +708,31 @@ def get_state_payload(
     )
 
     cur = clamp_stage(getattr(row, "current_stage", "import"))
+    cur_rank = stage_rank(cur)
+
+    stage_rows: list[dict[str, Any]] = []
+    for s in STAGES:
+        rank = stage_rank(s)
+        stage_rows.append(
+            {
+                "key": s,
+                "rank": rank,
+                "label": stage_label(s),
+                "status": "completed" if rank < cur_rank else "current" if rank == cur_rank else "locked",
+                "unlocked": rank <= cur_rank,
+            }
+        )
 
     return {
         "property_id": property_id,
         "current_stage": cur,
-        "current_stage_rank": stage_rank(cur),
+        "current_stage_label": stage_label(cur),
+        "current_stage_rank": cur_rank,
         "suggested_stage": suggested,
+        "suggested_stage_label": stage_label(suggested),
         "suggested_stage_rank": stage_rank(suggested),
         "all_stages": list(STAGES),
+        "stage_rows": stage_rows,
         "constraints": constraints_live if recompute else _loads_json(getattr(row, "constraints_json", None)),
         "outstanding_tasks": tasks_live if recompute else _loads_json(getattr(row, "outstanding_tasks_json", None)),
         "next_actions": next_actions,
@@ -738,7 +771,13 @@ def get_transition_payload(
         has_rehab_plan_tasks=rehab["has_plan_tasks"],
         rehab_blockers_open=rehab["has_blockers"],
         rehab_open_tasks=rehab["has_open_tasks"],
-        compliance_passed=(checklist.total > 0 and checklist.failed == 0 and checklist.blocked == 0 and checklist.pct_done >= 0.95 and insp.latest_passed),
+        compliance_passed=(
+            checklist.total > 0
+            and checklist.failed == 0
+            and checklist.blocked == 0
+            and checklist.pct_done >= 0.95
+            and insp.latest_passed
+        ),
         tenant_selected=has_any_lease,
         lease_active=has_active_lease,
         has_cash_txns=has_cash_txns,
@@ -748,11 +787,14 @@ def get_transition_payload(
     return {
         "property_id": property_id,
         "current_stage": cur,
+        "current_stage_label": stage_label(cur),
         "suggested_stage": state["suggested_stage"],
+        "suggested_stage_label": state["suggested_stage_label"],
         "gate": {
             "ok": gate.ok,
             "blocked_reason": gate.blocked_reason,
             "allowed_next_stage": gate.allowed_next_stage,
+            "allowed_next_stage_label": stage_label(gate.allowed_next_stage) if gate.allowed_next_stage else None,
         },
         "next_actions": state["next_actions"],
         "constraints": state["constraints"],

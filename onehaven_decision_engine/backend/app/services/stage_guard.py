@@ -8,6 +8,7 @@ from ..domain.workflow.stages import stage_gte
 from ..models import Property
 from ..services.policy_projection_service import build_property_compliance_brief
 from ..services.property_state_machine import get_state_payload, get_transition_payload
+from ..services.workflow_gate_service import build_workflow_summary
 
 
 def _policy_blockers(db: Session, *, org_id: int, property_id: int) -> list:
@@ -41,6 +42,7 @@ def require_stage(
 ) -> dict:
     st = get_state_payload(db, org_id=org_id, property_id=property_id, recompute=True)
     cur = str(st.get("current_stage") or "import")
+    workflow = build_workflow_summary(db, org_id=org_id, property_id=property_id, recompute=False)
 
     if not stage_gte(cur, min_stage):
         why = f"Requires stage ≥ {min_stage} to {action}."
@@ -59,6 +61,7 @@ def require_stage(
                 "next_actions": next_actions,
                 "constraints": st.get("constraints") or {},
                 "policy_blockers": _policy_blockers(db, org_id=org_id, property_id=property_id),
+                "workflow": workflow,
             },
         )
 
@@ -74,6 +77,7 @@ def require_next_stage_available(
 ) -> dict:
     tx = get_transition_payload(db, org_id=org_id, property_id=property_id)
     gate = tx.get("gate") or {}
+    workflow = build_workflow_summary(db, org_id=org_id, property_id=property_id, recompute=False)
 
     if not bool(gate.get("ok")):
         raise HTTPException(
@@ -87,6 +91,7 @@ def require_next_stage_available(
                 "constraints": tx.get("constraints") or {},
                 "next_actions": tx.get("next_actions") or [],
                 "policy_blockers": _policy_blockers(db, org_id=org_id, property_id=property_id),
+                "workflow": workflow,
             },
         )
 

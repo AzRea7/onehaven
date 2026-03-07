@@ -14,6 +14,7 @@ from ..services.lease_rules import ensure_no_lease_overlap
 from ..services.ownership import must_get_lease, must_get_property, must_get_tenant
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
+from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
@@ -241,6 +242,16 @@ def list_leases(
 
     q = q.order_by(desc(Lease.id)).limit(limit)
     return list(db.scalars(q).all())
+
+
+@router.get("/leases/workflow/{property_id}", response_model=dict)
+def lease_workflow_snapshot(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    must_get_property(db, org_id=p.org_id, property_id=property_id)
+    return build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True)
 
 
 @router.patch("/leases/{lease_id}", response_model=LeaseOut)

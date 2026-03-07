@@ -14,6 +14,7 @@ from ..models import Property, RehabTask
 from ..schemas import RehabTaskCreate, RehabTaskOut
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
+from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/rehab", tags=["rehab"])
 
@@ -111,6 +112,51 @@ def list_tasks(property_id: int = Query(...), db: Session = Depends(get_db), p=D
     return rows
 
 
+@router.get("/tasks/summary/{property_id}", response_model=dict)
+def rehab_summary(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    _get_property_or_404(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="acquisition",
+        action="view rehab summary",
+    )
+
+    rows = db.scalars(
+        select(RehabTask)
+        .where(RehabTask.org_id == p.org_id, RehabTask.property_id == property_id)
+        .order_by(desc(RehabTask.id))
+    ).all()
+
+    total = len(rows)
+    done = sum(1 for r in rows if (r.status or "todo").lower() == "done")
+    blocked = sum(1 for r in rows if (r.status or "todo").lower() == "blocked")
+    in_progress = sum(1 for r in rows if (r.status or "todo").lower() == "in_progress")
+    todo = total - done - blocked - in_progress
+
+    cost_estimate_sum = 0.0
+    for r in rows:
+        if r.cost_estimate is not None:
+            try:
+                cost_estimate_sum += float(r.cost_estimate or 0.0)
+            except Exception:
+                pass
+
+    return {
+        "property_id": property_id,
+        "summary": {
+            "total": total,
+            "todo": todo,
+            "in_progress": in_progress,
+            "blocked": blocked,
+            "done": done,
+            "cost_estimate_sum": round(cost_estimate_sum, 2),
+        },
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+    }
+
+
 @router.patch("/tasks/{task_id}", response_model=RehabTaskOut)
 def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     row = db.scalar(select(RehabTask).where(RehabTask.id == task_id, RehabTask.org_id == p.org_id))
@@ -127,6 +173,7 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
 
     before = _task_payload(row)
     old_status = (row.status or "").lower()
+    old_property_id = row.property_id
 
     if payload.property_id != row.property_id:
         _get_property_or_404(db, org_id=p.org_id, property_id=payload.property_id)
@@ -187,6 +234,9 @@ def update_task(task_id: int, payload: RehabTaskCreate, db: Session = Depends(ge
         )
 
     sync_property_state(db, org_id=p.org_id, property_id=row.property_id)
+    if old_property_id != row.property_id:
+        sync_property_state(db, org_id=p.org_id, property_id=old_property_id)
+
     db.commit()
     db.refresh(row)
     return row

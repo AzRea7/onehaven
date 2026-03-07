@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..domain.workflow.stages import clamp_stage, stage_gte
-from ..models import Property, PropertyState, WorkflowEvent
+from ..domain.workflow.stages import clamp_stage, stage_catalog, stage_gte
+from ..models import Property, WorkflowEvent
 from ..schemas import PropertyStateUpsert, WorkflowEventCreate, WorkflowEventOut
 from ..services.property_state_machine import (
     ensure_state_row,
@@ -18,6 +18,7 @@ from ..services.property_state_machine import (
     get_transition_payload,
     sync_property_state,
 )
+from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
 
@@ -27,6 +28,11 @@ def _must_get_property(db: Session, *, org_id: int, property_id: int) -> Propert
     if not prop or prop.org_id != org_id:
         raise HTTPException(status_code=404, detail="property not found")
     return prop
+
+
+@router.get("/catalog", response_model=dict)
+def workflow_catalog():
+    return {"stages": stage_catalog()}
 
 
 @router.post("/events", response_model=WorkflowEventOut)
@@ -73,10 +79,9 @@ def upsert_state(
     p=Depends(get_principal),
 ):
     """
-    Step 2 rule:
-    current_stage is authoritative from the state machine, not a user-editable toy.
-    This endpoint lets you persist extra constraints/outstanding task metadata,
-    but it will not allow arbitrary stage jumping.
+    current_stage is canonical and data-derived.
+    This endpoint is only for enriching constraints/task metadata and for
+    limited manual correction that cannot jump ahead of computed truth.
     """
     _must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
 
@@ -94,7 +99,7 @@ def upsert_state(
         computed = get_state_payload(db, org_id=p.org_id, property_id=payload.property_id, recompute=True)
         requested = clamp_stage(payload.current_stage)
         suggested = clamp_stage(computed.get("suggested_stage"))
-        # Only allow a manual stage set if it does not exceed computed truth.
+
         if stage_gte(requested, suggested) and requested != suggested:
             raise HTTPException(
                 status_code=409,
@@ -104,6 +109,12 @@ def upsert_state(
                     "suggested_stage": suggested,
                     "why": "Stage cannot be manually advanced beyond computed workflow truth.",
                     "next_actions": computed.get("next_actions") or [],
+                    "workflow": build_workflow_summary(
+                        db,
+                        org_id=p.org_id,
+                        property_id=payload.property_id,
+                        recompute=False,
+                    ),
                 },
             )
         row.current_stage = requested
@@ -115,11 +126,13 @@ def upsert_state(
     db.add(row)
     db.commit()
 
-    # Always sync back to canonical truth after persistence.
     sync_property_state(db, org_id=p.org_id, property_id=payload.property_id)
     db.commit()
 
-    return get_state_payload(db, org_id=p.org_id, property_id=payload.property_id, recompute=True)
+    return {
+        "state": get_state_payload(db, org_id=p.org_id, property_id=payload.property_id, recompute=True),
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=payload.property_id, recompute=False),
+    }
 
 
 @router.get("/state/{property_id}", response_model=dict)
@@ -130,7 +143,10 @@ def get_state(
     p=Depends(get_principal),
 ):
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    return get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=recompute)
+    return {
+        "state": get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=recompute),
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
+    }
 
 
 @router.get("/transition/{property_id}", response_model=dict)
@@ -140,7 +156,10 @@ def get_transition(
     p=Depends(get_principal),
 ):
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    return get_transition_payload(db, org_id=p.org_id, property_id=property_id)
+    return {
+        "transition": get_transition_payload(db, org_id=p.org_id, property_id=property_id),
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
+    }
 
 
 @router.post("/advance/{property_id}", response_model=dict)
@@ -151,8 +170,8 @@ def advance(
 ):
     """
     Validates whether the next stage is unlocked.
-    Because stage truth is data-driven, this endpoint mostly acts as a gate/diagnostic.
-    If the next stage is already reflected by computed facts, we persist the synced state.
+    current_stage itself is always computed from data truth, so this endpoint
+    acts mainly as a gate/diagnostic and resync trigger.
     """
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
 
@@ -170,6 +189,7 @@ def advance(
                 "allowed_next_stage": gate.get("allowed_next_stage"),
                 "constraints": tx.get("constraints") or {},
                 "next_actions": tx.get("next_actions") or [],
+                "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
             },
         )
 
@@ -180,5 +200,7 @@ def advance(
         "ok": True,
         "property_id": property_id,
         "advanced_to": gate.get("allowed_next_stage"),
+        "advanced_to_label": gate.get("allowed_next_stage_label"),
         "state": get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=True),
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
     }

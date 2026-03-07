@@ -15,6 +15,7 @@ from ..services.events_facade import wf
 from ..services.ownership import must_get_property
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
+from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/equity", tags=["equity"])
 
@@ -268,4 +269,5 @@ def valuation_suggestions(
         "cadence": cadence_clean,
         "latest_valuation_as_of": latest.as_of.isoformat() if latest and latest.as_of else None,
         "suggestions": suggestions,
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
     }

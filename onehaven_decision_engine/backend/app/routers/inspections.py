@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
@@ -34,6 +34,7 @@ from ..services.events_facade import wf
 from ..services.ownership import must_get_property
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
+from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/inspections", tags=["inspections"])
 
@@ -440,3 +441,42 @@ def stats(
         reinspect_rate=s.get("reinspect_rate", 0.0),
         top_fail_points=s.get("top_fail_points", []),
     )
+
+
+@router.get("/property/{property_id}/readiness", response_model=dict)
+def inspection_readiness(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view inspection readiness",
+    )
+
+    latest = db.scalar(
+        select(Inspection)
+        .where(Inspection.org_id == p.org_id, Inspection.property_id == property_id)
+        .order_by(desc(Inspection.id))
+        .limit(1)
+    )
+
+    items = db.scalars(
+        select(InspectionItem)
+        .join(Inspection, Inspection.id == InspectionItem.inspection_id)
+        .where(Inspection.org_id == p.org_id, Inspection.property_id == property_id)
+    ).all()
+
+    open_failed = [i for i in items if bool(i.failed) and i.resolved_at is None]
+
+    return {
+        "property_id": property_id,
+        "latest_inspection": _inspection_payload(latest) if latest else None,
+        "open_failed_count": len(open_failed),
+        "open_failed_items": [_inspection_item_payload(i) for i in open_failed[:25]],
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+    }

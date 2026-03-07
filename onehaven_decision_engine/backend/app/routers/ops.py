@@ -26,6 +26,7 @@ from ..models import (
     WorkflowEvent,
 )
 from ..services.property_state_machine import compute_and_persist_stage, get_state_payload
+from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 
@@ -188,6 +189,7 @@ def _rehab_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, A
         "blocked": blocked,
         "done": done,
         "cost_estimate_sum": cost_est,
+        "is_complete": total > 0 and todo == 0 and inprog == 0 and blocked == 0,
     }
 
 
@@ -204,6 +206,7 @@ def property_ops_summary(
 
     stage_row: PropertyState = compute_and_persist_stage(db, org_id=p.org_id, property=prop)
     state_payload = get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=True)
+    workflow = build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False)
     stage = state_payload.get("current_stage") or stage_row.current_stage or "deal"
 
     checklist = _checklist_progress(db, org_id=p.org_id, property_id=property_id)
@@ -258,6 +261,7 @@ def property_ops_summary(
             "is_red_zone": getattr(prop, "is_red_zone", False),
         },
         "stage": stage,
+        "stage_label": workflow.get("current_stage_label"),
         "stage_updated_at": stage_row.updated_at.isoformat() if stage_row.updated_at else None,
         "checklist_progress": {
             "total": checklist.total,
@@ -307,6 +311,7 @@ def property_ops_summary(
         "constraints": state_payload.get("constraints", {}),
         "outstanding_tasks": state_payload.get("outstanding_tasks", {}),
         "next_actions": state_payload.get("next_actions", []),
+        "workflow": workflow,
     }
 
 
@@ -339,6 +344,7 @@ def ops_rollups(
     for prop in props:
         compute_and_persist_stage(db, org_id=p.org_id, property=prop)
         state_payload = get_state_payload(db, org_id=p.org_id, property_id=prop.id, recompute=True)
+        workflow = build_workflow_summary(db, org_id=p.org_id, property_id=prop.id, recompute=False)
         cur_stage = str(state_payload.get("current_stage") or "deal")
 
         if stage and cur_stage != stage:
@@ -353,6 +359,10 @@ def ops_rollups(
                 "state": prop.state,
                 "county": getattr(prop, "county", None),
                 "stage": cur_stage,
+                "stage_label": workflow.get("current_stage_label"),
+                "primary_action": (workflow.get("primary_action") or {}).get("title"),
+                "next_stage": workflow.get("next_stage"),
+                "next_stage_label": workflow.get("next_stage_label"),
             }
         )
 
@@ -361,6 +371,20 @@ def ops_rollups(
         "rows": rows,
         "count": len(rows),
     }
+
+
+@router.get("/property/{property_id}/workflow")
+def property_workflow_summary(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    compute_and_persist_stage(db, org_id=p.org_id, property=prop)
+    return build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False)
 
 
 @router.post("/property/{property_id}/generate_rehab_tasks")
@@ -449,4 +473,8 @@ def generate_rehab_tasks_from_gaps(
     compute_and_persist_stage(db, org_id=p.org_id, property=prop)
     db.commit()
 
-    return {"created": created, "count": len(created)}
+    return {
+        "created": created,
+        "count": len(created),
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+    }

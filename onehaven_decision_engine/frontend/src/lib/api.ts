@@ -315,6 +315,34 @@ export const api = {
   propertyBundle: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
 
+  workflowCatalog: (signal?: AbortSignal) =>
+    request<any>(`/workflow/catalog`, { cacheTtlMs: 10_000, signal }),
+
+  workflowState: (
+    propertyId: number,
+    recompute: boolean = true,
+    signal?: AbortSignal,
+  ) =>
+    request<any>(
+      `/workflow/state/${propertyId}${qs({ recompute: recompute ? "true" : "false" })}`,
+      {
+        cacheTtlMs: 500,
+        signal,
+      },
+    ),
+
+  workflowTransition: (propertyId: number, signal?: AbortSignal) =>
+    request<any>(`/workflow/transition/${propertyId}`, {
+      cacheTtlMs: 500,
+      signal,
+    }),
+
+  workflowAdvance: (propertyId: number) =>
+    request<any>(`/workflow/advance/${propertyId}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
   opsPropertySummary: (
     propertyId: number,
     cashDays: number = 90,
@@ -324,6 +352,12 @@ export const api = {
       `/ops/property/${propertyId}/summary${qs({ cash_days: cashDays })}`,
       { cacheTtlMs: 800, signal },
     ),
+
+  opsPropertyWorkflow: (propertyId: number, signal?: AbortSignal) =>
+    request<any>(`/ops/property/${propertyId}/workflow`, {
+      cacheTtlMs: 500,
+      signal,
+    }),
 
   opsRollups: (params?: Record<string, any>, signal?: AbortSignal) =>
     request<any>(`/ops/rollups${qs(params || {})}`, {
@@ -467,6 +501,12 @@ export const api = {
       { cacheTtlMs: 2_000, signal },
     ),
 
+  rehabSummary: (propertyId: number, signal?: AbortSignal) =>
+    request<any>(`/rehab/tasks/summary/${propertyId}`, {
+      cacheTtlMs: 800,
+      signal,
+    }),
+
   createRehabTask: (payload: any) =>
     request<any>(`/rehab/tasks`, {
       method: "POST",
@@ -488,6 +528,12 @@ export const api = {
       { cacheTtlMs: 2_000, signal },
     ),
 
+  leaseWorkflow: (propertyId: number, signal?: AbortSignal) =>
+    request<any>(`/tenants/leases/workflow/${propertyId}`, {
+      cacheTtlMs: 800,
+      signal,
+    }),
+
   createLease: (payload: any) =>
     request<any>(`/tenants/leases`, {
       method: "POST",
@@ -506,6 +552,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  cashRollup: (propertyId: number, year: number, signal?: AbortSignal) =>
+    request<any>(`/cash/rollup${qs({ property_id: propertyId, year })}`, {
+      cacheTtlMs: 800,
+      signal,
+    }),
+
   valuations: (propertyId: number, signal?: AbortSignal) =>
     requestArray<any>(
       `/equity/valuations${qs({ property_id: propertyId, limit: 200 })}`,
@@ -517,6 +569,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  valuationSuggestions: (
+    propertyId: number,
+    cadence: "quarterly" | "monthly" = "quarterly",
+    count: number = 4,
+    signal?: AbortSignal,
+  ) =>
+    request<any>(
+      `/equity/valuation/suggestions${qs({
+        property_id: propertyId,
+        cadence,
+        count,
+      })}`,
+      { cacheTtlMs: 800, signal },
+    ),
 
   trustGet: (
     entity_type: string,

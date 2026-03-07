@@ -35,6 +35,7 @@ from ..services.compliance_service import (
 from ..services.policy_projection_service import build_property_compliance_brief
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
+from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -458,6 +459,7 @@ def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends
         "pct_done": summary["pct_done"],
         "latest_inspection_passed": latest_inspection_passed,
         "passed": passed,
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
     }
 
 
@@ -488,7 +490,10 @@ def run_compliance_hqs(
         )
         sync_property_state(db, org_id=p.org_id, property_id=property_id)
         db.commit()
-        return result
+        return {
+            **result,
+            "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+        }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -565,6 +570,7 @@ def run_hqs_summary_only(property_id: int, db: Session = Depends(get_db), p=Depe
         "not_yet": not_yet,
         "score_pct": score_pct,
         "fail_codes": fail_codes,
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
     }
 
 
@@ -609,7 +615,10 @@ def create_tasks_from_policy(
         )
         sync_property_state(db, org_id=p.org_id, property_id=property_id)
         db.commit()
-        return result
+        return {
+            **result,
+            "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+        }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
