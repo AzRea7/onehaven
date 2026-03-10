@@ -4,7 +4,6 @@ import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
 import VirtualList from "../components/VirtualList";
 import PageShell from "../components/PageShell";
-import FilterBar from "../components/FilterBar";
 import GlobalFilters from "../components/GlobalFilters";
 import { filtersToApiParams, readFilters } from "../lib/filters";
 
@@ -30,6 +29,15 @@ function getFinancingType(price?: number | null) {
 }
 
 type FinancingFilter = "ALL" | "CASH" | "DSCR";
+
+function inputClass() {
+  return [
+    "w-full rounded-xl border border-white/10 bg-white/[0.04]",
+    "px-3 py-2.5 text-sm text-white/90 placeholder:text-white/40",
+    "outline-none transition",
+    "focus:border-white/20 focus:ring-2 focus:ring-white/10",
+  ].join(" ");
+}
 
 export default function Properties() {
   const [rows, setRows] = React.useState<Row[]>([]);
@@ -183,7 +191,11 @@ export default function Properties() {
           subtitle="Scan and triage. Filter by decision, search by address, then click into the cockpit view."
           actions={
             <>
-              <button onClick={refresh} className="oh-btn" title="Refresh">
+              <button
+                onClick={refresh}
+                className="oh-btn cursor-pointer"
+                title="Refresh"
+              >
                 sync
               </button>
               <span className="oh-badge border-green-400/25 bg-green-400/10 text-green-200">
@@ -199,49 +211,7 @@ export default function Properties() {
           }
         />
 
-        <GlobalFilters className="oh-panel p-4" />
-
-        <FilterBar>
-          <div className="flex items-center gap-3 flex-wrap w-full">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Client-side quick search address, city, zip…"
-              className="oh-input focus-ring max-w-xl"
-            />
-
-            <select
-              value={decision}
-              onChange={(e) => setDecision(e.target.value as any)}
-              className="oh-input focus-ring max-w-[220px]"
-            >
-              <option value="ALL">All decisions</option>
-              <option value="PASS">PASS</option>
-              <option value="REVIEW">REVIEW</option>
-              <option value="REJECT">REJECT</option>
-            </select>
-
-            <select
-              value={financing}
-              onChange={(e) => setFinancing(e.target.value as any)}
-              className="oh-input focus-ring max-w-[240px]"
-              title="Client-side financing filter (<$75k cash, >=$75k DSCR)"
-            >
-              <option value="ALL">All financing</option>
-              <option value="CASH">Cash deals (&lt; $75k)</option>
-              <option value="DSCR">DSCR loans (≥ $75k)</option>
-            </select>
-
-            <div className="text-xs text-white/45 ml-auto">
-              Showing{" "}
-              <span className="text-white/80 font-semibold">
-                {filtered.length}
-              </span>{" "}
-              of{" "}
-              <span className="text-white/80 font-semibold">{rows.length}</span>
-            </div>
-          </div>
-        </FilterBar>
+        <GlobalFilters />
 
         {err && (
           <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">

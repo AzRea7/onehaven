@@ -137,9 +137,17 @@ async function request<T>(
 
   const run = (async () => {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
       ...(init?.headers as any),
     };
+
+    const hasBody =
+      init?.body !== undefined &&
+      init?.body !== null &&
+      !(typeof init.body === "string" && init.body.length === 0);
+
+    if (hasBody && !headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
 
     const isAuthBootstrap =
       path.startsWith("/auth/login") ||
@@ -178,6 +186,8 @@ async function request<T>(
 
     if (method === "GET" && ttl > 0) {
       memCache.set(key, { at: Date.now(), value: data });
+    } else if (method !== "GET") {
+      clearApiCache();
     }
 
     return data as T;
@@ -324,6 +334,9 @@ export const api = {
 
   propertyBundle: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
+
+  propertyCockpit: (id: number, signal?: AbortSignal) =>
+    request<any>(`/properties/${id}/cockpit`, { cacheTtlMs: 1_000, signal }),
 
   workflowCatalog: (signal?: AbortSignal) =>
     request<any>(`/workflow/catalog`, { cacheTtlMs: 10_000, signal }),
@@ -694,13 +707,25 @@ export const api = {
   upsertSlotAssignment: (payload: {
     slot_key: string;
     property_id?: number | null;
-    agent_key?: string | null;
+    owner_type?: string | null;
+    assignee?: string | null;
     status?: string | null;
+    notes?: string | null;
+    agent_key?: string | null;
     payload_json?: any;
   }) =>
     request<any>(`/agents/slots/assignments`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        slot_key: payload.slot_key,
+        property_id: payload.property_id ?? null,
+        owner_type: payload.owner_type ?? null,
+        assignee: payload.assignee ?? null,
+        status: payload.status ?? null,
+        notes: payload.notes ?? null,
+        agent_key: payload.agent_key ?? null,
+        payload_json: payload.payload_json ?? null,
+      }),
     }),
 
   agentRunsList: (arg: number | { property_id: number }) => {

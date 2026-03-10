@@ -46,6 +46,8 @@ from ..schemas import (
     ValuationOut,
 )
 from ..services.geo_enrichment import enrich_property_geo
+from ..services.property_state_machine import compute_and_persist_stage, get_state_payload
+from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 
@@ -211,12 +213,8 @@ def _extract_urls_from_any(value: Any, out: list[str]) -> None:
         return
 
     if isinstance(value, dict):
-        for k, v in value.items():
-            key = str(k).lower()
-            if any(tok in key for tok in ["photo", "photos", "image", "images", "img", "gallery", "media", "picture"]):
-                _extract_urls_from_any(v, out)
-            else:
-                _extract_urls_from_any(v, out)
+        for _, v in value.items():
+            _extract_urls_from_any(v, out)
         return
 
     if isinstance(value, list):
@@ -348,9 +346,7 @@ def list_properties(
     if only_red_zone:
         stmt = stmt.where(Property.is_red_zone.is_(True))
     elif exclude_red_zone:
-        stmt = stmt.where(
-            (Property.is_red_zone.is_(False)) | (Property.is_red_zone.is_(None))
-        )
+        stmt = stmt.where((Property.is_red_zone.is_(False)) | (Property.is_red_zone.is_(None)))
 
     if min_crime_score is not None:
         stmt = stmt.where(Property.crime_score.is_not(None))
@@ -560,4 +556,28 @@ def property_bundle(property_id: int, db: Session = Depends(get_db), p=Depends(g
         "leases": [LeaseOut.model_validate(x, from_attributes=True).model_dump() for x in leases],
         "transactions": [TransactionOut.model_validate(x, from_attributes=True).model_dump() for x in txns],
         "valuations": [ValuationOut.model_validate(x, from_attributes=True).model_dump() for x in vals],
+    }
+
+
+@router.get("/{property_id}/cockpit", response_model=dict)
+def property_cockpit(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    compute_and_persist_stage(db, org_id=p.org_id, property=prop)
+
+    bundle = property_bundle(property_id=property_id, db=db, p=p)
+    state_payload = get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=True)
+    workflow = build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False)
+
+    return {
+        **bundle,
+        "workflow": workflow,
+        "state": {
+            "current_stage": state_payload.get("current_stage"),
+            "constraints": state_payload.get("constraints", {}),
+            "outstanding_tasks": state_payload.get("outstanding_tasks", {}),
+            "next_actions": state_payload.get("next_actions", []),
+        },
     }

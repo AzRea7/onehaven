@@ -63,6 +63,20 @@ function SkeletonLine() {
   return <div className="h-3 bg-white/10 rounded w-full" />;
 }
 
+function FeatureArtwork({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end overflow-visible">
+      <div className={className}>{children}</div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [rows, setRows] = React.useState<DashboardRow[]>([]);
   const [rollups, setRollups] = React.useState<StageRollups | null>(null);
@@ -220,7 +234,7 @@ export default function Dashboard() {
           }
         />
 
-        <GlobalFilters className="oh-panel p-4" />
+        <GlobalFilters />
 
         {err && (
           <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
@@ -229,8 +243,8 @@ export default function Dashboard() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <GlassCard>
-            <div className="flex items-start justify-between gap-4">
+          <GlassCard className="min-h-[300px]">
+            <div className="relative z-10 flex items-start justify-between gap-4">
               <div className="space-y-1">
                 <div className="text-xs uppercase tracking-widest text-white/50">
                   Deal Engine
@@ -248,15 +262,15 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="mt-5 h-[140px] relative overflow-visible">
-              <HoverTilt className="absolute -right-10 top-14 h-[220px] w-[220px] opacity-95">
-                <OrbDealEngine className="animate-[floatSoft_7.5s_ease-in-out_infinite]" />
+            <FeatureArtwork className="translate-x-6 translate-y-6 h-[160px] w-[160px] opacity-95">
+              <HoverTilt className="h-full w-full">
+                <OrbDealEngine className="h-full w-full animate-[floatSoft_7.5s_ease-in-out_infinite]" />
               </HoverTilt>
-            </div>
+            </FeatureArtwork>
           </GlassCard>
 
-          <GlassCard>
-            <div className="flex items-start justify-between gap-4">
+          <GlassCard className="min-h-[300px]">
+            <div className="relative z-10 flex items-start justify-between gap-4">
               <div className="space-y-1">
                 <div className="text-xs uppercase tracking-widest text-white/50">
                   Compliance
@@ -274,15 +288,15 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="mt-5 h-[140px] relative overflow-visible">
-              <HoverTilt className="absolute -right-10 top-14 h-[220px] w-[220px] opacity-95">
-                <Section8Badge className="animate-[floatSoft_8s_ease-in-out_infinite]" />
+            <FeatureArtwork className="translate-x-4 translate-y-5 h-[170px] w-[170px] opacity-95">
+              <HoverTilt className="h-full w-full">
+                <Section8Badge className="h-full w-full animate-[floatSoft_8s_ease-in-out_infinite]" />
               </HoverTilt>
-            </div>
+            </FeatureArtwork>
           </GlassCard>
 
-          <GlassCard>
-            <div className="flex items-start justify-between gap-4">
+          <GlassCard className="min-h-[300px]">
+            <div className="relative z-10 flex items-start justify-between gap-4">
               <div className="space-y-1">
                 <div className="text-xs uppercase tracking-widest text-white/50">
                   Agents + Humans
@@ -300,16 +314,16 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="mt-5 h-[140px] relative overflow-visible">
-              <HoverTilt className="absolute -right-10 top-14 h-[220px] w-[220px] opacity-95">
-                <AgentClaw className="animate-[floatSoft_7.7s_ease-in-out_infinite]" />
+            <FeatureArtwork className="translate-x-6 translate-y-6 h-[155px] w-[155px] opacity-95">
+              <HoverTilt className="h-full w-full">
+                <AgentClaw className="h-full w-full animate-[floatSoft_7.7s_ease-in-out_infinite]" />
               </HoverTilt>
-            </div>
+            </FeatureArtwork>
           </GlassCard>
         </div>
 
-        <GlassCard hover={false}>
-          <div className="flex items-center justify-between gap-6 flex-wrap">
+        <GlassCard hover={false} className="min-h-[220px]">
+          <div className="relative z-10 flex items-center justify-between gap-6 flex-wrap">
             <div className="space-y-2">
               <div className="text-xs uppercase tracking-widest text-white/50">
                 Build Pipeline
@@ -323,12 +337,14 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="relative h-[140px] w-[220px] overflow-visible">
-              <HoverTilt className="absolute -right-8 top-[65px] h-[210px] w-[260px] opacity-95">
-                <BuildStack />
-              </HoverTilt>
-            </div>
+            <div className="relative h-[120px] w-[180px] overflow-visible" />
           </div>
+
+          <FeatureArtwork className="translate-x-10 translate-y-3 h-[165px] w-[210px] opacity-95">
+            <HoverTilt className="h-full w-full">
+              <BuildStack className="h-full w-full animate-[floatSoft_8.4s_ease-in-out_infinite]" />
+            </HoverTilt>
+          </FeatureArtwork>
         </GlassCard>
 
         <GlassCard>

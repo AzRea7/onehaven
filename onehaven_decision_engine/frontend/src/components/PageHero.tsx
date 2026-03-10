@@ -9,7 +9,7 @@ export default function PageHero({
   right,
   actions,
   className,
-  tilt = false, // default OFF for perf; enable per-page if you really want it
+  tilt = false,
 }: {
   eyebrow?: string;
   title: string;

@@ -194,6 +194,95 @@ def _rehab_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, A
     }
 
 
+def _decision_health(
+    *,
+    underwriting: Optional[dict[str, Any]],
+    checklist: ChecklistProgress,
+    rehab: dict[str, Any],
+    inspection_latest: Optional[Inspection],
+    open_failed_items: int,
+    active_lease: Optional[Lease],
+    cash_n: dict[str, float],
+    equity: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    score = 0
+    flags: list[str] = []
+    warnings: list[str] = []
+
+    if underwriting:
+        score += 20
+        decision = str(underwriting.get("decision") or "").lower()
+        if decision in {"buy", "proceed", "pass"}:
+            score += 10
+            flags.append("underwriting_positive")
+        elif decision in {"reject", "fail"}:
+            warnings.append("underwriting_negative")
+        else:
+            warnings.append("underwriting_unclear")
+    else:
+        warnings.append("missing_underwriting")
+
+    if checklist.total > 0:
+        checklist_pts = round(checklist.pct_done * 20)
+        score += checklist_pts
+        if checklist.done == checklist.total:
+            flags.append("checklist_complete")
+        elif checklist.blocked > 0:
+            warnings.append("checklist_blocked")
+    else:
+        warnings.append("missing_checklist")
+
+    if rehab.get("total", 0) > 0:
+        if rehab.get("is_complete"):
+            score += 15
+            flags.append("rehab_complete")
+        else:
+            score += min(10, rehab.get("done", 0))
+            warnings.append("rehab_incomplete")
+    else:
+        warnings.append("missing_rehab_tasks")
+
+    if inspection_latest:
+        if bool(getattr(inspection_latest, "passed", False)) and open_failed_items == 0:
+            score += 15
+            flags.append("inspection_clean")
+        else:
+            warnings.append("inspection_open")
+    else:
+        warnings.append("missing_inspection")
+
+    if active_lease:
+        score += 10
+        flags.append("active_lease")
+    else:
+        warnings.append("no_active_lease")
+
+    if float(cash_n.get("income", 0.0) or 0.0) > 0:
+        score += 5
+        flags.append("cashflow_observed")
+    else:
+        warnings.append("no_cash_income")
+
+    if equity and float(equity.get("estimated_value", 0.0) or 0.0) > 0:
+        score += 5
+        flags.append("valuation_present")
+    else:
+        warnings.append("missing_valuation")
+
+    band = "low"
+    if score >= 75:
+        band = "high"
+    elif score >= 45:
+        band = "medium"
+
+    return {
+        "score": max(0, min(100, score)),
+        "band": band,
+        "flags": flags,
+        "warnings": warnings,
+    }
+
+
 @router.get("/property/{property_id}/summary")
 def property_ops_summary(
     property_id: int,
@@ -247,6 +336,29 @@ def property_ops_summary(
             "created_at": uw.created_at.isoformat() if uw.created_at else None,
         }
 
+    decision_health = _decision_health(
+        underwriting=underwriting,
+        checklist=checklist,
+        rehab=rehab,
+        inspection_latest=latest_insp,
+        open_failed_items=open_failed_items,
+        active_lease=active_lease,
+        cash_n=cash_n,
+        equity=equity,
+    )
+
+    counts = {
+        "rehab_tasks_total": rehab.get("total", 0),
+        "rehab_tasks_open": int(rehab.get("todo", 0)) + int(rehab.get("in_progress", 0)) + int(rehab.get("blocked", 0)),
+        "checklist_total": checklist.total,
+        "checklist_done": checklist.done,
+        "inspection_open_failed_items": open_failed_items,
+        "has_active_lease": active_lease is not None,
+        "cash_days_window": cash_days,
+        "has_valuation": equity is not None,
+        "has_underwriting": underwriting is not None,
+    }
+
     return {
         "property": {
             "id": prop.id,
@@ -259,6 +371,10 @@ def property_ops_summary(
             "bathrooms": prop.bathrooms,
             "square_feet": prop.square_feet,
             "year_built": prop.year_built,
+            "lat": getattr(prop, "lat", None),
+            "lng": getattr(prop, "lng", None),
+            "crime_score": getattr(prop, "crime_score", None),
+            "offender_count": getattr(prop, "offender_count", None),
             "is_red_zone": getattr(prop, "is_red_zone", False),
         },
         "stage": stage,
@@ -309,6 +425,8 @@ def property_ops_summary(
         },
         "equity": equity,
         "underwriting": underwriting,
+        "decision_health": decision_health,
+        "counts": counts,
         "constraints": state_payload.get("constraints", {}),
         "outstanding_tasks": state_payload.get("outstanding_tasks", {}),
         "next_actions": state_payload.get("next_actions", []),

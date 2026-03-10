@@ -3,10 +3,13 @@ import { useParams } from "react-router-dom";
 import { api, buildZillowUrl } from "../lib/api";
 
 import AgentSlots from "../components/AgentSlots";
+import NextActionsPanel from "../components/NextActionsPanel";
 import PageHero from "../components/PageHero";
 import Golem from "../components/Golem";
 import PropertyImage from "../components/PropertyImage";
 import PropertyCompliancePanel from "../components/PropertyCompliancePanel";
+import RiskBadges from "../components/RiskBadges";
+import StageProgress from "../components/StageProgress";
 import { getFinancingType } from "../lib/dealRules";
 import PageShell from "../components/PageShell";
 
@@ -320,94 +323,6 @@ function AgentsDrawer({
         </div>
       </div>
     </div>
-  );
-}
-
-function WorkflowRail({
-  workflow,
-  onAdvance,
-  busy,
-}: {
-  workflow: any;
-  onAdvance: () => Promise<void>;
-  busy: boolean;
-}) {
-  const stages = Array.isArray(workflow?.stages) ? workflow.stages : [];
-  const primaryAction = workflow?.primary_action;
-  const gate = workflow?.gate || {};
-
-  return (
-    <Panel
-      title="Workflow"
-      right={
-        primaryAction?.kind === "advance" ? (
-          <button
-            onClick={() => onAdvance().catch(() => {})}
-            disabled={busy}
-            className="oh-btn oh-btn-primary cursor-pointer"
-          >
-            {busy ? "advancing…" : primaryAction?.title || "advance"}
-          </button>
-        ) : (
-          <Badge>{workflow?.current_stage_label || "—"}</Badge>
-        )
-      }
-    >
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-2">
-        {stages.map((s: any) => {
-          const status =
-            s.status === "completed"
-              ? "border-green-400/20 bg-green-400/8"
-              : s.status === "current"
-                ? "border-white/25 bg-white/10"
-                : s.status === "next"
-                  ? "border-yellow-300/20 bg-yellow-300/8"
-                  : "border-white/10 bg-white/[0.03]";
-
-          return (
-            <div
-              key={s.key}
-              className={`rounded-2xl border p-3 ${status}`}
-              style={{ contain: "layout paint" }}
-            >
-              <div className="text-[11px] uppercase tracking-wider text-white/45">
-                {s.status}
-              </div>
-              <div className="mt-1 text-sm font-semibold text-white">
-                {s.label}
-              </div>
-              <div className="mt-1 text-xs text-white/55 leading-relaxed">
-                {s.description}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_.9fr] gap-3 pt-2">
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-          <div className="text-xs text-white/45">Primary next move</div>
-          <div className="mt-2 text-sm font-semibold text-white">
-            {primaryAction?.title || "No action required"}
-          </div>
-          <div className="mt-2 text-xs text-white/55">
-            Current stage: {workflow?.current_stage_label || "—"}
-            {workflow?.next_stage_label
-              ? ` · Next stage: ${workflow.next_stage_label}`
-              : ""}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-          <div className="text-xs text-white/45">Transition gate</div>
-          <div className="mt-2 text-sm text-white/80">
-            {gate?.ok
-              ? `Ready to move into ${gate?.allowed_next_stage_label || gate?.allowed_next_stage || "next stage"}.`
-              : gate?.blocked_reason || "Not ready yet."}
-          </div>
-        </div>
-      </div>
-    </Panel>
   );
 }
 
@@ -817,17 +732,15 @@ export default function PropertyView() {
             <Badge tone={financingTone}>{financing}</Badge>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Badge>County: {geo?.county ?? p?.county ?? "—"}</Badge>
-            <Badge tone={geo?.is_red_zone ? "bad" : "good"}>
-              {geo?.is_red_zone ? "Red zone" : "Not red zone"}
-            </Badge>
-            <Badge>
-              Lat/Lng:{" "}
-              {geo?.lat != null && geo?.lng != null
-                ? `${Number(geo.lat).toFixed(5)}, ${Number(geo.lng).toFixed(5)}`
-                : "—"}
-            </Badge>
+          <div className="mt-3">
+            <RiskBadges
+              county={geo?.county ?? p?.county}
+              isRedZone={geo?.is_red_zone}
+              crimeScore={geo?.crime_score}
+              offenderCount={geo?.offender_count}
+              lat={geo?.lat}
+              lng={geo?.lng}
+            />
           </div>
 
           <div className="mt-3 text-xs text-white/45">
@@ -852,8 +765,10 @@ export default function PropertyView() {
         </div>
 
         <div className="space-y-4">
-          <WorkflowRail
+          <StageProgress
             workflow={workflow}
+            currentStage={stage}
+            currentStageLabel={stageLabel}
             onAdvance={advanceWorkflow}
             busy={!!busy}
           />
@@ -940,27 +855,9 @@ export default function PropertyView() {
                 </div>
               </div>
             </div>
-
-            <div className="pt-2">
-              <div className="text-xs text-white/45 mb-2">Next actions</div>
-              {nextActions.length ? (
-                <div className="space-y-2">
-                  {nextActions.slice(0, 5).map((a, i) => (
-                    <div
-                      key={i}
-                      className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-white/80"
-                    >
-                      {a}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-sm text-white/55">
-                  No blockers detected.
-                </div>
-              )}
-            </div>
           </Panel>
+
+          <NextActionsPanel actions={nextActions} />
 
           <Panel title="Trust" right={<TrustPill score={trustScore} />}>
             {trust == null ? (

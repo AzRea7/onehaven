@@ -1,4 +1,3 @@
-// frontend/src/components/PageShell.tsx
 import React from "react";
 import clsx from "clsx";
 
@@ -18,7 +17,6 @@ export default function PageShell({
   return (
     <div
       className={clsx(
-        // consistent container + rhythm everywhere
         "mx-auto w-full max-w-[1200px] px-4 md:px-6 py-6",
         className,
       )}

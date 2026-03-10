@@ -1,4 +1,3 @@
-// frontend/src/components/AgentSlots.tsx
 import React from "react";
 import { api } from "../lib/api";
 import { motion, useReducedMotion } from "framer-motion";
@@ -34,9 +33,7 @@ type SlotAssign = {
 };
 
 type Props = {
-  /** If provided, prefer per-property assignments. Also allow editing for that property. */
   propertyId?: number;
-  /** If true, hide global-only slots when propertyId is provided */
   propertyOnly?: boolean;
 };
 
@@ -48,15 +45,6 @@ function asArray<T = any>(x: any): T[] {
   return [];
 }
 
-/**
- * Performance goals:
- * - Avoid “n.map is not a function” by normalizing all list responses.
- * - Avoid UI freezing by:
- *   - removing per-row stagger animations
- *   - aborting in-flight requests on refresh/unmount
- *   - not fetching global+property assignments redundantly unless needed
- *   - memoizing derived maps
- */
 export default function AgentSlots({ propertyId, propertyOnly }: Props) {
   const prefersReducedMotion = useReducedMotion();
 
@@ -77,10 +65,7 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
   }>(null);
 
   const shouldFetchGlobalAssignments = React.useMemo(() => {
-    // If you’re in a property view, you still want to show “effective”
-    // assignments (property overrides global). So fetch both unless propertyOnly=true.
     if (propertyId != null) return !propertyOnly;
-    // If no propertyId, you’re basically in “global board” mode.
     return true;
   }, [propertyId, propertyOnly]);
 
@@ -94,7 +79,7 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
       setLoading(true);
 
       const tasks: Promise<any>[] = [];
-      tasks.push(api.slotSpecs()); // cached in api.ts already
+      tasks.push(api.slotSpecs());
 
       if (shouldFetchGlobalAssignments) {
         tasks.push(api.slotAssignments(undefined, ac.signal));
@@ -114,14 +99,12 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
       const aGlobal = asArray<SlotAssign>(aGlobalRaw);
       const aProp = asArray<SlotAssign>(aPropRaw);
 
-      // Merge; property assignment should win when we compute "effective"
       const merged = [...aProp, ...aGlobal].filter(Boolean);
 
-      // De-dupe by id (stable)
       const seen = new Set<number>();
       const dedup = merged.filter((x) => {
         const id = Number(x?.id);
-        if (!Number.isFinite(id) || id <= 0) return true; // keep weird rows
+        if (!Number.isFinite(id) || id <= 0) return true;
         if (seen.has(id)) return false;
         seen.add(id);
         return true;
@@ -140,11 +123,8 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
   React.useEffect(() => {
     refresh();
     return () => abortRef.current?.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyId, propertyOnly]);
 
-  // Effective assignment per slot_key:
-  // property assignment wins; otherwise global (property_id == null).
   const byKey = React.useMemo(() => {
     const m = new Map<string, SlotAssign>();
 
@@ -156,7 +136,6 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
       const aIsProp = propertyId != null && a.property_id === propertyId;
       const aIsGlobal = a.property_id == null;
 
-      // If propertyOnly, ignore globals entirely when in property view
       if (propertyOnly && propertyId != null && !aIsProp) continue;
 
       if (!existing) {
@@ -167,16 +146,13 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
       const eIsProp = propertyId != null && existing.property_id === propertyId;
       const eIsGlobal = existing.property_id == null;
 
-      // If we already have property assignment, keep it.
       if (eIsProp) continue;
 
-      // Prefer property assignment over global
       if (aIsProp) {
         m.set(a.slot_key, a);
         continue;
       }
 
-      // Otherwise keep existing (stable)
       if (!eIsGlobal && aIsGlobal) {
         m.set(a.slot_key, a);
       }
@@ -282,7 +258,6 @@ export default function AgentSlots({ propertyId, propertyOnly }: Props) {
           const assignee =
             a?.assignee ?? (s.owner_type === "ai" ? "system" : "unassigned");
 
-          // If propertyOnly, hide slots without a property assignment
           if (
             propertyOnly &&
             propertyId != null &&
