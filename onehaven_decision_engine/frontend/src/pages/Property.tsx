@@ -1,11 +1,12 @@
-// frontend/src/pages/Property.tsx
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
 import VirtualList from "../components/VirtualList";
 import PageShell from "../components/PageShell";
 import FilterBar from "../components/FilterBar";
+import GlobalFilters from "../components/GlobalFilters";
+import { filtersToApiParams, readFilters } from "../lib/filters";
 
 type Row = any;
 
@@ -44,7 +45,16 @@ export default function Properties() {
 
   const [financing, setFinancing] = React.useState<FinancingFilter>("ALL");
 
+  const location = useLocation();
   const abortRef = React.useRef<AbortController | null>(null);
+
+  const filters = React.useMemo(() => {
+    return readFilters(new URLSearchParams(location.search));
+  }, [location.search]);
+
+  const apiFilterParams = React.useMemo(() => {
+    return filtersToApiParams(filters);
+  }, [filters]);
 
   const refresh = React.useCallback(async () => {
     abortRef.current?.abort();
@@ -54,10 +64,8 @@ export default function Properties() {
     try {
       setErr(null);
       setLoading(true);
-      const out = await api.dashboardProperties({
-        limit: 400,
-        signal: ac.signal,
-      });
+
+      const out = await api.properties(apiFilterParams, ac.signal);
       setRows(Array.isArray(out) ? out : []);
     } catch (e: any) {
       if (String(e?.name) === "AbortError") return;
@@ -65,7 +73,7 @@ export default function Properties() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiFilterParams]);
 
   React.useEffect(() => {
     refresh();
@@ -76,7 +84,7 @@ export default function Properties() {
     const needle = deferredQ.trim().toLowerCase();
 
     return (rows || []).filter((r) => {
-      const p = r?.property || {};
+      const p = r?.property || r || {};
       const deal = r?.deal || {};
       const u = r?.last_underwriting_result || {};
 
@@ -120,7 +128,7 @@ export default function Properties() {
   const rowHeight = 86;
 
   const renderRow = React.useCallback((r: any) => {
-    const p = r.property || {};
+    const p = r.property || r || {};
     const deal = r.deal || {};
     const u = r.last_underwriting_result || {};
     const decisionTxt = (u.decision || "REJECT").toUpperCase();
@@ -191,13 +199,14 @@ export default function Properties() {
           }
         />
 
-        {/* Use your new FilterBar as the consistent control surface */}
+        <GlobalFilters className="oh-panel p-4" />
+
         <FilterBar>
           <div className="flex items-center gap-3 flex-wrap w-full">
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search address, city, zip…"
+              placeholder="Client-side quick search address, city, zip…"
               className="oh-input focus-ring max-w-xl"
             />
 
@@ -216,7 +225,7 @@ export default function Properties() {
               value={financing}
               onChange={(e) => setFinancing(e.target.value as any)}
               className="oh-input focus-ring max-w-[240px]"
-              title="Filter by financing type (<$75k cash, >=$75k DSCR)"
+              title="Client-side financing filter (<$75k cash, >=$75k DSCR)"
             >
               <option value="ALL">All financing</option>
               <option value="CASH">Cash deals (&lt; $75k)</option>
@@ -266,9 +275,9 @@ export default function Properties() {
               items={filtered}
               itemHeight={rowHeight}
               overscan={8}
-              itemKey={(r) => String(r?.property?.id ?? Math.random())}
+              itemKey={(r) => String(r?.property?.id ?? r?.id ?? Math.random())}
               className="rounded-xl"
-              style={{ height: "calc(100vh - 380px)" }}
+              style={{ height: "calc(100vh - 430px)" }}
               renderRow={(item) => renderRow(item)}
             />
           </div>

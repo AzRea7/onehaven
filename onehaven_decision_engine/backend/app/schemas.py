@@ -974,6 +974,38 @@ class PropertyStateUpsert(BaseModel):
     constraints: Optional[dict[str, Any]] = None
     outstanding_tasks: Optional[dict[str, Any]] = None
 
+class PropertyUpdate(BaseModel):
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[float] = None
+    square_feet: Optional[int] = None
+    year_built: Optional[int] = None
+    has_garage: Optional[bool] = None
+    property_type: Optional[str] = None
+
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    county: Optional[str] = None
+
+    is_red_zone: Optional[bool] = None
+    crime_density: Optional[float] = None
+    crime_score: Optional[float] = None
+    offender_count: Optional[int] = None
+
+
+class GeoEnrichmentOut(BaseModel):
+    ok: bool
+    property_id: int
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    county: Optional[str] = None
+    is_red_zone: bool = False
+    geocoded: bool = False
+    reverse_geocoded: bool = False
+    warnings: list[str] = Field(default_factory=list)
 
 class PropertyStateOut(BaseModel):
     id: int

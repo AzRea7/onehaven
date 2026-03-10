@@ -25,6 +25,7 @@ from ..models import (
     Valuation,
     WorkflowEvent,
 )
+from ..services.dashboard_rollups import compute_rollups
 from ..services.property_state_machine import compute_and_persist_stage, get_state_payload
 from ..services.workflow_gate_service import build_workflow_summary
 
@@ -317,60 +318,39 @@ def property_ops_summary(
 
 @router.get("/rollups")
 def ops_rollups(
-    state: str | None = Query(default=None),
-    county: str | None = Query(default=None),
-    city: str | None = Query(default=None),
-    stage: str | None = Query(default=None),
-    include_red_zone: bool | None = Query(default=None),
+    state: Optional[str] = Query(default=None),
+    county: Optional[str] = Query(default=None),
+    city: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    stage: Optional[str] = Query(default=None),
+    only_red_zone: bool = Query(default=False),
+    exclude_red_zone: bool = Query(default=False),
+    min_crime_score: Optional[float] = Query(default=None),
+    max_crime_score: Optional[float] = Query(default=None),
+    min_offender_count: Optional[int] = Query(default=None),
+    max_offender_count: Optional[int] = Query(default=None),
+    days: int = Query(default=90, ge=7, le=365),
+    limit: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    q = select(Property).where(Property.org_id == p.org_id)
-
-    if state:
-        q = q.where(Property.state == state)
-    if county:
-        q = q.where(Property.county == county)
-    if city:
-        q = q.where(Property.city == city)
-    if include_red_zone is not None:
-        q = q.where(Property.is_red_zone.is_(bool(include_red_zone)))
-
-    props = db.scalars(q).all()
-
-    stage_counts: dict[str, int] = {}
-    rows: list[dict[str, Any]] = []
-
-    for prop in props:
-        compute_and_persist_stage(db, org_id=p.org_id, property=prop)
-        state_payload = get_state_payload(db, org_id=p.org_id, property_id=prop.id, recompute=True)
-        workflow = build_workflow_summary(db, org_id=p.org_id, property_id=prop.id, recompute=False)
-        cur_stage = str(state_payload.get("current_stage") or "deal")
-
-        if stage and cur_stage != stage:
-            continue
-
-        stage_counts[cur_stage] = stage_counts.get(cur_stage, 0) + 1
-        rows.append(
-            {
-                "property_id": prop.id,
-                "address": prop.address,
-                "city": prop.city,
-                "state": prop.state,
-                "county": getattr(prop, "county", None),
-                "stage": cur_stage,
-                "stage_label": workflow.get("current_stage_label"),
-                "primary_action": (workflow.get("primary_action") or {}).get("title"),
-                "next_stage": workflow.get("next_stage"),
-                "next_stage_label": workflow.get("next_stage_label"),
-            }
-        )
-
-    return {
-        "stage_counts": stage_counts,
-        "rows": rows,
-        "count": len(rows),
-    }
+    return compute_rollups(
+        db,
+        org_id=p.org_id,
+        days=days,
+        limit=limit,
+        state=state,
+        county=county,
+        city=city,
+        q=q,
+        stage=stage,
+        only_red_zone=only_red_zone,
+        exclude_red_zone=exclude_red_zone,
+        min_crime_score=min_crime_score,
+        max_crime_score=max_crime_score,
+        min_offender_count=min_offender_count,
+        max_offender_count=max_offender_count,
+    )
 
 
 @router.get("/property/{property_id}/workflow")

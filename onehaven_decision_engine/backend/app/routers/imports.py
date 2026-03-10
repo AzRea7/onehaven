@@ -1,25 +1,52 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
+import os
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, UploadFile, Query
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, File, Query, UploadFile
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import Property, Deal, RentAssumption, ImportSnapshot
-from ..schemas import ImportResultOut, ImportErrorRow
-from ..domain.importers.zillow import normalize_zillow
-from ..domain.importers.investorlift import normalize_investorlift
 from ..domain.fingerprint import fingerprint
-from ..domain.operating_truth import enforce_property_truth, enforce_deal_truth, TruthViolation
+from ..domain.importers.investorlift import normalize_investorlift
+from ..domain.importers.zillow import normalize_zillow
+from ..domain.operating_truth import TruthViolation, enforce_deal_truth, enforce_property_truth
+from ..models import Deal, ImportSnapshot, Property, RentAssumption
+from ..schemas import ImportErrorRow, ImportResultOut
+from ..services.geo_enrichment import enrich_property_geo
 
 router = APIRouter(prefix="/import", tags=["import"])
+
+
+def _safe_attr(obj, name: str, default=None):
+    return getattr(obj, name, default)
+
+
+def _maybe_geo_enrich_property(db: Session, *, org_id: int, property_id: int, force: bool = False) -> None:
+    key = os.getenv("GOOGLE_MAPS_API_KEY")
+    try:
+        asyncio.run(
+            enrich_property_geo(
+                db,
+                org_id=org_id,
+                property_id=property_id,
+                google_api_key=key,
+                force=force,
+            )
+        )
+    except RuntimeError:
+        # If something weird is already running an event loop in this context,
+        # fail soft instead of exploding the import.
+        pass
+    except Exception:
+        pass
 
 
 def _get_or_create_property(db: Session, org_id: int, n) -> Property:
@@ -48,8 +75,10 @@ def _get_or_create_property(db: Session, org_id: int, n) -> Property:
             Property.zip == n.zip,
         )
     )
+
     if p:
         dirty = False
+
         if p.bedrooms is None and n.bedrooms is not None:
             p.bedrooms = n.bedrooms
             dirty = True
@@ -66,10 +95,39 @@ def _get_or_create_property(db: Session, org_id: int, n) -> Property:
             p.has_garage = True
             dirty = True
 
+        # geo/risk fields from normalizer if present
+        if getattr(p, "lat", None) is None and _safe_attr(n, "lat") is not None:
+            p.lat = float(_safe_attr(n, "lat"))
+            dirty = True
+        if getattr(p, "lng", None) is None and _safe_attr(n, "lng") is not None:
+            p.lng = float(_safe_attr(n, "lng"))
+            dirty = True
+        if not getattr(p, "county", None) and _safe_attr(n, "county"):
+            p.county = str(_safe_attr(n, "county")).strip()
+            dirty = True
+
+        if _safe_attr(n, "is_red_zone") is not None:
+            p.is_red_zone = bool(_safe_attr(n, "is_red_zone"))
+            dirty = True
+        if _safe_attr(n, "crime_density") is not None:
+            p.crime_density = _safe_attr(n, "crime_density")
+            dirty = True
+        if _safe_attr(n, "crime_score") is not None:
+            p.crime_score = _safe_attr(n, "crime_score")
+            dirty = True
+        if _safe_attr(n, "offender_count") is not None:
+            p.offender_count = _safe_attr(n, "offender_count")
+            dirty = True
+
         if dirty:
             db.add(p)
             db.commit()
             db.refresh(p)
+
+        if getattr(p, "lat", None) is None or getattr(p, "lng", None) is None or not getattr(p, "county", None):
+            _maybe_geo_enrich_property(db, org_id=org_id, property_id=int(p.id), force=False)
+            db.refresh(p)
+
         return p
 
     p = Property(
@@ -83,10 +141,24 @@ def _get_or_create_property(db: Session, org_id: int, n) -> Property:
         square_feet=n.square_feet,
         year_built=n.year_built,
         has_garage=bool(n.has_garage),
+
+        # geo/risk
+        lat=_safe_attr(n, "lat"),
+        lng=_safe_attr(n, "lng"),
+        county=_safe_attr(n, "county"),
+        is_red_zone=bool(_safe_attr(n, "is_red_zone", False)),
+        crime_density=_safe_attr(n, "crime_density"),
+        crime_score=_safe_attr(n, "crime_score"),
+        offender_count=_safe_attr(n, "offender_count"),
     )
     db.add(p)
     db.commit()
     db.refresh(p)
+
+    if getattr(p, "lat", None) is None or getattr(p, "lng", None) is None or not getattr(p, "county", None):
+        _maybe_geo_enrich_property(db, org_id=org_id, property_id=int(p.id), force=False)
+        db.refresh(p)
+
     return p
 
 
@@ -175,7 +247,12 @@ def _import_rows(
     notes: str | None,
     org_id: int,
 ) -> ImportResultOut:
-    snap = ImportSnapshot(org_id=org_id, source=source, notes=notes, created_at=datetime.utcnow())
+    snap = ImportSnapshot(
+        org_id=org_id,
+        source=source,
+        notes=notes,
+        created_at=datetime.utcnow(),
+    )
     db.add(snap)
     db.commit()
     db.refresh(snap)
@@ -273,7 +350,11 @@ def import_investorlift(
 
 
 @router.get("/status")
-def import_status(snapshot_id: int = Query(...), db: Session = Depends(get_db), principal=Depends(get_principal)):
+def import_status(
+    snapshot_id: int = Query(...),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
     snap = db.scalar(
         select(ImportSnapshot)
         .where(ImportSnapshot.id == snapshot_id)

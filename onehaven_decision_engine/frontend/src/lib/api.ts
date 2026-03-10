@@ -296,11 +296,21 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  dashboardProperties: (p: { limit: number; signal?: AbortSignal }) =>
-    requestArray<any>(`/dashboard/properties${qs({ limit: p.limit ?? 100 })}`, {
-      cacheTtlMs: 3_000,
-      signal: p.signal,
-    }),
+  dashboardProperties: (p: {
+    limit: number;
+    signal?: AbortSignal;
+    params?: Record<string, any>;
+  }) =>
+    requestArray<any>(
+      `/dashboard/properties${qs({
+        limit: p.limit ?? 100,
+        ...(p.params || {}),
+      })}`,
+      {
+        cacheTtlMs: 3_000,
+        signal: p.signal,
+      },
+    ),
 
   properties: (params?: Record<string, any>, signal?: AbortSignal) =>
     request<any>(`/properties${qs(params || {})}`, {
@@ -408,6 +418,50 @@ export const api = {
     request<any>(`/rent/enrich${qs({ property_id: propertyId, strategy })}`, {
       method: "POST",
       body: JSON.stringify({}),
+    }),
+
+  geoEnrichProperty: (
+    propertyId: number,
+    force: boolean = false,
+    signal?: AbortSignal,
+  ) =>
+    request<any>(
+      `/properties/${propertyId}/geo/enrich${qs({
+        force: force ? "true" : "false",
+      })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        cacheTtlMs: 0,
+        signal,
+      },
+    ),
+
+  geoEnrichMissing: (params?: {
+    state?: string;
+    limit?: number;
+    force?: boolean;
+    signal?: AbortSignal;
+  }) =>
+    request<any>(
+      `/geo/enrich_missing${qs({
+        state: params?.state ?? "MI",
+        limit: params?.limit ?? 50,
+        force: params?.force ? "true" : "false",
+      })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        cacheTtlMs: 0,
+        signal: params?.signal,
+      },
+    ),
+
+  geoRedZoneCheck: (lat: number, lng: number, signal?: AbortSignal) =>
+    request<any>(`/geo/redzone_check${qs({ lat, lng })}`, {
+      method: "GET",
+      cacheTtlMs: 0,
+      signal,
     }),
 
   explainProperty: (

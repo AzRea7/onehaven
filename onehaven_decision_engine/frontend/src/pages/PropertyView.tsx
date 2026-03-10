@@ -612,6 +612,12 @@ export default function PropertyView() {
     });
   }, [doAction, propertyId]);
 
+  const refreshGeo = React.useCallback(async () => {
+    await doAction("Refreshing geo…", async () => {
+      await api.geoEnrichProperty(propertyId, true);
+    });
+  }, [doAction, propertyId]);
+
   const checklistItems = checklist?.items ?? v?.checklist?.items ?? [];
 
   const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
@@ -671,6 +677,12 @@ export default function PropertyView() {
   const primaryActionTitle =
     workflow?.primary_action?.title || nextActions[0] || "No immediate action";
 
+  const geo = bundle?.geo || {};
+  const photoGallery = bundle?.photo_gallery || {};
+  const photoUrls = Array.isArray(photoGallery?.photos)
+    ? photoGallery.photos
+    : [];
+
   return (
     <PageShell className="relative space-y-5">
       <AgentsDrawer
@@ -700,6 +712,15 @@ export default function PropertyView() {
               title="Refresh"
             >
               sync
+            </button>
+
+            <button
+              onClick={refreshGeo}
+              className="oh-btn cursor-pointer"
+              disabled={!!busy}
+              title="Refresh geo / county / red-zone"
+            >
+              geo
             </button>
 
             <button
@@ -782,11 +803,9 @@ export default function PropertyView() {
 
           <div className="mt-3">
             <PropertyImage
-              address={p?.address}
-              city={p?.city}
-              state={p?.state}
-              zip={p?.zip}
-              className="h-[220px] w-full"
+              photos={photoUrls}
+              zillowUrl={zillowUrl}
+              className="w-full"
               roundedClassName="rounded-2xl"
             />
           </div>
@@ -796,6 +815,19 @@ export default function PropertyView() {
             <Badge>Score: {r?.score ?? "—"}</Badge>
             <Badge>DSCR: {r?.dscr?.toFixed?.(2) ?? "—"}</Badge>
             <Badge tone={financingTone}>{financing}</Badge>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Badge>County: {geo?.county ?? p?.county ?? "—"}</Badge>
+            <Badge tone={geo?.is_red_zone ? "bad" : "good"}>
+              {geo?.is_red_zone ? "Red zone" : "Not red zone"}
+            </Badge>
+            <Badge>
+              Lat/Lng:{" "}
+              {geo?.lat != null && geo?.lng != null
+                ? `${Number(geo.lat).toFixed(5)}, ${Number(geo.lng).toFixed(5)}`
+                : "—"}
+            </Badge>
           </div>
 
           <div className="mt-3 text-xs text-white/45">

@@ -6,7 +6,7 @@ import {
   Sparkles,
   GitBranch,
 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import GlassCard from "../components/GlassCard";
 import PageHero from "../components/PageHero";
 import StatPill from "../components/StatPill";
@@ -20,6 +20,8 @@ import {
 import { api } from "../lib/api";
 import Golem from "../components/Golem";
 import PageShell from "../components/PageShell";
+import GlobalFilters from "../components/GlobalFilters";
+import { filtersToApiParams, readFilters } from "../lib/filters";
 
 type DashboardRow = {
   property?: {
@@ -40,6 +42,15 @@ type DashboardRow = {
 
 type StageRollups = {
   stage_counts?: Record<string, number>;
+  counts?: {
+    properties?: number;
+    deals?: number;
+    rehab_tasks_total?: number;
+    rehab_tasks_open?: number;
+    transactions_window?: number;
+    valuations?: number;
+  };
+  filters?: Record<string, any>;
 };
 
 function toneForDecision(d?: string) {
@@ -60,35 +71,48 @@ export default function Dashboard() {
   const [lastSync, setLastSync] = React.useState<number | null>(null);
 
   const navigate = useNavigate();
+  const location = useLocation();
   const abortRef = React.useRef<AbortController | null>(null);
 
-  const refresh = React.useCallback(async (background = false) => {
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
+  const filters = React.useMemo(() => {
+    return readFilters(new URLSearchParams(location.search));
+  }, [location.search]);
 
-    try {
-      setErr(null);
-      if (!background) setLoading(true);
+  const apiFilterParams = React.useMemo(() => {
+    return filtersToApiParams(filters);
+  }, [filters]);
 
-      const [data, roll] = await Promise.all([
-        api.dashboardProperties({
-          limit: 80,
-          signal: ac.signal,
-        }),
-        api.opsRollups({}, ac.signal).catch(() => null),
-      ]);
+  const refresh = React.useCallback(
+    async (background = false) => {
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
 
-      setRows(Array.isArray(data) ? data : []);
-      setRollups(roll);
-      setLastSync(Date.now());
-    } catch (e: any) {
-      if (String(e?.name) === "AbortError") return;
-      setErr(String(e?.message || e));
-    } finally {
-      if (!background) setLoading(false);
-    }
-  }, []);
+      try {
+        setErr(null);
+        if (!background) setLoading(true);
+
+        const [data, roll] = await Promise.all([
+          api.dashboardProperties({
+            limit: 80,
+            signal: ac.signal,
+            params: apiFilterParams,
+          }),
+          api.opsRollups(apiFilterParams, ac.signal).catch(() => null),
+        ]);
+
+        setRows(Array.isArray(data) ? data : []);
+        setRollups(roll);
+        setLastSync(Date.now());
+      } catch (e: any) {
+        if (String(e?.name) === "AbortError") return;
+        setErr(String(e?.message || e));
+      } finally {
+        if (!background) setLoading(false);
+      }
+    },
+    [apiFilterParams],
+  );
 
   React.useEffect(() => {
     refresh(false);
@@ -195,6 +219,8 @@ export default function Dashboard() {
             </>
           }
         />
+
+        <GlobalFilters className="oh-panel p-4" />
 
         {err && (
           <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
@@ -318,7 +344,10 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <Link to="/pipeline" className="oh-btn cursor-pointer">
+            <Link
+              to={`/pipeline${location.search || ""}`}
+              className="oh-btn cursor-pointer"
+            >
               Open pipeline
             </Link>
           </div>
@@ -332,9 +361,11 @@ export default function Dashboard() {
               stageCards.map((s) => (
                 <button
                   key={s.key}
-                  onClick={() =>
-                    navigate(`/pipeline?stage=${encodeURIComponent(s.key)}`)
-                  }
+                  onClick={() => {
+                    const next = new URLSearchParams(location.search);
+                    next.set("stage", s.key);
+                    navigate(`/pipeline?${next.toString()}`);
+                  }}
                   className="rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.16] transition p-4 text-left cursor-pointer"
                 >
                   <div className="text-[11px] uppercase tracking-widest text-white/45">
@@ -361,7 +392,10 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <Link to="/properties" className="oh-btn cursor-pointer">
+            <Link
+              to={`/properties${location.search || ""}`}
+              className="oh-btn cursor-pointer"
+            >
               View all properties
             </Link>
           </div>

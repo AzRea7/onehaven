@@ -1,46 +1,51 @@
-# backend/app/routers/properties.py
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import re
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, desc
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth import get_principal
+from ..config import settings
 from ..db import get_db
+from ..domain.jurisdiction_scoring import compute_friction
 from ..models import (
-    Property,
-    JurisdictionRule,
+    AppUser,
     Deal,
-    UnderwritingResult,
+    JurisdictionRule,
+    Lease,
+    Property,
     PropertyChecklist,
     PropertyChecklistItem,
-    AppUser,
-    RentAssumption,
+    PropertyState,
     RehabTask,
-    Lease,
+    RentAssumption,
     Transaction,
+    UnderwritingResult,
     Valuation,
 )
 from ..schemas import (
+    CeilingCandidate,
+    ChecklistItemOut,
+    ChecklistOut,
+    DealOut,
+    JurisdictionRuleOut,
+    LeaseOut,
     PropertyCreate,
     PropertyOut,
-    JurisdictionRuleOut,
     PropertyViewOut,
-    DealOut,
-    UnderwritingResultOut,
-    RentExplainOut,
-    CeilingCandidate,
-    ChecklistOut,
-    ChecklistItemOut,
     RehabTaskOut,
-    LeaseOut,
+    RentExplainOut,
     TransactionOut,
+    UnderwritingResultOut,
     ValuationOut,
 )
-from ..domain.jurisdiction_scoring import compute_friction
-from ..config import settings
+from ..services.geo_enrichment import enrich_property_geo
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 
@@ -53,12 +58,25 @@ def _norm_state(s: str) -> str:
     return (s or "MI").strip().upper()
 
 
+def _maybe_geo_enrich_property(db: Session, *, org_id: int, property_id: int, force: bool = False) -> dict[str, Any]:
+    key = os.getenv("GOOGLE_MAPS_API_KEY")
+    try:
+        return asyncio.run(
+            enrich_property_geo(
+                db,
+                org_id=org_id,
+                property_id=property_id,
+                google_api_key=key,
+                force=force,
+            )
+        )
+    except RuntimeError:
+        return {"ok": False, "error": "geo_enrichment_runtime_error"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def _pick_jurisdiction_rule(db: Session, org_id: int, city: str, state: str) -> JurisdictionRule | None:
-    """
-    Precedence:
-      1) org-specific rule (JurisdictionRule.org_id == org_id)
-      2) global rule (JurisdictionRule.org_id IS NULL)
-    """
     city = _norm_city(city)
     state = _norm_state(state)
 
@@ -81,35 +99,6 @@ def _pick_jurisdiction_rule(db: Session, org_id: int, city: str, state: str) -> 
     )
 
 
-@router.post("", response_model=PropertyOut)
-def create_property(payload: PropertyCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    row = Property(**payload.model_dump())
-    row.org_id = p.org_id
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
-
-
-@router.get("/{property_id}", response_model=PropertyOut)
-def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    stmt = (
-        select(Property)
-        .where(Property.id == property_id)
-        .where(Property.org_id == p.org_id)
-        .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
-    )
-    row = db.execute(stmt).scalar_one_or_none()
-    if not row:
-        raise HTTPException(status_code=404, detail="Property not found")
-
-    jr = _pick_jurisdiction_rule(db, org_id=p.org_id, city=row.city, state=row.state)
-
-    out = PropertyOut.model_validate(row, from_attributes=True).model_dump()
-    out["jurisdiction_rule"] = JurisdictionRuleOut.model_validate(jr, from_attributes=True).model_dump() if jr else None
-    return out
-
-
 def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strategy: str) -> RentExplainOut:
     ra = db.scalar(
         select(RentAssumption).where(
@@ -122,7 +111,11 @@ def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strate
 
     ps = float(settings.payment_standard_pct)
 
-    fmr_adjusted = (float(ra.section8_fmr) * ps) if (ra.section8_fmr is not None and float(ra.section8_fmr) > 0) else None
+    fmr_adjusted = (
+        float(ra.section8_fmr) * ps
+        if (ra.section8_fmr is not None and float(ra.section8_fmr) > 0)
+        else None
+    )
 
     cap_reason = "none"
     ceiling_candidates: list[CeilingCandidate] = []
@@ -189,6 +182,264 @@ def _merge_checklist_state(db: Session, org_id: int, property_id: int, items: li
                 i.marked_by = users_by_id.get(s.marked_by_user_id)
         out.append(i)
     return out
+
+
+def _extract_urls_from_any(value: Any, out: list[str]) -> None:
+    if value is None:
+        return
+
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return
+
+        if s.startswith("http") and any(x in s.lower() for x in [".jpg", ".jpeg", ".png", ".webp", "image", "photo"]):
+            out.append(s)
+            return
+
+        if (s.startswith("[") and s.endswith("]")) or (s.startswith("{") and s.endswith("}")):
+            try:
+                parsed = json.loads(s)
+                _extract_urls_from_any(parsed, out)
+            except Exception:
+                pass
+
+        for url in re.findall(r"https?://[^\s'\"<>]+", s):
+            lo = url.lower()
+            if any(x in lo for x in [".jpg", ".jpeg", ".png", ".webp", "zillowstatic", "photos.zillowstatic"]):
+                out.append(url)
+        return
+
+    if isinstance(value, dict):
+        for k, v in value.items():
+            key = str(k).lower()
+            if any(tok in key for tok in ["photo", "photos", "image", "images", "img", "gallery", "media", "picture"]):
+                _extract_urls_from_any(v, out)
+            else:
+                _extract_urls_from_any(v, out)
+        return
+
+    if isinstance(value, list):
+        for item in value:
+            _extract_urls_from_any(item, out)
+        return
+
+
+def _dedupe_keep_order(items: list[str]) -> list[str]:
+    seen = set()
+    out = []
+    for x in items:
+        y = x.strip()
+        if not y or y in seen:
+            continue
+        seen.add(y)
+        out.append(y)
+    return out
+
+
+def _extract_zillow_photo_urls(source_raw_json: Optional[str]) -> list[str]:
+    if not source_raw_json:
+        return []
+
+    try:
+        raw = json.loads(source_raw_json)
+    except Exception:
+        return []
+
+    urls: list[str] = []
+    _extract_urls_from_any(raw, urls)
+
+    cleaned = []
+    for u in _dedupe_keep_order(urls):
+        lo = u.lower()
+        if any(tok in lo for tok in [".jpg", ".jpeg", ".png", ".webp", "zillowstatic", "photos.zillowstatic"]):
+            cleaned.append(u)
+
+    return cleaned[:50]
+
+
+def _latest_zillow_deal(db: Session, *, org_id: int, property_id: int) -> Deal | None:
+    return db.scalar(
+        select(Deal)
+        .where(
+            Deal.org_id == org_id,
+            Deal.property_id == property_id,
+            Deal.source == "zillow",
+        )
+        .order_by(desc(Deal.id))
+        .limit(1)
+    )
+
+
+def _photo_gallery_for_property(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    zdeal = _latest_zillow_deal(db, org_id=org_id, property_id=property_id)
+    photos = _extract_zillow_photo_urls(getattr(zdeal, "source_raw_json", None)) if zdeal else []
+    return {
+        "cover_url": photos[0] if photos else None,
+        "photos": photos,
+        "count": len(photos),
+        "source": "zillow_import" if photos else None,
+    }
+
+
+@router.post("", response_model=PropertyOut)
+def create_property(payload: PropertyCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
+    row = Property(**payload.model_dump())
+    row.org_id = p.org_id
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    if row.lat is None or row.lng is None or not row.county:
+        _maybe_geo_enrich_property(db, org_id=p.org_id, property_id=int(row.id), force=False)
+        db.refresh(row)
+
+    return row
+
+
+@router.get("", response_model=list[PropertyOut])
+def list_properties(
+    state: Optional[str] = Query(default=None),
+    city: Optional[str] = Query(default=None),
+    county: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    stage: Optional[str] = Query(default=None),
+    decision: Optional[str] = Query(default=None),
+    only_red_zone: bool = Query(default=False),
+    exclude_red_zone: bool = Query(default=False),
+    min_crime_score: Optional[float] = Query(default=None),
+    max_crime_score: Optional[float] = Query(default=None),
+    min_offender_count: Optional[int] = Query(default=None),
+    max_offender_count: Optional[int] = Query(default=None),
+    sort: Optional[str] = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=5000),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    stmt = (
+        select(Property)
+        .where(Property.org_id == p.org_id)
+        .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
+    )
+
+    if state:
+        stmt = stmt.where(Property.state == state)
+    if city:
+        stmt = stmt.where(func.lower(Property.city) == city.lower())
+    if county:
+        stmt = stmt.where(func.lower(Property.county) == county.lower())
+
+    if q:
+        like = f"%{q.strip().lower()}%"
+        stmt = stmt.where(
+            func.lower(
+                func.concat(
+                    Property.address,
+                    " ",
+                    Property.city,
+                    " ",
+                    Property.state,
+                    " ",
+                    Property.zip,
+                )
+            ).like(like)
+        )
+
+    if only_red_zone:
+        stmt = stmt.where(Property.is_red_zone.is_(True))
+    elif exclude_red_zone:
+        stmt = stmt.where(
+            (Property.is_red_zone.is_(False)) | (Property.is_red_zone.is_(None))
+        )
+
+    if min_crime_score is not None:
+        stmt = stmt.where(Property.crime_score.is_not(None))
+        stmt = stmt.where(Property.crime_score >= float(min_crime_score))
+
+    if max_crime_score is not None:
+        stmt = stmt.where(Property.crime_score.is_not(None))
+        stmt = stmt.where(Property.crime_score <= float(max_crime_score))
+
+    if min_offender_count is not None:
+        stmt = stmt.where(Property.offender_count.is_not(None))
+        stmt = stmt.where(Property.offender_count >= int(min_offender_count))
+
+    if max_offender_count is not None:
+        stmt = stmt.where(Property.offender_count.is_not(None))
+        stmt = stmt.where(Property.offender_count <= int(max_offender_count))
+
+    if stage:
+        stmt = stmt.join(
+            PropertyState,
+            (PropertyState.property_id == Property.id)
+            & (PropertyState.org_id == Property.org_id),
+        ).where(PropertyState.current_stage == stage)
+
+    if decision:
+        stmt = stmt.join(
+            Deal,
+            (Deal.property_id == Property.id)
+            & (Deal.org_id == Property.org_id),
+        ).join(
+            UnderwritingResult,
+            (UnderwritingResult.deal_id == Deal.id)
+            & (UnderwritingResult.org_id == Deal.org_id),
+        ).where(UnderwritingResult.decision == decision)
+
+    if sort == "oldest":
+        stmt = stmt.order_by(asc(Property.id))
+    elif sort == "address_asc":
+        stmt = stmt.order_by(asc(Property.address), desc(Property.id))
+    elif sort == "address_desc":
+        stmt = stmt.order_by(desc(Property.address), desc(Property.id))
+    elif sort == "crime_desc":
+        stmt = stmt.order_by(desc(Property.crime_score).nullslast(), desc(Property.id))
+    elif sort == "crime_asc":
+        stmt = stmt.order_by(asc(Property.crime_score).nullslast(), desc(Property.id))
+    elif sort == "offenders_desc":
+        stmt = stmt.order_by(desc(Property.offender_count).nullslast(), desc(Property.id))
+    elif sort == "offenders_asc":
+        stmt = stmt.order_by(asc(Property.offender_count).nullslast(), desc(Property.id))
+    else:
+        stmt = stmt.order_by(desc(Property.id))
+
+    stmt = stmt.limit(limit)
+
+    rows = db.scalars(stmt).unique().all()
+    return [PropertyOut.model_validate(x, from_attributes=True) for x in rows]
+
+
+@router.get("/{property_id}", response_model=PropertyOut)
+def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    stmt = (
+        select(Property)
+        .where(Property.id == property_id)
+        .where(Property.org_id == p.org_id)
+        .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
+    )
+    row = db.execute(stmt).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return row
+
+
+@router.post("/{property_id}/geo/enrich", response_model=dict)
+def geo_enrich_property(
+    property_id: int,
+    force: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = db.scalar(select(Property).where(Property.org_id == p.org_id, Property.id == property_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    return _maybe_geo_enrich_property(
+        db,
+        org_id=p.org_id,
+        property_id=int(property_id),
+        force=bool(force),
+    )
 
 
 @router.get("/{property_id}/view", response_model=PropertyViewOut)
@@ -260,14 +511,6 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
 
 @router.get("/{property_id}/bundle", response_model=dict)
 def property_bundle(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    """
-    Single-pane truth payload:
-      - view (underwriting + rent explain + friction + checklist)
-      - rehab tasks
-      - leases
-      - transactions
-      - valuations
-    """
     view = property_view(property_id=property_id, db=db, p=p)
 
     rehab = db.scalars(
@@ -298,8 +541,21 @@ def property_bundle(property_id: int, db: Session = Depends(get_db), p=Depends(g
         .limit(300)
     ).all()
 
+    prop = view.property
+    photo_gallery = _photo_gallery_for_property(db, org_id=p.org_id, property_id=property_id)
+
     return {
         "view": view.model_dump() if hasattr(view, "model_dump") else view,
+        "geo": {
+            "lat": getattr(prop, "lat", None),
+            "lng": getattr(prop, "lng", None),
+            "county": getattr(prop, "county", None),
+            "is_red_zone": bool(getattr(prop, "is_red_zone", False)),
+            "crime_density": getattr(prop, "crime_density", None),
+            "crime_score": getattr(prop, "crime_score", None),
+            "offender_count": getattr(prop, "offender_count", None),
+        },
+        "photo_gallery": photo_gallery,
         "rehab_tasks": [RehabTaskOut.model_validate(x, from_attributes=True).model_dump() for x in rehab],
         "leases": [LeaseOut.model_validate(x, from_attributes=True).model_dump() for x in leases],
         "transactions": [TransactionOut.model_validate(x, from_attributes=True).model_dump() for x in txns],
