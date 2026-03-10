@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Property
+from app.services.risk_scoring import compute_property_risk
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 REDZONES_PATH = DATA_DIR / "red_zones_detroit.geojson"
@@ -152,6 +153,41 @@ async def reverse_geocode_county_google(*, api_key: str, lat: float, lng: float)
     return None
 
 
+def _address_for_property(prop: Property) -> str:
+    parts = [
+        (getattr(prop, "address", None) or "").strip(),
+        (getattr(prop, "city", None) or "").strip(),
+        (getattr(prop, "state", None) or "").strip(),
+        (getattr(prop, "zip", None) or "").strip(),
+    ]
+    return ", ".join([p for p in parts[:2] if p] + [" ".join([p for p in parts[2:] if p]).strip()]).strip(", ").strip()
+
+
+def _apply_risk_fields(prop: Property) -> dict[str, Any]:
+    lat = getattr(prop, "lat", None)
+    lng = getattr(prop, "lng", None)
+    county = getattr(prop, "county", None)
+    city = getattr(prop, "city", None)
+    is_red_zone = bool(getattr(prop, "is_red_zone", False))
+
+    risk = compute_property_risk(
+        lat=float(lat) if lat is not None else None,
+        lng=float(lng) if lng is not None else None,
+        city=city,
+        county=county,
+        is_red_zone=is_red_zone,
+    )
+
+    if hasattr(prop, "crime_density"):
+        prop.crime_density = risk.get("crime_density")
+    if hasattr(prop, "crime_score"):
+        prop.crime_score = risk.get("crime_score")
+    if hasattr(prop, "offender_count"):
+        prop.offender_count = risk.get("offender_count")
+
+    return risk
+
+
 async def enrich_property_geo(
     db: Session,
     *,
@@ -177,8 +213,9 @@ async def enrich_property_geo(
 
     geocoded = False
     reverse_geocoded = False
+    risk_computed = False
 
-    address = f"{prop.address}, {prop.city}, {prop.state} {prop.zip}".strip()
+    address = _address_for_property(prop)
 
     # Step 1: geocode if needed (or force)
     if force or current_lat is None or current_lng is None:
@@ -213,11 +250,38 @@ async def enrich_property_geo(
         else:
             warnings.append("missing_google_maps_api_key")
 
+    # refresh locals after possible reverse geocode
+    current_lat = getattr(prop, "lat", None)
+    current_lng = getattr(prop, "lng", None)
+
     # Step 3: red-zone classification if we have coordinates
     if current_lat is not None and current_lng is not None:
         prop.is_red_zone = bool(is_in_redzone(lat=float(current_lat), lng=float(current_lng)))
     else:
         warnings.append("missing_coordinates_for_redzone_check")
+
+    # Step 4: crime + offender scoring if we have coordinates
+    risk: dict[str, Any] = {
+        "crime_density": None,
+        "crime_score": None,
+        "crime_band": "unknown",
+        "crime_source": None,
+        "offender_count": None,
+        "offender_band": "unknown",
+        "offender_source": None,
+        "offender_radius_miles": 1.0,
+        "nearest_offender_miles": None,
+        "risk_score": None,
+        "risk_band": "unknown",
+        "risk_summary": "missing_coordinates",
+        "risk_factors": ["missing_coordinates"],
+    }
+
+    if current_lat is not None and current_lng is not None:
+        risk = _apply_risk_fields(prop)
+        risk_computed = True
+    else:
+        warnings.append("missing_coordinates_for_risk_scoring")
 
     db.add(prop)
     db.commit()
@@ -230,7 +294,21 @@ async def enrich_property_geo(
         "lng": getattr(prop, "lng", None),
         "county": getattr(prop, "county", None),
         "is_red_zone": bool(getattr(prop, "is_red_zone", False)),
+        "crime_density": getattr(prop, "crime_density", None),
+        "crime_score": getattr(prop, "crime_score", None),
+        "offender_count": getattr(prop, "offender_count", None),
+        "crime_band": risk.get("crime_band"),
+        "crime_source": risk.get("crime_source"),
+        "offender_band": risk.get("offender_band"),
+        "offender_source": risk.get("offender_source"),
+        "offender_radius_miles": risk.get("offender_radius_miles"),
+        "nearest_offender_miles": risk.get("nearest_offender_miles"),
+        "risk_score": risk.get("risk_score"),
+        "risk_band": risk.get("risk_band"),
+        "risk_summary": risk.get("risk_summary"),
+        "risk_factors": risk.get("risk_factors"),
         "geocoded": geocoded,
         "reverse_geocoded": reverse_geocoded,
+        "risk_computed": risk_computed,
         "warnings": warnings,
     }

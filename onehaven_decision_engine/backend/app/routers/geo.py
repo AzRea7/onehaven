@@ -10,6 +10,7 @@ from app.auth import get_principal, require_operator
 from app.db import get_db
 from app.models import Property
 from app.services.geo_enrichment import enrich_property_geo, is_in_redzone
+from app.services.risk_scoring import compute_property_risk
 
 router = APIRouter(prefix="/geo", tags=["geo"])
 
@@ -76,6 +77,8 @@ async def enrich_missing(
             or getattr(prop, "lat", None) is None
             or getattr(prop, "lng", None) is None
             or not getattr(prop, "county", None)
+            or getattr(prop, "crime_score", None) is None
+            or getattr(prop, "offender_count", None) is None
         )
 
         if not needs_geo:
@@ -111,4 +114,36 @@ def redzone_check(
         "lat": lat,
         "lng": lng,
         "is_red_zone": bool(is_in_redzone(lat=float(lat), lng=float(lng))),
+    }
+
+
+@router.get("/risk_check", response_model=dict)
+def risk_check(
+    lat: float = Query(...),
+    lng: float = Query(...),
+    city: str | None = Query(default=None),
+    county: str | None = Query(default=None),
+    is_red_zone: bool | None = Query(default=None),
+    _p=Depends(get_principal),
+):
+    red_zone = bool(is_red_zone) if is_red_zone is not None else bool(
+        is_in_redzone(lat=float(lat), lng=float(lng))
+    )
+
+    risk = compute_property_risk(
+        lat=float(lat),
+        lng=float(lng),
+        city=city,
+        county=county,
+        is_red_zone=red_zone,
+    )
+
+    return {
+        "ok": True,
+        "lat": float(lat),
+        "lng": float(lng),
+        "city": city,
+        "county": county,
+        "is_red_zone": red_zone,
+        **risk,
     }
