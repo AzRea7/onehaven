@@ -12,6 +12,11 @@ import DealIntake from "./pages/DealIntake";
 import Jurisdictions from "./pages/Jurisdictions";
 import JurisdictionProfiles from "./pages/JurisdictionProfiles";
 import PipelineDrilldown from "./pages/drilldowns/PipelineDrilldown";
+import TrustDrilldown from "./pages/drilldowns/TrustDrilldown";
+import ComplianceDrilldown from "./pages/drilldowns/ComplianceDrilldown";
+import RehabDrilldown from "./pages/drilldowns/RehabDrilldown";
+import CashflowDrilldown from "./pages/drilldowns/CashflowDrilldown";
+import EquityDrilldown from "./pages/drilldowns/EquityDrilldown";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -29,11 +34,9 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-        {/* Public */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
 
-        {/* Protected */}
         <Route
           path="/dashboard"
           element={
@@ -75,6 +78,51 @@ export default function App() {
           element={
             <Protected>
               <PipelineDrilldown />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/drilldowns/trust"
+          element={
+            <Protected>
+              <TrustDrilldown />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/drilldowns/compliance"
+          element={
+            <Protected>
+              <ComplianceDrilldown />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/drilldowns/rehab"
+          element={
+            <Protected>
+              <RehabDrilldown />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/drilldowns/cashflow"
+          element={
+            <Protected>
+              <CashflowDrilldown />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/drilldowns/equity"
+          element={
+            <Protected>
+              <EquityDrilldown />
             </Protected>
           }
         />

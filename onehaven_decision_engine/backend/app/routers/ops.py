@@ -147,7 +147,7 @@ def _cash_rollup(db: Session, *, org_id: int, property_id: int, days: int) -> di
     for t in txns:
         b = _txn_bucket(t.txn_type)
         out[b] += float(t.amount or 0.0)
-    out["net"] = out["income"] - out["expense"] - out["capex"]
+    out["net"] = out["income"] - out["expense"] - out["capex"] + out["other"]
     return out
 
 
@@ -310,29 +310,29 @@ def property_ops_summary(
 
     val = _latest_valuation(db, org_id=p.org_id, property_id=property_id)
     equity = None
-    if val is not None:
-        est_val = float(val.estimated_value or 0.0)
-        loan = float(val.loan_balance or 0.0)
+    if val:
+        estimated_value = float(val.estimated_value or 0.0)
+        loan_balance = float(val.loan_balance or 0.0)
         equity = {
             "as_of": val.as_of.isoformat() if val.as_of else None,
-            "estimated_value": est_val,
-            "loan_balance": loan,
-            "estimated_equity": est_val - loan,
+            "estimated_value": estimated_value,
+            "loan_balance": loan_balance,
+            "estimated_equity": estimated_value - loan_balance,
+            "notes": val.notes,
         }
 
     uw = _latest_underwriting(db, org_id=p.org_id, property_id=property_id)
     underwriting = None
-    if uw is not None:
+    if uw:
         underwriting = {
+            "id": uw.id,
             "decision": uw.decision,
-            "score": int(uw.score),
-            "cash_flow": float(uw.cash_flow),
-            "dscr": float(uw.dscr),
-            "cash_on_cash": float(uw.cash_on_cash),
-            "gross_rent_used": float(uw.gross_rent_used),
-            "reasons": _loads(uw.reasons_json, []),
-            "jurisdiction_reasons": _loads(uw.jurisdiction_reasons_json, []),
-            "decision_version": uw.decision_version,
+            "score": uw.score,
+            "dscr": uw.dscr,
+            "cash_flow": uw.cash_flow,
+            "gross_rent_used": uw.gross_rent_used,
+            "opex_used": uw.opex_used,
+            "reason_json": _loads(getattr(uw, "reason_json", None), {}),
             "created_at": uw.created_at.isoformat() if uw.created_at else None,
         }
 
@@ -349,7 +349,9 @@ def property_ops_summary(
 
     counts = {
         "rehab_tasks_total": rehab.get("total", 0),
-        "rehab_tasks_open": int(rehab.get("todo", 0)) + int(rehab.get("in_progress", 0)) + int(rehab.get("blocked", 0)),
+        "rehab_tasks_open": int(rehab.get("todo", 0))
+        + int(rehab.get("in_progress", 0))
+        + int(rehab.get("blocked", 0)),
         "checklist_total": checklist.total,
         "checklist_done": checklist.done,
         "inspection_open_failed_items": open_failed_items,
@@ -434,23 +436,24 @@ def property_ops_summary(
     }
 
 
-@router.get("/rollups")
-def ops_rollups(
-    state: Optional[str] = Query(default=None),
-    county: Optional[str] = Query(default=None),
-    city: Optional[str] = Query(default=None),
-    q: Optional[str] = Query(default=None),
-    stage: Optional[str] = Query(default=None),
-    only_red_zone: bool = Query(default=False),
-    exclude_red_zone: bool = Query(default=False),
-    min_crime_score: Optional[float] = Query(default=None),
-    max_crime_score: Optional[float] = Query(default=None),
-    min_offender_count: Optional[int] = Query(default=None),
-    max_offender_count: Optional[int] = Query(default=None),
-    days: int = Query(default=90, ge=7, le=365),
-    limit: int = Query(default=50, ge=1, le=500),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
+def _rollup_args(
+    *,
+    db: Session,
+    p,
+    state: Optional[str],
+    county: Optional[str],
+    city: Optional[str],
+    q: Optional[str],
+    stage: Optional[str],
+    decision: Optional[str],
+    only_red_zone: bool,
+    exclude_red_zone: bool,
+    min_crime_score: Optional[float],
+    max_crime_score: Optional[float],
+    min_offender_count: Optional[int],
+    max_offender_count: Optional[int],
+    days: int,
+    limit: int,
 ):
     return compute_rollups(
         db,
@@ -462,6 +465,7 @@ def ops_rollups(
         city=city,
         q=q,
         stage=stage,
+        decision=decision,
         only_red_zone=only_red_zone,
         exclude_red_zone=exclude_red_zone,
         min_crime_score=min_crime_score,
@@ -469,6 +473,129 @@ def ops_rollups(
         min_offender_count=min_offender_count,
         max_offender_count=max_offender_count,
     )
+
+
+@router.get("/rollups")
+def ops_rollups(
+    state: Optional[str] = Query(default=None),
+    county: Optional[str] = Query(default=None),
+    city: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    stage: Optional[str] = Query(default=None),
+    decision: Optional[str] = Query(default=None),
+    only_red_zone: bool = Query(default=False),
+    exclude_red_zone: bool = Query(default=False),
+    min_crime_score: Optional[float] = Query(default=None),
+    max_crime_score: Optional[float] = Query(default=None),
+    min_offender_count: Optional[int] = Query(default=None),
+    max_offender_count: Optional[int] = Query(default=None),
+    days: int = Query(default=90, ge=7, le=365),
+    limit: int = Query(default=50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    return _rollup_args(
+        db=db,
+        p=p,
+        state=state,
+        county=county,
+        city=city,
+        q=q,
+        stage=stage,
+        decision=decision,
+        only_red_zone=only_red_zone,
+        exclude_red_zone=exclude_red_zone,
+        min_crime_score=min_crime_score,
+        max_crime_score=max_crime_score,
+        min_offender_count=min_offender_count,
+        max_offender_count=max_offender_count,
+        days=days,
+        limit=limit,
+    )
+
+
+@router.get("/control-plane")
+def ops_control_plane(
+    state: Optional[str] = Query(default=None),
+    county: Optional[str] = Query(default=None),
+    city: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    stage: Optional[str] = Query(default=None),
+    decision: Optional[str] = Query(default=None),
+    only_red_zone: bool = Query(default=False),
+    exclude_red_zone: bool = Query(default=False),
+    min_crime_score: Optional[float] = Query(default=None),
+    max_crime_score: Optional[float] = Query(default=None),
+    min_offender_count: Optional[int] = Query(default=None),
+    max_offender_count: Optional[int] = Query(default=None),
+    days: int = Query(default=90, ge=7, le=365),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    payload = _rollup_args(
+        db=db,
+        p=p,
+        state=state,
+        county=county,
+        city=city,
+        q=q,
+        stage=stage,
+        decision=decision,
+        only_red_zone=only_red_zone,
+        exclude_red_zone=exclude_red_zone,
+        min_crime_score=min_crime_score,
+        max_crime_score=max_crime_score,
+        min_offender_count=min_offender_count,
+        max_offender_count=max_offender_count,
+        days=days,
+        limit=limit,
+    )
+    payload["view"] = "control_plane"
+    return payload
+
+
+@router.get("/drilldown/{kind}")
+def ops_drilldown(
+    kind: str,
+    state: Optional[str] = Query(default=None),
+    county: Optional[str] = Query(default=None),
+    city: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    stage: Optional[str] = Query(default=None),
+    decision: Optional[str] = Query(default=None),
+    only_red_zone: bool = Query(default=False),
+    exclude_red_zone: bool = Query(default=False),
+    min_crime_score: Optional[float] = Query(default=None),
+    max_crime_score: Optional[float] = Query(default=None),
+    min_offender_count: Optional[int] = Query(default=None),
+    max_offender_count: Optional[int] = Query(default=None),
+    days: int = Query(default=90, ge=7, le=365),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    payload = _rollup_args(
+        db=db,
+        p=p,
+        state=state,
+        county=county,
+        city=city,
+        q=q,
+        stage=stage,
+        decision=decision,
+        only_red_zone=only_red_zone,
+        exclude_red_zone=exclude_red_zone,
+        min_crime_score=min_crime_score,
+        max_crime_score=max_crime_score,
+        min_offender_count=min_offender_count,
+        max_offender_count=max_offender_count,
+        days=days,
+        limit=limit,
+    )
+    payload["view"] = "drilldown"
+    payload["kind"] = kind
+    return payload
 
 
 @router.get("/property/{property_id}/workflow")

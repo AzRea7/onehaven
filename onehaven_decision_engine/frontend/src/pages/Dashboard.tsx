@@ -1,204 +1,341 @@
 import React from "react";
 import {
-  TrendingUp,
-  ShieldCheck,
-  Bot,
-  Sparkles,
+  ArrowRight,
+  BadgeDollarSign,
+  Building2,
+  ClipboardCheck,
   GitBranch,
+  Hammer,
+  Landmark,
+  ShieldCheck,
+  Wallet,
 } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import GlassCard from "../components/GlassCard";
+import { Link, useLocation } from "react-router-dom";
 import PageHero from "../components/PageHero";
-import StatPill from "../components/StatPill";
-import {
-  OrbDealEngine,
-  Section8Badge,
-  AgentClaw,
-  BuildStack,
-  HoverTilt,
-} from "../components/Artwork";
-import { api } from "../lib/api";
-import Golem from "../components/Golem";
 import PageShell from "../components/PageShell";
 import GlobalFilters from "../components/GlobalFilters";
-import { filtersToApiParams, readFilters } from "../lib/filters";
+import { api } from "../lib/api";
+import { readFilters, toQueryString } from "../lib/filters";
+import Golem from "../components/Golem";
 
-type DashboardRow = {
-  property?: {
-    id: number;
-    address: string;
-    city: string;
-    state: string;
-    zip: string;
-    bedrooms?: number;
+type RollupPayload = {
+  ok?: boolean;
+  kpis?: {
+    total_homes?: number;
+    good_deals?: number;
+    review_deals?: number;
+    rejected_deals?: number;
+    active_leases?: number;
+    cashflow_positive_homes?: number;
+    homes_with_valuation?: number;
+    red_zone_count?: number;
+    total_estimated_value?: number;
+    total_loan_balance?: number;
+    total_estimated_equity?: number;
+    rehab_open_cost_estimate?: number;
+    net_cash_window?: number;
+    avg_crime_score?: number | null;
   };
-  deal?: { strategy?: string };
-  last_underwriting_result?: {
-    decision?: "REJECT" | "REVIEW" | "PASS";
-    score?: number;
-    dscr?: number;
-  };
-};
-
-type StageRollups = {
-  stage_counts?: Record<string, number>;
   counts?: {
-    properties?: number;
     deals?: number;
     rehab_tasks_total?: number;
     rehab_tasks_open?: number;
     transactions_window?: number;
     valuations?: number;
   };
-  filters?: Record<string, any>;
+  stage_counts?: Record<string, number>;
+  series?: {
+    cash_by_month?: Array<{
+      label: string;
+      income?: number;
+      expense?: number;
+      capex?: number;
+      net?: number;
+    }>;
+    decision_mix?: Array<{ key: string; label: string; count: number }>;
+    stage_mix?: Array<{ key: string; label: string; count: number }>;
+    county_mix?: Array<{ key: string; label: string; count: number }>;
+  };
+  leaderboards?: {
+    good_deals?: any[];
+    cashflow?: any[];
+    equity?: any[];
+    rehab_backlog?: any[];
+    compliance_attention?: any[];
+  };
+  properties?: any[];
 };
 
-function toneForDecision(d?: string) {
-  if (d === "PASS") return "good";
-  if (d === "REVIEW") return "warn";
-  return "bad";
+function money(v?: number | null) {
+  const n = Number(v || 0);
+  return n.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
 }
 
-function SkeletonLine() {
-  return <div className="h-3 bg-white/10 rounded w-full" />;
+function pct(n: number, total: number) {
+  if (!total) return 0;
+  return Math.max(0, Math.min(100, (n / total) * 100));
 }
 
-function FeatureArtwork({
-  children,
-  className,
+function TonePill({
+  label,
+  value,
+  tone = "default",
 }: {
+  label: string;
+  value: React.ReactNode;
+  tone?: "default" | "good" | "warn" | "bad";
+}) {
+  const cls =
+    tone === "good"
+      ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-200"
+      : tone === "warn"
+        ? "border-yellow-300/25 bg-yellow-300/10 text-yellow-100"
+        : tone === "bad"
+          ? "border-red-400/25 bg-red-400/10 text-red-200"
+          : "border-white/10 bg-white/5 text-white/75";
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-3 py-1 text-xs ${cls}`}
+    >
+      <span className="mr-2 opacity-70">{label}</span>
+      <span className="font-semibold">{value}</span>
+    </span>
+  );
+}
+
+function Panel({
+  title,
+  subtitle,
+  right,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
   children: React.ReactNode;
-  className?: string;
 }) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end overflow-visible">
-      <div className={className}>{children}</div>
+    <div className="oh-panel p-5">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="text-sm font-semibold text-white">{title}</div>
+          {subtitle ? (
+            <div className="text-xs text-white/55 mt-1">{subtitle}</div>
+          ) : null}
+        </div>
+        {right}
+      </div>
+      <div className="mt-4">{children}</div>
+    </div>
+  );
+}
+
+function MetricCard({
+  title,
+  value,
+  sub,
+  icon,
+  to,
+  tone = "default",
+}: {
+  title: string;
+  value: React.ReactNode;
+  sub: string;
+  icon: React.ReactNode;
+  to: string;
+  tone?: "default" | "good" | "warn" | "bad";
+}) {
+  const borderTone =
+    tone === "good"
+      ? "border-emerald-400/20 hover:border-emerald-400/35"
+      : tone === "warn"
+        ? "border-yellow-300/20 hover:border-yellow-300/35"
+        : tone === "bad"
+          ? "border-red-400/20 hover:border-red-400/35"
+          : "border-white/10 hover:border-white/20";
+
+  return (
+    <Link
+      to={to}
+      className={`group block rounded-2xl border ${borderTone} bg-white/[0.03] hover:bg-white/[0.05] transition p-5`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="rounded-xl border border-white/10 bg-black/30 p-2 text-white/85">
+          {icon}
+        </div>
+        <ArrowRight className="h-4 w-4 text-white/35 group-hover:text-white/70 transition" />
+      </div>
+
+      <div className="mt-5 text-xs uppercase tracking-widest text-white/45">
+        {title}
+      </div>
+      <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
+        {value}
+      </div>
+      <div className="mt-2 text-sm text-white/55">{sub}</div>
+    </Link>
+  );
+}
+
+function MiniBars({
+  items,
+  emptyLabel,
+  valueKey = "count",
+}: {
+  items?: Array<{ label: string; count?: number; net?: number }>;
+  emptyLabel: string;
+  valueKey?: "count" | "net";
+}) {
+  const rows = Array.isArray(items) ? items : [];
+  const max =
+    rows.length > 0
+      ? Math.max(
+          ...rows.map((r) =>
+            Math.abs(Number(valueKey === "count" ? r.count || 0 : r.net || 0)),
+          ),
+          1,
+        )
+      : 1;
+
+  if (!rows.length) {
+    return <div className="text-sm text-white/55">{emptyLabel}</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {rows.map((row) => {
+        const raw = Number(
+          valueKey === "count" ? row.count || 0 : row.net || 0,
+        );
+        const width = Math.max(6, (Math.abs(raw) / max) * 100);
+        const isNegative = raw < 0;
+
+        return (
+          <div key={row.label} className="space-y-1">
+            <div className="flex items-center justify-between gap-4 text-xs">
+              <span className="truncate text-white/70">{row.label}</span>
+              <span className="text-white/85 font-semibold">
+                {valueKey === "count" ? raw : money(raw)}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+              <div
+                className={`h-full rounded-full ${
+                  isNegative ? "bg-red-400/70" : "bg-white/70"
+                }`}
+                style={{ width: `${width}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Leaderboard({
+  rows,
+  metricLabel,
+  metricGetter,
+  emptyLabel,
+}: {
+  rows?: any[];
+  metricLabel: string;
+  metricGetter: (row: any) => React.ReactNode;
+  emptyLabel: string;
+}) {
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    return <div className="text-sm text-white/55">{emptyLabel}</div>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {items.slice(0, 6).map((row) => (
+        <Link
+          key={row.id}
+          to={`/properties/${row.id}`}
+          className="block rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.16] transition p-3"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-white truncate">
+                {row.address}
+              </div>
+              <div className="text-xs text-white/55 mt-1 truncate">
+                {row.city}, {row.state}
+                {row.county ? ` · ${row.county}` : ""}
+                {row.stage ? ` · ${String(row.stage).replace(/_/g, " ")}` : ""}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] uppercase tracking-widest text-white/40">
+                {metricLabel}
+              </div>
+              <div className="text-sm font-semibold text-white">
+                {metricGetter(row)}
+              </div>
+            </div>
+          </div>
+        </Link>
+      ))}
     </div>
   );
 }
 
 export default function Dashboard() {
-  const [rows, setRows] = React.useState<DashboardRow[]>([]);
-  const [rollups, setRollups] = React.useState<StageRollups | null>(null);
+  const location = useLocation();
+  const filters = React.useMemo(
+    () => readFilters(new URLSearchParams(location.search)),
+    [location.search],
+  );
+
+  const qs = React.useMemo(() => toQueryString(filters), [filters]);
+
+  const [data, setData] = React.useState<RollupPayload | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [lastSync, setLastSync] = React.useState<number | null>(null);
 
-  const navigate = useNavigate();
-  const location = useLocation();
-  const abortRef = React.useRef<AbortController | null>(null);
-
-  const filters = React.useMemo(() => {
-    return readFilters(new URLSearchParams(location.search));
-  }, [location.search]);
-
-  const apiFilterParams = React.useMemo(() => {
-    return filtersToApiParams(filters);
-  }, [filters]);
-
   const refresh = React.useCallback(
     async (background = false) => {
-      abortRef.current?.abort();
-      const ac = new AbortController();
-      abortRef.current = ac;
-
       try {
-        setErr(null);
         if (!background) setLoading(true);
-
-        const [data, roll] = await Promise.all([
-          api.dashboardProperties({
-            limit: 80,
-            signal: ac.signal,
-            params: apiFilterParams,
-          }),
-          api.opsRollups(apiFilterParams, ac.signal).catch(() => null),
-        ]);
-
-        setRows(Array.isArray(data) ? data : []);
-        setRollups(roll);
+        const out = await api.get<RollupPayload>(`/ops/control-plane${qs}`);
+        setData(out);
+        setErr(null);
         setLastSync(Date.now());
       } catch (e: any) {
-        if (String(e?.name) === "AbortError") return;
         setErr(String(e?.message || e));
       } finally {
         if (!background) setLoading(false);
       }
     },
-    [apiFilterParams],
+    [qs],
   );
 
   React.useEffect(() => {
     refresh(false);
-
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        refresh(true);
-      }
-    }, 60_000);
-
-    return () => {
-      window.clearInterval(interval);
-      abortRef.current?.abort();
-    };
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh(true);
+    }, 60000);
+    return () => window.clearInterval(id);
   }, [refresh]);
 
-  const { pass, review, reject, survivors, stageCounts } = React.useMemo(() => {
-    let pass = 0;
-    let review = 0;
-    let reject = 0;
+  const kpis = data?.kpis || {};
+  const counts = data?.counts || {};
+  const stageCounts = data?.stage_counts || {};
+  const stageEntries = Object.entries(stageCounts).sort((a, b) => b[1] - a[1]);
+  const totalHomes = Number(kpis.total_homes || 0);
 
-    for (const r of rows || []) {
-      const d = r?.last_underwriting_result?.decision || "REJECT";
-      if (d === "PASS") {
-        pass++;
-      } else if (d === "REVIEW") {
-        review++;
-      } else {
-        reject++;
-      }
-    }
-
-    const survivors = (rows || [])
-      .filter((r) => r?.property?.id != null)
-      .sort((a, b) => {
-        const da = a?.last_underwriting_result?.decision || "REJECT";
-        const db = b?.last_underwriting_result?.decision || "REJECT";
-
-        const wa = da === "PASS" ? 2 : da === "REVIEW" ? 1 : 0;
-        const wb = db === "PASS" ? 2 : db === "REVIEW" ? 1 : 0;
-
-        return wb - wa;
-      })
-      .slice(0, 8);
-
-    const stageCounts = rollups?.stage_counts || {};
-
-    return { pass, review, reject, survivors, stageCounts };
-  }, [rows, rollups]);
-
-  const stageCards = React.useMemo(() => {
-    const ordered = [
-      "deal",
-      "decision",
-      "acquisition",
-      "rehab_plan",
-      "rehab_exec",
-      "compliance",
-      "tenant",
-      "lease",
-      "cash",
-      "equity",
-    ];
-
-    return ordered
-      .filter((s) => stageCounts[s] != null)
-      .map((s) => ({
-        key: s,
-        label: s.replace(/_/g, " "),
-        count: stageCounts[s] ?? 0,
-      }));
-  }, [stageCounts]);
+  const goodDeals = Number(kpis.good_deals || 0);
+  const reviewDeals = Number(kpis.review_deals || 0);
+  const rejectedDeals = Number(kpis.rejected_deals || 0);
 
   return (
     <PageShell>
@@ -222,9 +359,10 @@ export default function Dashboard() {
               >
                 sync
               </button>
-              <StatPill label="PASS" value={`${pass}`} tone="good" />
-              <StatPill label="REVIEW" value={`${review}`} tone="warn" />
-              <StatPill label="REJECT" value={`${reject}`} tone="bad" />
+              <TonePill label="homes" value={totalHomes} />
+              <TonePill label="good deals" value={goodDeals} tone="good" />
+              <TonePill label="review" value={reviewDeals} tone="warn" />
+              <TonePill label="rejected" value={rejectedDeals} tone="bad" />
               <div className="text-[11px] text-white/45 px-2 py-2">
                 {lastSync
                   ? `last sync: ${new Date(lastSync).toLocaleTimeString()}`
@@ -234,252 +372,376 @@ export default function Dashboard() {
           }
         />
 
-        <GlobalFilters />
+        <div className="oh-panel p-4">
+          <GlobalFilters />
+        </div>
 
-        {err && (
+        {err ? (
           <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
             {err}
           </div>
-        )}
+        ) : null}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <GlassCard className="min-h-[300px]">
-            <div className="relative z-10 flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <div className="text-xs uppercase tracking-widest text-white/50">
-                  Deal Engine
-                </div>
-                <div className="text-lg font-semibold tracking-tight text-white">
-                  Ruthless filtering
-                </div>
-                <div className="text-sm text-white/55">
-                  Auto-reject bad deals so you only touch survivors.
-                </div>
-              </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+          <MetricCard
+            title="Trust / pipeline quality"
+            value={goodDeals}
+            sub={`${reviewDeals} in review · ${rejectedDeals} rejected`}
+            icon={<ShieldCheck className="h-5 w-5" />}
+            to={`/drilldowns/trust${qs}`}
+            tone="good"
+          />
 
-              <div className="rounded-xl border border-white/10 bg-black/30 p-2">
-                <TrendingUp className="h-4 w-4 text-white" />
-              </div>
-            </div>
+          <MetricCard
+            title="Compliance exposure"
+            value={Number(counts.rehab_tasks_open || 0)}
+            sub={`${Number(kpis.red_zone_count || 0)} red-zone homes in filtered set`}
+            icon={<ClipboardCheck className="h-5 w-5" />}
+            to={`/drilldowns/compliance${qs}`}
+            tone="warn"
+          />
 
-            <FeatureArtwork className="translate-x-6 translate-y-6 h-[160px] w-[160px] opacity-95">
-              <HoverTilt className="h-full w-full">
-                <OrbDealEngine className="h-full w-full animate-[floatSoft_7.5s_ease-in-out_infinite]" />
-              </HoverTilt>
-            </FeatureArtwork>
-          </GlassCard>
+          <MetricCard
+            title="Rehab backlog"
+            value={money(kpis.rehab_open_cost_estimate)}
+            sub={`${Number(counts.rehab_tasks_total || 0)} total rehab tasks`}
+            icon={<Hammer className="h-5 w-5" />}
+            to={`/drilldowns/rehab${qs}`}
+            tone="warn"
+          />
 
-          <GlassCard className="min-h-[300px]">
-            <div className="relative z-10 flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <div className="text-xs uppercase tracking-widest text-white/50">
-                  Compliance
-                </div>
-                <div className="text-lg font-semibold tracking-tight text-white">
-                  Pass HQS first try
-                </div>
-                <div className="text-sm text-white/55">
-                  Predict fail points, track fixes, compound accuracy.
-                </div>
-              </div>
+          <MetricCard
+            title="Cashflow"
+            value={money(kpis.net_cash_window)}
+            sub={`${Number(kpis.cashflow_positive_homes || 0)} homes positive in current window`}
+            icon={<Wallet className="h-5 w-5" />}
+            to={`/drilldowns/cashflow${qs}`}
+            tone={Number(kpis.net_cash_window || 0) >= 0 ? "good" : "bad"}
+          />
 
-              <div className="rounded-xl border border-white/10 bg-black/30 p-2">
-                <ShieldCheck className="h-4 w-4 text-white" />
-              </div>
-            </div>
-
-            <FeatureArtwork className="translate-x-4 translate-y-5 h-[170px] w-[170px] opacity-95">
-              <HoverTilt className="h-full w-full">
-                <Section8Badge className="h-full w-full animate-[floatSoft_8s_ease-in-out_infinite]" />
-              </HoverTilt>
-            </FeatureArtwork>
-          </GlassCard>
-
-          <GlassCard className="min-h-[300px]">
-            <div className="relative z-10 flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <div className="text-xs uppercase tracking-widest text-white/50">
-                  Agents + Humans
-                </div>
-                <div className="text-lg font-semibold tracking-tight text-white">
-                  Playbook execution
-                </div>
-                <div className="text-sm text-white/55">
-                  Agents assist; humans do the real-world moves.
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-white/10 bg-black/30 p-2">
-                <Bot className="h-4 w-4 text-white" />
-              </div>
-            </div>
-
-            <FeatureArtwork className="translate-x-6 translate-y-6 h-[155px] w-[155px] opacity-95">
-              <HoverTilt className="h-full w-full">
-                <AgentClaw className="h-full w-full animate-[floatSoft_7.7s_ease-in-out_infinite]" />
-              </HoverTilt>
-            </FeatureArtwork>
-          </GlassCard>
+          <MetricCard
+            title="Equity"
+            value={money(kpis.total_estimated_equity)}
+            sub={`${Number(kpis.homes_with_valuation || 0)} homes with valuation`}
+            icon={<Landmark className="h-5 w-5" />}
+            to={`/drilldowns/equity${qs}`}
+            tone="good"
+          />
         </div>
 
-        <GlassCard hover={false} className="min-h-[220px]">
-          <div className="relative z-10 flex items-center justify-between gap-6 flex-wrap">
-            <div className="space-y-2">
-              <div className="text-xs uppercase tracking-widest text-white/50">
-                Build Pipeline
-              </div>
-              <div className="text-lg font-semibold tracking-tight flex items-center gap-2 text-white">
-                Deterministic truth <Sparkles className="h-4 w-4" />
-              </div>
-              <div className="text-sm text-white/55 max-w-xl">
-                Every action writes to one model. Audit trails everywhere. No
-                silent overrides.
-              </div>
-            </div>
-
-            <div className="relative h-[120px] w-[180px] overflow-visible" />
-          </div>
-
-          <FeatureArtwork className="translate-x-10 translate-y-3 h-[165px] w-[210px] opacity-95">
-            <HoverTilt className="h-full w-full">
-              <BuildStack className="h-full w-full animate-[floatSoft_8.4s_ease-in-out_infinite]" />
-            </HoverTilt>
-          </FeatureArtwork>
-        </GlassCard>
-
-        <GlassCard>
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <div className="text-sm font-semibold tracking-tight text-white flex items-center gap-2">
-                <GitBranch className="h-4 w-4" />
-                Pipeline drilldown
-              </div>
-              <div className="text-xs text-white/55">
-                See stage distribution and the properties contributing to each
-                stage.
-              </div>
-            </div>
-
-            <Link
-              to={`/pipeline${location.search || ""}`}
-              className="oh-btn cursor-pointer"
-            >
-              Open pipeline
-            </Link>
-          </div>
-
-          <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3">
-            {stageCards.length === 0 ? (
-              <div className="col-span-full text-sm text-white/55">
-                No stage rollups yet.
-              </div>
-            ) : (
-              stageCards.map((s) => (
-                <button
-                  key={s.key}
-                  onClick={() => {
-                    const next = new URLSearchParams(location.search);
-                    next.set("stage", s.key);
-                    navigate(`/pipeline?${next.toString()}`);
-                  }}
-                  className="rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.16] transition p-4 text-left cursor-pointer"
-                >
-                  <div className="text-[11px] uppercase tracking-widest text-white/45">
-                    {s.label}
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold text-white">
-                    {s.count}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        </GlassCard>
-
-        <GlassCard>
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <div className="text-sm font-semibold tracking-tight text-white">
-                Survivors (quick entry)
-              </div>
-              <div className="text-xs text-white/55">
-                Open a property to run the full loop: underwriting → ops →
-                checklist → cash.
-              </div>
-            </div>
-
-            <Link
-              to={`/properties${location.search || ""}`}
-              className="oh-btn cursor-pointer"
-            >
-              View all properties
-            </Link>
-          </div>
-
-          <div className="mt-5 space-y-2">
-            {loading ? (
-              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
-                <SkeletonLine />
-                <SkeletonLine />
-                <SkeletonLine />
-              </div>
-            ) : survivors.length === 0 ? (
+        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr,1fr] gap-4">
+          <Panel
+            title="Pipeline distribution"
+            subtitle="Every stage tile opens the filtered pipeline drilldown."
+            right={
+              <Link to={`/pipeline${qs}`} className="oh-btn">
+                open pipeline
+              </Link>
+            }
+          >
+            {!stageEntries.length ? (
               <div className="text-sm text-white/55">
-                No rows yet. Run ingest / enrich / evaluate, then refresh.
+                {loading ? "Loading pipeline…" : "No stage data yet."}
               </div>
             ) : (
-              survivors.map((row) => {
-                const p = row.property!;
-                const d = row.deal;
-                const r = row.last_underwriting_result;
-                const decision = r?.decision ?? "REJECT";
-                const tone = toneForDecision(decision);
-                const badge =
-                  tone === "good"
-                    ? "border-green-400/25 bg-green-400/10 text-green-200"
-                    : tone === "warn"
-                      ? "border-yellow-300/25 bg-yellow-300/10 text-yellow-100"
-                      : "border-red-400/25 bg-red-400/10 text-red-200";
+              <div className="space-y-3">
+                {stageEntries.map(([stage, count]) => {
+                  const width = pct(
+                    Number(count || 0),
+                    Math.max(totalHomes, 1),
+                  );
+                  const next = new URLSearchParams(location.search);
+                  next.set("stage", stage);
 
-                return (
-                  <Link
-                    key={p.id}
-                    to={`/properties/${p.id}`}
-                    className="block rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.16] transition p-3"
-                    style={{ contain: "layout paint" }}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-white truncate">
-                          {p.address}
+                  return (
+                    <Link
+                      key={stage}
+                      to={`/pipeline?${next.toString()}`}
+                      className="block rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.16] transition p-4"
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-widest text-white/45">
+                            {stage.replace(/_/g, " ")}
+                          </div>
+                          <div className="mt-1 text-lg font-semibold text-white">
+                            {count}
+                          </div>
                         </div>
-                        <div className="text-xs text-white/55 mt-1 truncate">
-                          {p.city}, {p.state} {p.zip}
-                          {p.bedrooms != null ? ` · ${p.bedrooms}bd` : ""}
-                          {d?.strategy
-                            ? ` · ${(d.strategy as string).toUpperCase()}`
-                            : ""}
+                        <div className="text-xs text-white/55">
+                          {width.toFixed(0)}% of filtered homes
                         </div>
                       </div>
-
-                      <div className="flex flex-col items-end gap-1">
-                        <span
-                          className={`inline-flex rounded-full border px-3 py-1 text-xs ${badge}`}
-                        >
-                          {decision}
-                          {r?.score != null ? ` · ${r.score}` : ""}
-                        </span>
-                        <div className="text-[11px] text-white/45">
-                          {r?.dscr != null ? `DSCR ${r.dscr.toFixed(2)}` : ""}
-                        </div>
+                      <div className="mt-3 h-2 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-white/70"
+                          style={{ width: `${width}%` }}
+                        />
                       </div>
-                    </div>
-                  </Link>
-                );
-              })
+                    </Link>
+                  );
+                })}
+              </div>
             )}
+          </Panel>
+
+          <Panel
+            title="Decision mix"
+            subtitle="Quick sanity check so the deal engine doesn’t become decorative pumpkin logic."
+          >
+            <MiniBars
+              items={data?.series?.decision_mix}
+              emptyLabel={
+                loading ? "Loading decisions…" : "No decision data yet."
+              }
+            />
+          </Panel>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <Panel
+            title="Best current opportunities"
+            subtitle="Highest quality survivors in the filtered slice."
+          >
+            <Leaderboard
+              rows={data?.leaderboards?.good_deals}
+              metricLabel="decision"
+              metricGetter={(row) =>
+                `${row.latest_decision || "—"}${row.score != null ? ` · ${row.score}` : ""}`
+              }
+              emptyLabel={
+                loading ? "Loading opportunities…" : "No opportunities yet."
+              }
+            />
+          </Panel>
+
+          <Panel
+            title="Cashflow leaders"
+            subtitle="Top properties by current net cash in the selected window."
+          >
+            <Leaderboard
+              rows={data?.leaderboards?.cashflow}
+              metricLabel="net"
+              metricGetter={(row) => money(row.property_net_cash_window)}
+              emptyLabel={
+                loading ? "Loading cashflow…" : "No cashflow rows yet."
+              }
+            />
+          </Panel>
+
+          <Panel
+            title="Equity leaders"
+            subtitle="Fast view of who is already carrying balance-sheet weight."
+          >
+            <Leaderboard
+              rows={data?.leaderboards?.equity}
+              metricLabel="equity"
+              metricGetter={(row) => money(row.estimated_equity)}
+              emptyLabel={loading ? "Loading equity…" : "No equity rows yet."}
+            />
+          </Panel>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <Panel
+            title="Cash trend"
+            subtitle="Monthly net view for the current filtered book."
+            right={
+              <Link to={`/drilldowns/cashflow${qs}`} className="oh-btn">
+                cashflow detail
+              </Link>
+            }
+          >
+            <MiniBars
+              items={data?.series?.cash_by_month}
+              valueKey="net"
+              emptyLabel={
+                loading ? "Loading trend…" : "No transaction trend yet."
+              }
+            />
+          </Panel>
+
+          <Panel
+            title="County concentration"
+            subtitle="Where your current filtered exposure is piling up."
+          >
+            <MiniBars
+              items={data?.series?.county_mix}
+              emptyLabel={
+                loading ? "Loading county mix…" : "No county data yet."
+              }
+            />
+          </Panel>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <Panel
+            title="Rehab pressure"
+            subtitle="Highest open rehab drag first."
+            right={
+              <Link to={`/drilldowns/rehab${qs}`} className="oh-btn">
+                rehab detail
+              </Link>
+            }
+          >
+            <Leaderboard
+              rows={data?.leaderboards?.rehab_backlog}
+              metricLabel="open cost"
+              metricGetter={(row) => money(row.rehab_open_cost)}
+              emptyLabel={
+                loading ? "Loading rehab backlog…" : "No rehab backlog yet."
+              }
+            />
+          </Panel>
+
+          <Panel
+            title="Compliance attention"
+            subtitle="Properties likely to want human eyeballs before they misbehave."
+            right={
+              <Link to={`/drilldowns/compliance${qs}`} className="oh-btn">
+                compliance detail
+              </Link>
+            }
+          >
+            <Leaderboard
+              rows={data?.leaderboards?.compliance_attention}
+              metricLabel="open tasks"
+              metricGetter={(row) => row.rehab_open ?? 0}
+              emptyLabel={
+                loading
+                  ? "Loading compliance attention…"
+                  : "No compliance attention list yet."
+              }
+            />
+          </Panel>
+        </div>
+
+        <div className="oh-panel p-5">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-sm font-semibold text-white flex items-center gap-2">
+                <Building2 className="h-4 w-4" />
+                Portfolio snapshot
+              </div>
+              <div className="text-xs text-white/55 mt-1">
+                Current filtered totals you can glance at without diving into
+                every property card like a raccoon in a wiring closet.
+              </div>
+            </div>
+            <Link to={`/properties${qs}`} className="oh-btn">
+              open properties
+            </Link>
           </div>
-        </GlassCard>
+
+          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-[11px] uppercase tracking-widest text-white/45">
+                homes
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {totalHomes}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-[11px] uppercase tracking-widest text-white/45">
+                deals
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {Number(counts.deals || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-[11px] uppercase tracking-widest text-white/45">
+                leases
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {Number(kpis.active_leases || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-[11px] uppercase tracking-widest text-white/45">
+                valuations
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {Number(counts.valuations || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-[11px] uppercase tracking-widest text-white/45">
+                value
+              </div>
+              <div className="mt-2 text-xl font-semibold text-white">
+                {money(kpis.total_estimated_value)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-[11px] uppercase tracking-widest text-white/45">
+                debt
+              </div>
+              <div className="mt-2 text-xl font-semibold text-white">
+                {money(kpis.total_loan_balance)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-[11px] uppercase tracking-widest text-white/45">
+                equity
+              </div>
+              <div className="mt-2 text-xl font-semibold text-white">
+                {money(kpis.total_estimated_equity)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <div className="text-[11px] uppercase tracking-widest text-white/45">
+                avg crime
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {kpis.avg_crime_score != null ? kpis.avg_crime_score : "—"}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="oh-panel p-5">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-sm font-semibold text-white flex items-center gap-2">
+                <GitBranch className="h-4 w-4" />
+                Main navigation, now with fewer useless ornaments
+              </div>
+              <div className="text-xs text-white/55 mt-1">
+                Every serious panel now drills into a page with
+                investor-specific detail instead of just looking expensive.
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link to={`/drilldowns/trust${qs}`} className="oh-btn">
+              trust
+            </Link>
+            <Link to={`/drilldowns/compliance${qs}`} className="oh-btn">
+              compliance
+            </Link>
+            <Link to={`/drilldowns/rehab${qs}`} className="oh-btn">
+              rehab
+            </Link>
+            <Link to={`/drilldowns/cashflow${qs}`} className="oh-btn">
+              cashflow
+            </Link>
+            <Link to={`/drilldowns/equity${qs}`} className="oh-btn">
+              equity
+            </Link>
+            <Link to={`/pipeline${qs}`} className="oh-btn">
+              pipeline
+            </Link>
+            <Link to={`/properties${qs}`} className="oh-btn">
+              properties
+            </Link>
+            <Link to="/agents" className="oh-btn">
+              agents
+            </Link>
+          </div>
+        </div>
       </div>
     </PageShell>
   );
