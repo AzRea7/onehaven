@@ -17,7 +17,7 @@ import ComplianceDrilldown from "./pages/drilldowns/ComplianceDrilldown";
 import RehabDrilldown from "./pages/drilldowns/RehabDrilldown";
 import CashflowDrilldown from "./pages/drilldowns/CashflowDrilldown";
 import EquityDrilldown from "./pages/drilldowns/EquityDrilldown";
-
+import ImportsPage from "./pages/ImportsPage";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import PolicyReview from "./pages/PolicyReview";
@@ -173,6 +173,15 @@ export default function App() {
           element={
             <Protected>
               <PolicyReview />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/imports"
+          element={
+            <Protected>
+              <ImportsPage />
             </Protected>
           }
         />

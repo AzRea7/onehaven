@@ -9,6 +9,7 @@ from .logging_config import configure_logging
 from .middleware.request_id import RequestIDMiddleware
 from .middleware.structured_logging import StructuredLoggingMiddleware
 
+from .routers.ingestion import router as ingestion_router
 from .routers.health import router as health_router
 from .routers.meta import router as meta_router
 from .routers.dashboard import router as dashboard_router
@@ -152,6 +153,8 @@ def create_app() -> FastAPI:
     app.include_router(policy_seed_router, prefix=API_PREFIX)
     app.include_router(policy_router, prefix=API_PREFIX)
     app.include_router(policy_evidence_router, prefix=API_PREFIX)
+
+    app.include_router(ingestion_router, prefix=API_PREFIX)
 
     return app
 

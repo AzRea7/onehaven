@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    JSON,
     Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -346,6 +347,111 @@ class RentCalibration(Base):
     mape: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
+
+class IngestionSource(Base):
+    __tablename__ = "ingestion_sources"
+    __table_args__ = (
+        UniqueConstraint("org_id", "provider", "slug", name="uq_ingestion_sources_org_provider_slug"),
+        Index("ix_ingestion_sources_org_provider", "org_id", "provider"),
+        Index("ix_ingestion_sources_org_enabled", "org_id", "is_enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)  # zillow|investorlift|partner_feed|custom
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+
+    source_type: Mapped[str] = mapped_column(String(30), nullable=False, default="api")  # api|webhook|feed
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="disconnected")  # connected|disconnected|error
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    base_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    webhook_secret_hint: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
+    credentials_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    config_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    cursor_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    schedule_cron: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    sync_interval_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=60)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_failure_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    next_scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    last_error_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_error_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    runs: Mapped[List["IngestionRun"]] = relationship(
+        "IngestionRun",
+        back_populates="source",
+        cascade="all, delete-orphan",
+    )
+
+
+class IngestionRun(Base):
+    __tablename__ = "ingestion_runs"
+    __table_args__ = (
+        Index("ix_ingestion_runs_org_source_started", "org_id", "source_id", "started_at"),
+        Index("ix_ingestion_runs_org_status", "org_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    source_id: Mapped[int] = mapped_column(Integer, ForeignKey("ingestion_sources.id"), nullable=False, index=True)
+
+    trigger_type: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")  # manual|scheduled|webhook
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")  # queued|running|success|partial|failed
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    records_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    records_imported: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    properties_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    properties_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    deals_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    deals_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rent_rows_upserted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    photos_upserted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duplicates_skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    invalid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    summary_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    source = relationship("IngestionSource", back_populates="runs")
+
+
+class IngestionRecordLink(Base):
+    __tablename__ = "ingestion_record_links"
+    __table_args__ = (
+        UniqueConstraint("org_id", "provider", "external_record_id", name="uq_ingestion_record_links_org_provider_ext"),
+        Index("ix_ingestion_record_links_org_property", "org_id", "property_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("ingestion_sources.id"), nullable=True, index=True)
+
+    external_record_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    external_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    fingerprint: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
+    deal_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("deals.id"), nullable=True, index=True)
+
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    raw_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 # -----------------------------
 # Jurisdiction + Underwriting

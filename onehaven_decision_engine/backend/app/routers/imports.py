@@ -27,6 +27,8 @@ from ..schemas import ImportErrorRow, ImportResultOut
 from ..services.geo_enrichment import enrich_property_geo
 from ..services.property_photo_service import upsert_zillow_photos
 from ..services.zillow_photo_source import extract_zillow_photo_urls
+from ..services.ingestion_source_service import ensure_default_manual_sources
+from ..services.ingestion_run_service import get_ingestion_overview
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -402,6 +404,26 @@ def _import_rows(
         errors=errors,
     )
 
+@router.get("/overview", response_model=IngestionOverviewOut)
+def imports_overview(
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    ensure_default_manual_sources(db, org_id=principal.org_id)
+    return get_ingestion_overview(db, org_id=principal.org_id)
+
+
+@router.post("/bootstrap", response_model=dict)
+def bootstrap_import_sources(
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    rows = ensure_default_manual_sources(db, org_id=principal.org_id)
+    return {
+        "ok": True,
+        "count": len(rows),
+        "sources": [{"id": r.id, "provider": r.provider, "slug": r.slug} for r in rows],
+    }
 
 @router.post("/zillow", response_model=ImportResultOut)
 def import_zillow(

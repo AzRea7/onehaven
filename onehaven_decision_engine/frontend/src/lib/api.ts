@@ -51,6 +51,79 @@ export type RehabPhotoAnalysis = {
   code?: string | null;
 };
 
+export type IngestionSource = {
+  id: number;
+  org_id: number;
+  provider: string;
+  slug: string;
+  display_name: string;
+  source_type: string;
+  status: string;
+  is_enabled: boolean;
+  base_url?: string | null;
+  webhook_secret_hint?: string | null;
+  schedule_cron?: string | null;
+  sync_interval_minutes?: number | null;
+  config_json: Record<string, any>;
+  cursor_json: Record<string, any>;
+  last_synced_at?: string | null;
+  last_success_at?: string | null;
+  last_failure_at?: string | null;
+  next_scheduled_at?: string | null;
+  last_error_summary?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type IngestionRun = {
+  id: number;
+  source_id: number;
+  source_label: string;
+  provider: string;
+  trigger_type: string;
+  status: string;
+  started_at: string;
+  finished_at?: string | null;
+  records_seen: number;
+  records_imported: number;
+  duplicates_skipped: number;
+  invalid_rows: number;
+  error_summary?: string | null;
+};
+
+export type IngestionRunDetail = {
+  id: number;
+  source_id: number;
+  trigger_type: string;
+  status: string;
+  started_at: string;
+  finished_at?: string | null;
+  records_seen: number;
+  records_imported: number;
+  properties_created: number;
+  properties_updated: number;
+  deals_created: number;
+  deals_updated: number;
+  rent_rows_upserted: number;
+  photos_upserted: number;
+  duplicates_skipped: number;
+  invalid_rows: number;
+  retry_count: number;
+  error_summary?: string | null;
+  error_json?: Record<string, any> | null;
+  summary_json?: Record<string, any> | null;
+};
+
+export type IngestionOverview = {
+  sources_connected: number;
+  sources_enabled: number;
+  last_sync_at?: string | null;
+  success_runs_24h: number;
+  failed_runs_24h: number;
+  records_imported_24h: number;
+  duplicates_skipped_24h: number;
+};
+
 export function getOrgSlug(): string {
   const env = (import.meta as any).env || {};
   const envOrg = (env.VITE_ORG_SLUG as string | undefined)?.trim();
@@ -141,6 +214,17 @@ function makeEventSource(pathWithQuery: string): EventSource {
   }
 
   return new EventSource(url.toString(), { withCredentials: true } as any);
+}
+
+function authHeaders(): HeadersInit {
+  const auth = getAuth();
+  const headers: Record<string, string> = {};
+
+  if (auth.orgSlug) headers["X-Org-Slug"] = auth.orgSlug;
+  if (auth.devEmail) headers["X-User-Email"] = auth.devEmail;
+  if (auth.devRole) headers["X-User-Role"] = auth.devRole;
+
+  return headers;
 }
 
 async function request<T>(
@@ -370,7 +454,7 @@ export const api = {
     if (!res.ok) {
       throw new Error(await res.text());
     }
-    clearApiCache?.();
+    clearApiCache();
     return res.json() as Promise<PropertyPhoto>;
   },
 
@@ -1398,8 +1482,110 @@ export const api = {
       })}`,
       { method: "DELETE" },
     ),
-};
-function authHeaders(): HeadersInit | undefined {
-  throw new Error("Function not implemented.");
-}
 
+  importsOverview: () =>
+    request<IngestionOverview>(`/imports/overview`, {
+      method: "GET",
+      cacheTtlMs: 800,
+    }),
+
+  importsBootstrap: () =>
+    request<any>(`/imports/bootstrap`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  ingestionOverview: (signal?: AbortSignal) =>
+    request<IngestionOverview>(`/ingestion/overview`, {
+      method: "GET",
+      cacheTtlMs: 800,
+      signal,
+    }),
+
+  listIngestionSources: (signal?: AbortSignal) =>
+    requestArray<IngestionSource>(`/ingestion/sources`, {
+      method: "GET",
+      cacheTtlMs: 1_000,
+      signal,
+    }),
+
+  createIngestionSource: (payload: {
+    provider: string;
+    slug: string;
+    display_name: string;
+    source_type?: string;
+    is_enabled?: boolean;
+    base_url?: string | null;
+    schedule_cron?: string | null;
+    sync_interval_minutes?: number | null;
+    config_json?: Record<string, any>;
+    credentials_json?: Record<string, any>;
+  }) =>
+    request<IngestionSource>(`/ingestion/sources`, {
+      method: "POST",
+      body: JSON.stringify({
+        provider: payload.provider,
+        slug: payload.slug,
+        display_name: payload.display_name,
+        source_type: payload.source_type ?? "api",
+        is_enabled: payload.is_enabled ?? true,
+        base_url: payload.base_url ?? null,
+        schedule_cron: payload.schedule_cron ?? null,
+        sync_interval_minutes: payload.sync_interval_minutes ?? 60,
+        config_json: payload.config_json ?? {},
+        credentials_json: payload.credentials_json ?? {},
+      }),
+    }),
+
+  updateIngestionSource: (
+    sourceId: number,
+    payload: {
+      display_name?: string;
+      is_enabled?: boolean;
+      status?: string;
+      base_url?: string | null;
+      schedule_cron?: string | null;
+      sync_interval_minutes?: number | null;
+      config_json?: Record<string, any>;
+      credentials_json?: Record<string, any>;
+    },
+  ) =>
+    request<IngestionSource>(`/ingestion/sources/${sourceId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  syncIngestionSource: (
+    sourceId: number,
+    payload?: { trigger_type?: "manual" | "scheduled" | "webhook" },
+  ) =>
+    request<{
+      ok: boolean;
+      queued: boolean;
+      task_id?: string;
+      run_id?: number;
+      status?: string;
+    }>(`/ingestion/sources/${sourceId}/sync`, {
+      method: "POST",
+      body: JSON.stringify({
+        trigger_type: payload?.trigger_type ?? "manual",
+      }),
+    }),
+
+  listIngestionRuns: (params?: { limit?: number }, signal?: AbortSignal) =>
+    requestArray<IngestionRun>(
+      `/ingestion/runs${qs({ limit: params?.limit ?? 50 })}`,
+      {
+        method: "GET",
+        cacheTtlMs: 800,
+        signal,
+      },
+    ),
+
+  getIngestionRunDetail: (runId: number, signal?: AbortSignal) =>
+    request<IngestionRunDetail>(`/ingestion/runs/${runId}`, {
+      method: "GET",
+      cacheTtlMs: 200,
+      signal,
+    }),
+};

@@ -34,6 +34,121 @@ class ImportResultOut(BaseModel):
     errors: list[ImportErrorRow]
 
 
+
+class IngestionSourceBase(BaseModel):
+    provider: str
+    slug: str
+    display_name: str
+    source_type: str = "api"
+    is_enabled: bool = True
+    base_url: Optional[str] = None
+    schedule_cron: Optional[str] = None
+    sync_interval_minutes: Optional[int] = 60
+    config_json: dict[str, Any] = Field(default_factory=dict)
+    credentials_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class IngestionSourceCreate(IngestionSourceBase):
+    pass
+
+
+class IngestionSourceUpdate(BaseModel):
+    display_name: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    status: Optional[str] = None
+    base_url: Optional[str] = None
+    schedule_cron: Optional[str] = None
+    sync_interval_minutes: Optional[int] = None
+    config_json: Optional[dict[str, Any]] = None
+    credentials_json: Optional[dict[str, Any]] = None
+
+
+class IngestionSourceOut(BaseModel):
+    id: int
+    org_id: int
+    provider: str
+    slug: str
+    display_name: str
+    source_type: str
+    status: str
+    is_enabled: bool
+    base_url: Optional[str] = None
+    webhook_secret_hint: Optional[str] = None
+    schedule_cron: Optional[str] = None
+    sync_interval_minutes: Optional[int] = None
+    config_json: dict[str, Any] = Field(default_factory=dict)
+    cursor_json: dict[str, Any] = Field(default_factory=dict)
+    last_synced_at: Optional[datetime] = None
+    last_success_at: Optional[datetime] = None
+    last_failure_at: Optional[datetime] = None
+    next_scheduled_at: Optional[datetime] = None
+    last_error_summary: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class IngestionRunOut(BaseModel):
+    id: int
+    org_id: int
+    source_id: int
+    trigger_type: str
+    status: str
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    records_seen: int
+    records_imported: int
+    properties_created: int
+    properties_updated: int
+    deals_created: int
+    deals_updated: int
+    rent_rows_upserted: int
+    photos_upserted: int
+    duplicates_skipped: int
+    invalid_rows: int
+    retry_count: int
+    error_summary: Optional[str] = None
+    error_json: Optional[dict[str, Any]] = None
+    summary_json: Optional[dict[str, Any]] = None
+
+    model_config = {"from_attributes": True}
+
+
+class IngestionRunListItem(BaseModel):
+    id: int
+    source_id: int
+    source_label: str
+    provider: str
+    trigger_type: str
+    status: str
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    records_seen: int
+    records_imported: int
+    duplicates_skipped: int
+    invalid_rows: int
+    error_summary: Optional[str] = None
+
+
+class IngestionSyncRequest(BaseModel):
+    trigger_type: str = "manual"
+
+
+class IngestionWebhookIn(BaseModel):
+    external_record_id: Optional[str] = None
+    event_type: Optional[str] = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class IngestionOverviewOut(BaseModel):
+    sources_connected: int
+    sources_enabled: int
+    last_sync_at: Optional[datetime] = None
+    success_runs_24h: int
+    failed_runs_24h: int
+    records_imported_24h: int
+    duplicates_skipped_24h: int
 # --------------------
 # Evaluation / Survivors
 # --------------------
