@@ -995,6 +995,49 @@ class PropertyUpdate(BaseModel):
     crime_score: Optional[float] = None
     offender_count: Optional[int] = None
 
+class PropertyPhotoCreate(BaseModel):
+    url: str
+    source: str = "upload"
+    kind: str = "unknown"
+    label: str | None = None
+
+
+class PropertyPhotoOut(BaseModel):
+    id: int
+    org_id: int | None = None
+    property_id: int
+    source: str
+    kind: str
+    label: str | None = None
+    url: str
+    storage_key: str | None = None
+    content_type: str | None = None
+    sort_order: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RehabPhotoAnalysisIssueOut(BaseModel):
+    title: str
+    category: str
+    severity: str
+    estimated_cost: float | None = None
+    blocker: bool = False
+    notes: str | None = None
+    evidence_photo_ids: list[int] = Field(default_factory=list)
+
+
+class RehabPhotoAnalysisOut(BaseModel):
+    ok: bool
+    property_id: int
+    photo_count: int
+    summary: dict[str, int] = Field(default_factory=dict)
+    issues: list[RehabPhotoAnalysisIssueOut] = Field(default_factory=list)
+    created: int | None = None
+    created_task_ids: list[int] = Field(default_factory=list)
+    code: str | None = None
 
 class GeoEnrichmentOut(BaseModel):
     ok: bool

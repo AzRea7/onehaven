@@ -12,6 +12,9 @@ import RiskBadges from "../components/RiskBadges";
 import StageProgress from "../components/StageProgress";
 import { getFinancingType } from "../lib/dealRules";
 import PageShell from "../components/PageShell";
+import PhotoUploader from "../components/PhotoUploader";
+import PhotoGallery from "../components/PhotoGallery";
+import RehabFromPhotosCTA from "../components/RehabFromPhotosCTA";
 
 const tabs = [
   "Deal",
@@ -21,6 +24,7 @@ const tabs = [
   "Cash",
   "Equity",
 ] as const;
+
 type Tab = (typeof tabs)[number];
 
 const TAB_TO_STAGE: Record<Tab, string> = {
@@ -346,6 +350,10 @@ export default function PropertyView() {
 
   const [agentsOpen, setAgentsOpen] = React.useState(false);
 
+  const [photos, setPhotos] = React.useState<any[]>([]);
+  const [photoAnalysis, setPhotoAnalysis] = React.useState<any | null>(null);
+  const [photoBusy, setPhotoBusy] = React.useState(false);
+
   const abortRef = React.useRef<AbortController | null>(null);
 
   const v = bundle?.view;
@@ -361,6 +369,19 @@ export default function PropertyView() {
   const vals = bundle?.valuations || [];
 
   const noDeal = (err || "").toLowerCase().includes("nodealfoundforproperty");
+
+  const refreshPhotos = React.useCallback(
+    async (signal?: AbortSignal) => {
+      if (!Number.isFinite(propertyId)) return;
+      try {
+        const rows = await api.photos(propertyId, signal);
+        setPhotos(Array.isArray(rows) ? rows : []);
+      } catch {
+        setPhotos([]);
+      }
+    },
+    [propertyId],
+  );
 
   const loadAll = React.useCallback(async () => {
     abortRef.current?.abort();
@@ -397,15 +418,30 @@ export default function PropertyView() {
       } catch {
         setChecklist(null);
       }
+
+      const galleryFromBundle = Array.isArray(out?.photo_gallery)
+        ? out.photo_gallery
+        : Array.isArray(out?.view?.photo_gallery)
+          ? out.view.photo_gallery
+          : Array.isArray(out?.view?.photo_gallery?.photos)
+            ? out.view.photo_gallery.photos
+            : [];
+
+      if (galleryFromBundle.length) {
+        setPhotos(galleryFromBundle);
+      } else {
+        await refreshPhotos(ac.signal);
+      }
     } catch (e: any) {
       if (String(e?.name) === "AbortError") return;
       setBundle(null);
       setOps(null);
       setWorkflow(null);
       setTrust(null);
+      setPhotos([]);
       setErr(String(e.message || e));
     }
-  }, [propertyId]);
+  }, [propertyId, refreshPhotos]);
 
   React.useEffect(() => {
     if (!Number.isFinite(propertyId)) {
@@ -533,6 +569,53 @@ export default function PropertyView() {
     });
   }, [doAction, propertyId]);
 
+  const handlePreviewRehabFromPhotos = React.useCallback(async () => {
+    try {
+      setPhotoBusy(true);
+      setErr(null);
+      const out = await api.previewRehabFromPhotos(propertyId);
+      setPhotoAnalysis(out);
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setPhotoBusy(false);
+    }
+  }, [propertyId]);
+
+  const handleGenerateRehabFromPhotos = React.useCallback(async () => {
+    try {
+      setPhotoBusy(true);
+      setErr(null);
+      const out = await api.generateRehabFromPhotos(propertyId);
+      setPhotoAnalysis(out);
+      await loadAll();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setPhotoBusy(false);
+    }
+  }, [propertyId, loadAll]);
+
+  const handleDeletePhoto = React.useCallback(
+    async (photoId: number) => {
+      try {
+        setPhotoBusy(true);
+        setErr(null);
+        await api.deletePhoto(photoId);
+        await refreshPhotos();
+      } catch (e: any) {
+        setErr(String(e?.message || e));
+      } finally {
+        setPhotoBusy(false);
+      }
+    },
+    [refreshPhotos],
+  );
+
+  const handleUploadedPhoto = React.useCallback(async () => {
+    await refreshPhotos();
+  }, [refreshPhotos]);
+
   const checklistItems = checklist?.items ?? v?.checklist?.items ?? [];
 
   const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
@@ -594,9 +677,13 @@ export default function PropertyView() {
 
   const geo = bundle?.geo || {};
   const photoGallery = bundle?.photo_gallery || {};
-  const photoUrls = Array.isArray(photoGallery?.photos)
+  const fallbackPhotoUrls = Array.isArray(photoGallery?.photos)
     ? photoGallery.photos
     : [];
+  const propertyImagePhotos =
+    photos.length > 0
+      ? photos.map((x) => x?.url).filter(Boolean)
+      : fallbackPhotoUrls;
 
   return (
     <PageShell className="relative space-y-5">
@@ -718,7 +805,7 @@ export default function PropertyView() {
 
           <div className="mt-3">
             <PropertyImage
-              photos={photoUrls}
+              photos={propertyImagePhotos}
               zillowUrl={zillowUrl}
               className="w-full"
               roundedClassName="rounded-2xl"
@@ -1104,52 +1191,71 @@ export default function PropertyView() {
       )}
 
       {tab === "Rehab" && (
-        <Panel
-          title="Rehab Tasks"
-          right={
-            <button
-              onClick={generateRehabFromGaps}
-              className="oh-btn cursor-pointer"
-              disabled={!!busy}
-              title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
-            >
-              rehab from gaps
-            </button>
-          }
-        >
-          {rehab.length === 0 ? (
-            <div className="text-sm text-white/55">No rehab tasks yet.</div>
-          ) : (
-            <div className="space-y-2">
-              {rehab.map((t: any) => (
-                <div
-                  key={t.id}
-                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
-                  style={{ contain: "layout paint" }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold text-white">{t.title}</div>
-                    <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/5 text-white/70">
-                      {t.status}
-                    </span>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4">
+            <PhotoGallery photos={photos} onDelete={handleDeletePhoto} />
+            <PhotoUploader
+              propertyId={propertyId}
+              onUploaded={handleUploadedPhoto}
+            />
+          </div>
+
+          <RehabFromPhotosCTA
+            busy={photoBusy}
+            analysis={photoAnalysis}
+            onPreview={handlePreviewRehabFromPhotos}
+            onGenerate={handleGenerateRehabFromPhotos}
+          />
+
+          <Panel
+            title="Rehab Tasks"
+            right={
+              <button
+                onClick={generateRehabFromGaps}
+                className="oh-btn cursor-pointer"
+                disabled={!!busy}
+                title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
+              >
+                rehab from gaps
+              </button>
+            }
+          >
+            {rehab.length === 0 ? (
+              <div className="text-sm text-white/55">No rehab tasks yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {rehab.map((t: any) => (
+                  <div
+                    key={t.id}
+                    className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                    style={{ contain: "layout paint" }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-white">{t.title}</div>
+                      <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/5 text-white/70">
+                        {t.status}
+                      </span>
+                    </div>
+                    <div className="text-xs text-white/55 mt-1">
+                      {t.deadline
+                        ? `Due: ${new Date(t.deadline).toLocaleDateString()}`
+                        : "No deadline"}{" "}
+                      ·{" "}
+                      {t.cost_estimate != null
+                        ? `Est: ${money(t.cost_estimate)}`
+                        : "No estimate"}
+                    </div>
+                    {t.notes && (
+                      <div className="text-sm text-white/70 mt-2">
+                        {t.notes}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-xs text-white/55 mt-1">
-                    {t.deadline
-                      ? `Due: ${new Date(t.deadline).toLocaleDateString()}`
-                      : "No deadline"}{" "}
-                    ·{" "}
-                    {t.cost_estimate != null
-                      ? `Est: ${money(t.cost_estimate)}`
-                      : "No estimate"}
-                  </div>
-                  {t.notes && (
-                    <div className="text-sm text-white/70 mt-2">{t.notes}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
       )}
 
       {tab === "Compliance" && (

@@ -182,6 +182,11 @@ class Property(Base):
         back_populates="property", cascade="all, delete-orphan"
     )
 
+    photos: Mapped[List["PropertyPhoto"]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+
     rehab_tasks: Mapped[List["RehabTask"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     leases: Mapped[List["Lease"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="property", cascade="all, delete-orphan")
@@ -634,6 +639,48 @@ class TrustScore(Base):
 # -----------------------------
 # Phase 4/5: rehab, tenants, cash, equity
 # -----------------------------
+class PropertyPhoto(Base):
+    __tablename__ = "property_photos"
+    __table_args__ = (
+        UniqueConstraint("org_id", "property_id", "url", name="uq_property_photos_org_property_url"),
+        Index("ix_property_photos_org_property", "org_id", "property_id"),
+        Index("ix_property_photos_org_source", "org_id", "source"),
+        Index("ix_property_photos_org_kind", "org_id", "kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id"),
+        nullable=False,
+        index=True,
+    )
+    property_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="upload")   # upload|zillow
+    kind: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")     # interior|exterior|unknown
+    label: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    property: Mapped["Property"] = relationship(back_populates="photos")
+
 class RehabTask(Base):
     __tablename__ = "rehab_tasks"
     __table_args__ = (UniqueConstraint("org_id", "property_id", "title", name="uq_rehab_tasks_org_property_title"),)

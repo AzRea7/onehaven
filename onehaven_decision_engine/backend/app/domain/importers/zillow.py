@@ -2,26 +2,15 @@
 from __future__ import annotations
 
 from .base import NormalizedRow, required, optional_float, optional_int, optional_bool
+from app.services.zillow_photo_source import extract_zillow_photo_urls
 
 
 def normalize_zillow(row: dict[str, str]) -> NormalizedRow:
-    """
-    Normalize a Zillow "properties for sale" export row into our canonical NormalizedRow.
-
-    Supports Zillow headers like:
-      - Street address, City, State, Zip
-      - Property price (USD)
-      - Living area
-      - Bedrooms, Bathrooms
-      - Property type
-    """
-
     address = required(row, "Street address", "Address", "Street Address", "Street")
     city = required(row, "City")
     state = required(row, "State", "ST") or "MI"
     zip_code = required(row, "Zip", "ZIP", "Postal Code")
 
-    # Zillow uses exact header "Property price (USD)"
     asking = (
         optional_float(row, "Property price (USD)", "Price", "List Price", "Asking Price")
         or 0.0
@@ -29,17 +18,10 @@ def normalize_zillow(row: dict[str, str]) -> NormalizedRow:
 
     beds = optional_int(row, "Bedrooms", "Beds", "Bed") or 0
     baths = optional_float(row, "Bathrooms", "Baths", "Bath") or 1.0
-
-    # Zillow uses exact header "Living area"
     sqft = optional_int(row, "Living area", "Living Area", "SqFt", "Square Feet")
-
-    # Zillow export usually doesn’t include year built; keep optional
     year = optional_int(row, "Year Built", "YearBuilt")
-
-    # Zillow export doesn’t reliably have garage; keep it false unless present
     has_garage = optional_bool(row, "Has Garage", "Garage", "has_garage")
 
-    # Property type is present in your CSV as "Property type"
     raw_pt = (row.get("Property type") or "").strip().lower()
     if "single" in raw_pt:
         property_type = "single_family"
@@ -52,17 +34,18 @@ def normalize_zillow(row: dict[str, str]) -> NormalizedRow:
     else:
         property_type = "single_family"
 
-    # Optional rent fields: Zillow export doesn't include these by default
     market_rent = optional_float(row, "Rent Zestimate", "Rent zestimate", "Market Rent", "Estimated Rent")
     fmr = optional_float(row, "FMR", "Section 8 FMR", "HUD FMR")
     approved_ceiling = optional_float(row, "Approved Rent Ceiling", "Rent Ceiling", "Rent Cap")
     rr_comp = optional_float(row, "Rent Reasonableness", "Rent Comp", "RR Comp")
-
     inventory = optional_int(row, "Inventory", "Listings Count", "Inventory Count")
     starbucks = optional_int(row, "Starbucks Minutes", "Starbucks Min", "Starbucks (min)")
 
     if not address or not city or not zip_code or asking <= 0:
         raise ValueError("Missing required fields: address/city/zip/price")
+
+    raw_payload = dict(row)
+    raw_payload["zillow_photo_urls"] = extract_zillow_photo_urls(raw_payload)
 
     return NormalizedRow(
         address=address,
@@ -85,5 +68,5 @@ def normalize_zillow(row: dict[str, str]) -> NormalizedRow:
         rent_reasonableness_comp=rr_comp,
         inventory_count=inventory,
         starbucks_minutes=starbucks,
-        raw=row,
+        raw=raw_payload,
     )

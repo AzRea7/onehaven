@@ -15,6 +15,42 @@ export type Principal = {
   plan_code?: string | null;
 };
 
+export type PropertyPhoto = {
+  id: number;
+  org_id?: number | null;
+  property_id: number;
+  source: string;
+  kind: string;
+  label?: string | null;
+  url: string;
+  storage_key?: string | null;
+  content_type?: string | null;
+  sort_order: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type RehabPhotoIssue = {
+  title: string;
+  category: string;
+  severity: string;
+  estimated_cost?: number | null;
+  blocker: boolean;
+  notes?: string | null;
+  evidence_photo_ids: number[];
+};
+
+export type RehabPhotoAnalysis = {
+  ok: boolean;
+  property_id: number;
+  photo_count: number;
+  summary: Record<string, number>;
+  issues: RehabPhotoIssue[];
+  created?: number | null;
+  created_task_ids: number[];
+  code?: string | null;
+};
+
 export function getOrgSlug(): string {
   const env = (import.meta as any).env || {};
   const envOrg = (env.VITE_ORG_SLUG as string | undefined)?.trim();
@@ -304,6 +340,54 @@ export const api = {
     request<any>(`/auth/select-org${qs({ org_slug: orgSlug })}`, {
       method: "POST",
       body: JSON.stringify({}),
+    }),
+
+  photos: (propertyId: number, signal?: AbortSignal) =>
+    request<PropertyPhoto[]>(`/photos/${propertyId}`, {
+      cacheTtlMs: 1_000,
+      signal,
+    }),
+
+  uploadPhoto: async (args: {
+    propertyId: number;
+    file: File;
+    kind?: string;
+    label?: string;
+  }) => {
+    const form = new FormData();
+    form.append("property_id", String(args.propertyId));
+    form.append("file", args.file);
+    form.append("kind", args.kind || "unknown");
+    if (args.label) form.append("label", args.label);
+
+    const res = await fetch(`${API_BASE}/photos/upload`, {
+      method: "POST",
+      credentials: "include",
+      headers: authHeaders(),
+      body: form,
+    });
+
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    clearApiCache?.();
+    return res.json() as Promise<PropertyPhoto>;
+  },
+
+  deletePhoto: (photoId: number) =>
+    request<{ ok: boolean; id: number }>(`/photos/${photoId}`, {
+      method: "DELETE",
+    }),
+
+  previewRehabFromPhotos: (propertyId: number, signal?: AbortSignal) =>
+    request<RehabPhotoAnalysis>(`/rehab/from-photos/${propertyId}`, {
+      cacheTtlMs: 500,
+      signal,
+    }),
+
+  generateRehabFromPhotos: (propertyId: number) =>
+    request<RehabPhotoAnalysis>(`/rehab/from-photos/${propertyId}`, {
+      method: "POST",
     }),
 
   dashboardProperties: (p: {
@@ -1315,3 +1399,7 @@ export const api = {
       { method: "DELETE" },
     ),
 };
+function authHeaders(): HeadersInit | undefined {
+  throw new Error("Function not implemented.");
+}
+

@@ -17,10 +17,16 @@ from ..db import get_db
 from ..domain.fingerprint import fingerprint
 from ..domain.importers.investorlift import normalize_investorlift
 from ..domain.importers.zillow import normalize_zillow
-from ..domain.operating_truth import TruthViolation, enforce_deal_truth, enforce_property_truth
+from ..domain.operating_truth import (
+    TruthViolation,
+    enforce_deal_truth,
+    enforce_property_truth,
+)
 from ..models import Deal, ImportSnapshot, Property, RentAssumption
 from ..schemas import ImportErrorRow, ImportResultOut
 from ..services.geo_enrichment import enrich_property_geo
+from ..services.property_photo_service import upsert_zillow_photos
+from ..services.zillow_photo_source import extract_zillow_photo_urls
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -29,7 +35,32 @@ def _safe_attr(obj, name: str, default=None):
     return getattr(obj, name, default)
 
 
-def _maybe_geo_enrich_property(db: Session, *, org_id: int, property_id: int, force: bool = False) -> None:
+def _maybe_attach_zillow_photos(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    raw_payload: dict | str | None,
+) -> None:
+    urls = extract_zillow_photo_urls(raw_payload)
+    if not urls:
+        return
+
+    upsert_zillow_photos(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        urls=urls,
+    )
+
+
+def _maybe_geo_enrich_property(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    force: bool = False,
+) -> None:
     key = os.getenv("GOOGLE_MAPS_API_KEY")
     try:
         asyncio.run(
@@ -42,8 +73,7 @@ def _maybe_geo_enrich_property(db: Session, *, org_id: int, property_id: int, fo
             )
         )
     except RuntimeError:
-        # If something weird is already running an event loop in this context,
-        # fail soft instead of exploding the import.
+        # Event loop weirdness during import should not nuke the entire import.
         pass
     except Exception:
         pass
@@ -95,7 +125,6 @@ def _get_or_create_property(db: Session, org_id: int, n) -> Property:
             p.has_garage = True
             dirty = True
 
-        # geo/risk fields from normalizer if present
         if getattr(p, "lat", None) is None and _safe_attr(n, "lat") is not None:
             p.lat = float(_safe_attr(n, "lat"))
             dirty = True
@@ -124,8 +153,17 @@ def _get_or_create_property(db: Session, org_id: int, n) -> Property:
             db.commit()
             db.refresh(p)
 
-        if getattr(p, "lat", None) is None or getattr(p, "lng", None) is None or not getattr(p, "county", None):
-            _maybe_geo_enrich_property(db, org_id=org_id, property_id=int(p.id), force=False)
+        if (
+            getattr(p, "lat", None) is None
+            or getattr(p, "lng", None) is None
+            or not getattr(p, "county", None)
+        ):
+            _maybe_geo_enrich_property(
+                db,
+                org_id=org_id,
+                property_id=int(p.id),
+                force=False,
+            )
             db.refresh(p)
 
         return p
@@ -141,8 +179,6 @@ def _get_or_create_property(db: Session, org_id: int, n) -> Property:
         square_feet=n.square_feet,
         year_built=n.year_built,
         has_garage=bool(n.has_garage),
-
-        # geo/risk
         lat=_safe_attr(n, "lat"),
         lng=_safe_attr(n, "lng"),
         county=_safe_attr(n, "county"),
@@ -155,8 +191,17 @@ def _get_or_create_property(db: Session, org_id: int, n) -> Property:
     db.commit()
     db.refresh(p)
 
-    if getattr(p, "lat", None) is None or getattr(p, "lng", None) is None or not getattr(p, "county", None):
-        _maybe_geo_enrich_property(db, org_id=org_id, property_id=int(p.id), force=False)
+    if (
+        getattr(p, "lat", None) is None
+        or getattr(p, "lng", None) is None
+        or not getattr(p, "county", None)
+    ):
+        _maybe_geo_enrich_property(
+            db,
+            org_id=org_id,
+            property_id=int(p.id),
+            force=False,
+        )
         db.refresh(p)
 
     return p
@@ -191,7 +236,11 @@ def _upsert_rent(db: Session, org_id: int, property_id: int, n) -> None:
     db.commit()
 
 
-def _backfill_inventory_counts_from_snapshot(db: Session, org_id: int, snapshot_id: int) -> None:
+def _backfill_inventory_counts_from_snapshot(
+    db: Session,
+    org_id: int,
+    snapshot_id: int,
+) -> None:
     rows = db.execute(
         select(Property.city, Property.state, func.count(Deal.id))
         .join(Deal, Deal.property_id == Property.id)
@@ -210,7 +259,12 @@ def _backfill_inventory_counts_from_snapshot(db: Session, org_id: int, snapshot_
     ).all()
 
     for d in deals:
-        p = db.scalar(select(Property).where(Property.id == d.property_id, Property.org_id == org_id))
+        p = db.scalar(
+            select(Property).where(
+                Property.id == d.property_id,
+                Property.org_id == org_id,
+            )
+        )
         if not p:
             continue
 
@@ -276,6 +330,16 @@ def _import_rows(
                 .where(Deal.source_fingerprint == fp)
             )
             if existing:
+                if source == "zillow":
+                    try:
+                        _maybe_attach_zillow_photos(
+                            db,
+                            org_id=org_id,
+                            property_id=prop.id,
+                            raw_payload=n.raw,
+                        )
+                    except Exception:
+                        pass
                 skipped += 1
                 continue
 
@@ -310,6 +374,18 @@ def _import_rows(
             db.refresh(d)
 
             _upsert_rent(db, org_id, prop.id, n)
+
+            if source == "zillow":
+                try:
+                    _maybe_attach_zillow_photos(
+                        db,
+                        org_id=org_id,
+                        property_id=prop.id,
+                        raw_payload=n.raw,
+                    )
+                except Exception:
+                    pass
+
             imported += 1
 
         except Exception as e:
@@ -364,7 +440,8 @@ def import_status(
         return {"snapshot_id": snapshot_id, "exists": False}
 
     deal_count = db.scalar(
-        select(func.count()).select_from(Deal)
+        select(func.count())
+        .select_from(Deal)
         .where(Deal.snapshot_id == snapshot_id)
         .where(Deal.org_id == principal.org_id)
     ) or 0
@@ -377,12 +454,12 @@ def import_status(
     ) or 0
 
     return {
-        "snapshot_id": snapshot_id,
-        "exists": True,
-        "org_id": snap.org_id,
-        "source": snap.source,
-        "notes": snap.notes,
-        "created_at": snap.created_at,
-        "deal_count": int(deal_count),
-        "distinct_property_count": int(distinct_props),
+      "snapshot_id": snapshot_id,
+      "exists": True,
+      "org_id": snap.org_id,
+      "source": snap.source,
+      "notes": snap.notes,
+      "created_at": snap.created_at,
+      "deal_count": int(deal_count),
+      "distinct_property_count": int(distinct_props),
     }

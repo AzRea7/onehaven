@@ -11,10 +11,11 @@ from ..db import get_db
 from ..domain.audit import emit_audit
 from ..domain.events import emit_workflow_event
 from ..models import Property, RehabTask
-from ..schemas import RehabTaskCreate, RehabTaskOut
+from ..schemas import RehabTaskCreate, RehabTaskOut, RehabPhotoAnalysisOut
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
 from ..services.workflow_gate_service import build_workflow_summary
+from ..services.photo_rehab_agent import analyze_property_photos, analyze_and_create_rehab_tasks
 
 router = APIRouter(prefix="/rehab", tags=["rehab"])
 
@@ -111,6 +112,38 @@ def list_tasks(property_id: int = Query(...), db: Session = Depends(get_db), p=D
     ).all()
     return rows
 
+@router.get("/from-photos/{property_id}", response_model=RehabPhotoAnalysisOut)
+def preview_rehab_from_photos(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _get_property_or_404(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="acquisition",
+        action="analyze rehab from photos",
+    )
+    return analyze_property_photos(db, org_id=p.org_id, property_id=property_id)
+
+
+@router.post("/from-photos/{property_id}", response_model=RehabPhotoAnalysisOut)
+def generate_rehab_from_photos(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _get_property_or_404(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="acquisition",
+        action="generate rehab tasks from photos",
+    )
+    return analyze_and_create_rehab_tasks(db, org_id=p.org_id, property_id=property_id)
 
 @router.get("/tasks/summary/{property_id}", response_model=dict)
 def rehab_summary(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):

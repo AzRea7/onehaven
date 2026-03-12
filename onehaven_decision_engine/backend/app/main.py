@@ -12,6 +12,7 @@ from .middleware.structured_logging import StructuredLoggingMiddleware
 from .routers.health import router as health_router
 from .routers.meta import router as meta_router
 from .routers.dashboard import router as dashboard_router
+from .routers.photos import router as photos_router
 
 from .routers.properties import router as properties_router
 from .routers.deals import router as deals_router
@@ -126,6 +127,7 @@ def create_app() -> FastAPI:
     # Compliance
     app.include_router(compliance_router, prefix=API_PREFIX)
     app.include_router(inspections_router, prefix=API_PREFIX)
+    app.include_router(photos_router, prefix=API_PREFIX)
 
     # Ops
     app.include_router(rehab_router, prefix=API_PREFIX)
