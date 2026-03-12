@@ -18,6 +18,8 @@ from app.services.agent_trace import emit_trace_safe
 
 TERMINAL = {"done", "failed", "timed_out"}
 ACTIVE = {"queued", "running", "blocked"}
+RUN_STATUSES = {"queued", "running", "done", "failed", "blocked", "timed_out"}
+APPROVAL_STATUSES = {"not_required", "pending", "approved", "rejected"}
 
 
 def _dumps(v: Any) -> str:
@@ -59,6 +61,87 @@ def _emit_event(
             created_at=_now(),
         )
     )
+
+
+def normalize_run_status(status: Optional[str]) -> str:
+    s = str(status or "queued").strip().lower()
+    return s if s in RUN_STATUSES else "queued"
+
+
+def normalize_approval_status(status: Optional[str]) -> str:
+    s = str(status or "not_required").strip().lower()
+    return s if s in APPROVAL_STATUSES else "not_required"
+
+
+def infer_runtime_health(run: AgentRun) -> str:
+    status = normalize_run_status(getattr(run, "status", None))
+    timeout_s = int(getattr(settings, "agents_run_timeout_seconds", 120) or 120)
+    now = _now()
+
+    if status in TERMINAL:
+        return "terminal"
+    if status == "blocked":
+        return "awaiting_approval"
+    if status == "queued":
+        return "queued"
+    if status != "running":
+        return status
+
+    heartbeat_at = getattr(run, "heartbeat_at", None)
+    started_at = getattr(run, "started_at", None)
+    ref = heartbeat_at or started_at
+    if ref is None:
+        return "running"
+
+    age = (now - ref).total_seconds()
+    if age > timeout_s:
+        return "stale"
+    if age > max(15, timeout_s // 3):
+        return "lagging"
+    return "healthy"
+
+
+def serialize_run(run: AgentRun) -> dict[str, Any]:
+    started_at = getattr(run, "started_at", None)
+    finished_at = getattr(run, "finished_at", None)
+    heartbeat_at = getattr(run, "heartbeat_at", None)
+    created_at = getattr(run, "created_at", None)
+
+    duration_ms: int | None = None
+    if started_at and finished_at:
+        duration_ms = max(0, int((finished_at - started_at).total_seconds() * 1000))
+    elif started_at and normalize_run_status(run.status) == "running":
+        duration_ms = max(0, int((_now() - started_at).total_seconds() * 1000))
+
+    output = _loads(getattr(run, "output_json", None), {})
+    proposed = _loads(getattr(run, "proposed_actions_json", None), [])
+
+    return {
+        "id": int(run.id),
+        "org_id": int(run.org_id),
+        "property_id": getattr(run, "property_id", None),
+        "agent_key": str(getattr(run, "agent_key", "")),
+        "status": normalize_run_status(getattr(run, "status", None)),
+        "runtime_health": infer_runtime_health(run),
+        "attempts": int(getattr(run, "attempts", 0) or 0),
+        "last_error": getattr(run, "last_error", None),
+        "created_at": created_at,
+        "started_at": started_at,
+        "heartbeat_at": heartbeat_at,
+        "finished_at": finished_at,
+        "duration_ms": duration_ms,
+        "approval_status": normalize_approval_status(getattr(run, "approval_status", None)),
+        "approved_at": getattr(run, "approved_at", None),
+        "approved_by_user_id": getattr(run, "approved_by_user_id", None),
+        "created_by_user_id": getattr(run, "created_by_user_id", None),
+        "idempotency_key": getattr(run, "idempotency_key", None),
+        "has_output": bool(output),
+        "has_proposed_actions": bool(proposed),
+        "output": output,
+        "proposed": proposed,
+        "output_json": getattr(run, "output_json", None),
+        "proposed_actions_json": getattr(run, "proposed_actions_json", None),
+    }
 
 
 def create_run(
@@ -113,6 +196,19 @@ def create_run(
         event_type="agent_run_created",
         payload={"run_id": int(r.id), "agent_key": str(r.agent_key), "idempotency_key": idempotency_key},
     )
+    emit_trace_safe(
+        db,
+        org_id=org_id,
+        run_id=int(r.id),
+        agent_key=str(r.agent_key),
+        event_type="queued",
+        payload={
+            "property_id": r.property_id,
+            "idempotency_key": idempotency_key,
+            "attempt": 0,
+        },
+        level="info",
+    )
     db.commit()
 
     return r
@@ -162,7 +258,7 @@ def mark_approved(
     if r is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
 
-    if r.approval_status != "pending":
+    if normalize_approval_status(r.approval_status) != "pending":
         return r
 
     r.approval_status = "approved"
@@ -478,12 +574,10 @@ def execute_run_now(
     )
     db.commit()
 
-    # Persist proposed_actions_json ONLY for mutation modes, and ONLY actions[] (never recommendations)
     if isinstance(output, dict) and contract.mode != "recommend_only":
         actions = output.get("actions")
         r.proposed_actions_json = _dumps(actions if isinstance(actions, list) else [])
 
-    # recommend_only => auto-done
     if contract.mode == "recommend_only":
         r.status = "done"
         r.finished_at = _now()
@@ -509,7 +603,6 @@ def execute_run_now(
         db.commit()
         return {"ok": True, "status": "done", "run_id": int(r.id), "output": output}
 
-    # otherwise blocked pending approval
     r.status = "blocked"
     r.finished_at = _now()
     r.approval_status = "pending"

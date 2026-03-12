@@ -728,12 +728,73 @@ export const api = {
       }),
     }),
 
-  agentRunsList: (arg: number | { property_id: number }) => {
-    const propertyId = typeof arg === "number" ? arg : arg.property_id;
-    return requestArray<any>(`/agents/runs${qs({ property_id: propertyId })}`, {
+  agentRunsList: (
+    arg?:
+      | number
+      | {
+          property_id?: number;
+          agent_key?: string;
+          status?: string;
+          limit?: number;
+        },
+    signal?: AbortSignal,
+  ) => {
+    const params =
+      typeof arg === "number"
+        ? { property_id: arg, limit: 100 }
+        : {
+            property_id: arg?.property_id,
+            agent_key: arg?.agent_key,
+            status: arg?.status,
+            limit: arg?.limit ?? 100,
+          };
+    return requestArray<any>(`/agent-runs/${qs(params)}`, {
       cacheTtlMs: 800,
+      signal,
     });
   },
+
+  agentRunsSummary: (params?: Record<string, any>, signal?: AbortSignal) =>
+    request<any>(`/agent-runs/summary${qs(params || {})}`, {
+      method: "GET",
+      cacheTtlMs: 800,
+      signal,
+    }),
+
+  agentRunsHistory: (params?: Record<string, any>, signal?: AbortSignal) =>
+    request<any>(`/agent-runs/history${qs(params || {})}`, {
+      method: "GET",
+      cacheTtlMs: 800,
+      signal,
+    }),
+
+  agentRunsCompare: (runIds: number[], signal?: AbortSignal) =>
+    request<any>(`/agent-runs/compare${qs({ run_ids: runIds.join(",") })}`, {
+      method: "GET",
+      cacheTtlMs: 0,
+      signal,
+    }),
+
+  agentRunsCockpit: (propertyId: number, signal?: AbortSignal) =>
+    request<any>(`/agent-runs/property/${propertyId}/cockpit`, {
+      method: "GET",
+      cacheTtlMs: 500,
+      signal,
+    }),
+
+  agentRunGet: (runId: number, signal?: AbortSignal) =>
+    request<any>(`/agent-runs/${runId}`, {
+      method: "GET",
+      cacheTtlMs: 300,
+      signal,
+    }),
+
+  agentRunTrace: (runId: number, signal?: AbortSignal) =>
+    request<any>(`/agent-runs/${runId}/trace`, {
+      method: "GET",
+      cacheTtlMs: 0,
+      signal,
+    }),
 
   createAgentRun: (payload: {
     agent_key: string;
@@ -785,6 +846,37 @@ export const api = {
     request<any>(`/agent-runs/${runId}/apply`, {
       method: "POST",
       body: JSON.stringify({}),
+    }),
+
+  agentRunsRetry: (runId: number, dispatch: boolean = true) =>
+    request<any>(
+      `/agent-runs/${runId}/retry${qs({ dispatch: dispatch ? "true" : "false" })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
+  agentRunsDeadletter: (params?: Record<string, any>, signal?: AbortSignal) =>
+    requestArray<any>(`/agent-runs/deadletter${qs(params || {})}`, {
+      cacheTtlMs: 800,
+      signal,
+    }),
+
+  agentRunsAckDeadletter: (deadId: number) =>
+    request<any>(`/agent-runs/deadletter/${deadId}/ack`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  agentRunsMessages: (
+    runId: number,
+    params?: Record<string, any>,
+    signal?: AbortSignal,
+  ) =>
+    requestArray<any>(`/agent-runs/${runId}/messages${qs(params || {})}`, {
+      cacheTtlMs: 0,
+      signal,
     }),
 
   agentRunsStream: (runId: number) =>
