@@ -15,6 +15,7 @@ import PageShell from "../components/PageShell";
 import PhotoUploader from "../components/PhotoUploader";
 import PhotoGallery from "../components/PhotoGallery";
 import RehabFromPhotosCTA from "../components/RehabFromPhotosCTA";
+import InspectionReadiness from "../components/InspectionReadiness";
 
 const tabs = [
   "Deal",
@@ -354,6 +355,11 @@ export default function PropertyView() {
   const [photoAnalysis, setPhotoAnalysis] = React.useState<any | null>(null);
   const [photoBusy, setPhotoBusy] = React.useState(false);
 
+  const [complianceBrief, setComplianceBrief] = React.useState<any | null>(null);
+  const [complianceStatus, setComplianceStatus] = React.useState<any | null>(null);
+  const [complianceRunSummary, setComplianceRunSummary] = React.useState<any | null>(null);
+
+
   const abortRef = React.useRef<AbortController | null>(null);
 
   const v = bundle?.view;
@@ -391,26 +397,45 @@ export default function PropertyView() {
     try {
       setErr(null);
 
-      const [out, opsOut, workflowOut, trustOut] = await Promise.all([
-        api.propertyBundle(propertyId, ac.signal),
-        api.opsPropertySummary(propertyId, 90, ac.signal).catch(() => null),
-        api.opsPropertyWorkflow(propertyId, ac.signal).catch(() => null),
-        api
-          .trustGet("property", propertyId, ac.signal)
-          .then((x) => {
-            setTrustErr(null);
-            return x;
-          })
-          .catch((e) => {
-            setTrustErr(String(e?.message || e));
-            return null;
-          }),
-      ]);
+        const [
+          out,
+          opsOut,
+          workflowOut,
+          trustOut,
+          complianceBriefOut,
+          complianceStatusOut,
+          complianceRunSummaryOut,
+            ] = await Promise.all([
+              api.propertyBundle(propertyId, ac.signal),
+              api
+                .opsPropertySummary(propertyId, 90, ac.signal)
+                .catch(() => null),
+              api.opsPropertyWorkflow(propertyId, ac.signal).catch(() => null),
+              api
+                .trustGet("property", propertyId, ac.signal)
+                .then((x) => {
+                  setTrustErr(null);
+                  return x;
+                })
+                .catch((e) => {
+                  setTrustErr(String(e?.message || e));
+                  return null;
+                }),
+              api
+                .compliancePropertyBrief(propertyId, ac.signal)
+                .catch(() => null),
+              api.complianceStatus(propertyId, ac.signal).catch(() => null),
+              api.complianceRunSummary(propertyId, ac.signal).catch(() => null),
+            ]);
 
       setBundle(out);
       setOps(opsOut);
       setWorkflow(workflowOut ?? opsOut?.workflow ?? null);
       setTrust(trustOut);
+
+      setComplianceBrief(complianceBriefOut);
+      setComplianceStatus(complianceStatusOut);
+      setComplianceRunSummary(complianceRunSummaryOut);
 
       try {
         const latest = await api.checklistLatest(propertyId, ac.signal);
@@ -438,6 +463,9 @@ export default function PropertyView() {
       setOps(null);
       setWorkflow(null);
       setTrust(null);
+      setComplianceBrief(null);
+      setComplianceStatus(null);
+      setComplianceRunSummary(null);
       setPhotos([]);
       setErr(String(e.message || e));
     }
@@ -1270,7 +1298,36 @@ export default function PropertyView() {
             }}
           />
 
-          <Panel title="Compliance / Checklist">
+          <InspectionReadiness brief={complianceBrief} />
+
+          <Panel
+            title="Compliance / Checklist"
+            right={
+              <div className="flex flex-wrap items-center gap-2">
+                {complianceStatus ? (
+                  <Badge tone={complianceStatus?.passed ? "good" : "warn"}>
+                    status: {complianceStatus?.passed ? "ready" : "not ready"}
+                  </Badge>
+                ) : null}
+                {complianceRunSummary ? (
+                  <Badge
+                    tone={
+                      (complianceRunSummary?.failed ?? 0) > 0
+                        ? "bad"
+                        : "neutral"
+                    }
+                  >
+                    fails: {complianceRunSummary?.failed ?? 0}
+                  </Badge>
+                ) : null}
+                {complianceRunSummary ? (
+                  <Badge>
+                    score: {complianceRunSummary?.score_pct ?? "—"}%
+                  </Badge>
+                ) : null}
+              </div>
+            }
+          >
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="text-sm text-white/70">
                 Update status, proof, and notes. Compliance must be genuinely

@@ -1182,10 +1182,25 @@ export const api = {
       { method: "GET", cacheTtlMs: 0 },
     ),
 
-  compliancePropertyBrief: (propertyId: number) =>
+  compliancePropertyBrief: (propertyId: number, signal?: AbortSignal) =>
     request<any>(`/compliance/property/${propertyId}/brief`, {
       method: "GET",
       cacheTtlMs: 500,
+      signal,
+    }),
+
+  complianceStatus: (propertyId: number, signal?: AbortSignal) =>
+    request<any>(`/compliance/status/${propertyId}`, {
+      method: "GET",
+      cacheTtlMs: 500,
+      signal,
+    }),
+
+  complianceRunSummary: (propertyId: number, signal?: AbortSignal) =>
+    request<any>(`/compliance/run_hqs/${propertyId}`, {
+      method: "GET",
+      cacheTtlMs: 500,
+      signal,
     }),
 
   complianceCreateTasksFromPolicy: (propertyId: number) =>

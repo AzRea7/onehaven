@@ -32,6 +32,7 @@ def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
         zip_code=payload["zip"],
     )
     created = False
+
     if existing is None:
         existing = Property(
             org_id=int(org_id),
@@ -56,6 +57,7 @@ def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
         existing.property_type = payload.get("property_type") or existing.property_type
         db.add(existing)
         db.flush()
+
     return existing, created
 
 
@@ -66,6 +68,7 @@ def _upsert_deal(db: Session, *, org_id: int, property_id: int, snapshot_id: int
         .order_by(desc(Deal.id))
     )
     created = False
+
     if existing is None:
         existing = Deal(
             org_id=int(org_id),
@@ -87,6 +90,7 @@ def _upsert_deal(db: Session, *, org_id: int, property_id: int, snapshot_id: int
         existing.source = payload.get("source", existing.source)
         db.add(existing)
         db.flush()
+
     return existing, created
 
 
@@ -97,6 +101,7 @@ def _upsert_rent_assumption(db: Session, *, org_id: int, property_id: int, paylo
         .order_by(desc(RentAssumption.id))
     )
     created = False
+
     if existing is None:
         existing = RentAssumption(
             org_id=int(org_id),
@@ -120,14 +125,17 @@ def _upsert_rent_assumption(db: Session, *, org_id: int, property_id: int, paylo
             existing.inventory_count = payload.get("inventory_count")
         db.add(existing)
         db.flush()
+
     return existing, created
 
 
 def _upsert_photos(db: Session, *, org_id: int, property_id: int, provider: str, photos: list[Any]) -> int:
     count = 0
+
     for p in photos:
         url = p["url"] if isinstance(p, dict) else str(p)
         kind = p.get("kind") if isinstance(p, dict) else derive_photo_kind(url)
+
         existing = db.scalar(
             select(PropertyPhoto).where(
                 PropertyPhoto.org_id == int(org_id),
@@ -146,12 +154,47 @@ def _upsert_photos(db: Session, *, org_id: int, property_id: int, provider: str,
             )
             db.add(existing)
             count += 1
+
     db.flush()
     return count
 
 
+def _load_rows(source) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    config = source.config_json or {}
+
+    # Local/test/webhook override path. This makes the ingestion pipeline fully testable
+    # without requiring a live upstream API.
+    sample_rows = config.get("sample_rows")
+    if isinstance(sample_rows, list):
+        rows = [x for x in sample_rows if isinstance(x, dict)]
+        next_cursor = source.cursor_json or {}
+        return rows, next_cursor
+
+    adapter = PROVIDER_ADAPTERS.get(source.provider)
+    if adapter is None:
+        raise ValueError(f"No adapter registered for provider={source.provider}")
+
+    fetched = adapter.fetch_incremental(
+        credentials=source.credentials_json or {},
+        config=config,
+        cursor=source.cursor_json or {},
+    )
+    return fetched.get("rows") or [], fetched.get("next_cursor") or {}
+
+
+def _is_valid_payload(payload: dict[str, Any]) -> bool:
+    return bool(
+        payload.get("external_record_id")
+        and payload.get("address")
+        and payload.get("city")
+        and payload.get("state")
+        and payload.get("zip")
+    )
+
+
 def execute_source_sync(db: Session, *, org_id: int, source, trigger_type: str = "manual"):
     run = start_run(db, org_id=org_id, source_id=source.id, trigger_type=trigger_type)
+
     summary = {
         "records_seen": 0,
         "records_imported": 0,
@@ -165,38 +208,25 @@ def execute_source_sync(db: Session, *, org_id: int, source, trigger_type: str =
         "invalid_rows": 0,
     }
 
-    adapter = PROVIDER_ADAPTERS.get(source.provider)
-    if adapter is None:
-        return finish_run(
-            db,
-            row=run,
-            status="failed",
-            summary=summary,
-            error_summary=f"No adapter registered for provider={source.provider}",
-            error_json={"provider": source.provider},
-        )
-
     try:
-        fetched = adapter.fetch_incremental(
-            credentials=source.credentials_json or {},
-            config=source.config_json or {},
-            cursor=source.cursor_json or {},
-        )
-        rows = fetched.get("rows") or []
-        source.cursor_json = fetched.get("next_cursor") or {}
+        rows, next_cursor = _load_rows(source)
+
+        source.cursor_json = next_cursor or {}
         db.add(source)
         db.commit()
         db.refresh(source)
 
         for raw_row in rows:
             summary["records_seen"] += 1
+
             payload = canonical_listing_payload(raw_row)
             payload["source"] = source.provider
 
-            ext_id = payload.get("external_record_id")
-            if not ext_id:
+            if not _is_valid_payload(payload):
                 summary["invalid_rows"] += 1
                 continue
+
+            ext_id = payload["external_record_id"]
 
             existing_link = find_existing_by_external_id(
                 db,
@@ -220,7 +250,12 @@ def execute_source_sync(db: Session, *, org_id: int, source, trigger_type: str =
                 snapshot_id=None,
                 payload=payload,
             )
-            _rent, _ = _upsert_rent_assumption(db, org_id=org_id, property_id=prop.id, payload=payload)
+            _rent, _ = _upsert_rent_assumption(
+                db,
+                org_id=org_id,
+                property_id=prop.id,
+                payload=payload,
+            )
             photo_count = _upsert_photos(
                 db,
                 org_id=org_id,
@@ -255,6 +290,7 @@ def execute_source_sync(db: Session, *, org_id: int, source, trigger_type: str =
 
         db.commit()
         return finish_run(db, row=run, status="success", summary=summary)
+
     except Exception as e:
         db.rollback()
         return finish_run(
@@ -265,3 +301,4 @@ def execute_source_sync(db: Session, *, org_id: int, source, trigger_type: str =
             error_summary=str(e),
             error_json={"type": type(e).__name__},
         )
+    

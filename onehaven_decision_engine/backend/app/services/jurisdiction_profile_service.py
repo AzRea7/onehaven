@@ -1,11 +1,9 @@
-# backend/app/services/jurisdiction_profile_service.py
 from __future__ import annotations
 
 import json
 from datetime import datetime
 from typing import Any, Optional
 
-import sqlalchemy as sa
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
@@ -77,12 +75,6 @@ def list_profiles(
 
 
 def _specificity(r: JurisdictionProfile) -> int:
-    """
-    Specificity rank:
-      2 = city row (city present)
-      1 = county row (county present, city absent)
-      0 = state row (county/city absent)
-    """
     if (r.city or "").strip():
         return 2
     if (r.county or "").strip():
@@ -98,28 +90,6 @@ def resolve_profile(
     county: Optional[str],
     state: str = "MI",
 ) -> dict[str, Any]:
-    """
-    Deterministic resolution (CORRECT):
-      1) Specificity FIRST: city > county > state
-      2) Within the same specificity: org overrides beat global defaults
-      3) Deterministic tie-breaker: lowest id wins
-
-    IMPORTANT:
-      This prevents an org-level state override from masking a more specific
-      global county/city row.
-
-    Returns:
-      {
-        "matched": bool,
-        "scope": "org"|"global"|None,
-        "match_level": "city"|"county"|"state"|None,
-        "friction_multiplier": float,
-        "pha_name": str|None,
-        "policy": dict,
-        "notes": str|None,
-        "profile_id": int|None,
-      }
-    """
     st = _norm_state(state)
     req_city = _norm_city(city)
     req_county = _norm_county(county)
@@ -127,29 +97,9 @@ def resolve_profile(
     rows = list_profiles(db, org_id=org_id, include_global=True, state=st)
 
     def match_level(r: JurisdictionProfile) -> Optional[str]:
-        """
-        Decide if row can satisfy the request; return the match level it provides.
-
-        Rules:
-          - If request includes city:
-              accept city row if city matches (case-normalized),
-              else accept county row if county matches (as fallback),
-              else accept state row (as fallback).
-          - If request includes county but not city:
-              accept county row if county matches,
-              else accept state row.
-          - If request includes only state:
-              accept state row.
-
-        Note:
-          A city row must match the requested city to be a city match.
-          A county row must have no city (city NULL/empty) to be a county match.
-          A state row must have neither county nor city.
-        """
         r_city = _norm_city(r.city)
         r_county = _norm_county(r.county)
 
-        # City request
         if req_city:
             if r_city and r_city == req_city:
                 return "city"
@@ -159,7 +109,6 @@ def resolve_profile(
                 return "state"
             return None
 
-        # County request (no city)
         if req_county:
             if (not r_city) and r_county and r_county == req_county:
                 return "county"
@@ -167,7 +116,6 @@ def resolve_profile(
                 return "state"
             return None
 
-        # State only request
         if (not r_city) and (not r_county):
             return "state"
         return None
@@ -178,13 +126,9 @@ def resolve_profile(
         if not lvl:
             continue
 
-        spec = _specificity(r)  # 0/1/2
-        scope_pri = 1 if (r.org_id == org_id) else 0  # org beats global on ties
+        spec = _specificity(r)
+        scope_pri = 1 if (r.org_id == org_id) else 0
         rid = int(r.id)
-
-        # Sort key components we will max()/sort on:
-        # (spec, scope_pri, -id?) We want deterministic by *lowest* id, so use -rid in max,
-        # or use sort with rid ascending. We'll just sort below.
         candidates.append((spec, scope_pri, rid, r, lvl))
 
     if not candidates:
@@ -195,15 +139,16 @@ def resolve_profile(
             "friction_multiplier": 1.0,
             "pha_name": None,
             "policy": {},
+            "rules": [],
             "notes": None,
             "profile_id": None,
         }
 
-    # Highest specificity first, then org scope, then deterministic smallest id.
     candidates.sort(key=lambda t: (-t[0], -t[1], t[2]))
-    best_spec, best_scope_pri, _rid, chosen, lvl = candidates[0]
+    _best_spec, best_scope_pri, _rid, chosen, lvl = candidates[0]
 
     scope = "org" if best_scope_pri == 1 else "global"
+    policy = _loads(getattr(chosen, "policy_json", None), {})
 
     return {
         "matched": True,
@@ -211,7 +156,8 @@ def resolve_profile(
         "match_level": lvl,
         "friction_multiplier": float(chosen.friction_multiplier or 1.0),
         "pha_name": chosen.pha_name,
-        "policy": _loads(getattr(chosen, "policy_json", None), {}),
+        "policy": policy,
+        "rules": policy.get("rules", []),
         "notes": chosen.notes,
         "profile_id": int(chosen.id),
     }
@@ -229,10 +175,6 @@ def upsert_profile(
     policy: Any,
     notes: Optional[str],
 ) -> JurisdictionProfile:
-    """
-    Upsert ORG override row for a given (state, county?, city?).
-    Global rows are not written here (seed them instead).
-    """
     st = _norm_state(state)
     cnty = _norm_county(county)
     cty = _norm_city(city)
@@ -276,6 +218,7 @@ def upsert_profile(
     db.refresh(row)
     return row
 
+
 def resolve_operational_policy(
     db: Session,
     *,
@@ -303,14 +246,59 @@ def resolve_operational_policy(
         pha_name=base.get("pha_name"),
     )
 
+    policy = base.get("policy") or {}
+    rules = policy.get("rules", [])
+    policy_required_actions = policy.get("required_actions", [])
+    policy_blocking_items = policy.get("blocking_items", [])
+
+    combined_required_actions = []
+    combined_required_actions.extend(brief.get("required_actions", []))
+    combined_required_actions.extend(policy_required_actions)
+
+    combined_blocking_items = []
+    combined_blocking_items.extend(brief.get("blocking_items", []))
+    combined_blocking_items.extend(policy_blocking_items)
+
+    dedup_required: list[dict[str, Any]] = []
+    seen_required: set[str] = set()
+    for x in combined_required_actions:
+        key = str(
+            x.get("code")
+            or x.get("rule_key")
+            or x.get("title")
+            or x.get("description")
+            or ""
+        ).strip().lower()
+        if not key or key in seen_required:
+            continue
+        seen_required.add(key)
+        dedup_required.append(x)
+
+    dedup_blocking: list[dict[str, Any]] = []
+    seen_blocking: set[str] = set()
+    for x in combined_blocking_items:
+        key = str(
+            x.get("code")
+            or x.get("rule_key")
+            or x.get("title")
+            or x.get("description")
+            or ""
+        ).strip().lower()
+        if not key or key in seen_blocking:
+            continue
+        seen_blocking.add(key)
+        dedup_blocking.append(x)
+
     return {
         **base,
+        "rules": rules,
         "coverage": brief.get("coverage", {}),
         "brief": brief.get("compliance", {}),
-        "blocking_items": brief.get("blocking_items", []),
-        "required_actions": brief.get("required_actions", []),
+        "blocking_items": dedup_blocking,
+        "required_actions": dedup_required,
         "evidence_links": brief.get("evidence_links", []),
     }
+
 
 def delete_profile(
     db: Session,

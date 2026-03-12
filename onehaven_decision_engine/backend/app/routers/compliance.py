@@ -32,6 +32,7 @@ from ..services.compliance_service import (
     generate_policy_tasks_for_property,
     run_hqs as run_hqs_service,
 )
+from ..services.jurisdiction_profile_service import resolve_operational_policy
 from ..services.policy_projection_service import build_property_compliance_brief
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
@@ -40,29 +41,102 @@ from ..services.workflow_gate_service import build_workflow_summary
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
 _SECTION8_TEMPLATE: list[dict] = [
-    {"category": "Electrical", "item_code": "GFCI", "description": "GFCI protection near sinks / wet areas", "severity": 3, "common_fail": True},
-    {"category": "Electrical", "item_code": "OUTLET_COVERS", "description": "Missing/broken outlet/switch covers", "severity": 2, "common_fail": True},
-    {"category": "Safety", "item_code": "SMOKE_CO_DETECTORS", "description": "Smoke/CO detectors installed and working", "severity": 4, "common_fail": True},
-    {"category": "Safety", "item_code": "HANDRAILS", "description": "Handrails on stairs / steps where required", "severity": 3, "common_fail": True},
-    {"category": "Exterior", "item_code": "BROKEN_WINDOWS", "description": "No broken/cracked windows; lockable and weather-tight", "severity": 3, "common_fail": True},
-    {"category": "Interior", "item_code": "TRIP_HAZARDS", "description": "No trip hazards (loose flooring, torn carpet, bad transitions)", "severity": 3, "common_fail": True},
-    {"category": "Plumbing", "item_code": "LEAKS", "description": "No active plumbing leaks; fixtures secure", "severity": 3, "common_fail": True},
-    {"category": "HVAC", "item_code": "HEAT_WORKS", "description": "Permanent heat source operational", "severity": 4, "common_fail": True},
-    {"category": "Lead Paint", "item_code": "LEAD_PAINT_FLAGS", "description": "Potential lead paint hazards (pre-1978): peeling/chipping paint", "severity": 5, "common_fail": True, "applies_if": {"year_built_lt": 1978}},
-    {"category": "Garage", "item_code": "GARAGE_DOOR_SAFE", "description": "Garage door operates safely; no unsafe springs/rails", "severity": 2, "common_fail": False, "applies_if": {"has_garage": True}},
+    {
+        "category": "Electrical",
+        "item_code": "GFCI",
+        "description": "GFCI protection near sinks / wet areas",
+        "severity": 3,
+        "common_fail": True,
+    },
+    {
+        "category": "Electrical",
+        "item_code": "OUTLET_COVERS",
+        "description": "Missing/broken outlet/switch covers",
+        "severity": 2,
+        "common_fail": True,
+    },
+    {
+        "category": "Safety",
+        "item_code": "SMOKE_CO_DETECTORS",
+        "description": "Smoke/CO detectors installed and working",
+        "severity": 4,
+        "common_fail": True,
+    },
+    {
+        "category": "Safety",
+        "item_code": "HANDRAILS",
+        "description": "Handrails on stairs / steps where required",
+        "severity": 3,
+        "common_fail": True,
+    },
+    {
+        "category": "Exterior",
+        "item_code": "BROKEN_WINDOWS",
+        "description": "No broken/cracked windows; lockable and weather-tight",
+        "severity": 3,
+        "common_fail": True,
+    },
+    {
+        "category": "Interior",
+        "item_code": "TRIP_HAZARDS",
+        "description": "No trip hazards (loose flooring, torn carpet, bad transitions)",
+        "severity": 3,
+        "common_fail": True,
+    },
+    {
+        "category": "Plumbing",
+        "item_code": "LEAKS",
+        "description": "No active plumbing leaks; fixtures secure",
+        "severity": 3,
+        "common_fail": True,
+    },
+    {
+        "category": "HVAC",
+        "item_code": "HEAT_WORKS",
+        "description": "Permanent heat source operational",
+        "severity": 4,
+        "common_fail": True,
+    },
+    {
+        "category": "Lead Paint",
+        "item_code": "LEAD_PAINT_FLAGS",
+        "description": "Potential lead paint hazards (pre-1978): peeling/chipping paint",
+        "severity": 5,
+        "common_fail": True,
+        "applies_if": {"year_built_lt": 1978},
+    },
+    {
+        "category": "Garage",
+        "item_code": "GARAGE_DOOR_SAFE",
+        "description": "Garage door operates safely; no unsafe springs/rails",
+        "severity": 2,
+        "common_fail": False,
+        "applies_if": {"has_garage": True},
+    },
 ]
 
 _ALLOWED_STATUS = {"todo", "in_progress", "done", "blocked", "failed"}
 
 
 def _must_get_property(db: Session, *, org_id: int, property_id: int) -> Property:
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == org_id))
+    prop = db.scalar(
+        select(Property).where(
+            Property.id == property_id,
+            Property.org_id == org_id,
+        )
+    )
     if not prop:
         raise HTTPException(status_code=404, detail="property not found")
     return prop
 
 
-def _applies(cond: dict | None, *, year_built: int | None, has_garage: bool, property_type: str) -> bool:
+def _applies(
+    cond: dict | None,
+    *,
+    year_built: int | None,
+    has_garage: bool,
+    property_type: str | None,
+) -> bool:
     if not cond:
         return True
 
@@ -77,13 +151,16 @@ def _applies(cond: dict | None, *, year_built: int | None, has_garage: bool, pro
 
     if "property_type_in" in cond:
         allowed = cond.get("property_type_in") or []
-        if isinstance(allowed, list) and property_type not in allowed:
+        if isinstance(allowed, list) and (property_type or "") not in allowed:
             return False
 
     return True
 
 
-def _items_from_templates(prop: Property, tmpl_rows: list[ChecklistTemplateItem]) -> list[ChecklistItemOut]:
+def _items_from_templates(
+    prop: Property,
+    tmpl_rows: list[ChecklistTemplateItem],
+) -> list[ChecklistItemOut]:
     items: list[ChecklistItemOut] = []
     for t in tmpl_rows:
         cond = None
@@ -119,7 +196,12 @@ def _items_from_fallback(prop: Property) -> list[ChecklistItemOut]:
     items: list[ChecklistItemOut] = []
     for raw in _SECTION8_TEMPLATE:
         cond = raw.get("applies_if")
-        if not _applies(cond, year_built=prop.year_built, has_garage=prop.has_garage, property_type=prop.property_type):
+        if not _applies(
+            cond,
+            year_built=prop.year_built,
+            has_garage=prop.has_garage,
+            property_type=prop.property_type,
+        ):
             continue
         items.append(
             ChecklistItemOut(
@@ -135,7 +217,71 @@ def _items_from_fallback(prop: Property) -> list[ChecklistItemOut]:
     return items
 
 
-def _merge_state(db: Session, *, org_id: int, property_id: int, items: list[ChecklistItemOut]) -> list[ChecklistItemOut]:
+def _items_from_policy_brief(brief: dict[str, Any]) -> list[ChecklistItemOut]:
+    items: list[ChecklistItemOut] = []
+
+    required_actions = brief.get("required_actions") or []
+    blocking_items = brief.get("blocking_items") or []
+
+    for raw in required_actions:
+        code = str(raw.get("code") or raw.get("rule_key") or raw.get("title") or "POLICY_ACTION").upper().replace(" ", "_")
+        items.append(
+            ChecklistItemOut(
+                category=str(raw.get("category") or "Policy"),
+                item_code=code,
+                description=str(raw.get("title") or raw.get("description") or code),
+                severity=int(raw.get("severity") or 3),
+                common_fail=bool(raw.get("common_fail", True)),
+                applies_if=raw.get("applies_if"),
+                status="todo",
+            )
+        )
+
+    for raw in blocking_items:
+        code = str(raw.get("code") or raw.get("rule_key") or raw.get("title") or "POLICY_BLOCKER").upper().replace(" ", "_")
+        if any(x.item_code == code for x in items):
+            continue
+        items.append(
+            ChecklistItemOut(
+                category=str(raw.get("category") or "Policy Blocker"),
+                item_code=code,
+                description=str(raw.get("title") or raw.get("description") or code),
+                severity=int(raw.get("severity") or 5),
+                common_fail=True,
+                applies_if=raw.get("applies_if"),
+                status="todo",
+            )
+        )
+
+    return items
+
+
+def _dedupe_items(items: list[ChecklistItemOut]) -> list[ChecklistItemOut]:
+    seen: dict[str, ChecklistItemOut] = {}
+    for item in items:
+        code = item.item_code.strip().upper()
+        if code not in seen:
+            item.item_code = code
+            seen[code] = item
+            continue
+
+        existing = seen[code]
+        if int(item.severity) > int(existing.severity):
+            seen[code] = item
+
+    return sorted(
+        seen.values(),
+        key=lambda x: (str(x.category or "").lower(), str(x.item_code or "").lower()),
+    )
+
+
+def _merge_state(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    items: list[ChecklistItemOut],
+) -> list[ChecklistItemOut]:
     state_rows = db.scalars(
         select(PropertyChecklistItem).where(
             PropertyChecklistItem.org_id == org_id,
@@ -196,7 +342,9 @@ def _is_template_version_locked(db: Session, *, org_id: int, strategy: str, vers
     if (version or "").strip().lower() != "v1":
         return False
 
-    insp_id = db.scalar(select(Inspection.id).where(Inspection.org_id == org_id).limit(1))
+    insp_id = db.scalar(
+        select(Inspection.id).where(Inspection.org_id == org_id).limit(1)
+    )
     return insp_id is not None
 
 
@@ -209,17 +357,29 @@ def list_templates(
 ):
     rows = db.scalars(
         select(ChecklistTemplateItem)
-        .where(ChecklistTemplateItem.strategy == strategy, ChecklistTemplateItem.version == version)
+        .where(
+            ChecklistTemplateItem.strategy == strategy,
+            ChecklistTemplateItem.version == version,
+        )
         .order_by(ChecklistTemplateItem.category, ChecklistTemplateItem.code)
     ).all()
     return rows
 
 
 @router.put("/templates", response_model=ChecklistTemplateItemOut)
-def upsert_template(payload: ChecklistTemplateItemUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
+def upsert_template(
+    payload: ChecklistTemplateItemUpsert,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     require_owner(p)
 
-    if _is_template_version_locked(db, org_id=p.org_id, strategy=payload.strategy, version=payload.version):
+    if _is_template_version_locked(
+        db,
+        org_id=p.org_id,
+        strategy=payload.strategy,
+        version=payload.version,
+    ):
         raise HTTPException(
             status_code=409,
             detail="Template version v1 is locked because inspections exist. Create version v2 instead.",
@@ -266,6 +426,7 @@ def generate_checklist(
     strategy: str = Query(default="section8"),
     version: str = Query(default="v1"),
     persist: bool = Query(default=True),
+    include_policy: bool = Query(default=True),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
@@ -280,11 +441,31 @@ def generate_checklist(
 
     tmpl = db.scalars(
         select(ChecklistTemplateItem)
-        .where(ChecklistTemplateItem.strategy == strategy, ChecklistTemplateItem.version == version)
+        .where(
+            ChecklistTemplateItem.strategy == strategy,
+            ChecklistTemplateItem.version == version,
+        )
         .order_by(ChecklistTemplateItem.category, ChecklistTemplateItem.code)
     ).all()
 
-    items = _items_from_templates(prop, tmpl) if tmpl else _items_from_fallback(prop)
+    base_items = _items_from_templates(prop, tmpl) if tmpl else _items_from_fallback(prop)
+
+    policy_items: list[ChecklistItemOut] = []
+    policy_brief: dict[str, Any] = {}
+    jurisdiction: dict[str, Any] = {}
+
+    if include_policy:
+        jurisdiction = resolve_operational_policy(
+            db,
+            org_id=p.org_id,
+            city=prop.city,
+            county=getattr(prop, "county", None),
+            state=prop.state or "MI",
+        )
+        policy_brief = jurisdiction.get("brief") or {}
+        policy_items = _items_from_policy_brief(jurisdiction)
+
+    items = _dedupe_items(base_items + policy_items)
 
     out = ChecklistOut(
         property_id=property_id,
@@ -306,6 +487,8 @@ def generate_checklist(
             )
         )
 
+        serialized = [i.model_dump() for i in items]
+
         if not row:
             row = PropertyChecklist(
                 org_id=p.org_id,
@@ -313,13 +496,13 @@ def generate_checklist(
                 strategy=strategy,
                 version=version,
                 generated_at=out.generated_at,
-                items_json=json.dumps([i.model_dump() for i in items], default=str),
+                items_json=json.dumps(serialized, default=str),
             )
             db.add(row)
             db.flush()
         else:
             row.generated_at = out.generated_at
-            row.items_json = json.dumps([i.model_dump() for i in items], default=str)
+            row.items_json = json.dumps(serialized, default=str)
             db.add(row)
             db.flush()
 
@@ -366,20 +549,38 @@ def generate_checklist(
                 property_id=property_id,
                 actor_user_id=p.user_id,
                 event_type="compliance.checklist_generated",
-                payload_json=json.dumps({"strategy": strategy, "version": version}),
+                payload_json=json.dumps(
+                    {
+                        "strategy": strategy,
+                        "version": version,
+                        "include_policy": include_policy,
+                        "jurisdiction_profile_id": jurisdiction.get("profile_id"),
+                        "policy_required_actions": len(jurisdiction.get("required_actions") or []),
+                        "policy_blocking_items": len(jurisdiction.get("blocking_items") or []),
+                    }
+                ),
                 created_at=now,
             )
         )
 
         sync_property_state(db, org_id=p.org_id, property_id=property_id)
         db.commit()
-        out.items = _merge_state(db, org_id=p.org_id, property_id=property_id, items=out.items)
+        out.items = _merge_state(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            items=out.items,
+        )
 
     return out
 
 
 @router.get("/checklist/{property_id}/latest", response_model=PropertyChecklistOut)
-def get_latest_checklist(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+def get_latest_checklist(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
     require_stage(
         db,
@@ -419,8 +620,12 @@ def get_latest_checklist(property_id: int, db: Session = Depends(get_db), p=Depe
 
 
 @router.get("/status/{property_id}", response_model=dict)
-def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+def compliance_status(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
     require_stage(
         db,
         org_id=p.org_id,
@@ -440,13 +645,32 @@ def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends
 
     latest_insp = db.scalar(
         select(Inspection)
-        .where(Inspection.org_id == p.org_id, Inspection.property_id == property_id)
+        .where(
+            Inspection.org_id == p.org_id,
+            Inspection.property_id == property_id,
+        )
         .order_by(desc(Inspection.id))
         .limit(1)
     )
     latest_inspection_passed = bool(latest_insp.passed) if latest_insp else False
 
-    passed = (summary["pct_done"] >= 0.95) and (summary["failed"] == 0) and latest_inspection_passed
+    jurisdiction = resolve_operational_policy(
+        db,
+        org_id=p.org_id,
+        city=prop.city,
+        county=getattr(prop, "county", None),
+        state=prop.state or "MI",
+    )
+
+    blocking_items = jurisdiction.get("blocking_items") or []
+    required_actions = jurisdiction.get("required_actions") or []
+
+    passed = (
+        (summary["pct_done"] >= 0.95)
+        and (summary["failed"] == 0)
+        and latest_inspection_passed
+        and (len(blocking_items) == 0)
+    )
 
     return {
         "property_id": property_id,
@@ -459,7 +683,17 @@ def compliance_status(property_id: int, db: Session = Depends(get_db), p=Depends
         "pct_done": summary["pct_done"],
         "latest_inspection_passed": latest_inspection_passed,
         "passed": passed,
-        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+        "jurisdiction_profile_id": jurisdiction.get("profile_id"),
+        "jurisdiction_scope": jurisdiction.get("scope"),
+        "jurisdiction_match_level": jurisdiction.get("match_level"),
+        "blocking_item_count": len(blocking_items),
+        "required_action_count": len(required_actions),
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            recompute=True,
+        ),
     }
 
 
@@ -492,7 +726,12 @@ def run_compliance_hqs(
         db.commit()
         return {
             **result,
-            "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=property_id,
+                recompute=True,
+            ),
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -511,7 +750,10 @@ def compliance_timeline(
 
     rows = db.scalars(
         select(WorkflowEvent)
-        .where(WorkflowEvent.org_id == p.org_id, WorkflowEvent.property_id == property_id)
+        .where(
+            WorkflowEvent.org_id == p.org_id,
+            WorkflowEvent.property_id == property_id,
+        )
         .order_by(desc(WorkflowEvent.id))
         .limit(limit)
     ).all()
@@ -537,8 +779,12 @@ def compliance_timeline(
 
 
 @router.get("/run_hqs/{property_id}", response_model=dict)
-def run_hqs_summary_only(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+def run_hqs_summary_only(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
     require_stage(
         db,
         org_id=p.org_id,
@@ -557,20 +803,46 @@ def run_hqs_summary_only(property_id: int, db: Session = Depends(get_db), p=Depe
     total = len(items)
     passed_ct = sum(1 for x in items if (x.status or "").lower() == "done")
     failed_ct = sum(1 for x in items if (x.status or "").lower() == "failed")
-    not_yet = total - passed_ct - failed_ct
+    blocked_ct = sum(1 for x in items if (x.status or "").lower() == "blocked")
+    not_yet = total - passed_ct - failed_ct - blocked_ct
 
     score_pct = round((passed_ct / total) * 100.0, 2) if total else 0.0
-    fail_codes = sorted([x.item_code for x in items if (x.status or "").lower() == "failed" and x.item_code])
+    fail_codes = sorted(
+        [
+            x.item_code
+            for x in items
+            if (x.status or "").lower() == "failed" and x.item_code
+        ]
+    )
+
+    jurisdiction = resolve_operational_policy(
+        db,
+        org_id=p.org_id,
+        city=prop.city,
+        county=getattr(prop, "county", None),
+        state=prop.state or "MI",
+    )
 
     return {
         "property_id": property_id,
         "total": total,
         "passed": passed_ct,
         "failed": failed_ct,
+        "blocked": blocked_ct,
         "not_yet": not_yet,
         "score_pct": score_pct,
         "fail_codes": fail_codes,
-        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+        "jurisdiction_profile_id": jurisdiction.get("profile_id"),
+        "jurisdiction_scope": jurisdiction.get("scope"),
+        "jurisdiction_match_level": jurisdiction.get("match_level"),
+        "blocking_items": jurisdiction.get("blocking_items", []),
+        "required_actions": jurisdiction.get("required_actions", []),
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            recompute=True,
+        ),
     }
 
 
@@ -581,14 +853,37 @@ def property_compliance_brief(
     p=Depends(get_principal),
 ):
     prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    return build_property_compliance_brief(
+
+    jurisdiction = resolve_operational_policy(
+        db,
+        org_id=p.org_id,
+        city=prop.city,
+        county=getattr(prop, "county", None),
+        state=prop.state or "MI",
+    )
+
+    policy_brief = build_property_compliance_brief(
         db,
         org_id=None,
         state=prop.state or "MI",
         county=getattr(prop, "county", None),
         city=prop.city,
-        pha_name=None,
+        pha_name=jurisdiction.get("pha_name"),
     )
+
+    return {
+        "property_id": property_id,
+        "address": getattr(prop, "address", None),
+        "city": prop.city,
+        "county": getattr(prop, "county", None),
+        "state": prop.state or "MI",
+        "jurisdiction": jurisdiction,
+        "brief": policy_brief,
+        "coverage": jurisdiction.get("coverage", {}),
+        "blocking_items": jurisdiction.get("blocking_items", []),
+        "required_actions": jurisdiction.get("required_actions", []),
+        "evidence_links": jurisdiction.get("evidence_links", []),
+    }
 
 
 @router.post("/property/{property_id}/tasks/from-policy", response_model=dict)
@@ -617,7 +912,12 @@ def create_tasks_from_policy(
         db.commit()
         return {
             **result,
-            "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=property_id,
+                recompute=True,
+            ),
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -650,7 +950,10 @@ def update_checklist_item(
         )
     )
     if not row:
-        raise HTTPException(status_code=404, detail="checklist item not found (generate checklist first)")
+        raise HTTPException(
+            status_code=404,
+            detail="checklist item not found (generate checklist first)",
+        )
 
     before = {
         "status": row.status,

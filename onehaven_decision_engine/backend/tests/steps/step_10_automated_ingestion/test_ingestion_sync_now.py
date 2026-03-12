@@ -6,9 +6,9 @@ def test_sync_now_endpoint_queues_task(client_with_auth_headers, db_session):
 
     source = IngestionSource(
         org_id=1,
-        provider="zillow",
-        slug="zillow-api",
-        display_name="Zillow API",
+        provider="rentcast",
+        slug="rentcast-sale-listings",
+        display_name="RentCast Sale Listings",
         source_type="api",
         status="connected",
         is_enabled=True,
@@ -20,7 +20,11 @@ def test_sync_now_endpoint_queues_task(client_with_auth_headers, db_session):
     db_session.commit()
     db_session.refresh(source)
 
-    resp = client.post(f"/api/ingestion/sources/{source.id}/sync", headers=headers, json={"trigger_type": "manual"})
+    resp = client.post(
+        f"/api/ingestion/sources/{source.id}/sync",
+        headers=headers,
+        json={"trigger_type": "manual"},
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True

@@ -28,28 +28,36 @@ export default function PropertyImage({
         <div
           className={[
             "w-full h-full min-h-[220px] border border-white/10 bg-white/[0.03]",
-            "flex flex-col items-center justify-center text-center px-4",
+            "flex flex-col items-center justify-center text-center px-5",
             roundedClassName,
           ].join(" ")}
         >
-          <div className="text-sm font-semibold text-white">
-            No Zillow photos found
-          </div>
-          <div className="mt-2 text-xs text-white/55 max-w-[280px]">
-            This property does not currently have imported Zillow image URLs in
-            the latest Zillow source row.
-          </div>
+          <div className="w-full h-[220px] rounded-[inherit] overflow-hidden flex items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.14),_rgba(255,255,255,0.03)_45%,_rgba(255,255,255,0.01)_100%)]">
+            <div className="space-y-3">
+              <div className="mx-auto h-14 w-14 rounded-2xl border border-white/10 bg-white/[0.04] flex items-center justify-center text-2xl">
+                🏠
+              </div>
+              <div className="text-sm font-semibold text-white">
+                Image placeholder
+              </div>
+              <div className="mx-auto max-w-[290px] text-xs text-white/55 leading-5">
+                Automated property ingestion is active. Listing images have not
+                been connected yet, so this property is using a placeholder for
+                now.
+              </div>
 
-          {zillowUrl ? (
-            <a
-              href={zillowUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-4 oh-btn cursor-pointer"
-            >
-              open Zillow ↗
-            </a>
-          ) : null}
+              {zillowUrl ? (
+                <a
+                  href={zillowUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex mt-1 oh-btn cursor-pointer"
+                >
+                  open listing ↗
+                </a>
+              ) : null}
+            </div>
+          </div>
         </div>
       </div>
     );
