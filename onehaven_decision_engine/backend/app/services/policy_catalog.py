@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 
 @dataclass(frozen=True)
@@ -34,31 +34,53 @@ def _norm_lower(v: Optional[str]) -> Optional[str]:
     return s or None
 
 
+def _norm_text(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = v.strip()
+    return s or None
+
+
 def _dedupe(items: list[PolicyCatalogItem]) -> list[PolicyCatalogItem]:
     seen: set[str] = set()
     out: list[PolicyCatalogItem] = []
+
     for item in items:
         key = item.url.strip()
-        if key in seen:
+        if not key or key in seen:
             continue
         seen.add(key)
         out.append(
             PolicyCatalogItem(
-                url=item.url.strip(),
+                url=key,
                 state=_norm_state(item.state),
                 county=_norm_lower(item.county),
                 city=_norm_lower(item.city),
-                pha_name=item.pha_name.strip() if item.pha_name else None,
-                program_type=item.program_type.strip() if item.program_type else None,
-                publisher=item.publisher.strip() if item.publisher else None,
-                title=item.title.strip() if item.title else None,
-                notes=item.notes.strip() if item.notes else None,
-                source_kind=item.source_kind,
+                pha_name=_norm_text(item.pha_name),
+                program_type=_norm_text(item.program_type),
+                publisher=_norm_text(item.publisher),
+                title=_norm_text(item.title),
+                notes=_norm_text(item.notes),
+                source_kind=_norm_text(item.source_kind),
                 is_authoritative=bool(item.is_authoritative),
                 priority=int(item.priority or 100),
             )
         )
+
     return out
+
+
+def _sorted_then_deduped(items: list[PolicyCatalogItem]) -> list[PolicyCatalogItem]:
+    ordered = sorted(
+        items,
+        key=lambda x: (
+            int(x.priority or 100),
+            (x.city or ""),
+            (x.county or ""),
+            x.url.strip(),
+        ),
+    )
+    return _dedupe(ordered)
 
 
 def catalog_municipalities(
@@ -70,6 +92,7 @@ def catalog_municipalities(
     for item in items:
         if not item.city:
             continue
+
         key = (
             _norm_state(item.state) or "MI",
             _norm_lower(item.county),
@@ -77,6 +100,7 @@ def catalog_municipalities(
         )
         if key in seen:
             continue
+
         seen.add(key)
         out.append(
             {
@@ -88,6 +112,22 @@ def catalog_municipalities(
 
     out.sort(key=lambda x: ((x["county"] or ""), (x["city"] or "")))
     return out
+
+
+def supported_focuses() -> list[str]:
+    return [
+        "se_mi",
+        "se_mi_extended",
+        "all_verified_core",
+        "wayne_county_core",
+        "oakland_county_core",
+        "macomb_county_core",
+        *sorted(_city_pack_registry().keys()),
+    ]
+
+
+def supported_markets() -> list[dict[str, Optional[str]]]:
+    return catalog_municipalities(catalog_mi_authoritative("se_mi_extended"))
 
 
 def catalog_for_market(
@@ -125,7 +165,7 @@ def catalog_for_market(
                 out.append(item)
             continue
 
-    return _dedupe(out)
+    return _sorted_then_deduped(out)
 
 
 def _federal_and_state_baseline() -> list[PolicyCatalogItem]:
@@ -458,6 +498,39 @@ def _dearborn_pack() -> list[PolicyCatalogItem]:
             source_kind="municipal_registration",
             priority=10,
         ),
+        PolicyCatalogItem(
+            url="https://www.dearborn.gov/index.php/step-1-submit-application-payment-0",
+            state="MI",
+            county="wayne",
+            city="dearborn",
+            publisher="City of Dearborn",
+            title="Step 1: Submit an application with payment",
+            notes="Operational application/payment step for requesting a rental home inspection.",
+            source_kind="municipal_inspection",
+            priority=15,
+        ),
+        PolicyCatalogItem(
+            url="https://www.dearborn.gov/index.php/step-6-certificate-occupancy-0",
+            state="MI",
+            county="wayne",
+            city="dearborn",
+            publisher="City of Dearborn",
+            title="Step 6: Certificate of Occupancy",
+            notes="Certificate issuance timing, validity period, and renewal cycle anchor.",
+            source_kind="municipal_certificate",
+            priority=10,
+        ),
+        PolicyCatalogItem(
+            url="https://dearborn.gov/how-submit-re-occupancy",
+            state="MI",
+            county="wayne",
+            city="dearborn",
+            publisher="City of Dearborn",
+            title="How to Submit for Re-Occupancy",
+            notes="Reinspection/correction workflow page that clarifies post-inspection correction requirements.",
+            source_kind="municipal_inspection",
+            priority=20,
+        ),
     ]
 
 
@@ -485,7 +558,7 @@ def _warren_pack() -> list[PolicyCatalogItem]:
             source_kind="municipal_registration",
             priority=10,
         ),
-                PolicyCatalogItem(
+        PolicyCatalogItem(
             url="https://www.cityofwarren.org/departments/building-division/",
             state="MI",
             county="macomb",
@@ -518,7 +591,6 @@ def _warren_pack() -> list[PolicyCatalogItem]:
             source_kind="municipal_certificate",
             priority=10,
         ),
-
         PolicyCatalogItem(
             url="https://www.cityofwarren.org/departments/property-maintenance-division/",
             state="MI",
@@ -529,6 +601,17 @@ def _warren_pack() -> list[PolicyCatalogItem]:
             notes="Operational property maintenance/enforcement page relevant to rental compliance.",
             source_kind="municipal_enforcement",
             priority=20,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofwarren.org/departments/public-service-department/",
+            state="MI",
+            county="macomb",
+            city="warren",
+            publisher="City of Warren",
+            title="Public Service Department",
+            notes="Operational contacts page with rental inspections/registration and property maintenance contact points.",
+            source_kind="municipal_guidance",
+            priority=30,
         ),
     ]
 
@@ -556,6 +639,61 @@ def _southfield_pack() -> list[PolicyCatalogItem]:
             notes="Official Southfield registration application PDF.",
             source_kind="municipal_registration",
             priority=20,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofsouthfield.com/sites/default/files/inline-files/ordinance_1656_rental_reg_1.pdf",
+            state="MI",
+            county="oakland",
+            city="southfield",
+            publisher="City of Southfield",
+            title="Ordinance No. 1656 - Rental Registration",
+            notes="Primary ordinance anchor for rental certificate validity and compliance rules.",
+            source_kind="municipal_ordinance",
+            priority=10,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofsouthfield.com/sites/default/files/2023-05/Ordinance%201768.pdf",
+            state="MI",
+            county="oakland",
+            city="southfield",
+            publisher="City of Southfield",
+            title="Rental Property Ordinance No. 1768",
+            notes="Updated rental property ordinance reference for enforcement and registration structure.",
+            source_kind="municipal_ordinance",
+            priority=10,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofsouthfield.com/departments/building-department/building-southfield/inspections",
+            state="MI",
+            county="oakland",
+            city="southfield",
+            publisher="City of Southfield",
+            title="Inspections",
+            notes="Inspection workflow and certificate-of-occupancy operational page.",
+            source_kind="municipal_inspection",
+            priority=15,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofsouthfield.com/departments/building-department/building-southfield/certificate-occupancy",
+            state="MI",
+            county="oakland",
+            city="southfield",
+            publisher="City of Southfield",
+            title="Certificate of Occupancy",
+            notes="Certificate-of-occupancy/change-of-occupancy requirements anchor.",
+            source_kind="municipal_certificate",
+            priority=15,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofsouthfield.com/residents/housing-property/code-enforcement",
+            state="MI",
+            county="oakland",
+            city="southfield",
+            publisher="City of Southfield",
+            title="Code Enforcement",
+            notes="Enforcement/support page that clarifies how property issues are handled.",
+            source_kind="municipal_enforcement",
+            priority=25,
         ),
         PolicyCatalogItem(
             url="https://www.cityofsouthfield.com/residents/housing-property/housing-section-8",
@@ -621,6 +759,39 @@ def _pontiac_pack() -> list[PolicyCatalogItem]:
             source_kind="municipal_registration",
             priority=10,
         ),
+        PolicyCatalogItem(
+            url="https://www.pontiac.mi.us/how_do_i/apply_for/forms___applications.php",
+            state="MI",
+            county="oakland",
+            city="pontiac",
+            publisher="City of Pontiac",
+            title="Forms, Permits and Applications",
+            notes="General forms hub that links building safety and rental application material.",
+            source_kind="municipal_guidance",
+            priority=20,
+        ),
+        PolicyCatalogItem(
+            url="https://www.pontiac.mi.us/departments/community_development/code_enforcement/index.php",
+            state="MI",
+            county="oakland",
+            city="pontiac",
+            publisher="City of Pontiac",
+            title="Code Enforcement",
+            notes="Code enforcement anchor relevant to rental and operational restrictions.",
+            source_kind="municipal_enforcement",
+            priority=20,
+        ),
+        PolicyCatalogItem(
+            url="https://www.pontiac.mi.us/departments/community_development/code_enforcement/faqs.php",
+            state="MI",
+            county="oakland",
+            city="pontiac",
+            publisher="City of Pontiac",
+            title="Code Enforcement FAQs",
+            notes="FAQ page clarifying residential rental vs vacant registration constraints and operational expectations.",
+            source_kind="municipal_guidance",
+            priority=25,
+        ),
     ]
 
 
@@ -670,6 +841,28 @@ def _livonia_pack() -> list[PolicyCatalogItem]:
             source_kind="municipal_guidance",
             priority=30,
         ),
+        PolicyCatalogItem(
+            url="https://livonia.gov/1832/Building-Permits-Residential",
+            state="MI",
+            county="wayne",
+            city="livonia",
+            publisher="City of Livonia",
+            title="Building Permits Residential",
+            notes="Operational permitting page that also surfaces residential building and rental-related forms.",
+            source_kind="municipal_building_anchor",
+            priority=25,
+        ),
+        PolicyCatalogItem(
+            url="https://livonia.gov/101/Departments",
+            state="MI",
+            county="wayne",
+            city="livonia",
+            publisher="City of Livonia",
+            title="Departments",
+            notes="Department index that explicitly points to inspection/certificate-of-occupancy responsibilities.",
+            source_kind="municipal_guidance",
+            priority=35,
+        ),
     ]
 
 
@@ -695,7 +888,7 @@ def _westland_pack() -> list[PolicyCatalogItem]:
             title="Building Division",
             notes="Official Westland building division page with rental certificates and inspections links.",
             source_kind="municipal_inspection",
-            priority=20,
+            priority=15,
         ),
         PolicyCatalogItem(
             url="https://www.cityofwestland.com/DocumentCenter/View/170/Rental-Registration-Application-PDF",
@@ -707,6 +900,28 @@ def _westland_pack() -> list[PolicyCatalogItem]:
             notes="Official Westland rental registration application PDF.",
             source_kind="municipal_registration",
             priority=10,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofwestland.com/1845/Planning-Building-Department",
+            state="MI",
+            county="wayne",
+            city="westland",
+            publisher="City of Westland",
+            title="Planning & Building Department",
+            notes="Operational building department anchor with building inspection and compliance resources.",
+            source_kind="municipal_building_anchor",
+            priority=20,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofwestland.com/550/Buying-or-Selling-a-Home",
+            state="MI",
+            county="wayne",
+            city="westland",
+            publisher="City of Westland",
+            title="Buying or Selling a Home",
+            notes="Operational page exposing home certification inspection and inspection checklist resources that support turnover/compliance understanding.",
+            source_kind="municipal_guidance",
+            priority=30,
         ),
     ]
 
@@ -757,7 +972,53 @@ def _taylor_pack() -> list[PolicyCatalogItem]:
             source_kind="municipal_inspection",
             priority=20,
         ),
+        PolicyCatalogItem(
+            url="https://www.cityoftaylor.com/FormCenter/Building-Department-Forms-11/Building-Department-ReOccupancy-Inspecti-64",
+            state="MI",
+            county="wayne",
+            city="taylor",
+            publisher="City of Taylor",
+            title="Re-Occupancy Inspection Application",
+            notes="Operational turnover/re-occupancy inspection page relevant to rental transitions.",
+            source_kind="municipal_certificate",
+            priority=15,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityoftaylor.com/DocumentCenter/View/8259/Residential-and-Commercial-Reoccupancy-Application-2022",
+            state="MI",
+            county="wayne",
+            city="taylor",
+            publisher="City of Taylor",
+            title="Residential and Commercial Reoccupancy Application",
+            notes="PDF form supporting re-occupancy inspection and turnover workflow.",
+            source_kind="municipal_certificate",
+            priority=15,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityoftaylor.com/FormCenter/Building-Department-Forms-11",
+            state="MI",
+            county="wayne",
+            city="taylor",
+            publisher="City of Taylor",
+            title="Building Department Forms",
+            notes="Taylor forms hub that exposes rental inspection and re-occupancy inspection paths together.",
+            source_kind="municipal_guidance",
+            priority=25,
+        ),
     ]
+
+
+def _city_pack_registry() -> dict[str, Callable[[], list[PolicyCatalogItem]]]:
+    return {
+        "dearborn": _dearborn_pack,
+        "detroit": _detroit_pack,
+        "livonia": _livonia_pack,
+        "pontiac": _pontiac_pack,
+        "southfield": _southfield_pack,
+        "taylor": _taylor_pack,
+        "warren": _warren_pack,
+        "westland": _westland_pack,
+    }
 
 
 def _focus_county_sets() -> dict[str, list[str]]:
@@ -766,6 +1027,35 @@ def _focus_county_sets() -> dict[str, list[str]]:
         "oakland_county_core": ["southfield", "pontiac"],
         "macomb_county_core": ["warren"],
     }
+
+
+def _expand_focuses(focus: str) -> list[str]:
+    f = (focus or "se_mi_extended").strip().lower()
+    city_registry = _city_pack_registry()
+    county_sets = _focus_county_sets()
+
+    if f in county_sets:
+        return county_sets[f]
+
+    if f in {"all_verified_core", "se_mi_extended"}:
+        return [
+            "detroit",
+            "dearborn",
+            "warren",
+            "southfield",
+            "pontiac",
+            "livonia",
+            "westland",
+            "taylor",
+        ]
+
+    if f == "se_mi":
+        return ["detroit"]
+
+    if f in city_registry:
+        return [f]
+
+    return []
 
 
 def catalog_mi_authoritative(focus: str = "se_mi_extended") -> list[PolicyCatalogItem]:
@@ -777,56 +1067,14 @@ def catalog_mi_authoritative(focus: str = "se_mi_extended") -> list[PolicyCatalo
     - wayne_county_core / oakland_county_core / macomb_county_core
     - detroit / dearborn / warren / southfield / pontiac / livonia / westland / taylor
     """
-    focus = (focus or "se_mi_extended").strip().lower()
-
     items = _federal_and_state_baseline()
+    city_registry = _city_pack_registry()
+    expanded_focuses = _expand_focuses(focus)
 
-    county_sets = _focus_county_sets()
-    if focus in county_sets:
-        expanded_focuses = county_sets[focus]
-    elif focus in {"all_verified_core"}:
-        expanded_focuses = [
-            "detroit",
-            "dearborn",
-            "warren",
-            "southfield",
-            "pontiac",
-            "livonia",
-            "westland",
-            "taylor",
-        ]
-    elif focus == "se_mi":
-        expanded_focuses = ["detroit"]
-    elif focus == "se_mi_extended":
-        expanded_focuses = [
-            "detroit",
-            "dearborn",
-            "warren",
-            "southfield",
-            "pontiac",
-            "livonia",
-            "westland",
-            "taylor",
-        ]
-    else:
-        expanded_focuses = [focus]
+    for name in expanded_focuses:
+        pack_builder = city_registry.get(name)
+        if not pack_builder:
+            continue
+        items.extend(pack_builder())
 
-    for f in expanded_focuses:
-        if f == "detroit":
-            items.extend(_detroit_pack())
-        elif f == "dearborn":
-            items.extend(_dearborn_pack())
-        elif f == "warren":
-            items.extend(_warren_pack())
-        elif f == "southfield":
-            items.extend(_southfield_pack())
-        elif f == "pontiac":
-            items.extend(_pontiac_pack())
-        elif f == "livonia":
-            items.extend(_livonia_pack())
-        elif f == "westland":
-            items.extend(_westland_pack())
-        elif f == "taylor":
-            items.extend(_taylor_pack())
-
-    return _dedupe(items)
+    return _sorted_then_deduped(items)

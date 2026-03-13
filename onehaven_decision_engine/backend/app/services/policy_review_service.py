@@ -176,6 +176,18 @@ def _source_map_for_assertions(
     return {r.id: r for r in rows}
 
 
+def _market_label(state: str, county: Optional[str], city: Optional[str], pha_name: Optional[str]) -> str:
+    if city:
+        if county:
+            return f"{city.title()}, {county.title()} County, {state}"
+        return f"{city.title()}, {state}"
+    if pha_name:
+        return f"{pha_name}, {state}"
+    if county:
+        return f"{county.title()} County, {state}"
+    return state
+
+
 def auto_verify_market_assertions(
     db: Session,
     *,
@@ -186,13 +198,19 @@ def auto_verify_market_assertions(
     pha_name: Optional[str] = None,
     reviewer_user_id: Optional[int] = None,
 ) -> dict:
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+    market_label = _market_label(st, cnty, cty, pha)
+
     rows = _market_assertions(
         db,
         org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
     )
     src_map = _source_map_for_assertions(db, rows)
 
@@ -216,9 +234,18 @@ def auto_verify_market_assertions(
         a.reviewed_at = now
         a.stale_after = None
 
+        auto_note = (
+            f"Auto-verified for {market_label} from authoritative source: "
+            f"{src.title or src.url}"
+            if src
+            else f"Auto-verified for {market_label} from authoritative source"
+        )
+        # Overwrite market-specific stale/recheck notes instead of preserving old nonsense
         existing_note = (a.review_notes or "").strip()
-        auto_note = f"Auto-verified from authoritative source: {src.title or src.url}" if src else "Auto-verified from authoritative source"
-        a.review_notes = auto_note if not existing_note else existing_note
+        if "warren" in existing_note.lower() or "source_changed=" in existing_note.lower():
+            a.review_notes = auto_note
+        else:
+            a.review_notes = auto_note if not existing_note else existing_note
 
         updated_ids.append(a.id)
 
@@ -256,7 +283,7 @@ def supersede_replaced_assertions(
     superseded_ids: list[int] = []
     now = datetime.utcnow()
 
-    for rule_key, group in by_rule.items():
+    for _, group in by_rule.items():
         verified = [a for a in group if a.review_status == "verified"]
         if not verified:
             continue
@@ -272,14 +299,8 @@ def supersede_replaced_assertions(
         for a in group:
             if a.id == winner.id:
                 continue
-            if a.review_status not in {"needs_recheck", "stale", "verified"}:
+            if a.review_status not in {"needs_recheck", "stale", "verified", "extracted"}:
                 continue
-
-            if a.review_status == "verified":
-                # keep parallel verified state/federal anchors if truly different sources/rules,
-                # but supersede duplicate verified rows of the exact same rule for the same market
-                if a.rule_key != winner.rule_key:
-                    continue
 
             a.review_status = "superseded"
             a.superseded_by_assertion_id = winner.id
@@ -298,4 +319,153 @@ def supersede_replaced_assertions(
     return {
         "superseded_count": len(superseded_ids),
         "superseded_ids": superseded_ids,
+    }
+
+
+def cleanup_market_stale_assertions(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    reviewer_user_id: Optional[int] = None,
+    archive_extracted_duplicates: bool = True,
+) -> dict:
+    """
+    Product-safe cleanup:
+    - keep authoritative verified winners
+    - supersede stale / needs_recheck rows when a verified winner exists
+    - supersede extracted rows too when a verified winner exists
+    - optionally supersede older duplicate extracted rows, keeping only newest per
+      (rule_key, source_id, scope)
+    """
+
+    rows = _market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+
+    now = datetime.utcnow()
+    cleaned_ids: list[int] = []
+    stale_resolved_ids: list[int] = []
+    archived_duplicate_ids: list[int] = []
+
+    by_rule: dict[str, list[PolicyAssertion]] = {}
+    for row in rows:
+        by_rule.setdefault(row.rule_key, []).append(row)
+
+    for _, group in by_rule.items():
+        verified = [a for a in group if a.review_status == "verified"]
+        winner = None
+        if verified:
+            winner = sorted(
+                verified,
+                key=lambda x: (
+                    -(float(x.confidence or 0.0)),
+                    -(x.id or 0),
+                ),
+            )[0]
+
+        if winner is not None:
+            for a in group:
+                if a.id == winner.id:
+                    continue
+                if a.review_status not in {"stale", "needs_recheck", "extracted"}:
+                    continue
+
+                a.review_status = "superseded"
+                a.superseded_by_assertion_id = winner.id
+                a.reviewed_by_user_id = reviewer_user_id
+                a.reviewed_at = now
+                a.stale_after = None
+
+                extra = (
+                    f"Resolved stale/recheck assertion during cleanup; "
+                    f"superseded by verified assertion {winner.id}"
+                )
+                existing = (a.review_notes or "").strip()
+                a.review_notes = extra if not existing else f"{existing} | {extra}"
+
+                cleaned_ids.append(a.id)
+                stale_resolved_ids.append(a.id)
+
+    if archive_extracted_duplicates:
+        duplicate_groups: dict[
+            tuple[str, int | None, str | None, str | None, str | None],
+            list[PolicyAssertion],
+        ] = {}
+        for a in rows:
+            if a.review_status != "extracted":
+                continue
+            key = (
+                a.rule_key,
+                a.source_id,
+                a.county,
+                a.city,
+                a.pha_name,
+            )
+            duplicate_groups.setdefault(key, []).append(a)
+
+        for _, group in duplicate_groups.items():
+            if len(group) <= 1:
+                continue
+
+            group_sorted = sorted(
+                group,
+                key=lambda x: (
+                    x.extracted_at.isoformat() if x.extracted_at else "",
+                    x.id or 0,
+                ),
+                reverse=True,
+            )
+            keeper = group_sorted[0]
+            for a in group_sorted[1:]:
+                a.review_status = "superseded"
+                a.superseded_by_assertion_id = keeper.id
+                a.reviewed_by_user_id = reviewer_user_id
+                a.reviewed_at = now
+                a.stale_after = None
+
+                extra = (
+                    f"Archived duplicate extracted assertion during cleanup; "
+                    f"kept newer assertion {keeper.id}"
+                )
+                existing = (a.review_notes or "").strip()
+                a.review_notes = extra if not existing else f"{existing} | {extra}"
+
+                cleaned_ids.append(a.id)
+                archived_duplicate_ids.append(a.id)
+
+    db.commit()
+
+    remaining_rows = _market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    stale_remaining = [
+        a.id
+        for a in remaining_rows
+        if a.review_status in {"stale", "needs_recheck"}
+        and a.superseded_by_assertion_id is None
+    ]
+
+    return {
+        "cleaned_count": len(cleaned_ids),
+        "cleaned_ids": cleaned_ids,
+        "stale_resolved_count": len(stale_resolved_ids),
+        "stale_resolved_ids": stale_resolved_ids,
+        "archived_duplicate_count": len(archived_duplicate_ids),
+        "archived_duplicate_ids": archived_duplicate_ids,
+        "stale_items_remaining": len(stale_remaining),
+        "stale_item_ids_remaining": stale_remaining,
     }

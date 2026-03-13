@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
 import GlassCard from "../components/GlassCard";
 import PageShell from "../components/PageShell";
+import MarketSourcePackModal from "../components/MarketSourcePackModal";
 
 type CoverageRow = {
   state: string;
@@ -82,7 +83,13 @@ type LegacyRuleRow = {
   notes?: string | null;
 };
 
-type MarketAction = "seed" | "collect" | "extract" | "build" | "pipeline";
+type MarketAction =
+  | "collect"
+  | "build"
+  | "coverage"
+  | "cleanup"
+  | "pipeline"
+  | "repair";
 
 function parseMaybeJsonArray(v: any): string[] {
   if (Array.isArray(v)) return v.map(String);
@@ -195,6 +202,35 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function ActionButton({
+  label,
+  busy,
+  onClick,
+  tone = "default",
+}: {
+  label: string;
+  busy?: boolean;
+  onClick: () => void;
+  tone?: "default" | "primary" | "danger";
+}) {
+  const cls =
+    tone === "primary"
+      ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/15"
+      : tone === "danger"
+        ? "border-amber-400/20 bg-amber-400/10 text-amber-100 hover:bg-amber-400/15"
+        : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10";
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={busy}
+      className={`rounded-xl border px-3 py-2 text-sm transition disabled:opacity-50 ${cls}`}
+    >
+      {busy ? "Running…" : label}
+    </button>
+  );
+}
+
 function MarketCard({
   row,
   active,
@@ -276,11 +312,16 @@ export default function Jurisdictions() {
   const [query, setQuery] = React.useState("");
   const [onlyReady, setOnlyReady] = React.useState(false);
   const [onlyWeak, setOnlyWeak] = React.useState(false);
+
   const [busy, setBusy] = React.useState(false);
   const [detailBusy, setDetailBusy] = React.useState(false);
   const [marketBusy, setMarketBusy] = React.useState<string>("");
   const [err, setErr] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
+
+  const [showSourceList, setShowSourceList] = React.useState(true);
+  const [showAssertionList, setShowAssertionList] = React.useState(true);
+  const [sourcePackOpen, setSourcePackOpen] = React.useState(false);
 
   const selectedRow = React.useMemo(
     () => coverageRows.find((r) => marketKey(r) === selectedKey) ?? null,
@@ -350,45 +391,15 @@ export default function Jurisdictions() {
     [selectedRow, legacyRulesByKey],
   );
 
-  function getOrgSlug() {
-    return (
-      ((import.meta as any).env?.VITE_ORG_SLUG as string | undefined)?.trim() ||
-      localStorage.getItem("org_slug") ||
-      ""
-    );
-  }
+  const selectedSources = React.useMemo(
+    () => (Array.isArray(evidence?.sources) ? evidence.sources : []),
+    [evidence],
+  );
 
-  async function postMarketAction(
-    endpoint: string,
-    row: CoverageRow,
-    bodyExtra: Record<string, any> = {},
-  ) {
-    const res = await fetch(`/api/policy${endpoint}`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Org-Slug": getOrgSlug(),
-      },
-      body: JSON.stringify({
-        state: row.state || "MI",
-        county: row.county ?? null,
-        city: row.city ?? null,
-        pha_name: row.pha_name ?? null,
-        org_scope: false,
-        focus: "se_mi_extended",
-        ...bodyExtra,
-      }),
-    });
-
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(
-        json?.detail || json?.message || `Request failed: ${res.status}`,
-      );
-    }
-    return json;
-  }
+  const selectedAssertions = React.useMemo(
+    () => (Array.isArray(evidence?.assertions) ? evidence.assertions : []),
+    [evidence],
+  );
 
   async function refresh() {
     setBusy(true);
@@ -398,7 +409,7 @@ export default function Jurisdictions() {
       const [coverageOut, profileOut, legacyOut] = await Promise.all([
         api
           .policyCoverageAll({ focus: "se_mi_extended", org_scope: false })
-          .catch(() => ({ rows: [] })),
+          .catch(() => ({ items: [] })),
         api.listJurisdictionProfiles(true, "MI").catch(() => []),
         api.listJurisdictionRules(true, "MI").catch(() => []),
       ]);
@@ -488,31 +499,58 @@ export default function Jurisdictions() {
     setErr(null);
     setMessage(null);
 
+    const payload = {
+      state: row.state || "MI",
+      county: row.county ?? null,
+      city: row.city ?? null,
+      pha_name: row.pha_name ?? null,
+      org_scope: false,
+      focus: "se_mi_extended",
+    };
+
     try {
-      if (action === "seed") {
-        await postMarketAction("/market/seed", row);
-      } else if (action === "collect") {
-        await postMarketAction("/market/collect", row);
-      } else if (action === "extract") {
-        await postMarketAction("/market/extract", row);
+      let result: any = null;
+
+      if (action === "collect") {
+        result = await api.policyCollectCatalogMarket(payload);
+        setMessage(
+          `Sources refreshed for ${titleCase(row.city || row.county || row.state)}. ${result?.ok_count ?? 0} ok, ${result?.failed_count ?? 0} failed.`,
+        );
       } else if (action === "build") {
-        await postMarketAction("/market/build", row);
+        result = await api.policyBuildMarket(payload);
+        setMessage(
+          `Profile rebuilt for ${titleCase(row.city || row.county || row.state)}.`,
+        );
+      } else if (action === "coverage") {
+        result = await api.policyRefreshCoverage(payload);
+        setMessage(
+          `Coverage refreshed for ${titleCase(row.city || row.county || row.state)}.`,
+        );
+      } else if (action === "cleanup") {
+        result = await api.policyCleanupStaleMarket(payload);
+        setMessage(
+          `Stale cleanup finished for ${titleCase(row.city || row.county || row.state)}. Remaining stale items: ${result?.cleanup?.stale_items_remaining ?? 0}.`,
+        );
+      } else if (action === "pipeline") {
+        result = await api.policyRunMarketPipeline(payload);
+        setMessage(
+          `Pipeline finished for ${titleCase(row.city || row.county || row.state)}.`,
+        );
       } else {
-        await postMarketAction("/market/pipeline", row);
+        result = await api.policyRepairMarket(payload);
+        setMessage(
+          `Repair market finished for ${titleCase(row.city || row.county || row.state)}. Unresolved rule gaps: ${(result?.unresolved_rule_gaps ?? []).length}.`,
+        );
       }
 
-      setMessage(
-        `${action === "pipeline" ? "Pipeline" : titleCase(action)} completed for ${
-          row.city
-            ? titleCase(row.city)
-            : row.county
-              ? `${titleCase(row.county)} County`
-              : row.state
-        }.`,
-      );
-
       await refresh();
-      await loadDetail(row);
+      await loadDetail({
+        ...row,
+        state: row.state || "MI",
+        county: row.county ?? null,
+        city: row.city ?? null,
+        pha_name: row.pha_name ?? null,
+      });
     } catch (e: any) {
       setErr(String(e?.message || e));
     } finally {
@@ -549,7 +587,7 @@ export default function Jurisdictions() {
       <PageHero
         eyebrow="Compliance intelligence"
         title="Jurisdictions"
-        subtitle="Real market coverage, confidence, and compliance readiness by city, county, and PHA. This page should answer whether automation is trustworthy, not just whether somebody typed in a seed row six months ago."
+        subtitle="A few-click control plane for market repair, evidence inspection, and coverage verification."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -557,23 +595,7 @@ export default function Jurisdictions() {
               disabled={busy}
               className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 hover:bg-white/15 disabled:opacity-50"
             >
-              {busy ? "Refreshing…" : "Refresh"}
-            </button>
-
-            <button
-              onClick={() =>
-                runMarketAction("pipeline", {
-                  state: "MI",
-                  county: "macomb",
-                  city: "warren",
-                })
-              }
-              disabled={!!marketBusy}
-              className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-cyan-100 hover:bg-cyan-400/15 disabled:opacity-50"
-            >
-              {marketBusy === "pipeline:mi|macomb|warren|"
-                ? "Running Warren…"
-                : "Run Warren pipeline"}
+              {busy ? "Refreshing…" : "Refresh page"}
             </button>
           </div>
         }
@@ -710,48 +732,79 @@ export default function Jurisdictions() {
                   }
                 />
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {(
-                    [
-                      "seed",
-                      "collect",
-                      "extract",
-                      "build",
-                      "pipeline",
-                    ] as MarketAction[]
-                  ).map((action) => {
-                    const key = `${action}:${marketKey(selectedRow)}`;
-                    return (
-                      <button
-                        key={action}
-                        onClick={() => runMarketAction(action, selectedRow)}
-                        disabled={!!marketBusy}
-                        className={`rounded-xl border px-3 py-2 text-sm transition disabled:opacity-50 ${
-                          action === "pipeline"
-                            ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/15"
-                            : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
-                        }`}
-                      >
-                        {marketBusy === key
-                          ? "Running…"
-                          : action === "pipeline"
-                            ? "Run pipeline"
-                            : titleCase(action)}
-                      </button>
-                    );
-                  })}
+                <div className="mt-3 rounded-2xl border border-cyan-400/15 bg-cyan-500/8 p-3 text-sm text-cyan-100">
+                  This is the pipeline workspace for the selected market. Use
+                  the buttons below to refresh sources, run extraction, rebuild
+                  the profile, clean stale items, or repair the whole market.
                 </div>
 
-                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <ActionButton
+                    label="Repair market"
+                    busy={marketBusy === `repair:${marketKey(selectedRow)}`}
+                    onClick={() => runMarketAction("repair", selectedRow)}
+                    tone="primary"
+                  />
+                  <ActionButton
+                    label="Run pipeline"
+                    busy={marketBusy === `pipeline:${marketKey(selectedRow)}`}
+                    onClick={() => runMarketAction("pipeline", selectedRow)}
+                    tone="primary"
+                  />
+                  <ActionButton
+                    label="Refresh sources"
+                    busy={marketBusy === `collect:${marketKey(selectedRow)}`}
+                    onClick={() => runMarketAction("collect", selectedRow)}
+                  />
+                  <ActionButton
+                    label="Rebuild profile"
+                    busy={marketBusy === `build:${marketKey(selectedRow)}`}
+                    onClick={() => runMarketAction("build", selectedRow)}
+                  />
+                  <ActionButton
+                    label="Refresh coverage"
+                    busy={marketBusy === `coverage:${marketKey(selectedRow)}`}
+                    onClick={() => runMarketAction("coverage", selectedRow)}
+                  />
+                  <ActionButton
+                    label="Resolve stale items"
+                    busy={marketBusy === `cleanup:${marketKey(selectedRow)}`}
+                    onClick={() => runMarketAction("cleanup", selectedRow)}
+                    tone="danger"
+                  />
+                  <ActionButton
+                    label="Manage source pack"
+                    onClick={() => setSourcePackOpen(true)}
+                  />
+                  <ActionButton
+                    label={
+                      showSourceList ? "Hide source list" : "View source list"
+                    }
+                    onClick={() => setShowSourceList((v) => !v)}
+                  />
+                  <ActionButton
+                    label={
+                      showAssertionList
+                        ? "Hide assertions list"
+                        : "View assertions list"
+                    }
+                    onClick={() => setShowAssertionList((v) => !v)}
+                  />
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                     <div className="space-y-2">
                       <Row label="State" value={selectedRow.state || "MI"} />
-                      <Row label="County" value={selectedRow.county || "—"} />
-                      <Row label="City" value={selectedRow.city || "—"} />
+                      <Row
+                        label="County"
+                        value={titleCase(selectedRow.county)}
+                      />
+                      <Row label="City" value={titleCase(selectedRow.city)} />
                       <Row label="PHA" value={selectedRow.pha_name || "—"} />
                       <Row
-                        label="Coverage status"
-                        value={selectedRow.coverage_status || "—"}
+                        label="Coverage"
+                        value={selectedRow.coverage_status || "unknown"}
                       />
                       <Row
                         label="Verified rules"
@@ -798,6 +851,119 @@ export default function Jurisdictions() {
                   </div>
                 ) : null}
               </GlassCard>
+
+              {showSourceList ? (
+                <GlassCard>
+                  <SectionTitle
+                    title={`Source list (${selectedSources.length})`}
+                    right={
+                      <Badge>{selectedRow.source_count ?? 0} tracked</Badge>
+                    }
+                  />
+                  <div className="mt-3 space-y-2">
+                    {selectedSources.length === 0 ? (
+                      <div className="text-sm text-white/55">
+                        No sources loaded for this market yet.
+                      </div>
+                    ) : (
+                      selectedSources.map((s: any) => (
+                        <div
+                          key={s.id}
+                          className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-medium text-white">
+                                {s.title ||
+                                  s.publisher ||
+                                  s.url ||
+                                  `Source ${s.id}`}
+                              </div>
+                              <div className="mt-1 text-xs text-white/50">
+                                {s.publisher || "Unknown publisher"} • HTTP{" "}
+                                {s.http_status ?? "—"}
+                              </div>
+                            </div>
+                            <Badge>{s.id}</Badge>
+                          </div>
+                          <div className="mt-2 break-all text-xs text-white/60">
+                            {s.url || "No URL"}
+                          </div>
+                          {s.notes ? (
+                            <div className="mt-2 text-sm text-white/70">
+                              {s.notes}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </GlassCard>
+              ) : null}
+
+              {showAssertionList ? (
+                <GlassCard>
+                  <SectionTitle
+                    title={`Assertions list (${selectedAssertions.length})`}
+                    right={
+                      <Badge>
+                        {selectedRow.verified_rule_count ?? 0} verified
+                      </Badge>
+                    }
+                  />
+                  <div className="mt-3 space-y-2">
+                    {selectedAssertions.length === 0 ? (
+                      <div className="text-sm text-white/55">
+                        No assertions loaded for this market yet.
+                      </div>
+                    ) : (
+                      selectedAssertions.map((a: any) => (
+                        <div
+                          key={a.id}
+                          className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-medium text-white">
+                                {a.rule_key}
+                              </div>
+                              <div className="mt-1 text-xs text-white/50">
+                                {a.rule_family || "unknown family"} •{" "}
+                                {a.assertion_type || "unknown type"} • source{" "}
+                                {a.source_id ?? "—"}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge
+                                tone={
+                                  a.review_status === "verified"
+                                    ? "good"
+                                    : a.review_status === "superseded"
+                                      ? "warn"
+                                      : "neutral"
+                                }
+                              >
+                                {a.review_status}
+                              </Badge>
+                              <Badge>
+                                {Number(a.confidence ?? 0).toFixed(2)}
+                              </Badge>
+                            </div>
+                          </div>
+                          <pre className="mt-3 overflow-auto rounded-lg bg-black/20 p-3 text-xs text-white/70">
+                            {JSON.stringify(a.value ?? {}, null, 2)}
+                          </pre>
+                          {a.review_notes ? (
+                            <div className="mt-2 text-sm text-white/70">
+                              {a.review_notes}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </GlassCard>
+              ) : null}
 
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <GlassCard>
@@ -874,144 +1040,107 @@ export default function Jurisdictions() {
               </div>
 
               <GlassCard>
-                <SectionTitle title="Evidence and source posture" />
-                <div className="mt-3 space-y-3">
-                  {(brief?.evidence_links ?? []).length > 0 ? (
-                    <div className="space-y-2">
-                      {(brief?.evidence_links ?? []).map(
-                        (item: any, idx: number) => (
-                          <div
-                            key={idx}
-                            className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
-                          >
-                            <div className="text-sm text-white/85">
-                              {item?.title ||
-                                item?.publisher ||
-                                item?.url ||
-                                "Evidence"}
-                            </div>
-                            <div className="mt-1 text-xs text-white/50">
-                              {item?.url ||
-                                item?.source_url ||
-                                "No URL surfaced"}
-                            </div>
-                          </div>
-                        ),
-                      )}
+                <SectionTitle title="Resolved jurisdiction profiles" />
+                <div className="mt-3 space-y-2">
+                  {selectedProfiles.length === 0 ? (
+                    <div className="text-sm text-white/55">
+                      No explicit jurisdiction profile rows matched this market.
                     </div>
                   ) : (
-                    <div className="text-sm text-white/55">
-                      No evidence links surfaced for this market yet.
-                    </div>
+                    selectedProfiles.map((p) => (
+                      <div
+                        key={p.id}
+                        className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-medium text-white">
+                            Profile #{p.id}
+                          </div>
+                          <Badge tone={p.org_id ? "warn" : "neutral"}>
+                            {p.org_id ? "org override" : "global"}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 text-xs text-white/55">
+                          friction: {p.friction_multiplier ?? "—"} • PHA:{" "}
+                          {p.pha_name || "—"}
+                        </div>
+                        {p.notes ? (
+                          <div className="mt-2 text-sm text-white/70">
+                            {p.notes}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))
                   )}
-
-                  {evidence?.rows?.length ? (
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                      <div className="text-xs uppercase tracking-wider text-white/45">
-                        Evidence rows
-                      </div>
-                      <div className="mt-3 space-y-2">
-                        {evidence.rows
-                          .slice(0, 8)
-                          .map((row: any, idx: number) => (
-                            <div key={idx} className="text-sm text-white/75">
-                              •{" "}
-                              {row?.title ||
-                                row?.publisher ||
-                                row?.url ||
-                                "Untitled source"}
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
               </GlassCard>
 
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <GlassCard>
-                  <SectionTitle title="Resolved jurisdiction profiles" />
-                  <div className="mt-3 space-y-2">
-                    {selectedProfiles.length === 0 ? (
-                      <div className="text-sm text-white/55">
-                        No explicit jurisdiction profile rows matched this
-                        market.
-                      </div>
-                    ) : (
-                      selectedProfiles.map((p) => (
+              <GlassCard>
+                <SectionTitle title="Legacy jurisdiction rules (fallback only)" />
+                <div className="mt-3 space-y-2">
+                  {selectedLegacyRules.length === 0 ? (
+                    <div className="text-sm text-white/55">
+                      No legacy rule rows matched this market.
+                    </div>
+                  ) : (
+                    selectedLegacyRules.map((r) => {
+                      const failPoints = parseMaybeJsonArray(
+                        r.typical_fail_points_json ?? r.typical_fail_points,
+                      );
+
+                      return (
                         <div
-                          key={p.id}
+                          key={r.id}
                           className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="text-sm font-medium text-white">
-                              Profile #{p.id}
+                              Legacy rule #{r.id}
                             </div>
-                            <Badge tone={p.org_id ? "warn" : "neutral"}>
-                              {p.org_id ? "org override" : "global"}
+                            <Badge tone={r.org_id ? "warn" : "neutral"}>
+                              {r.org_id ? "org override" : "global"}
                             </Badge>
                           </div>
                           <div className="mt-2 text-xs text-white/55">
-                            friction: {p.friction_multiplier ?? "—"} • PHA:{" "}
-                            {p.pha_name || "—"}
+                            license: {String(!!r.rental_license_required)} •
+                            authority: {r.inspection_authority || "—"} • freq:{" "}
+                            {r.inspection_frequency || "—"}
                           </div>
-                          {p.notes ? (
-                            <div className="mt-2 text-sm text-white/70">
-                              {p.notes}
-                            </div>
-                          ) : null}
+                          <div className="mt-2 text-sm text-white/70">
+                            fail points:{" "}
+                            {failPoints.length ? failPoints.join(", ") : "—"}
+                          </div>
                         </div>
-                      ))
-                    )}
-                  </div>
-                </GlassCard>
-
-                <GlassCard>
-                  <SectionTitle title="Legacy jurisdiction rules (fallback only)" />
-                  <div className="mt-3 space-y-2">
-                    {selectedLegacyRules.length === 0 ? (
-                      <div className="text-sm text-white/55">
-                        No legacy rule rows matched this market.
-                      </div>
-                    ) : (
-                      selectedLegacyRules.map((r) => {
-                        const failPoints = parseMaybeJsonArray(
-                          r.typical_fail_points_json ?? r.typical_fail_points,
-                        );
-
-                        return (
-                          <div
-                            key={r.id}
-                            className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm font-medium text-white">
-                                Legacy rule #{r.id}
-                              </div>
-                              <Badge tone={r.org_id ? "warn" : "neutral"}>
-                                {r.org_id ? "org override" : "global"}
-                              </Badge>
-                            </div>
-                            <div className="mt-2 text-xs text-white/55">
-                              license: {String(!!r.rental_license_required)} •
-                              authority: {r.inspection_authority || "—"} • freq:{" "}
-                              {r.inspection_frequency || "—"}
-                            </div>
-                            <div className="mt-2 text-sm text-white/70">
-                              fail points:{" "}
-                              {failPoints.length ? failPoints.join(", ") : "—"}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </GlassCard>
-              </div>
+                      );
+                    })
+                  )}
+                </div>
+              </GlassCard>
             </>
           )}
         </div>
       </div>
+
+      <MarketSourcePackModal
+        open={sourcePackOpen}
+        market={
+          selectedRow
+            ? {
+                state: selectedRow.state || "MI",
+                county: selectedRow.county ?? null,
+                city: selectedRow.city ?? null,
+                pha_name: selectedRow.pha_name ?? null,
+              }
+            : null
+        }
+        onClose={() => setSourcePackOpen(false)}
+        onChanged={async () => {
+          await refresh();
+          if (selectedRow) {
+            await loadDetail(selectedRow);
+          }
+        }}
+      />
     </PageShell>
   );
 }

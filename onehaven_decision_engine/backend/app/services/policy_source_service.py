@@ -278,27 +278,44 @@ def collect_catalog_item(
 
 
 def collect_catalog_for_market(
-    db: Session,
+    db,
     *,
-    org_id: Optional[int],
+    org_id: int | None,
     state: str = "MI",
-    county: Optional[str] = None,
-    city: Optional[str] = None,
+    county: str | None = None,
+    city: str | None = None,
     focus: str = "se_mi_extended",
-    timeout_s: float = 20.0,
-) -> list[CollectResult]:
-    items = catalog_for_market(state=state, county=county, city=city, focus=focus)
-    out: list[CollectResult] = []
+):
+    from app.services.policy_catalog_admin_service import merged_catalog_for_market
+
+    items = merged_catalog_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=None,
+        focus=focus,
+    )
+
+    results = []
     for item in items:
-        out.append(
-            collect_catalog_item(
-                db,
-                org_id=org_id,
-                item=item,
-                timeout_s=timeout_s,
-            )
+        res = collect_url(
+            db,
+            org_id=org_id,
+            url=item.url,
+            state=item.state or "MI",
+            county=item.county,
+            city=item.city,
+            pha_name=item.pha_name,
+            program_type=item.program_type,
+            publisher=item.publisher,
+            title=item.title,
+            notes=item.notes,
         )
-    return out
+        results.append(res)
+
+    return results
 
 
 def collect_catalog_for_focus(

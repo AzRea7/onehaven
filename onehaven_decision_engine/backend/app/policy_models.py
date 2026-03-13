@@ -15,11 +15,45 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
     Boolean,
+    func,
+    
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
 
+class PolicyCatalogEntry(Base):
+    __tablename__ = "policy_catalog_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    state: Mapped[str] = mapped_column(String(8), nullable=False, default="MI")
+    county: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    pha_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    program_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    publisher: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_kind: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    is_authoritative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_override: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    baseline_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 class JurisdictionProfile(Base):
     __tablename__ = "jurisdiction_profiles"

@@ -20,8 +20,18 @@ from app.services.policy_coverage_service import (
     compute_coverage_status,
     upsert_coverage_status,
 )
-from app.services.policy_extractor_service import extract_assertions_for_source, _rule_family_for, _assertion_type_for, _priority_for, _source_rank_for
-from app.services.policy_pipeline_service import run_market_pipeline
+from app.services.policy_extractor_service import (
+    _assertion_type_for,
+    _priority_for,
+    _rule_family_for,
+    _source_rank_for,
+    extract_assertions_for_source,
+)
+from app.services.policy_pipeline_service import (
+    cleanup_market,
+    repair_market,
+    run_market_pipeline,
+)
 from app.services.policy_projection_service import (
     build_property_compliance_brief,
     project_verified_assertions_to_profile,
@@ -78,6 +88,7 @@ class BatchReviewIn(BaseModel):
     review_notes: Optional[str] = None
     verification_reason: Optional[str] = None
 
+
 class SourceBackedAssertionIn(BaseModel):
     source_id: int
     rule_key: str
@@ -125,6 +136,25 @@ class MarketBuildIn(BaseModel):
     notes: Optional[str] = None
 
 
+class MarketCleanupIn(BaseModel):
+    state: str = "MI"
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    org_scope: bool = False
+    archive_extracted_duplicates: bool = True
+    focus: str = "se_mi_extended"
+
+class MarketRepairIn(BaseModel):
+    state: str = "MI"
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    org_scope: bool = False
+    focus: str = "se_mi_extended"
+    archive_extracted_duplicates: bool = True
+
+
 def _loads(s: Optional[str], default: Any = None) -> Any:
     if default is None:
         default = {}
@@ -158,21 +188,28 @@ def _norm_text(s: Optional[str]) -> Optional[str]:
 
 
 def _market_sources_for_catalog(
-    db: Session,
+    db,
     *,
-    org_id: Optional[int],
+    org_id: int | None,
     state: str,
-    county: Optional[str],
-    city: Optional[str],
+    county: str | None,
+    city: str | None,
+    pha_name: str | None,
     focus: str,
-) -> list[PolicySource]:
-    items = catalog_for_market(
+):
+    from app.policy_models import PolicySource
+    from app.services.policy_catalog_admin_service import merged_catalog_for_market
+
+    items = merged_catalog_for_market(
+        db,
+        org_id=org_id,
         state=state,
         county=county,
         city=city,
+        pha_name=pha_name,
         focus=focus,
     )
-    urls = [item.url.strip() for item in items]
+    urls = [item.url.strip() for item in items if item.url.strip()]
     if not urls:
         return []
 
@@ -180,10 +217,9 @@ def _market_sources_for_catalog(
     if org_id is None:
         q = q.filter(PolicySource.org_id.is_(None))
     else:
-        q = q.filter(PolicySource.org_id == org_id)
+        q = q.filter((PolicySource.org_id == org_id) | (PolicySource.org_id.is_(None)))
 
     return q.order_by(PolicySource.id.asc()).all()
-
 
 @router.get("/catalog")
 def get_catalog(
@@ -415,10 +451,12 @@ def extract_assertions(
     if not src:
         raise HTTPException(status_code=404, detail="Source not found")
 
+    target_org_id = principal.org_id if payload.org_scope else None
+
     created = extract_assertions_for_source(
         db,
         source=src,
-        org_id=principal.org_id,
+        org_id=target_org_id,
         org_scope=payload.org_scope,
     )
     return {"ok": True, "created": len(created), "ids": [a.id for a in created]}
@@ -448,7 +486,7 @@ def extract_market(
         created = extract_assertions_for_source(
             db,
             source=src,
-            org_id=principal.user_id,
+            org_id=target_org_id,
             org_scope=payload.org_scope,
         )
         created_ids.extend([a.id for a in created])
@@ -664,6 +702,7 @@ def review_assertions_batch(
         "updated_ids": updated,
     }
 
+
 @router.post("/assertions/from-source")
 def create_verified_assertion_from_source(
     payload: SourceBackedAssertionIn,
@@ -716,7 +755,6 @@ def create_verified_assertion_from_source(
             "confidence": row.confidence,
         },
     }
-
 
 
 @router.post("/profiles/build")
@@ -919,10 +957,6 @@ def get_property_compliance_brief(
     )
 
 
-# ---------------------------
-# New one-button market routes
-# ---------------------------
-
 @router.post("/market/seed")
 def seed_market(
     payload: MarketIn,
@@ -1018,7 +1052,7 @@ def extract_market_step(
         created = extract_assertions_for_source(
             db,
             source=src,
-            org_id=principal.user_id,
+            org_id=target_org_id,
             org_scope=payload.org_scope,
         )
         created_ids.extend([a.id for a in created])
@@ -1141,4 +1175,44 @@ def run_market_pipeline_route(
         city=payload.city,
         pha_name=payload.pha_name,
         focus=payload.focus,
+    )
+
+
+@router.post("/market/cleanup-stale")
+def cleanup_market_stale_route(
+    payload: MarketCleanupIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+    return cleanup_market(
+        db,
+        org_id=target_org_id,
+        reviewer_user_id=principal.user_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        archive_extracted_duplicates=payload.archive_extracted_duplicates,
+        focus=payload.focus,
+    )
+
+
+@router.post("/market/repair")
+def repair_market_route(
+    payload: MarketRepairIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+    return repair_market(
+        db,
+        org_id=target_org_id,
+        reviewer_user_id=principal.user_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+        archive_extracted_duplicates=payload.archive_extracted_duplicates,
     )

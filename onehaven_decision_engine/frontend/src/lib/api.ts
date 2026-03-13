@@ -691,6 +691,112 @@ export const api = {
       })}`,
     ),
 
+  policyBuildMarket: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+    focus?: string;
+    notes?: string | null;
+  }) =>
+    request<any>(`/policy/market/build`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        focus: payload.focus ?? "se_mi_extended",
+        notes: payload.notes ?? null,
+      }),
+    }),
+
+  policyRunMarketPipeline: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+    focus?: string;
+  }) =>
+    request<any>(`/policy/market/pipeline`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        focus: payload.focus ?? "se_mi_extended",
+      }),
+    }),
+
+  policyRefreshCoverage: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+    notes?: string | null;
+  }) =>
+    request<any>(`/policy/coverage`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        notes: payload.notes ?? null,
+      }),
+    }),
+
+  policyCleanupStaleMarket: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+    archive_extracted_duplicates?: boolean;
+  }) =>
+    request<any>(`/policy/market/cleanup-stale`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        archive_extracted_duplicates:
+          payload.archive_extracted_duplicates ?? true,
+      }),
+    }),
+
+  policyRepairMarket: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+    focus?: string;
+    archive_extracted_duplicates?: boolean;
+  }) =>
+    request<any>(`/policy/market/repair`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        focus: payload.focus ?? "se_mi_extended",
+        archive_extracted_duplicates:
+          payload.archive_extracted_duplicates ?? true,
+      }),
+    }),
+
   createDeal: (payload: {
     property_id: number;
     asking_price: number;
@@ -1501,17 +1607,155 @@ export const api = {
       { method: "GET", cacheTtlMs: 0 },
     ),
 
-  policyRefreshCoverage: (payload: {
+  policyCatalogAdminMarket: (payload: {
     state: string;
     county?: string | null;
     city?: string | null;
     pha_name?: string | null;
     org_scope?: boolean;
-    notes?: string | null;
+    focus?: string;
   }) =>
-    request<any>(`/policy/coverage`, {
+    request<any>(`/policy/catalog-admin/market`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        focus: payload.focus ?? "se_mi_extended",
+      }),
+    }),
+
+  policyCatalogAdminBootstrap: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+    focus?: string;
+  }) =>
+    request<any>(`/policy/catalog-admin/market/bootstrap`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        focus: payload.focus ?? "se_mi_extended",
+      }),
+    }),
+
+  policyCatalogAdminReset: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    org_scope?: boolean;
+    focus?: string;
+  }) =>
+    request<any>(`/policy/catalog-admin/market/reset`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        focus: payload.focus ?? "se_mi_extended",
+      }),
+    }),
+
+  policyCatalogAdminCreateItem: (payload: {
+    state: string;
+    county?: string | null;
+    city?: string | null;
+    pha_name?: string | null;
+    program_type?: string | null;
+    org_scope?: boolean;
+    url: string;
+    publisher?: string | null;
+    title?: string | null;
+    notes?: string | null;
+    source_kind?: string | null;
+    is_authoritative?: boolean;
+    priority?: number;
+    baseline_url?: string | null;
+  }) =>
+    request<any>(`/policy/catalog-admin/market/items`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        program_type: payload.program_type ?? null,
+        org_scope: payload.org_scope ?? false,
+        url: payload.url,
+        publisher: payload.publisher ?? null,
+        title: payload.title ?? null,
+        notes: payload.notes ?? null,
+        source_kind: payload.source_kind ?? null,
+        is_authoritative: payload.is_authoritative ?? true,
+        priority: payload.priority ?? 100,
+        baseline_url: payload.baseline_url ?? null,
+      }),
+    }),
+
+  policyCatalogAdminUpdateItem: (
+    itemId: number,
+    payload: {
+      org_scope?: boolean;
+      title?: string | null;
+      publisher?: string | null;
+      notes?: string | null;
+      source_kind?: string | null;
+      is_authoritative?: boolean | null;
+      priority?: number | null;
+      url?: string | null;
+      is_active?: boolean | null;
+    },
+  ) =>
+    request<any>(`/policy/catalog-admin/market/items/${itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        org_scope: payload.org_scope ?? false,
+        title: payload.title ?? undefined,
+        publisher: payload.publisher ?? undefined,
+        notes: payload.notes ?? undefined,
+        source_kind: payload.source_kind ?? undefined,
+        is_authoritative:
+          payload.is_authoritative === null
+            ? undefined
+            : payload.is_authoritative,
+        priority: payload.priority ?? undefined,
+        url: payload.url ?? undefined,
+        is_active: payload.is_active === null ? undefined : payload.is_active,
+      }),
+    }),
+
+  policyCatalogAdminDisableItem: (
+    itemId: number,
+    payload: {
+      state: string;
+      county?: string | null;
+      city?: string | null;
+      pha_name?: string | null;
+      org_scope?: boolean;
+      focus?: string;
+    },
+  ) =>
+    request<any>(`/policy/catalog-admin/market/items/${itemId}/disable`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+        focus: payload.focus ?? "se_mi_extended",
+      }),
     }),
 
   policyBrief: (params: {

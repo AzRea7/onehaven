@@ -301,7 +301,6 @@ export default function JurisdictionProfiles() {
 
   React.useEffect(() => {
     refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includeGlobal, state]);
 
   return (
@@ -309,7 +308,7 @@ export default function JurisdictionProfiles() {
       <PageHero
         eyebrow="Operational modeling"
         title="Jurisdiction Profiles"
-        subtitle="Encode city, county, and PHA reality as reusable operational profiles. Global defaults set the baseline; org overrides capture what your team has actually verified in the field."
+        subtitle="Profiles are the modeled output layer. Pipeline actions like source refresh, run pipeline, cleanup stale, and repair market live on the Jurisdictions page."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -319,9 +318,38 @@ export default function JurisdictionProfiles() {
             >
               {loading ? "Loading…" : "Refresh"}
             </button>
+            <a
+              href="/jurisdictions"
+              className="rounded-2xl border border-cyan-400/25 bg-cyan-500/12 px-4 py-2 text-sm text-cyan-100 hover:bg-cyan-500/18"
+            >
+              Open pipeline workspace
+            </a>
           </div>
         }
       />
+
+      <GlassCard>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-white">
+              Looking for the pipeline buttons?
+            </div>
+            <div className="mt-1 text-sm text-white/65">
+              Use the <span className="text-white">Jurisdictions</span> page
+              for: Repair market, Run pipeline, Refresh sources, Refresh
+              coverage, Resolve stale items, and Manage source pack.
+            </div>
+          </div>
+          <div>
+            <a
+              href="/jurisdictions"
+              className="inline-flex rounded-xl border border-cyan-400/25 bg-cyan-500/12 px-4 py-2 text-sm text-cyan-100 hover:bg-cyan-500/18"
+            >
+              Go to Jurisdictions
+            </a>
+          </div>
+        </div>
+      </GlassCard>
 
       {error ? (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
@@ -544,7 +572,7 @@ export default function JurisdictionProfiles() {
         <div className="space-y-4">
           <GlassCard>
             <SectionTitle
-              title={selected ? "Selected profile" : "Selected profile"}
+              title="Selected profile"
               right={
                 selected ? (
                   <div className="flex flex-wrap gap-2">
