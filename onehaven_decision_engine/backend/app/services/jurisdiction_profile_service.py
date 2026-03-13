@@ -75,6 +75,7 @@ def _dedupe_dict_list(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             or x.get("rule_key")
             or x.get("title")
             or x.get("description")
+            or x.get("label")
             or ""
         ).strip().lower()
         if not key or key in seen:
@@ -130,6 +131,22 @@ def _default_warren_policy() -> dict[str, Any]:
             "source_of_income_effective_date": "2025-04-02",
             "source_of_income_threshold_units": 5,
         },
+        "hqs_addenda": [
+            {
+                "code": "WARREN_POSTED_ADDRESS_VISIBLE",
+                "description": "Unit address / numbering should be clearly identifiable for inspection access and record matching",
+                "category": "jurisdiction",
+                "severity": "warn",
+                "suggested_fix": "Ensure address numbering is visible and matches inspection records.",
+            },
+            {
+                "code": "WARREN_APPLICATION_PACKET_READY",
+                "description": "Municipal rental packet documentation should be organized and inspection-ready",
+                "category": "documents",
+                "severity": "warn",
+                "suggested_fix": "Prepare owner, tenant, and registration packet documentation before inspection.",
+            },
+        ],
         "required_actions": [
             {
                 "code": "WARREN_RENTAL_LICENSE_REQUIRED",
@@ -313,7 +330,17 @@ def _augment_policy_for_market(
         merged["required_actions"] = _dedupe_dict_list(merged.get("required_actions") or [])
         merged["blocking_items"] = _dedupe_dict_list(merged.get("blocking_items") or [])
         merged["rules"] = _dedupe_dict_list(merged.get("rules") or [])
+        merged["hqs_addenda"] = _dedupe_dict_list(merged.get("hqs_addenda") or [])
         return merged
+
+    if isinstance(base.get("required_actions"), list):
+        base["required_actions"] = _dedupe_dict_list(base["required_actions"])
+    if isinstance(base.get("blocking_items"), list):
+        base["blocking_items"] = _dedupe_dict_list(base["blocking_items"])
+    if isinstance(base.get("rules"), list):
+        base["rules"] = _dedupe_dict_list(base["rules"])
+    if isinstance(base.get("hqs_addenda"), list):
+        base["hqs_addenda"] = _dedupe_dict_list(base["hqs_addenda"])
 
     return base
 
@@ -437,6 +464,7 @@ def resolve_profile(
         "pha_name": chosen.pha_name,
         "policy": policy,
         "rules": policy.get("rules", []),
+        "hqs_addenda": policy.get("hqs_addenda", []),
         "notes": chosen.notes,
         "profile_id": int(chosen.id),
         "market": {
@@ -543,6 +571,7 @@ def resolve_operational_policy(
     rules = policy.get("rules", [])
     policy_required_actions = policy.get("required_actions", [])
     policy_blocking_items = policy.get("blocking_items", [])
+    policy_hqs_addenda = policy.get("hqs_addenda", [])
 
     combined_required_actions: list[dict[str, Any]] = []
     for x in brief.get("required_actions", []):
@@ -560,17 +589,24 @@ def resolve_operational_policy(
         if isinstance(x, dict):
             combined_blocking_items.append(x)
 
-    dedup_required = _dedupe_dict_list(combined_required_actions)
-    dedup_blocking = _dedupe_dict_list(combined_blocking_items)
+    evidence_links = list(brief.get("evidence_links", []) or [])
+    policy_evidence = policy.get("evidence") or {}
+    if isinstance(policy_evidence, dict):
+        for _, values in policy_evidence.items():
+            if isinstance(values, list):
+                for url in values:
+                    if isinstance(url, str) and url.strip():
+                        evidence_links.append({"title": "Policy evidence", "url": url.strip()})
 
     return {
         **base,
         "rules": _dedupe_dict_list(rules if isinstance(rules, list) else []),
+        "hqs_addenda": _dedupe_dict_list(policy_hqs_addenda if isinstance(policy_hqs_addenda, list) else []),
         "coverage": brief.get("coverage", {}),
         "brief": brief.get("compliance", {}),
-        "blocking_items": dedup_blocking,
-        "required_actions": dedup_required,
-        "evidence_links": brief.get("evidence_links", []),
+        "blocking_items": _dedupe_dict_list(combined_blocking_items),
+        "required_actions": _dedupe_dict_list(combined_required_actions),
+        "evidence_links": _dedupe_dict_list([x for x in evidence_links if isinstance(x, dict)]),
     }
 
 
@@ -583,9 +619,6 @@ def summarize_profile(
     state: str = "MI",
     pha_name: Optional[str] = None,
 ) -> dict[str, Any]:
-    """
-    Compatibility alias for older callers.
-    """
     return resolve_operational_policy(
         db,
         org_id=org_id,

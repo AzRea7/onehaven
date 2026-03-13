@@ -355,10 +355,20 @@ export default function PropertyView() {
   const [photoAnalysis, setPhotoAnalysis] = React.useState<any | null>(null);
   const [photoBusy, setPhotoBusy] = React.useState(false);
 
-  const [complianceBrief, setComplianceBrief] = React.useState<any | null>(null);
-  const [complianceStatus, setComplianceStatus] = React.useState<any | null>(null);
-  const [complianceRunSummary, setComplianceRunSummary] = React.useState<any | null>(null);
-
+    const [complianceBrief, setComplianceBrief] = React.useState<any | null>(
+      null,
+    );
+    const [complianceStatus, setComplianceStatus] = React.useState<any | null>(
+      null,
+    );
+    const [complianceRunSummary, setComplianceRunSummary] = React.useState<
+      any | null
+    >(null);
+    const [inspectionReadiness, setInspectionReadiness] = React.useState<
+      any | null
+    >(null);
+    const [complianceAutomationBusy, setComplianceAutomationBusy] =
+      React.useState(false);
 
   const abortRef = React.useRef<AbortController | null>(null);
 
@@ -397,36 +407,44 @@ export default function PropertyView() {
     try {
       setErr(null);
 
-        const [
-          out,
-          opsOut,
-          workflowOut,
-          trustOut,
-          complianceBriefOut,
-          complianceStatusOut,
-          complianceRunSummaryOut,
-            ] = await Promise.all([
-              api.propertyBundle(propertyId, ac.signal),
-              api
-                .opsPropertySummary(propertyId, 90, ac.signal)
-                .catch(() => null),
-              api.opsPropertyWorkflow(propertyId, ac.signal).catch(() => null),
-              api
-                .trustGet("property", propertyId, ac.signal)
-                .then((x) => {
-                  setTrustErr(null);
-                  return x;
-                })
-                .catch((e) => {
-                  setTrustErr(String(e?.message || e));
-                  return null;
-                }),
-              api
-                .compliancePropertyBrief(propertyId, ac.signal)
-                .catch(() => null),
-              api.complianceStatus(propertyId, ac.signal).catch(() => null),
-              api.complianceRunSummary(propertyId, ac.signal).catch(() => null),
-            ]);
+                const [
+                  out,
+                  opsOut,
+                  workflowOut,
+                  trustOut,
+                  complianceBriefOut,
+                  complianceStatusOut,
+                  complianceRunSummaryOut,
+                  inspectionReadinessOut,
+                ] = await Promise.all([
+                  api.propertyBundle(propertyId, ac.signal),
+                  api
+                    .opsPropertySummary(propertyId, 90, ac.signal)
+                    .catch(() => null),
+                  api
+                    .opsPropertyWorkflow(propertyId, ac.signal)
+                    .catch(() => null),
+                  api
+                    .trustGet("property", propertyId, ac.signal)
+                    .then((x) => {
+                      setTrustErr(null);
+                      return x;
+                    })
+                    .catch((e) => {
+                      setTrustErr(String(e?.message || e));
+                      return null;
+                    }),
+                  api
+                    .compliancePropertyBrief(propertyId, ac.signal)
+                    .catch(() => null),
+                  api.complianceStatus(propertyId, ac.signal).catch(() => null),
+                  api
+                    .complianceRunSummary(propertyId, ac.signal)
+                    .catch(() => null),
+                  api
+                    .complianceInspectionReadiness(propertyId, ac.signal)
+                    .catch(() => null),
+                ]);
 
       setBundle(out);
       setOps(opsOut);
@@ -436,12 +454,13 @@ export default function PropertyView() {
       setComplianceBrief(complianceBriefOut);
       setComplianceStatus(complianceStatusOut);
       setComplianceRunSummary(complianceRunSummaryOut);
-
+            setInspectionReadiness(inspectionReadinessOut);
       try {
         const latest = await api.checklistLatest(propertyId, ac.signal);
         setChecklist(latest);
       } catch {
         setChecklist(null);
+        setInspectionReadiness(null);
       }
 
       const galleryFromBundle = Array.isArray(out?.photo_gallery)
@@ -507,6 +526,31 @@ export default function PropertyView() {
     },
     [loadAll],
   );
+
+  const runComplianceAutomation = React.useCallback(async () => {
+      try {
+        setComplianceAutomationBusy(true);
+        setErr(null);
+
+        const out = await api.runComplianceAutomation(propertyId, true);
+        setInspectionReadiness(
+          out && typeof out === "object" && "inspection_readiness" in out
+            ? out.inspection_readiness
+            : null
+        );
+        setComplianceRunSummary(
+          out && typeof out === "object" && "summary" in out
+            ? out.summary
+            : null
+        );
+
+        await loadAll();
+      } catch (e: any) {
+        setErr(String(e?.message || e));
+      } finally {
+        setComplianceAutomationBusy(false);
+      }
+    }, [propertyId, loadAll]);
 
   const advanceWorkflow = React.useCallback(async () => {
     await doAction("Advancing workflow…", async () => {
@@ -1298,7 +1342,14 @@ export default function PropertyView() {
             }}
           />
 
-          <InspectionReadiness brief={complianceBrief} />
+          <InspectionReadiness
+            readiness={inspectionReadiness}
+            brief={complianceBrief}
+            status={complianceStatus}
+            summary={complianceRunSummary}
+            onRunAutomation={runComplianceAutomation}
+            busy={complianceAutomationBusy}
+          />
 
           <Panel
             title="Compliance / Checklist"

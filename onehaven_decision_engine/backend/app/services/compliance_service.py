@@ -48,10 +48,10 @@ def _get_property(db: Session, *, org_id: int, property_id: int) -> Property:
     return prop
 
 
-def _latest_inspection(db: Session, *, property_id: int) -> Inspection | None:
+def _latest_inspection(db: Session, *, org_id: int, property_id: int) -> Inspection | None:
     return db.scalar(
         select(Inspection)
-        .where(Inspection.property_id == property_id)
+        .where(Inspection.org_id == org_id, Inspection.property_id == property_id)
         .order_by(Inspection.id.desc())
         .limit(1)
     )
@@ -134,6 +134,9 @@ def _status_from_checklist(
     if completed is False or status_norm in {"fail", "failed", "open", "blocked"}:
         return (STATUS_FAIL if severity == "fail" else STATUS_WARN), notes
 
+    if status_norm in {"todo", "in_progress"}:
+        return STATUS_UNKNOWN, notes
+
     return STATUS_UNKNOWN, notes
 
 
@@ -205,11 +208,6 @@ def _policy_item_to_rule(
     if status not in {STATUS_PASS, STATUS_FAIL, STATUS_WARN, STATUS_UNKNOWN, STATUS_NA}:
         status = STATUS_FAIL if severity == "fail" else STATUS_WARN
 
-    blocks_local = bool(raw.get("blocks_local", default_blocks_local))
-    blocks_voucher = bool(raw.get("blocks_voucher", default_blocks_voucher))
-    blocks_lease_up = bool(raw.get("blocks_lease_up", default_blocks_lease_up))
-    blocks_hqs = bool(raw.get("blocks_hqs", False))
-
     return _rule_result(
         key=code,
         label=label,
@@ -217,20 +215,12 @@ def _policy_item_to_rule(
         status=status,
         severity=severity,
         category=str(raw.get("category") or default_category),
-        blocks_hqs=blocks_hqs,
-        blocks_local=blocks_local,
-        blocks_voucher=blocks_voucher,
-        blocks_lease_up=blocks_lease_up,
+        blocks_hqs=bool(raw.get("blocks_hqs", False)),
+        blocks_local=bool(raw.get("blocks_local", default_blocks_local)),
+        blocks_voucher=bool(raw.get("blocks_voucher", default_blocks_voucher)),
+        blocks_lease_up=bool(raw.get("blocks_lease_up", default_blocks_lease_up)),
         suggested_fix=raw.get("suggested_fix") or raw.get("fix") or raw.get("description"),
         evidence=raw.get("evidence"),
-    )
-
-
-def _is_warren_market(prop: Property) -> bool:
-    return (
-        str(getattr(prop, "state", "") or "").strip().upper() == "MI"
-        and str(getattr(prop, "county", "") or "").strip().lower() == "macomb"
-        and str(getattr(prop, "city", "") or "").strip().lower() == "warren"
     )
 
 
@@ -423,13 +413,6 @@ def _dedupe_rules(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _build_local_rules_from_profile(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Prefer explicit operational-policy outputs:
-      * required_actions
-      * blocking_items
-      * rules
-    Also keep one governance confidence rule from coverage.
-    """
     rules: list[dict[str, Any]] = []
 
     for raw in profile_summary.get("required_actions") or []:
@@ -507,10 +490,6 @@ def _safe_property_policy_brief(
     prop: Property,
     profile_summary: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Compatibility wrapper because policy_projection_service signature
-    may still be the older one.
-    """
     try:
         return build_property_compliance_brief(
             db,
@@ -536,6 +515,21 @@ def _safe_property_policy_brief(
         return {}
 
 
+def _sorted_actions(rows: list[dict[str, Any]], *, limit: int = 8) -> list[dict[str, Any]]:
+    order = {"fail": 0, "unknown": 1, "warn": 2, "pass": 3, "not_applicable": 4}
+    return sorted(
+        rows,
+        key=lambda x: (
+            order.get(str(x.get("status") or "").lower(), 9),
+            0 if x.get("blocks_lease_up") else 1,
+            0 if x.get("blocks_voucher") else 1,
+            0 if x.get("blocks_local") else 1,
+            str(x.get("category") or ""),
+            str(x.get("rule_key") or ""),
+        ),
+    )[: max(1, int(limit))]
+
+
 def build_property_inspection_readiness(
     db: Session,
     *,
@@ -547,15 +541,24 @@ def build_property_inspection_readiness(
 
     by_code: dict[str, PropertyChecklistItem] = {}
     for r in checklist_rows:
-        code = (
-            str(getattr(r, "item_code", None) or getattr(r, "code", None) or "")
-            .strip()
-            .upper()
-        )
+        code = str(getattr(r, "item_code", None) or getattr(r, "code", None) or "").strip().upper()
         if code:
             by_code[code] = r
 
-    effective_hqs = get_effective_hqs_items(db, org_id=org_id, prop=prop)
+    profile_summary = resolve_operational_policy(
+        db,
+        org_id=org_id,
+        state=getattr(prop, "state", None) or "MI",
+        county=getattr(prop, "county", None),
+        city=getattr(prop, "city", None),
+    )
+
+    effective_hqs = get_effective_hqs_items(
+        db,
+        org_id=org_id,
+        prop=prop,
+        profile_summary=profile_summary,
+    )
     hqs_items = effective_hqs.get("items") or []
 
     hqs_results: list[dict[str, Any]] = []
@@ -571,7 +574,7 @@ def build_property_inspection_readiness(
             _rule_result(
                 key=code,
                 label=str(item.get("description") or code.replace("_", " ").title()),
-                source="hqs_library",
+                source=str((item.get("source") or {}).get("type") or "hqs_library"),
                 status=status,
                 severity=severity,
                 category=str(item.get("category") or "other"),
@@ -583,20 +586,9 @@ def build_property_inspection_readiness(
             )
         )
 
-    profile_summary = resolve_operational_policy(
-        db,
-        org_id=org_id,
-        state=getattr(prop, "state", None) or "MI",
-        county=getattr(prop, "county", None),
-        city=getattr(prop, "city", None),
-    )
-
     local_rules = _build_local_rules_from_profile(profile_summary)
 
-    if _is_warren_market(prop):
-        local_rules.extend(_build_warren_fallback_rules(profile_summary))
-
-    latest_inspection = _latest_inspection(db, property_id=property_id)
+    latest_inspection = _latest_inspection(db, org_id=org_id, property_id=property_id)
     if latest_inspection is not None:
         passed = bool(getattr(latest_inspection, "passed", False))
         inspection_id = getattr(latest_inspection, "id", None)
@@ -626,6 +618,7 @@ def build_property_inspection_readiness(
     warnings = [r for r in all_results if r["status"] == STATUS_WARN]
     failing = [r for r in all_results if r["status"] == STATUS_FAIL]
     unknowns = [r for r in all_results if r["status"] == STATUS_UNKNOWN]
+    passed_items = [r for r in all_results if r["status"] == STATUS_PASS]
 
     hqs_ready = not any(
         r["blocks_hqs"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
@@ -644,6 +637,8 @@ def build_property_inspection_readiness(
         for r in all_results
     )
 
+    score_pct = round((len(passed_items) / len(all_results)) * 100.0, 2) if all_results else 0.0
+
     overall_status = "ready"
     if not lease_up_ready or not voucher_ready or not local_ready:
         overall_status = "blocked"
@@ -656,6 +651,11 @@ def build_property_inspection_readiness(
         org_id=org_id,
         prop=prop,
         profile_summary=profile_summary,
+    )
+
+    action_plan = _sorted_actions(
+        [r for r in all_results if r["status"] in {STATUS_FAIL, STATUS_UNKNOWN, STATUS_WARN}],
+        limit=10,
     )
 
     return {
@@ -675,8 +675,9 @@ def build_property_inspection_readiness(
             "profile_id": profile_summary.get("profile_id"),
             "friction_multiplier": profile_summary.get("friction_multiplier"),
         },
-        "coverage": coverage,
+        "coverage": profile_summary.get("coverage") or {},
         "overall_status": overall_status,
+        "score_pct": score_pct,
         "readiness": {
             "hqs_ready": hqs_ready,
             "local_ready": local_ready,
@@ -685,6 +686,7 @@ def build_property_inspection_readiness(
         },
         "counts": {
             "total_rules": len(all_results),
+            "passed": len(passed_items),
             "failing": len(failing),
             "unknown": len(unknowns),
             "warnings": len(warnings),
@@ -693,9 +695,22 @@ def build_property_inspection_readiness(
         "results": all_results,
         "blocking_items": blockers,
         "warning_items": warnings,
+        "recommended_actions": action_plan,
         "effective_hqs_sources": effective_hqs.get("sources") or [],
+        "effective_hqs_counts": effective_hqs.get("counts") or {},
         "policy_brief": brief,
         "jurisdiction": profile_summary,
+        "latest_inspection": {
+            "id": getattr(latest_inspection, "id", None) if latest_inspection else None,
+            "passed": bool(getattr(latest_inspection, "passed", False)) if latest_inspection else None,
+        },
+        "run_summary": {
+            "passed": len(passed_items),
+            "failed": len(failing),
+            "blocked": len(blockers),
+            "not_yet": len(unknowns),
+            "score_pct": score_pct,
+        },
     }
 
 
@@ -771,6 +786,7 @@ def generate_policy_tasks_for_property(
                     "titles": created_titles,
                     "overall_status": readiness["overall_status"],
                     "readiness": readiness["readiness"],
+                    "score_pct": readiness["score_pct"],
                 }
             ),
             created_at=now,
@@ -789,6 +805,7 @@ def generate_policy_tasks_for_property(
                     "created": created,
                     "titles": created_titles,
                     "overall_status": readiness["overall_status"],
+                    "score_pct": readiness["score_pct"],
                 }
             ),
             created_at=now,
@@ -802,6 +819,7 @@ def generate_policy_tasks_for_property(
         "titles": created_titles,
         "overall_status": readiness["overall_status"],
         "readiness": readiness["readiness"],
+        "score_pct": readiness["score_pct"],
     }
 
 
@@ -815,12 +833,6 @@ def run_hqs(
     auto_create_rehab_tasks: bool | None = None,
     create_tasks: bool | None = None,
 ) -> dict[str, Any]:
-    """
-    Step-11 upgraded implementation:
-      - supports older callers that pass actor_email / auto_create_rehab_tasks
-      - drives from effective HQS + jurisdiction profile + readiness blockers
-      - does not commit internally; router/service caller can decide transaction boundary
-    """
     should_create_tasks = create_tasks
     if should_create_tasks is None:
         should_create_tasks = bool(auto_create_rehab_tasks) if auto_create_rehab_tasks is not None else True
@@ -843,6 +855,25 @@ def run_hqs(
             actor_user_id=actor_user_id,
             property_id=property_id,
         )
+
+    now = _now()
+    db.add(
+        WorkflowEvent(
+            org_id=org_id,
+            property_id=property_id,
+            actor_user_id=actor_user_id,
+            event_type="compliance.automation.run",
+            payload_json=_j(
+                {
+                    "overall_status": readiness["overall_status"],
+                    "score_pct": readiness["score_pct"],
+                    "counts": readiness["counts"],
+                    "tasks_created": task_info.get("created", 0),
+                }
+            ),
+            created_at=now,
+        )
+    )
 
     return {
         "ok": True,

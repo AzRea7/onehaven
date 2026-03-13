@@ -156,9 +156,10 @@ def _baseline_hqs_items() -> list[dict[str, Any]]:
 
 
 def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
+    code = str(item.get("code") or item.get("rule_key") or "").strip().upper()
     return {
-        "code": str(item.get("code") or "").strip().upper(),
-        "description": str(item.get("description") or "").strip(),
+        "code": code,
+        "description": str(item.get("description") or item.get("label") or code.replace("_", " ").title()).strip(),
         "category": str(item.get("category") or "other").strip().lower(),
         "severity": str(item.get("severity") or "fail").strip().lower(),
         "suggested_fix": (str(item.get("suggested_fix")).strip() if item.get("suggested_fix") else None),
@@ -188,16 +189,146 @@ def _load_hqs_addendum_rows(db: Session, *, org_id: int | None = None) -> list[A
         return []
 
 
-def get_effective_hqs_items(db: Session, *, org_id: int, prop: Property) -> dict[str, Any]:
+def _profile_hqs_items(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    policy = profile_summary.get("policy") or {}
+    if not isinstance(policy, dict):
+        return []
+
+    out: list[dict[str, Any]] = []
+
+    # Accept either name because reality is messy and schemas drift like raccoons in an attic.
+    raw_items = (
+        policy.get("hqs_addenda")
+        or policy.get("hqs_overrides")
+        or policy.get("inspection_items")
+        or []
+    )
+
+    if isinstance(raw_items, list):
+        for raw in raw_items:
+            if not isinstance(raw, dict):
+                continue
+            code = str(raw.get("code") or raw.get("rule_key") or "").strip().upper()
+            if not code:
+                continue
+            out.append(
+                _normalize_item(
+                    {
+                        "code": code,
+                        "description": raw.get("description") or raw.get("label") or raw.get("title"),
+                        "category": raw.get("category") or "jurisdiction",
+                        "severity": raw.get("severity") or "fail",
+                        "suggested_fix": raw.get("suggested_fix") or raw.get("fix"),
+                        "source": {
+                            "type": "jurisdiction_policy",
+                            "name": "profile_hqs_item",
+                        },
+                    }
+                )
+            )
+
+    compliance = policy.get("compliance") or {}
+    if isinstance(compliance, dict):
+        if str(compliance.get("inspection_required") or "").strip().lower() in {"yes", "true", "required", "1"}:
+            out.append(
+                _normalize_item(
+                    {
+                        "code": "LOCAL_INSPECTION_REQUIRED",
+                        "description": "Jurisdiction requires local rental inspection readiness",
+                        "category": "jurisdiction",
+                        "severity": "fail",
+                        "suggested_fix": "Prepare the unit for local rental inspection and complete jurisdiction-specific inspection steps.",
+                        "source": {"type": "jurisdiction_policy", "name": "inspection_required"},
+                    }
+                )
+            )
+        if str(compliance.get("certificate_required_before_occupancy") or "").strip().lower() in {
+            "yes",
+            "true",
+            "required",
+            "1",
+        }:
+            out.append(
+                _normalize_item(
+                    {
+                        "code": "LOCAL_CERTIFICATE_BEFORE_OCCUPANCY",
+                        "description": "Certificate or compliance approval is required before occupancy",
+                        "category": "jurisdiction",
+                        "severity": "fail",
+                        "suggested_fix": "Obtain the required municipal certificate or occupancy/compliance approval before move-in.",
+                        "source": {
+                            "type": "jurisdiction_policy",
+                            "name": "certificate_required_before_occupancy",
+                        },
+                    }
+                )
+            )
+
+    return out
+
+
+def _contextual_items(prop: Property, profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+
+    year_built = getattr(prop, "year_built", None)
+    if isinstance(year_built, int) and year_built < 1978:
+        out.append(
+            _normalize_item(
+                {
+                    "code": "LEAD_SAFE_SURFACES",
+                    "description": "Pre-1978 property should be checked for deteriorated paint / lead-safe compliance",
+                    "category": "lead",
+                    "severity": "warn",
+                    "suggested_fix": "Verify lead-safe workflow, stabilization, and required disclosures/certifications.",
+                    "source": {"type": "contextual_rule", "reason": "pre_1978"},
+                }
+            )
+        )
+
+    policy = profile_summary.get("policy") or {}
+    compliance = policy.get("compliance") or {}
+    if isinstance(compliance, dict):
+        if str(compliance.get("local_agent_required") or "").strip().lower() in {"yes", "true", "required", "1"}:
+            out.append(
+                _normalize_item(
+                    {
+                        "code": "LOCAL_AGENT_DOCUMENTATION",
+                        "description": "Local agent / responsible party documentation should be ready for inspection packet",
+                        "category": "documents",
+                        "severity": "warn",
+                        "suggested_fix": "Prepare valid local agent or responsible party information required by the jurisdiction.",
+                        "source": {"type": "contextual_rule", "reason": "local_agent_required"},
+                    }
+                )
+            )
+
+    return out
+
+
+def get_effective_hqs_items(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+    profile_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Effective HQS set:
       1) internal baseline
       2) HqsRule policy table overrides/extensions
       3) HqsAddendum policy table overrides/extensions
-      4) inferred local adds from property / jurisdiction context when present
+      4) jurisdiction profile HQS/policy adds
+      5) contextual property adds
     """
+    profile_summary = profile_summary or {}
+
     items: dict[str, dict[str, Any]] = {
-        row["code"]: _normalize_item({**row, "source": {"type": "baseline_internal", "name": "OneHaven HQS baseline"}})
+        row["code"]: _normalize_item(
+            {
+                **row,
+                "source": {"type": "baseline_internal", "name": "OneHaven HQS baseline"},
+            }
+        )
         for row in _baseline_hqs_items()
     }
 
@@ -205,7 +336,8 @@ def get_effective_hqs_items(db: Session, *, org_id: int, prop: Property) -> dict
         {"type": "baseline_internal", "name": "OneHaven HQS baseline", "count": len(items)}
     ]
 
-    for row in _load_hqs_rule_rows(db):
+    rule_rows = _load_hqs_rule_rows(db)
+    for row in rule_rows:
         code = str(getattr(row, "code", "") or "").strip().upper()
         if not code:
             continue
@@ -220,11 +352,11 @@ def get_effective_hqs_items(db: Session, *, org_id: int, prop: Property) -> dict
                 "source": {"type": "policy_table", "table": "HqsRule"},
             }
         )
+    if rule_rows:
+        sources.append({"type": "policy_table", "table": "HqsRule", "count": len(rule_rows)})
 
-    if _load_hqs_rule_rows(db):
-        sources.append({"type": "policy_table", "table": "HqsRule"})
-
-    for row in _load_hqs_addendum_rows(db, org_id=org_id):
+    addenda = _load_hqs_addendum_rows(db, org_id=org_id)
+    for row in addenda:
         code = str(getattr(row, "code", "") or "").strip().upper()
         if not code:
             continue
@@ -239,26 +371,28 @@ def get_effective_hqs_items(db: Session, *, org_id: int, prop: Property) -> dict
                 "source": {"type": "policy_table", "table": "HqsAddendum"},
             }
         )
-
-    addenda = _load_hqs_addendum_rows(db, org_id=org_id)
     if addenda:
         sources.append({"type": "policy_table", "table": "HqsAddendum", "count": len(addenda)})
 
-    # Small context-sensitive adds that are safe and generic.
-    year_built = getattr(prop, "year_built", None)
-    if isinstance(year_built, int) and year_built < 1978:
-        items["LEAD_SAFE_SURFACES"] = _normalize_item(
-            {
-                "code": "LEAD_SAFE_SURFACES",
-                "description": "Pre-1978 property should be checked for deteriorated paint / lead-safe compliance",
-                "category": "lead",
-                "severity": "warn",
-                "suggested_fix": "Verify lead-safe workflow, stabilization, and required disclosures/certifications.",
-                "source": {"type": "contextual_rule", "reason": "pre_1978"},
-            }
-        )
+    profile_items = _profile_hqs_items(profile_summary)
+    for item in profile_items:
+        items[item["code"]] = item
+    if profile_items:
+        sources.append({"type": "jurisdiction_policy", "name": "profile_hqs_items", "count": len(profile_items)})
+
+    ctx_items = _contextual_items(prop, profile_summary)
+    for item in ctx_items:
+        items[item["code"]] = item
+    if ctx_items:
+        sources.append({"type": "contextual_rules", "count": len(ctx_items)})
 
     return {
         "items": sorted(items.values(), key=lambda x: (x["category"], x["code"])),
         "sources": sources,
+        "counts": {
+            "total": len(items),
+            "baseline": len(_baseline_hqs_items()),
+            "profile_items": len(profile_items),
+            "contextual_items": len(ctx_items),
+        },
     }

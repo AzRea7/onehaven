@@ -921,28 +921,31 @@ export const api = {
     ),
 
   checklistLatest: (propertyId: number, signal?: AbortSignal) =>
-    request<any>(`/compliance/checklist/${propertyId}/latest`, {
-      cacheTtlMs: 1_000,
+    request(`/compliance/checklist/${propertyId}/latest`, {
+      method: "GET",
       signal,
     }),
 
   generateChecklist: (
     propertyId: number,
-    opts?: { strategy?: string; version?: string; persist?: boolean },
+    opts?: {
+      strategy?: string;
+      persist?: boolean;
+      version?: string;
+      include_policy?: boolean;
+    },
+    signal?: AbortSignal,
   ) => {
-    const strategy = opts?.strategy ?? "section8";
-    const version = opts?.version ?? "v1";
+    const strategy = opts?.strategy || "section8";
     const persist = opts?.persist ?? true;
+    const version = opts?.version || "v1";
+    const includePolicy = opts?.include_policy ?? true;
 
-    return request<any>(
-      `/compliance/checklist/${propertyId}${qs({
-        strategy,
-        version,
-        persist: persist ? "true" : "false",
-      })}`,
+    return request(
+      `/compliance/checklist/${propertyId}?strategy=${encodeURIComponent(strategy)}&version=${encodeURIComponent(version)}&persist=${persist ? "true" : "false"}&include_policy=${includePolicy ? "true" : "false"}`,
       {
         method: "POST",
-        body: JSON.stringify({}),
+        signal,
       },
     );
   },
@@ -950,17 +953,19 @@ export const api = {
   updateChecklistItem: (
     propertyId: number,
     itemCode: string,
-    payload: {
+    patch: {
       status?: string | null;
       proof_url?: string | null;
       notes?: string | null;
     },
+    signal?: AbortSignal,
   ) =>
-    request<any>(
+    request(
       `/compliance/checklist/${propertyId}/items/${encodeURIComponent(itemCode)}`,
       {
         method: "PATCH",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(patch),
+        signal,
       },
     ),
 
@@ -1416,27 +1421,6 @@ export const api = {
       { method: "GET", cacheTtlMs: 0 },
     ),
 
-  compliancePropertyBrief: (propertyId: number, signal?: AbortSignal) =>
-    request<any>(`/compliance/property/${propertyId}/brief`, {
-      method: "GET",
-      cacheTtlMs: 500,
-      signal,
-    }),
-
-  complianceStatus: (propertyId: number, signal?: AbortSignal) =>
-    request<any>(`/compliance/status/${propertyId}`, {
-      method: "GET",
-      cacheTtlMs: 500,
-      signal,
-    }),
-
-  complianceRunSummary: (propertyId: number, signal?: AbortSignal) =>
-    request<any>(`/compliance/run_hqs/${propertyId}`, {
-      method: "GET",
-      cacheTtlMs: 500,
-      signal,
-    }),
-
   complianceCreateTasksFromPolicy: (propertyId: number) =>
     request<any>(`/compliance/property/${propertyId}/tasks/from-policy`, {
       method: "POST",
@@ -1606,6 +1590,43 @@ export const api = {
       })}`,
       { method: "GET", cacheTtlMs: 0 },
     ),
+
+  complianceInspectionReadiness: (propertyId: number, signal?: AbortSignal) =>
+    request(`/compliance/property/${propertyId}/inspection-readiness`, {
+      method: "GET",
+      signal,
+    }),
+
+  runComplianceAutomation: (
+    propertyId: number,
+    createTasks = true,
+    signal?: AbortSignal,
+  ) =>
+    request(
+      `/compliance/property/${propertyId}/automation/run?create_tasks=${createTasks ? "true" : "false"}`,
+      {
+        method: "POST",
+        signal,
+      },
+    ),
+
+  compliancePropertyBrief: (propertyId: number, signal?: AbortSignal) =>
+    request(`/compliance/property/${propertyId}/brief`, {
+      method: "GET",
+      signal,
+    }),
+
+  complianceStatus: (propertyId: number, signal?: AbortSignal) =>
+    request(`/compliance/status/${propertyId}`, {
+      method: "GET",
+      signal,
+    }),
+
+  complianceRunSummary: (propertyId: number, signal?: AbortSignal) =>
+    request(`/compliance/run_hqs/${propertyId}`, {
+      method: "GET",
+      signal,
+    }),
 
   policyCatalogAdminMarket: (payload: {
     state: string;

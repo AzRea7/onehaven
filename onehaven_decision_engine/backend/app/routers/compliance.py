@@ -29,6 +29,7 @@ from ..schemas import (
     PropertyChecklistOut,
 )
 from ..services.compliance_service import (
+    build_property_inspection_readiness,
     generate_policy_tasks_for_property,
     run_hqs as run_hqs_service,
 )
@@ -625,7 +626,7 @@ def compliance_status(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
     require_stage(
         db,
         org_id=p.org_id,
@@ -634,66 +635,28 @@ def compliance_status(
         action="view compliance status",
     )
 
-    items = db.scalars(
-        select(PropertyChecklistItem).where(
-            PropertyChecklistItem.org_id == p.org_id,
-            PropertyChecklistItem.property_id == property_id,
-        )
-    ).all()
-
-    summary = _summarize_status(items)
-
-    latest_insp = db.scalar(
-        select(Inspection)
-        .where(
-            Inspection.org_id == p.org_id,
-            Inspection.property_id == property_id,
-        )
-        .order_by(desc(Inspection.id))
-        .limit(1)
-    )
-    latest_inspection_passed = bool(latest_insp.passed) if latest_insp else False
-
-    jurisdiction = resolve_operational_policy(
+    readiness = build_property_inspection_readiness(
         db,
         org_id=p.org_id,
-        city=prop.city,
-        county=getattr(prop, "county", None),
-        state=prop.state or "MI",
-    )
-
-    blocking_items = jurisdiction.get("blocking_items") or []
-    required_actions = jurisdiction.get("required_actions") or []
-
-    passed = (
-        (summary["pct_done"] >= 0.95)
-        and (summary["failed"] == 0)
-        and latest_inspection_passed
-        and (len(blocking_items) == 0)
+        property_id=property_id,
     )
 
     return {
         "property_id": property_id,
-        "checklist_total": summary["total"],
-        "checklist_done": summary["done"],
-        "checklist_failed": summary["failed"],
-        "checklist_blocked": summary["blocked"],
-        "checklist_in_progress": summary["in_progress"],
-        "checklist_todo": summary["todo"],
-        "pct_done": summary["pct_done"],
-        "latest_inspection_passed": latest_inspection_passed,
-        "passed": passed,
-        "jurisdiction_profile_id": jurisdiction.get("profile_id"),
-        "jurisdiction_scope": jurisdiction.get("scope"),
-        "jurisdiction_match_level": jurisdiction.get("match_level"),
-        "blocking_item_count": len(blocking_items),
-        "required_action_count": len(required_actions),
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
+        "passed": bool(
+            readiness["readiness"]["hqs_ready"]
+            and readiness["readiness"]["local_ready"]
+            and readiness["readiness"]["voucher_ready"]
+            and readiness["readiness"]["lease_up_ready"]
         ),
+        "overall_status": readiness["overall_status"],
+        "score_pct": readiness["score_pct"],
+        "readiness": readiness["readiness"],
+        "counts": readiness["counts"],
+        "blocking_items": readiness["blocking_items"],
+        "warning_items": readiness["warning_items"],
+        "recommended_actions": readiness["recommended_actions"],
+        "coverage": readiness["coverage"],
     }
 
 
@@ -884,6 +847,72 @@ def property_compliance_brief(
         "required_actions": jurisdiction.get("required_actions", []),
         "evidence_links": jurisdiction.get("evidence_links", []),
     }
+
+@router.get("/property/{property_id}/inspection-readiness", response_model=dict)
+def property_inspection_readiness(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view policy-driven inspection readiness",
+    )
+
+    return build_property_inspection_readiness(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+
+
+@router.post("/property/{property_id}/automation/run", response_model=dict)
+def run_property_compliance_automation(
+    property_id: int,
+    create_tasks: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="run compliance automation",
+    )
+
+    try:
+        result = run_hqs_service(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            actor_email=p.email,
+            property_id=property_id,
+            create_tasks=create_tasks,
+        )
+        sync_property_state(db, org_id=p.org_id, property_id=property_id)
+        db.commit()
+
+        readiness = result.get("inspection_readiness") or {}
+        return {
+            **result,
+            "summary": readiness.get("run_summary") or {},
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=property_id,
+                recompute=True,
+            ),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"automation run failed: {e}")
 
 
 @router.post("/property/{property_id}/tasks/from-policy", response_model=dict)
