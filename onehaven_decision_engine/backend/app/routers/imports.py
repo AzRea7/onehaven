@@ -23,7 +23,7 @@ from ..domain.operating_truth import (
     enforce_property_truth,
 )
 from ..models import Deal, ImportSnapshot, Property, RentAssumption
-from ..schemas import ImportErrorRow, ImportResultOut
+from ..schemas import ImportErrorRow, ImportResultOut, IngestionOverviewOut
 from ..services.geo_enrichment import enrich_property_geo
 from ..services.property_photo_service import upsert_zillow_photos
 from ..services.zillow_photo_source import extract_zillow_photo_urls

@@ -1,7 +1,22 @@
 import React from "react";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
+import GlassCard from "../components/GlassCard";
 import { api } from "../lib/api";
+
+type ProfileRow = {
+  id: number;
+  org_id?: number | null;
+  scope?: string | null;
+  state: string;
+  county?: string | null;
+  city?: string | null;
+  friction_multiplier?: number | null;
+  pha_name?: string | null;
+  notes?: string | null;
+  policy?: Record<string, any> | null;
+  policy_json?: Record<string, any> | string | null;
+};
 
 function pretty(v: any) {
   try {
@@ -11,16 +26,101 @@ function pretty(v: any) {
   }
 }
 
+function norm(v: any) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function inferScope(row: ProfileRow): "org" | "global" {
+  if (row.scope === "org" || row.org_id) return "org";
+  return "global";
+}
+
+function policyObject(row: ProfileRow): Record<string, any> {
+  if (row.policy && typeof row.policy === "object") return row.policy;
+  if (row.policy_json && typeof row.policy_json === "object")
+    return row.policy_json as Record<string, any>;
+  if (typeof row.policy_json === "string") {
+    try {
+      const parsed = JSON.parse(row.policy_json);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function Badge({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "good" | "warn" | "bad";
+}) {
+  const cls =
+    tone === "good"
+      ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-200"
+      : tone === "warn"
+        ? "border-amber-300/25 bg-amber-300/10 text-amber-100"
+        : tone === "bad"
+          ? "border-red-400/25 bg-red-400/10 text-red-200"
+          : "border-white/10 bg-white/5 text-white/75";
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] ${cls}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function SectionTitle({
+  title,
+  right,
+}: {
+  title: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-sm font-semibold text-white">{title}</div>
+      {right ? <div>{right}</div> : null}
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4 text-sm">
+      <div className="text-white/55">{label}</div>
+      <div className="text-right text-white/85">{value}</div>
+    </div>
+  );
+}
+
+function profileKey(
+  row: Pick<ProfileRow, "state" | "county" | "city" | "pha_name" | "id">,
+) {
+  return `${row.id}:${norm(row.state)}|${norm(row.county)}|${norm(row.city)}|${norm(row.pha_name)}`;
+}
+
 export default function JurisdictionProfiles() {
   const [includeGlobal, setIncludeGlobal] = React.useState(true);
   const [state, setState] = React.useState("MI");
-  const [rows, setRows] = React.useState<any[]>([]);
+  const [rows, setRows] = React.useState<ProfileRow[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const [query, setQuery] = React.useState("");
+  const [selectedId, setSelectedId] = React.useState<number | null>(null);
 
   const [testCity, setTestCity] = React.useState("Detroit");
   const [testCounty, setTestCounty] = React.useState("Wayne");
   const [resolved, setResolved] = React.useState<any | null>(null);
+  const [resolveBusy, setResolveBusy] = React.useState(false);
 
   const [city, setCity] = React.useState("");
   const [county, setCounty] = React.useState("");
@@ -29,23 +129,71 @@ export default function JurisdictionProfiles() {
   const [policyJson, setPolicyJson] = React.useState(
     pretty({
       summary: "Org override profile.",
-      licensing: {
-        typical: "Fill with what you actually see in this jurisdiction.",
+      compliance: {
+        registration_required: "unknown",
+        inspection_required: "unknown",
+        certificate_required_before_occupancy: "unknown",
+      },
+      voucher: {
+        landlord_packet_required: "unknown",
+        hap_contract_and_tenancy_addendum_required: "unknown",
       },
       inspections: {
-        typical: "Fill with your observed re-inspection patterns.",
+        reinspection_required_after_fail: "unknown",
       },
-      notes: ["Keep it operational. You can get more formal later."],
+      notes: ["Replace this with verified operational reality."],
     }),
   );
   const [notes, setNotes] = React.useState("");
+  const [saveBusy, setSaveBusy] = React.useState(false);
+
+  const selected = React.useMemo(
+    () => rows.find((r) => r.id === selectedId) ?? null,
+    [rows, selectedId],
+  );
+
+  const filteredRows = React.useMemo(() => {
+    const q = norm(query);
+    return rows.filter((r) => {
+      if (!q) return true;
+      const hay = [
+        r.scope,
+        inferScope(r),
+        r.state,
+        r.county,
+        r.city,
+        r.pha_name,
+        r.notes,
+      ]
+        .map(norm)
+        .join(" ");
+      return hay.includes(q);
+    });
+  }, [rows, query]);
+
+  const stats = React.useMemo(() => {
+    const total = rows.length;
+    const org = rows.filter((r) => inferScope(r) === "org").length;
+    const global = rows.filter((r) => inferScope(r) === "global").length;
+    const city = rows.filter((r) => !!r.city).length;
+    const county = rows.filter((r) => !r.city && !!r.county).length;
+    return { total, org, global, city, county };
+  }, [rows]);
 
   async function refresh() {
     setLoading(true);
     setError(null);
     try {
       const data = await api.listJurisdictionProfiles(includeGlobal, state);
-      setRows(data || []);
+      const list = Array.isArray(data) ? data : [];
+      setRows(list);
+
+      if (list.length > 0) {
+        const stillExists = selectedId && list.some((r) => r.id === selectedId);
+        setSelectedId(stillExists ? selectedId : list[0].id);
+      } else {
+        setSelectedId(null);
+      }
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
@@ -56,22 +204,61 @@ export default function JurisdictionProfiles() {
   async function runResolve() {
     setResolved(null);
     setError(null);
+    setResolveBusy(true);
     try {
       const out = await api.resolveJurisdictionProfile({
-        city: testCity || null,
-        county: testCounty || null,
+        city: testCity.trim() || null,
+        county: testCounty.trim() || null,
         state,
       });
       setResolved(out);
     } catch (e: any) {
       setError(String(e?.message || e));
+    } finally {
+      setResolveBusy(false);
     }
+  }
+
+  function clearForm() {
+    setCity("");
+    setCounty("");
+    setFriction(1.0);
+    setPhaName("");
+    setNotes("");
+    setPolicyJson(
+      pretty({
+        summary: "Org override profile.",
+        compliance: {
+          registration_required: "unknown",
+          inspection_required: "unknown",
+          certificate_required_before_occupancy: "unknown",
+        },
+        voucher: {
+          landlord_packet_required: "unknown",
+          hap_contract_and_tenancy_addendum_required: "unknown",
+        },
+        inspections: {
+          reinspection_required_after_fail: "unknown",
+        },
+        notes: ["Replace this with verified operational reality."],
+      }),
+    );
+  }
+
+  function loadIntoForm(row: ProfileRow) {
+    const policy = policyObject(row);
+    setCity(row.city || "");
+    setCounty(row.county || "");
+    setFriction(Number(row.friction_multiplier ?? 1.0));
+    setPhaName(row.pha_name || "");
+    setNotes(row.notes || "");
+    setPolicyJson(pretty(policy));
   }
 
   async function saveProfile() {
     setError(null);
-    let policy: any = {};
 
+    let policy: any = {};
     try {
       policy = policyJson ? JSON.parse(policyJson) : {};
     } catch {
@@ -79,6 +266,7 @@ export default function JurisdictionProfiles() {
       return;
     }
 
+    setSaveBusy(true);
     try {
       await api.upsertJurisdictionProfile({
         state,
@@ -92,10 +280,12 @@ export default function JurisdictionProfiles() {
       await refresh();
     } catch (e: any) {
       setError(String(e?.message || e));
+    } finally {
+      setSaveBusy(false);
     }
   }
 
-  async function deleteOne(r: any) {
+  async function deleteOne(r: ProfileRow) {
     setError(null);
     try {
       await api.deleteJurisdictionProfile({
@@ -111,13 +301,26 @@ export default function JurisdictionProfiles() {
 
   React.useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includeGlobal, state]);
 
   return (
     <PageShell className="space-y-6">
       <PageHero
+        eyebrow="Operational modeling"
         title="Jurisdiction Profiles"
-        subtitle="Encode Michigan city/county/PHA reality as a reusable operational model (global defaults + org overrides)."
+        subtitle="Encode city, county, and PHA reality as reusable operational profiles. Global defaults set the baseline; org overrides capture what your team has actually verified in the field."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={refresh}
+              className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/15 disabled:opacity-50"
+              disabled={loading}
+            >
+              {loading ? "Loading…" : "Refresh"}
+            </button>
+          </div>
+        }
       />
 
       {error ? (
@@ -126,177 +329,371 @@ export default function JurisdictionProfiles() {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="text-sm text-white/70">State</label>
-        <input
-          value={state}
-          onChange={(e) => setState(e.target.value.toUpperCase())}
-          className="px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-white text-sm"
-          style={{ width: 90 }}
-        />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+        <GlassCard>
+          <div className="text-xs uppercase tracking-wider text-white/45">
+            Profiles
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-white">
+            {stats.total}
+          </div>
+        </GlassCard>
 
-        <label className="text-sm text-white/70 ml-2">
-          Include global defaults
-        </label>
-        <input
-          type="checkbox"
-          checked={includeGlobal}
-          onChange={(e) => setIncludeGlobal(e.target.checked)}
-          className="h-4 w-4"
-        />
+        <GlassCard>
+          <div className="text-xs uppercase tracking-wider text-white/45">
+            Org overrides
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-amber-100">
+            {stats.org}
+          </div>
+        </GlassCard>
 
-        <button
-          onClick={refresh}
-          className="ml-auto px-3 py-2 rounded-xl text-sm bg-white/[0.06] border border-white/10 hover:bg-white/[0.10] transition cursor-pointer text-white"
-        >
-          {loading ? "Loading…" : "Refresh"}
-        </button>
+        <GlassCard>
+          <div className="text-xs uppercase tracking-wider text-white/45">
+            Global defaults
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-white">
+            {stats.global}
+          </div>
+        </GlassCard>
+
+        <GlassCard>
+          <div className="text-xs uppercase tracking-wider text-white/45">
+            City scoped
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-white">
+            {stats.city}
+          </div>
+        </GlassCard>
+
+        <GlassCard>
+          <div className="text-xs uppercase tracking-wider text-white/45">
+            County scoped
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-white">
+            {stats.county}
+          </div>
+        </GlassCard>
       </div>
 
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
-        <div className="text-white font-semibold text-sm">Resolve Tester</div>
-        <div className="flex flex-wrap gap-3 items-center">
-          <input
-            value={testCity}
-            onChange={(e) => setTestCity(e.target.value)}
-            placeholder="City (optional)"
-            className="px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-white text-sm"
-          />
-          <input
-            value={testCounty}
-            onChange={(e) => setTestCounty(e.target.value)}
-            placeholder="County (optional)"
-            className="px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-white text-sm"
-          />
-          <button
-            onClick={runResolve}
-            className="px-3 py-2 rounded-xl text-sm bg-indigo-500/20 border border-indigo-400/30 hover:bg-indigo-500/25 transition cursor-pointer text-white"
-          >
-            Resolve
-          </button>
-        </div>
+      <GlassCard>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[120px_180px_1fr]">
+          <div>
+            <div className="mb-1 text-xs uppercase tracking-wider text-white/45">
+              State
+            </div>
+            <input
+              value={state}
+              onChange={(e) => setState(e.target.value.toUpperCase())}
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white"
+            />
+          </div>
 
-        {resolved ? (
-          <pre className="text-xs text-white/80 whitespace-pre-wrap bg-black/30 border border-white/10 rounded-xl p-3 overflow-auto">
-            {pretty(resolved)}
-          </pre>
-        ) : null}
-      </div>
+          <div className="flex items-end">
+            <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/75">
+              <input
+                type="checkbox"
+                checked={includeGlobal}
+                onChange={(e) => setIncludeGlobal(e.target.checked)}
+                className="h-4 w-4"
+              />
+              include global defaults
+            </label>
+          </div>
 
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
-        <div className="text-white font-semibold text-sm">
-          Create / Update Org Override
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-3">
-          <input
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            placeholder="City (optional)"
-            className="px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-white text-sm"
-          />
-          <input
-            value={county}
-            onChange={(e) => setCounty(e.target.value)}
-            placeholder="County (optional)"
-            className="px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-white text-sm"
-          />
-          <input
-            value={String(friction)}
-            onChange={(e) => setFriction(Number(e.target.value))}
-            placeholder="Friction (e.g. 1.25)"
-            className="px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-white text-sm"
-          />
-          <input
-            value={phaName}
-            onChange={(e) => setPhaName(e.target.value)}
-            placeholder="PHA name (optional)"
-            className="px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-white text-sm"
-          />
-        </div>
-
-        <textarea
-          value={policyJson}
-          onChange={(e) => setPolicyJson(e.target.value)}
-          rows={10}
-          className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-white text-xs font-mono"
-        />
-
-        <input
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Notes (optional)"
-          className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/10 text-white text-sm"
-        />
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={saveProfile}
-            className="px-3 py-2 rounded-xl text-sm bg-emerald-500/15 border border-emerald-400/25 hover:bg-emerald-500/20 transition cursor-pointer text-white"
-          >
-            Save override
-          </button>
-          <div className="text-xs text-white/60">
-            Tip: leave city/county blank to override the state default for your
-            org.
+          <div>
+            <div className="mb-1 text-xs uppercase tracking-wider text-white/45">
+              Search
+            </div>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search city, county, scope, PHA, notes…"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/35"
+            />
           </div>
         </div>
-      </div>
+      </GlassCard>
 
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <div className="text-white font-semibold text-sm">Profiles</div>
-          <div className="text-white/60 text-xs">{rows.length} rows</div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_1fr]">
+        <div className="space-y-4">
+          <GlassCard>
+            <SectionTitle title="Resolve tester" />
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <input
+                value={testCity}
+                onChange={(e) => setTestCity(e.target.value)}
+                placeholder="City (optional)"
+                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+              />
+              <input
+                value={testCounty}
+                onChange={(e) => setTestCounty(e.target.value)}
+                placeholder="County (optional)"
+                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+              />
+            </div>
+
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                onClick={runResolve}
+                className="rounded-xl border border-indigo-400/30 bg-indigo-500/20 px-3 py-2 text-sm text-white transition hover:bg-indigo-500/25"
+                disabled={resolveBusy}
+              >
+                {resolveBusy ? "Resolving…" : "Resolve"}
+              </button>
+            </div>
+
+            {resolved ? (
+              <div className="mt-4 space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <Badge tone={resolved?.matched ? "good" : "bad"}>
+                    {resolved?.matched ? "matched" : "not matched"}
+                  </Badge>
+                  <Badge>{resolved?.scope || "—"} scope</Badge>
+                  <Badge>{resolved?.match_level || "—"} level</Badge>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                  <div className="space-y-2">
+                    <Row
+                      label="Profile ID"
+                      value={resolved?.profile_id ?? "—"}
+                    />
+                    <Row
+                      label="Friction"
+                      value={resolved?.friction_multiplier ?? 1.0}
+                    />
+                    <Row label="PHA" value={resolved?.pha_name || "—"} />
+                  </div>
+                </div>
+
+                <pre className="overflow-auto rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-white/80 whitespace-pre-wrap">
+                  {pretty(resolved)}
+                </pre>
+              </div>
+            ) : null}
+          </GlassCard>
+
+          <GlassCard>
+            <SectionTitle
+              title="Profiles"
+              right={
+                <div className="text-xs text-white/60">
+                  {filteredRows.length} rows
+                </div>
+              }
+            />
+
+            <div className="mt-3 space-y-2">
+              {filteredRows.length === 0 ? (
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+                  No profiles found.
+                </div>
+              ) : (
+                filteredRows.map((r) => {
+                  const scope = inferScope(r);
+                  const active = selectedId === r.id;
+
+                  return (
+                    <button
+                      key={profileKey(r)}
+                      onClick={() => setSelectedId(r.id)}
+                      className={[
+                        "w-full rounded-2xl border p-4 text-left transition",
+                        active
+                          ? "border-white/20 bg-white/[0.08]"
+                          : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.14]",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-white">
+                            {r.city || r.county || r.pha_name || r.state}
+                          </div>
+                          <div className="mt-1 text-xs text-white/50">
+                            {r.city
+                              ? `${r.county || "—"} • ${r.state}`
+                              : r.county
+                                ? `${r.state}`
+                                : `${r.state} baseline`}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge tone={scope === "org" ? "warn" : "neutral"}>
+                            {scope}
+                          </Badge>
+                          <Badge>friction {r.friction_multiplier ?? 1.0}</Badge>
+                        </div>
+                      </div>
+
+                      {r.notes ? (
+                        <div className="mt-2 line-clamp-2 text-sm text-white/65">
+                          {r.notes}
+                        </div>
+                      ) : null}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </GlassCard>
         </div>
 
-        <div className="overflow-auto">
-          <table className="w-full text-sm">
-            <thead className="text-white/70">
-              <tr className="border-b border-white/10">
-                <th className="text-left px-4 py-2">Scope</th>
-                <th className="text-left px-4 py-2">State</th>
-                <th className="text-left px-4 py-2">County</th>
-                <th className="text-left px-4 py-2">City</th>
-                <th className="text-left px-4 py-2">Friction</th>
-                <th className="text-left px-4 py-2">PHA</th>
-                <th className="text-right px-4 py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="text-white/85">
-              {rows.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-white/5 hover:bg-white/[0.03]"
-                >
-                  <td className="px-4 py-2">{r.scope}</td>
-                  <td className="px-4 py-2">{r.state}</td>
-                  <td className="px-4 py-2">{r.county || "—"}</td>
-                  <td className="px-4 py-2">{r.city || "—"}</td>
-                  <td className="px-4 py-2">{r.friction_multiplier}</td>
-                  <td className="px-4 py-2">{r.pha_name || "—"}</td>
-                  <td className="px-4 py-2 text-right">
-                    {r.scope === "org" ? (
+        <div className="space-y-4">
+          <GlassCard>
+            <SectionTitle
+              title={selected ? "Selected profile" : "Selected profile"}
+              right={
+                selected ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Badge
+                      tone={inferScope(selected) === "org" ? "warn" : "neutral"}
+                    >
+                      {inferScope(selected)}
+                    </Badge>
+                    <Badge>id {selected.id}</Badge>
+                  </div>
+                ) : null
+              }
+            />
+
+            {!selected ? (
+              <div className="mt-3 text-sm text-white/60">
+                Select a profile to inspect its current operational model.
+              </div>
+            ) : (
+              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="space-y-2">
+                    <Row label="State" value={selected.state} />
+                    <Row label="County" value={selected.county || "—"} />
+                    <Row label="City" value={selected.city || "—"} />
+                    <Row label="PHA" value={selected.pha_name || "—"} />
+                    <Row
+                      label="Friction multiplier"
+                      value={selected.friction_multiplier ?? 1.0}
+                    />
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {inferScope(selected) === "org" ? (
                       <button
-                        onClick={() => deleteOne(r)}
-                        className="px-3 py-1.5 rounded-xl text-xs bg-red-500/10 border border-red-500/20 hover:bg-red-500/15 transition cursor-pointer text-red-100"
+                        onClick={() => loadIntoForm(selected)}
+                        className="rounded-xl border border-emerald-400/25 bg-emerald-500/15 px-3 py-2 text-xs text-white hover:bg-emerald-500/20"
                       >
-                        Delete
+                        Load into editor
+                      </button>
+                    ) : null}
+
+                    {inferScope(selected) === "org" ? (
+                      <button
+                        onClick={() => deleteOne(selected)}
+                        className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-100 hover:bg-red-500/15"
+                      >
+                        Delete override
                       </button>
                     ) : (
-                      <span className="text-xs text-white/40">Global</span>
+                      <span className="text-xs text-white/45">
+                        Global rows cannot be deleted here.
+                      </span>
                     )}
-                  </td>
-                </tr>
-              ))}
-              {!rows.length ? (
-                <tr>
-                  <td className="px-4 py-6 text-white/60" colSpan={7}>
-                    No profiles found.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="text-xs uppercase tracking-wider text-white/45">
+                    Notes
+                  </div>
+                  <div className="mt-2 text-sm text-white/75">
+                    {selected.notes || "No notes recorded."}
+                  </div>
+                </div>
+
+                <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <div className="text-xs uppercase tracking-wider text-white/45">
+                    Policy JSON
+                  </div>
+                  <pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs text-white/80">
+                    {pretty(policyObject(selected))}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </GlassCard>
+
+          <GlassCard>
+            <SectionTitle
+              title="Create / update org override"
+              right={
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={clearForm}
+                    className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white/75 hover:bg-white/[0.08]"
+                  >
+                    Clear form
+                  </button>
+                </div>
+              }
+            />
+
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <input
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="City (optional)"
+                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+              />
+              <input
+                value={county}
+                onChange={(e) => setCounty(e.target.value)}
+                placeholder="County (optional)"
+                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+              />
+              <input
+                value={String(friction)}
+                onChange={(e) => setFriction(Number(e.target.value))}
+                placeholder="Friction (e.g. 1.25)"
+                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+              />
+              <input
+                value={phaName}
+                onChange={(e) => setPhaName(e.target.value)}
+                placeholder="PHA name (optional)"
+                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+              />
+            </div>
+
+            <textarea
+              value={policyJson}
+              onChange={(e) => setPolicyJson(e.target.value)}
+              rows={14}
+              className="mt-3 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-white"
+            />
+
+            <input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Notes (optional)"
+              className="mt-3 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+            />
+
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                onClick={saveProfile}
+                disabled={saveBusy}
+                className="rounded-xl border border-emerald-400/25 bg-emerald-500/15 px-3 py-2 text-sm text-white transition hover:bg-emerald-500/20 disabled:opacity-50"
+              >
+                {saveBusy ? "Saving…" : "Save override"}
+              </button>
+
+              <div className="text-xs text-white/60">
+                Tip: leave city and county blank to override the state baseline
+                for your org.
+              </div>
+            </div>
+          </GlassCard>
         </div>
       </div>
 

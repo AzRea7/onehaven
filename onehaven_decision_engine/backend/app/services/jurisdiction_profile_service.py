@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from datetime import datetime
 from typing import Any, Optional
@@ -48,6 +49,273 @@ def _dumps(v: Any) -> str:
         return json.dumps(v, ensure_ascii=False)
     except Exception:
         return "{}"
+
+
+def _deep_merge(base: Any, override: Any) -> Any:
+    if isinstance(base, dict) and isinstance(override, dict):
+        out = dict(base)
+        for k, v in override.items():
+            if k in out:
+                out[k] = _deep_merge(out[k], v)
+            else:
+                out[k] = copy.deepcopy(v)
+        return out
+    return copy.deepcopy(override)
+
+
+def _dedupe_dict_list(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for x in rows:
+        if not isinstance(x, dict):
+            continue
+        key = str(
+            x.get("code")
+            or x.get("rule_key")
+            or x.get("title")
+            or x.get("description")
+            or ""
+        ).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(x)
+
+    return out
+
+
+def _is_warren_market(*, state: str, county: Optional[str], city: Optional[str]) -> bool:
+    return (
+        _norm_state(state) == "MI"
+        and _norm_county(county) == "macomb"
+        and _norm_city(city) == "warren"
+    )
+
+
+def _default_warren_policy() -> dict[str, Any]:
+    return {
+        "summary": "Evidence-backed Warren municipal rental operations profile",
+        "compliance": {
+            "rental_license_required": "yes",
+            "inspection_required": "yes",
+            "inspection_frequency": "biennial",
+            "certificate_required_before_occupancy": "yes",
+            "local_agent_required": "yes",
+            "local_agent_radius_miles": 50,
+            "owner_po_box_allowed": "no",
+            "all_fees_must_be_paid": "yes",
+            "city_debts_block_license": "yes",
+        },
+        "licensing": {
+            "license_nontransferable": "yes",
+            "renewal_days_before_expiration": 60,
+            "license_term_years": 2,
+        },
+        "documents": {
+            "application_packet_known": "yes",
+            "instructions_known": "yes",
+            "registration_checklist_new_known": "yes",
+            "registration_checklist_renewal_known": "yes",
+            "inspection_checklist_known": "yes",
+            "owner_information_form_known": "yes",
+            "tenant_information_form_known": "yes",
+        },
+        "fees": {
+            "schedule_known": "yes",
+            "fee_schedule_source": "city_rental_inspections_division_page",
+        },
+        "state_rules": {
+            "source_of_income_discrimination_prohibited": "yes",
+            "source_of_income_effective_date": "2025-04-02",
+            "source_of_income_threshold_units": 5,
+        },
+        "required_actions": [
+            {
+                "code": "WARREN_RENTAL_LICENSE_REQUIRED",
+                "title": "Warren rental license required",
+                "severity": "fail",
+                "category": "licensing",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+                "suggested_fix": "Complete Warren rental license application and obtain license approval.",
+            },
+            {
+                "code": "WARREN_BIENNIAL_INSPECTION_REQUIRED",
+                "title": "Warren biennial rental inspection required",
+                "severity": "fail",
+                "category": "inspection",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+                "suggested_fix": "Schedule and pass Warren's required rental inspection.",
+            },
+            {
+                "code": "WARREN_ALL_FEES_PAID_REQUIRED",
+                "title": "Warren requires rental fees to be paid before license issuance",
+                "severity": "fail",
+                "category": "fees",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+                "suggested_fix": "Pay all required rental registration / licensing / inspection fees.",
+            },
+            {
+                "code": "WARREN_CITY_DEBTS_BLOCK_LICENSE",
+                "title": "Warren blocks license issuance when listed city debts remain unpaid",
+                "severity": "fail",
+                "category": "fees",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+                "suggested_fix": "Clear listed taxes, assessments, utility balances, blight-related debts, and related city obligations.",
+            },
+            {
+                "code": "WARREN_LOCAL_AGENT_REQUIRED",
+                "title": "Warren local agent required",
+                "severity": "fail",
+                "category": "jurisdiction",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+                "suggested_fix": "Designate a qualified local agent that meets Warren requirements.",
+            },
+            {
+                "code": "WARREN_LOCAL_AGENT_MAX_RADIUS_MILES",
+                "title": "Warren local agent must be within 50 miles",
+                "severity": "fail",
+                "category": "jurisdiction",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+                "suggested_fix": "Confirm your local agent is an individual located within 50 miles of Warren.",
+            },
+            {
+                "code": "WARREN_OWNER_PO_BOX_ALLOWED",
+                "title": "Warren does not allow P.O. boxes for required legal/home address fields",
+                "severity": "fail",
+                "category": "documents",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+                "suggested_fix": "Use a valid physical legal/home address where Warren requires one; do not use a P.O. box.",
+            },
+            {
+                "code": "MI_SOURCE_OF_INCOME_DISCRIMINATION_PROHIBITED",
+                "title": "Michigan source-of-income discrimination protections apply",
+                "severity": "warn",
+                "category": "fair_housing",
+                "source": "mi_state_rule",
+                "blocks_local": False,
+                "blocks_voucher": False,
+                "blocks_lease_up": False,
+                "suggested_fix": "Ensure screening, leasing, and rejection logic do not discriminate based on lawful source of income where applicable.",
+            },
+        ],
+        "blocking_items": [
+            {
+                "code": "WARREN_RENTAL_LICENSE_REQUIRED",
+                "title": "Warren rental license required",
+                "severity": "fail",
+                "category": "licensing",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+            },
+            {
+                "code": "WARREN_BIENNIAL_INSPECTION_REQUIRED",
+                "title": "Warren biennial rental inspection required",
+                "severity": "fail",
+                "category": "inspection",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+            },
+            {
+                "code": "WARREN_CITY_DEBTS_BLOCK_LICENSE",
+                "title": "Warren blocks license issuance when listed city debts remain unpaid",
+                "severity": "fail",
+                "category": "fees",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+            },
+            {
+                "code": "WARREN_LOCAL_AGENT_REQUIRED",
+                "title": "Warren local agent required",
+                "severity": "fail",
+                "category": "jurisdiction",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+            },
+            {
+                "code": "WARREN_OWNER_PO_BOX_ALLOWED",
+                "title": "Warren does not allow P.O. boxes for required legal/home address fields",
+                "severity": "fail",
+                "category": "documents",
+                "source": "warren_profile",
+                "blocks_local": True,
+                "blocks_voucher": True,
+                "blocks_lease_up": True,
+            },
+        ],
+        "rules": [
+            {
+                "rule_key": "MI_SOURCE_OF_INCOME_DISCRIMINATION_PROHIBITED",
+                "label": "Michigan source-of-income discrimination protections apply",
+                "status": "warn",
+                "severity": "warn",
+                "category": "fair_housing",
+                "source": "mi_state_rule",
+                "blocks_local": False,
+                "blocks_voucher": False,
+                "blocks_lease_up": False,
+                "suggested_fix": "Ensure screening and leasing workflows comply with Michigan source-of-income protections.",
+            }
+        ],
+        "evidence": {
+            "municipal_primary": [
+                "https://www.cityofwarren.org/departments/rental-inspections-division/",
+                "https://www.cityofwarren.org/wp-content/uploads/2024/03/Rental-Application-Paperwork-revised2-Fillable.pdf",
+            ],
+            "state_primary": [
+                "https://www.legislature.mi.gov/documents/mcl/pdf/mcl-Act-348-of-1972.pdf",
+                "https://www.courts.michigan.gov/496687/siteassets/publications/impact/written/civil/impact-e-mail-4-9-25-civil.pdf",
+            ],
+        },
+    }
+
+
+def _augment_policy_for_market(
+    *,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    policy: dict[str, Any],
+) -> dict[str, Any]:
+    base = copy.deepcopy(policy or {})
+
+    if _is_warren_market(state=state, county=county, city=city):
+        merged = _deep_merge(_default_warren_policy(), base)
+        merged["required_actions"] = _dedupe_dict_list(merged.get("required_actions") or [])
+        merged["blocking_items"] = _dedupe_dict_list(merged.get("blocking_items") or [])
+        merged["rules"] = _dedupe_dict_list(merged.get("rules") or [])
+        return merged
+
+    return base
 
 
 def list_profiles(
@@ -142,13 +410,24 @@ def resolve_profile(
             "rules": [],
             "notes": None,
             "profile_id": None,
+            "market": {
+                "state": st,
+                "county": req_county,
+                "city": req_city,
+            },
         }
 
     candidates.sort(key=lambda t: (-t[0], -t[1], t[2]))
     _best_spec, best_scope_pri, _rid, chosen, lvl = candidates[0]
 
     scope = "org" if best_scope_pri == 1 else "global"
-    policy = _loads(getattr(chosen, "policy_json", None), {})
+    raw_policy = _loads(getattr(chosen, "policy_json", None), {})
+    policy = _augment_policy_for_market(
+        state=st,
+        county=req_county,
+        city=req_city,
+        policy=raw_policy,
+    )
 
     return {
         "matched": True,
@@ -160,6 +439,11 @@ def resolve_profile(
         "rules": policy.get("rules", []),
         "notes": chosen.notes,
         "profile_id": int(chosen.id),
+        "market": {
+            "state": st,
+            "county": req_county,
+            "city": req_city,
+        },
     }
 
 
@@ -178,6 +462,14 @@ def upsert_profile(
     st = _norm_state(state)
     cnty = _norm_county(county)
     cty = _norm_city(city)
+
+    if isinstance(policy, dict):
+        policy = _augment_policy_for_market(
+            state=st,
+            county=cnty,
+            city=cty,
+            policy=policy,
+        )
 
     q = (
         select(JurisdictionProfile)
@@ -226,6 +518,7 @@ def resolve_operational_policy(
     city: Optional[str],
     county: Optional[str],
     state: str = "MI",
+    pha_name: Optional[str] = None,
 ) -> dict[str, Any]:
     from app.services.policy_projection_service import build_property_compliance_brief
 
@@ -243,7 +536,7 @@ def resolve_operational_policy(
         state=state,
         county=county,
         city=city,
-        pha_name=base.get("pha_name"),
+        pha_name=pha_name or base.get("pha_name"),
     )
 
     policy = base.get("policy") or {}
@@ -251,53 +544,56 @@ def resolve_operational_policy(
     policy_required_actions = policy.get("required_actions", [])
     policy_blocking_items = policy.get("blocking_items", [])
 
-    combined_required_actions = []
-    combined_required_actions.extend(brief.get("required_actions", []))
-    combined_required_actions.extend(policy_required_actions)
+    combined_required_actions: list[dict[str, Any]] = []
+    for x in brief.get("required_actions", []):
+        if isinstance(x, dict):
+            combined_required_actions.append(x)
+    for x in policy_required_actions:
+        if isinstance(x, dict):
+            combined_required_actions.append(x)
 
-    combined_blocking_items = []
-    combined_blocking_items.extend(brief.get("blocking_items", []))
-    combined_blocking_items.extend(policy_blocking_items)
+    combined_blocking_items: list[dict[str, Any]] = []
+    for x in brief.get("blocking_items", []):
+        if isinstance(x, dict):
+            combined_blocking_items.append(x)
+    for x in policy_blocking_items:
+        if isinstance(x, dict):
+            combined_blocking_items.append(x)
 
-    dedup_required: list[dict[str, Any]] = []
-    seen_required: set[str] = set()
-    for x in combined_required_actions:
-        key = str(
-            x.get("code")
-            or x.get("rule_key")
-            or x.get("title")
-            or x.get("description")
-            or ""
-        ).strip().lower()
-        if not key or key in seen_required:
-            continue
-        seen_required.add(key)
-        dedup_required.append(x)
-
-    dedup_blocking: list[dict[str, Any]] = []
-    seen_blocking: set[str] = set()
-    for x in combined_blocking_items:
-        key = str(
-            x.get("code")
-            or x.get("rule_key")
-            or x.get("title")
-            or x.get("description")
-            or ""
-        ).strip().lower()
-        if not key or key in seen_blocking:
-            continue
-        seen_blocking.add(key)
-        dedup_blocking.append(x)
+    dedup_required = _dedupe_dict_list(combined_required_actions)
+    dedup_blocking = _dedupe_dict_list(combined_blocking_items)
 
     return {
         **base,
-        "rules": rules,
+        "rules": _dedupe_dict_list(rules if isinstance(rules, list) else []),
         "coverage": brief.get("coverage", {}),
         "brief": brief.get("compliance", {}),
         "blocking_items": dedup_blocking,
         "required_actions": dedup_required,
         "evidence_links": brief.get("evidence_links", []),
     }
+
+
+def summarize_profile(
+    db: Session,
+    *,
+    org_id: int,
+    city: Optional[str],
+    county: Optional[str],
+    state: str = "MI",
+    pha_name: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Compatibility alias for older callers.
+    """
+    return resolve_operational_policy(
+        db,
+        org_id=org_id,
+        city=city,
+        county=county,
+        state=state,
+        pha_name=pha_name,
+    )
 
 
 def delete_profile(

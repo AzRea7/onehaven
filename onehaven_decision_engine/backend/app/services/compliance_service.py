@@ -1,4 +1,3 @@
-# backend/app/services/compliance_service.py
 from __future__ import annotations
 
 import json
@@ -10,8 +9,15 @@ from sqlalchemy.orm import Session
 
 from ..domain.compliance.hqs import summarize_items, top_fix_candidates
 from ..domain.compliance.hqs_library import get_effective_hqs_items
-from ..models import AuditEvent, Inspection, Property, PropertyChecklistItem, RehabTask, WorkflowEvent
-from ..services.jurisdiction_profile_service import summarize_profile
+from ..models import (
+    AuditEvent,
+    Inspection,
+    Property,
+    PropertyChecklistItem,
+    RehabTask,
+    WorkflowEvent,
+)
+from ..services.jurisdiction_profile_service import resolve_operational_policy
 from ..services.policy_projection_service import build_property_compliance_brief
 
 
@@ -27,11 +33,16 @@ def _now() -> datetime:
 
 
 def _j(v: Any) -> str:
-    return json.dumps(v, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps(v, separators=(",", ":"), ensure_ascii=False, default=str)
 
 
 def _get_property(db: Session, *, org_id: int, property_id: int) -> Property:
-    prop = db.scalar(select(Property).where(Property.org_id == org_id, Property.id == property_id))
+    prop = db.scalar(
+        select(Property).where(
+            Property.org_id == org_id,
+            Property.id == property_id,
+        )
+    )
     if not prop:
         raise ValueError("property not found")
     return prop
@@ -57,10 +68,6 @@ def _checklist_rows(db: Session, *, org_id: int, property_id: int) -> list[Prope
             .order_by(PropertyChecklistItem.id.asc())
         ).all()
     )
-
-
-def _normalize_policy_task_title(title: str) -> str:
-    return " ".join((title or "").strip().lower().split())
 
 
 def _rehab_task_exists(db: Session, *, org_id: int, property_id: int, title: str) -> bool:
@@ -106,7 +113,11 @@ def _ensure_policy_task(
     return True
 
 
-def _status_from_checklist(code: str, by_code: dict[str, PropertyChecklistItem], severity: str) -> tuple[str, str | None]:
+def _status_from_checklist(
+    code: str,
+    by_code: dict[str, PropertyChecklistItem],
+    severity: str,
+) -> tuple[str, str | None]:
     row = by_code.get(code.upper())
     if row is None:
         return STATUS_UNKNOWN, "No checklist evidence recorded yet."
@@ -115,9 +126,12 @@ def _status_from_checklist(code: str, by_code: dict[str, PropertyChecklistItem],
     status = getattr(row, "status", None)
     notes = getattr(row, "notes", None)
 
-    if completed is True or str(status or "").lower() in {"done", "pass", "passed", "complete", "completed"}:
+    status_norm = str(status or "").strip().lower()
+
+    if completed is True or status_norm in {"done", "pass", "passed", "complete", "completed"}:
         return STATUS_PASS, notes
-    if completed is False or str(status or "").lower() in {"fail", "failed", "open", "blocked"}:
+
+    if completed is False or status_norm in {"fail", "failed", "open", "blocked"}:
         return (STATUS_FAIL if severity == "fail" else STATUS_WARN), notes
 
     return STATUS_UNKNOWN, notes
@@ -154,182 +168,322 @@ def _rule_result(
     }
 
 
-def _yn_unknown(v: Any) -> str:
-    s = str(v or "").strip().lower()
-    if s in {"yes", "true", "required"}:
-        return "yes"
-    if s in {"no", "false", "not_required"}:
-        return "no"
-    return "unknown"
+def _policy_item_to_rule(
+    raw: dict[str, Any],
+    *,
+    default_source: str,
+    default_category: str,
+    default_severity: str,
+    default_blocks_local: bool = False,
+    default_blocks_voucher: bool = False,
+    default_blocks_lease_up: bool = False,
+) -> dict[str, Any]:
+    code = str(
+        raw.get("code")
+        or raw.get("rule_key")
+        or raw.get("title")
+        or raw.get("description")
+        or "POLICY_ITEM"
+    ).strip().upper().replace(" ", "_")
+
+    label = str(
+        raw.get("title")
+        or raw.get("description")
+        or raw.get("label")
+        or code.replace("_", " ").title()
+    ).strip()
+
+    severity = str(raw.get("severity") or default_severity).strip().lower()
+    if severity not in {"fail", "warn", "unknown", "info"}:
+        try:
+            sev_num = int(raw.get("severity"))
+            severity = "fail" if sev_num >= 4 else "warn"
+        except Exception:
+            severity = default_severity
+
+    status = str(raw.get("status") or STATUS_FAIL).strip().lower()
+    if status not in {STATUS_PASS, STATUS_FAIL, STATUS_WARN, STATUS_UNKNOWN, STATUS_NA}:
+        status = STATUS_FAIL if severity == "fail" else STATUS_WARN
+
+    blocks_local = bool(raw.get("blocks_local", default_blocks_local))
+    blocks_voucher = bool(raw.get("blocks_voucher", default_blocks_voucher))
+    blocks_lease_up = bool(raw.get("blocks_lease_up", default_blocks_lease_up))
+    blocks_hqs = bool(raw.get("blocks_hqs", False))
+
+    return _rule_result(
+        key=code,
+        label=label,
+        source=str(raw.get("source") or default_source),
+        status=status,
+        severity=severity,
+        category=str(raw.get("category") or default_category),
+        blocks_hqs=blocks_hqs,
+        blocks_local=blocks_local,
+        blocks_voucher=blocks_voucher,
+        blocks_lease_up=blocks_lease_up,
+        suggested_fix=raw.get("suggested_fix") or raw.get("fix") or raw.get("description"),
+        evidence=raw.get("evidence"),
+    )
+
+
+def _is_warren_market(prop: Property) -> bool:
+    return (
+        str(getattr(prop, "state", "") or "").strip().upper() == "MI"
+        and str(getattr(prop, "county", "") or "").strip().lower() == "macomb"
+        and str(getattr(prop, "city", "") or "").strip().lower() == "warren"
+    )
+
+
+def _build_warren_fallback_rules(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    policy = profile_summary.get("policy") or {}
+    if not isinstance(policy, dict):
+        policy = {}
+
+    compliance = policy.get("compliance") or {}
+    state_rules = policy.get("state_rules") or {}
+
+    def _yes(v: Any) -> bool:
+        return str(v or "").strip().lower() in {"yes", "true", "required", "1"}
+
+    def _no(v: Any) -> bool:
+        return str(v or "").strip().lower() in {"no", "false", "not_allowed", "not_required", "0"}
+
+    rental_license_required = _yes(compliance.get("rental_license_required"))
+    inspection_required = _yes(compliance.get("inspection_required"))
+    all_fees_paid_required = _yes(compliance.get("all_fees_must_be_paid"))
+    city_debts_block_license = _yes(compliance.get("city_debts_block_license"))
+    local_agent_required = _yes(compliance.get("local_agent_required"))
+    local_agent_radius = compliance.get("local_agent_radius_miles")
+    owner_po_box_allowed = not _no(compliance.get("owner_po_box_allowed"))
+    soi_protected = _yes(state_rules.get("source_of_income_discrimination_prohibited"))
+
+    out: list[dict[str, Any]] = []
+
+    if rental_license_required:
+        out.append(
+            _rule_result(
+                key="WARREN_RENTAL_LICENSE_REQUIRED",
+                label="Warren rental license required",
+                source="warren_profile",
+                status=STATUS_FAIL,
+                severity="fail",
+                category="licensing",
+                blocks_local=True,
+                blocks_lease_up=True,
+                blocks_voucher=True,
+                suggested_fix="Complete Warren rental license application and obtain license approval.",
+            )
+        )
+
+    if inspection_required:
+        inspection_frequency = str(compliance.get("inspection_frequency") or "required").strip().lower()
+        frequency_label = "Warren biennial rental inspection required" if inspection_frequency == "biennial" else "Warren rental inspection required"
+        out.append(
+            _rule_result(
+                key="WARREN_BIENNIAL_INSPECTION_REQUIRED",
+                label=frequency_label,
+                source="warren_profile",
+                status=STATUS_FAIL,
+                severity="fail",
+                category="inspection",
+                blocks_local=True,
+                blocks_lease_up=True,
+                blocks_voucher=True,
+                suggested_fix="Schedule and pass Warren's required rental inspection.",
+            )
+        )
+
+    if all_fees_paid_required:
+        out.append(
+            _rule_result(
+                key="WARREN_ALL_FEES_PAID_REQUIRED",
+                label="Warren requires rental fees to be paid before license issuance",
+                source="warren_profile",
+                status=STATUS_FAIL,
+                severity="fail",
+                category="fees",
+                blocks_local=True,
+                blocks_lease_up=True,
+                blocks_voucher=True,
+                suggested_fix="Pay all required rental registration / licensing / inspection fees.",
+            )
+        )
+
+    if city_debts_block_license:
+        out.append(
+            _rule_result(
+                key="WARREN_CITY_DEBTS_BLOCK_LICENSE",
+                label="Warren blocks license issuance when listed city debts remain unpaid",
+                source="warren_profile",
+                status=STATUS_FAIL,
+                severity="fail",
+                category="fees",
+                blocks_local=True,
+                blocks_lease_up=True,
+                blocks_voucher=True,
+                suggested_fix="Clear listed taxes, assessments, utility balances, blight-related debts, and related city obligations.",
+            )
+        )
+
+    if local_agent_required:
+        radius_text = f" within {local_agent_radius} miles" if local_agent_radius else ""
+        out.append(
+            _rule_result(
+                key="WARREN_LOCAL_AGENT_REQUIRED",
+                label=f"Warren local agent required{radius_text}",
+                source="warren_profile",
+                status=STATUS_FAIL,
+                severity="fail",
+                category="jurisdiction",
+                blocks_local=True,
+                blocks_lease_up=True,
+                blocks_voucher=True,
+                suggested_fix="Designate a qualified local agent that meets Warren requirements.",
+            )
+        )
+
+    if local_agent_radius:
+        out.append(
+            _rule_result(
+                key="WARREN_LOCAL_AGENT_MAX_RADIUS_MILES",
+                label=f"Warren local agent must be within {local_agent_radius} miles",
+                source="warren_profile",
+                status=STATUS_FAIL,
+                severity="fail",
+                category="jurisdiction",
+                blocks_local=True,
+                blocks_lease_up=True,
+                blocks_voucher=True,
+                suggested_fix=f"Confirm your local agent is an individual located within {local_agent_radius} miles of Warren.",
+            )
+        )
+
+    if owner_po_box_allowed is False:
+        out.append(
+            _rule_result(
+                key="WARREN_OWNER_PO_BOX_ALLOWED",
+                label="Warren does not allow P.O. boxes for required legal/home address fields",
+                source="warren_profile",
+                status=STATUS_FAIL,
+                severity="fail",
+                category="documents",
+                blocks_local=True,
+                blocks_lease_up=True,
+                blocks_voucher=True,
+                suggested_fix="Use a valid physical legal/home address where Warren requires one; do not use a P.O. box.",
+            )
+        )
+
+    if soi_protected:
+        out.append(
+            _rule_result(
+                key="MI_SOURCE_OF_INCOME_DISCRIMINATION_PROHIBITED",
+                label="Michigan source-of-income discrimination protections apply",
+                source="mi_state_rule",
+                status=STATUS_WARN,
+                severity="warn",
+                category="fair_housing",
+                blocks_local=False,
+                blocks_voucher=False,
+                blocks_lease_up=False,
+                suggested_fix="Ensure screening, leasing, and rejection logic do not discriminate based on lawful source of income where applicable.",
+            )
+        )
+
+    return out
+
+
+def _dedupe_rules(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    rank = {
+        "fail": 4,
+        "warn": 3,
+        "unknown": 2,
+        "info": 1,
+        "pass": 0,
+        "not_applicable": -1,
+    }
+
+    for item in rows:
+        key = str(item.get("rule_key") or "").strip().upper()
+        if not key:
+            continue
+
+        existing = out.get(key)
+        if existing is None:
+            out[key] = item
+            continue
+
+        current_rank = rank.get(str(item.get("severity") or "").lower(), 0)
+        existing_rank = rank.get(str(existing.get("severity") or "").lower(), 0)
+        if current_rank > existing_rank:
+            out[key] = item
+
+    return list(out.values())
 
 
 def _build_local_rules_from_profile(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
-    coverage = profile_summary.get("coverage") or {}
-    profile_json = profile_summary.get("profile_json") or {}
-    compliance = (profile_json.get("compliance") or {}) if isinstance(profile_json, dict) else {}
-    voucher = (profile_json.get("voucher") or {}) if isinstance(profile_json, dict) else {}
-    inspections = (profile_json.get("inspections") or {}) if isinstance(profile_json, dict) else {}
-    documents = (profile_json.get("documents") or {}) if isinstance(profile_json, dict) else {}
-    lead = (profile_json.get("lead") or {}) if isinstance(profile_json, dict) else {}
+    """
+    Prefer explicit operational-policy outputs:
+      * required_actions
+      * blocking_items
+      * rules
+    Also keep one governance confidence rule from coverage.
+    """
+    rules: list[dict[str, Any]] = []
 
+    for raw in profile_summary.get("required_actions") or []:
+        if not isinstance(raw, dict):
+            continue
+        rules.append(
+            _policy_item_to_rule(
+                raw,
+                default_source="jurisdiction_policy",
+                default_category="jurisdiction",
+                default_severity="fail",
+                default_blocks_local=True,
+                default_blocks_voucher=True,
+                default_blocks_lease_up=True,
+            )
+        )
+
+    for raw in profile_summary.get("blocking_items") or []:
+        if not isinstance(raw, dict):
+            continue
+        rules.append(
+            _policy_item_to_rule(
+                raw,
+                default_source="jurisdiction_policy",
+                default_category="jurisdiction_blocker",
+                default_severity="fail",
+                default_blocks_local=True,
+                default_blocks_voucher=True,
+                default_blocks_lease_up=True,
+            )
+        )
+
+    for raw in profile_summary.get("rules") or []:
+        if not isinstance(raw, dict):
+            continue
+        rules.append(
+            _policy_item_to_rule(
+                raw,
+                default_source="jurisdiction_rule",
+                default_category="jurisdiction_rule",
+                default_severity="warn",
+                default_blocks_local=False,
+                default_blocks_voucher=False,
+                default_blocks_lease_up=False,
+            )
+        )
+
+    coverage = profile_summary.get("coverage") or {}
     confidence = str(coverage.get("confidence_label") or "low").lower()
     readiness = str(coverage.get("production_readiness") or "needs_review").lower()
 
-    rules: list[dict[str, Any]] = []
-
-    registration_required = _yn_unknown(compliance.get("registration_required"))
-    inspection_required = _yn_unknown(compliance.get("inspection_required"))
-    certificate_required = _yn_unknown(compliance.get("certificate_required_before_occupancy"))
-    lead_required = _yn_unknown(lead.get("lead_safe_required") or lead.get("lead_clearance_required"))
-    landlord_packet_required = _yn_unknown(voucher.get("landlord_packet_required"))
-    hap_required = _yn_unknown(voucher.get("hap_contract_and_tenancy_addendum_required"))
-    local_reinspection = _yn_unknown(inspections.get("reinspection_required_after_fail"))
-    business_license_required = _yn_unknown(compliance.get("business_license_required") or compliance.get("rental_license_required"))
-    fee_schedule_known = "yes" if (profile_json.get("fees") or {}) else "unknown"
-    document_stack_known = "yes" if documents else "unknown"
-
-    def requirement_status(v: str, *, hard_block: bool, unknown_blocks: bool = True) -> str:
-        if v == "yes":
-            return STATUS_FAIL
-        if v == "no":
-            return STATUS_PASS
-        return STATUS_UNKNOWN if unknown_blocks else STATUS_WARN
-
     rules.append(
         _rule_result(
-            key="local_registration_cleared",
-            label="Local rental registration / registration equivalent cleared",
-            source="jurisdiction_profile",
-            status=requirement_status(registration_required, hard_block=True),
-            severity="fail",
-            category="jurisdiction",
-            blocks_local=registration_required != "no",
-            blocks_lease_up=registration_required != "no",
-            blocks_voucher=registration_required != "no",
-            suggested_fix="Complete local rental registration / registration-equivalent workflow and record proof.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="local_inspection_cleared",
-            label="Local municipal inspection workflow cleared",
-            source="jurisdiction_profile",
-            status=requirement_status(inspection_required, hard_block=True),
-            severity="fail",
-            category="jurisdiction",
-            blocks_local=inspection_required != "no",
-            blocks_lease_up=inspection_required != "no",
-            blocks_voucher=inspection_required != "no",
-            suggested_fix="Book and pass required local rental inspection and record outcome.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="certificate_before_occupancy_cleared",
-            label="Certificate / compliance approval before occupancy cleared",
-            source="jurisdiction_profile",
-            status=requirement_status(certificate_required, hard_block=True),
-            severity="fail",
-            category="jurisdiction",
-            blocks_local=certificate_required != "no",
-            blocks_lease_up=certificate_required != "no",
-            blocks_voucher=certificate_required != "no",
-            suggested_fix="Obtain certificate of compliance / occupancy approval before lease-up.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="rental_license_cleared",
-            label="Rental / business / landlord license requirement cleared",
-            source="jurisdiction_profile",
-            status=requirement_status(business_license_required, hard_block=True),
-            severity="fail",
-            category="licensing",
-            blocks_local=business_license_required != "no",
-            blocks_lease_up=business_license_required != "no",
-            blocks_voucher=business_license_required != "no",
-            suggested_fix="Confirm and complete any local rental or business licensing requirement.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="fee_schedule_known",
-            label="Local fees / recurring charges are known",
-            source="jurisdiction_profile",
-            status=STATUS_PASS if fee_schedule_known == "yes" else STATUS_UNKNOWN,
-            severity="warn",
-            category="fees",
-            blocks_local=False,
-            blocks_lease_up=False,
-            suggested_fix="Verify all local registration, inspection, certification, and renewal fees.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="document_stack_known",
-            label="Required local documents are known",
-            source="jurisdiction_profile",
-            status=STATUS_PASS if document_stack_known == "yes" else STATUS_UNKNOWN,
-            severity="warn",
-            category="documents",
-            blocks_local=False,
-            blocks_lease_up=False,
-            suggested_fix="Confirm all required uploads/forms/disclosures for this market.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="lead_safe_cleared",
-            label="Lead-safe / deteriorated paint requirements cleared",
-            source="jurisdiction_profile",
-            status=requirement_status(lead_required, hard_block=False),
-            severity="warn",
-            category="lead",
-            blocks_local=False,
-            blocks_lease_up=lead_required == "yes",
-            blocks_voucher=lead_required == "yes",
-            suggested_fix="Complete any required lead-safe stabilization / clearance process.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="pha_landlord_packet_cleared",
-            label="PHA landlord packet requirements cleared",
-            source="jurisdiction_profile",
-            status=requirement_status(landlord_packet_required, hard_block=True),
-            severity="fail",
-            category="voucher",
-            blocks_voucher=landlord_packet_required != "no",
-            suggested_fix="Complete any required PHA landlord packet / owner registration items.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="pha_hap_documents_cleared",
-            label="HAP contract / tenancy addendum workflow cleared",
-            source="jurisdiction_profile",
-            status=requirement_status(hap_required, hard_block=True),
-            severity="fail",
-            category="voucher",
-            blocks_voucher=hap_required != "no",
-            suggested_fix="Prepare and complete HAP contract / tenancy addendum requirements.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="local_reinspection_logic_known",
-            label="Local reinspection / fail-followup logic is known",
-            source="jurisdiction_profile",
-            status=STATUS_PASS if local_reinspection in {"yes", "no"} else STATUS_UNKNOWN,
-            severity="warn",
-            category="jurisdiction",
-            blocks_local=False,
-            suggested_fix="Confirm local reinspection timing and fail-remediation deadlines.",
-        )
-    )
-    rules.append(
-        _rule_result(
-            key="policy_confidence_sufficient",
+            key="POLICY_CONFIDENCE_SUFFICIENT",
             label="Jurisdiction policy confidence is sufficient for automation",
             source="policy_coverage",
             status=STATUS_PASS if confidence in {"high", "medium"} and readiness == "ready" else STATUS_UNKNOWN,
@@ -343,7 +497,43 @@ def _build_local_rules_from_profile(profile_summary: dict[str, Any]) -> list[dic
         )
     )
 
-    return rules
+    return _dedupe_rules(rules)
+
+
+def _safe_property_policy_brief(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+    profile_summary: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Compatibility wrapper because policy_projection_service signature
+    may still be the older one.
+    """
+    try:
+        return build_property_compliance_brief(
+            db,
+            org_id=org_id,
+            state=getattr(prop, "state", None) or "MI",
+            county=getattr(prop, "county", None),
+            city=getattr(prop, "city", None),
+            pha_name=profile_summary.get("pha_name"),
+        ) or {}
+    except TypeError:
+        try:
+            return build_property_compliance_brief(
+                db,
+                org_id=None,
+                state=getattr(prop, "state", None) or "MI",
+                county=getattr(prop, "county", None),
+                city=getattr(prop, "city", None),
+                pha_name=profile_summary.get("pha_name"),
+            ) or {}
+        except Exception:
+            return {}
+    except Exception:
+        return {}
 
 
 def build_property_inspection_readiness(
@@ -354,11 +544,16 @@ def build_property_inspection_readiness(
 ) -> dict[str, Any]:
     prop = _get_property(db, org_id=org_id, property_id=property_id)
     checklist_rows = _checklist_rows(db, org_id=org_id, property_id=property_id)
-    by_code = {
-        str(getattr(r, "code", "") or "").strip().upper(): r
-        for r in checklist_rows
-        if str(getattr(r, "code", "") or "").strip()
-    }
+
+    by_code: dict[str, PropertyChecklistItem] = {}
+    for r in checklist_rows:
+        code = (
+            str(getattr(r, "item_code", None) or getattr(r, "code", None) or "")
+            .strip()
+            .upper()
+        )
+        if code:
+            by_code[code] = r
 
     effective_hqs = get_effective_hqs_items(db, org_id=org_id, prop=prop)
     hqs_items = effective_hqs.get("items") or []
@@ -366,8 +561,12 @@ def build_property_inspection_readiness(
     hqs_results: list[dict[str, Any]] = []
     for item in hqs_items:
         code = str(item.get("code") or "").strip().upper()
+        if not code:
+            continue
+
         severity = str(item.get("severity") or "fail").lower()
         status, evidence = _status_from_checklist(code, by_code, severity)
+
         hqs_results.append(
             _rule_result(
                 key=code,
@@ -376,31 +575,34 @@ def build_property_inspection_readiness(
                 status=status,
                 severity=severity,
                 category=str(item.get("category") or "other"),
-                blocks_hqs=(status == STATUS_FAIL and severity == "fail") or status == STATUS_UNKNOWN,
-                blocks_voucher=(status == STATUS_FAIL and severity == "fail") or status == STATUS_UNKNOWN,
+                blocks_hqs=(status in {STATUS_FAIL, STATUS_UNKNOWN} and severity == "fail"),
+                blocks_voucher=(status in {STATUS_FAIL, STATUS_UNKNOWN} and severity == "fail"),
                 blocks_lease_up=(status == STATUS_FAIL and severity == "fail"),
                 suggested_fix=item.get("suggested_fix"),
                 evidence=evidence,
             )
         )
 
-    profile_summary = summarize_profile(
+    profile_summary = resolve_operational_policy(
         db,
         org_id=org_id,
-        state=getattr(prop, "state", None),
+        state=getattr(prop, "state", None) or "MI",
         county=getattr(prop, "county", None),
         city=getattr(prop, "city", None),
-        pha_name=getattr(prop, "pha_name", None),
     )
 
     local_rules = _build_local_rules_from_profile(profile_summary)
 
+    if _is_warren_market(prop):
+        local_rules.extend(_build_warren_fallback_rules(profile_summary))
+
     latest_inspection = _latest_inspection(db, property_id=property_id)
     if latest_inspection is not None:
         passed = bool(getattr(latest_inspection, "passed", False))
+        inspection_id = getattr(latest_inspection, "id", None)
         local_rules.append(
             _rule_result(
-                key="latest_inspection_passed",
+                key="LATEST_INSPECTION_PASSED",
                 label="Latest recorded inspection passed",
                 source="inspection_history",
                 status=STATUS_PASS if passed else STATUS_FAIL,
@@ -410,34 +612,51 @@ def build_property_inspection_readiness(
                 blocks_voucher=not passed,
                 blocks_lease_up=not passed,
                 suggested_fix="Address failing items and pass reinspection.",
-                evidence=f"inspection_id={int(getattr(latest_inspection, 'id'))}",
+                evidence=f"inspection_id={inspection_id}" if inspection_id is not None else None,
             )
         )
 
-    all_results = hqs_results + local_rules
+    all_results = _dedupe_rules(hqs_results + local_rules)
 
-    blockers = [r for r in all_results if r["status"] in {STATUS_FAIL, STATUS_UNKNOWN} and (r["blocks_hqs"] or r["blocks_local"] or r["blocks_voucher"] or r["blocks_lease_up"])]
+    blockers = [
+        r for r in all_results
+        if r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
+        and (r["blocks_hqs"] or r["blocks_local"] or r["blocks_voucher"] or r["blocks_lease_up"])
+    ]
     warnings = [r for r in all_results if r["status"] == STATUS_WARN]
     failing = [r for r in all_results if r["status"] == STATUS_FAIL]
     unknowns = [r for r in all_results if r["status"] == STATUS_UNKNOWN]
 
-    hqs_ready = not any(r["blocks_hqs"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN} for r in all_results)
-    local_ready = not any(r["blocks_local"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN} for r in all_results)
-    voucher_ready = not any(r["blocks_voucher"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN} for r in all_results)
-    lease_up_ready = not any(r["blocks_lease_up"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN} for r in all_results)
+    hqs_ready = not any(
+        r["blocks_hqs"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
+        for r in all_results
+    )
+    local_ready = not any(
+        r["blocks_local"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
+        for r in all_results
+    )
+    voucher_ready = not any(
+        r["blocks_voucher"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
+        for r in all_results
+    )
+    lease_up_ready = not any(
+        r["blocks_lease_up"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
+        for r in all_results
+    )
 
     overall_status = "ready"
-    if not lease_up_ready or not voucher_ready:
+    if not lease_up_ready or not voucher_ready or not local_ready:
         overall_status = "blocked"
     elif warnings:
         overall_status = "attention"
 
     coverage = profile_summary.get("coverage") or {}
-    brief = {}
-    try:
-        brief = build_property_compliance_brief(db, org_id=org_id, property_id=property_id) or {}
-    except Exception:
-        brief = {}
+    brief = _safe_property_policy_brief(
+        db,
+        org_id=org_id,
+        prop=prop,
+        profile_summary=profile_summary,
+    )
 
     return {
         "ok": True,
@@ -448,9 +667,14 @@ def build_property_inspection_readiness(
             "county": getattr(prop, "county", None),
             "state": getattr(prop, "state", None),
             "zip": getattr(prop, "zip", None),
-            "pha_name": getattr(prop, "pha_name", None),
+            "pha_name": profile_summary.get("pha_name"),
         },
-        "market": profile_summary.get("market") or {},
+        "market": {
+            "scope": profile_summary.get("scope"),
+            "match_level": profile_summary.get("match_level"),
+            "profile_id": profile_summary.get("profile_id"),
+            "friction_multiplier": profile_summary.get("friction_multiplier"),
+        },
         "coverage": coverage,
         "overall_status": overall_status,
         "readiness": {
@@ -471,6 +695,7 @@ def build_property_inspection_readiness(
         "warning_items": warnings,
         "effective_hqs_sources": effective_hqs.get("sources") or [],
         "policy_brief": brief,
+        "jurisdiction": profile_summary,
     }
 
 
@@ -481,8 +706,12 @@ def generate_policy_tasks_for_property(
     actor_user_id: int,
     property_id: int,
 ) -> dict[str, Any]:
-    readiness = build_property_inspection_readiness(db, org_id=org_id, property_id=property_id)
-    prop = _get_property(db, org_id=org_id, property_id=property_id)
+    readiness = build_property_inspection_readiness(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    _get_property(db, org_id=org_id, property_id=property_id)
 
     created = 0
     created_titles: list[str] = []
@@ -565,7 +794,6 @@ def generate_policy_tasks_for_property(
             created_at=now,
         )
     )
-    db.commit()
 
     return {
         "ok": True,
@@ -583,21 +811,32 @@ def run_hqs(
     org_id: int,
     actor_user_id: int,
     property_id: int,
-    create_tasks: bool = True,
+    actor_email: str | None = None,
+    auto_create_rehab_tasks: bool | None = None,
+    create_tasks: bool | None = None,
 ) -> dict[str, Any]:
     """
     Step-11 upgraded implementation:
-      - still supports legacy HQS summary expectations
-      - now drives from effective HQS + jurisdiction profile + readiness blockers
+      - supports older callers that pass actor_email / auto_create_rehab_tasks
+      - drives from effective HQS + jurisdiction profile + readiness blockers
+      - does not commit internally; router/service caller can decide transaction boundary
     """
-    readiness = build_property_inspection_readiness(db, org_id=org_id, property_id=property_id)
+    should_create_tasks = create_tasks
+    if should_create_tasks is None:
+        should_create_tasks = bool(auto_create_rehab_tasks) if auto_create_rehab_tasks is not None else True
+
+    readiness = build_property_inspection_readiness(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
     checklist_rows = _checklist_rows(db, org_id=org_id, property_id=property_id)
 
     summary = summarize_items(checklist_rows)
     fix_candidates = top_fix_candidates(checklist_rows)
 
     task_info = {"ok": True, "created": 0, "titles": []}
-    if create_tasks:
+    if should_create_tasks:
         task_info = generate_policy_tasks_for_property(
             db,
             org_id=org_id,
