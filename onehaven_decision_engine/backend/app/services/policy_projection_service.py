@@ -54,6 +54,7 @@ def _rule_family(rule_key: str) -> str:
         "federal_hcv_regulations_anchor": "federal_hcv",
         "federal_nspire_anchor": "federal_nspire",
         "mi_statute_anchor": "mi_landlord_tenant",
+        "mshda_program_anchor": "mshda_program",
         "document_reference": "document_reference",
     }
     return explicit.get(rule_key, rule_key)
@@ -85,7 +86,9 @@ def _specificity_score(
     return score
 
 
-def _source_info_map(db: Session, assertions: list[PolicyAssertion]) -> dict[int, PolicySource]:
+def _source_info_map(
+    db: Session, assertions: list[PolicyAssertion]
+) -> dict[int, PolicySource]:
     ids = sorted({a.source_id for a in assertions if a.source_id is not None})
     if not ids:
         return {}
@@ -179,6 +182,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
             {
                 "key": "register_rental_property",
                 "title": "Register rental property with the local authority",
+                "category": "municipal_registration",
                 "severity": "required",
             }
         )
@@ -187,29 +191,50 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
             {
                 "key": "schedule_initial_inspection",
                 "title": "Schedule initial rental inspection",
+                "category": "municipal_inspection",
                 "severity": "required",
             }
         )
-    if "certificate_required_before_occupancy" in keys:
-        actions.append(
-            {
-                "key": "obtain_certificate_before_occupancy",
-                "title": "Obtain required certificate/compliance approval before occupancy",
-                "severity": "required",
-            }
-        )
-        blockers.append(
-            {
-                "key": "certificate_pre_lease_blocker",
-                "title": "Do not move to lease-ready until certificate/compliance requirement is satisfied",
-                "severity": "blocking",
-            }
-        )
+    cert_rows = [a for a in assertions if a.rule_key == "certificate_required_before_occupancy"]
+    if cert_rows:
+        cert_statuses = []
+        for a in cert_rows:
+            value = _loads(a.value_json, {})
+            cert_statuses.append(str(value.get("status") or "yes").strip().lower())
+
+        if "yes" in cert_statuses:
+            actions.append(
+                {
+                    "key": "obtain_certificate_before_occupancy",
+                    "title": "Obtain required certificate/compliance approval before occupancy",
+                    "category": "municipal_certificate",
+                    "severity": "required",
+                }
+            )
+            blockers.append(
+                {
+                    "key": "certificate_pre_lease_blocker",
+                    "title": "Do not move to lease-ready until certificate/compliance requirement is satisfied",
+                    "category": "municipal_certificate",
+                    "severity": "blocking",
+                }
+            )
+        elif "conditional" in cert_statuses:
+            actions.append(
+                {
+                    "key": "check_certificate_before_occupancy_conditions",
+                    "title": "Check whether Warren certificate/city certification is required before occupancy",
+                    "category": "municipal_certificate",
+                    "severity": "required_if_applicable",
+                }
+            )
+
     if "hap_contract_and_tenancy_addendum_required" in keys:
         actions.append(
             {
                 "key": "prepare_hap_and_addendum",
                 "title": "Prepare HAP contract and tenancy addendum if voucher strategy is used",
+                "category": "voucher_workflow",
                 "severity": "required_if_voucher",
             }
         )
@@ -218,6 +243,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
             {
                 "key": "prepare_pha_landlord_packet",
                 "title": "Prepare required landlord packet / PHA paperwork",
+                "category": "pha_workflow",
                 "severity": "required_if_voucher",
             }
         )
@@ -226,6 +252,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
             {
                 "key": "confirm_current_pha_admin",
                 "title": "Confirm current PHA administrator before relying on older process documents",
+                "category": "pha_workflow",
                 "severity": "warning",
             }
         )
@@ -317,14 +344,35 @@ def _compute_local_rule_statuses(local_assertions: list[PolicyAssertion]) -> dic
         "certificate_required_before_occupancy",
     ]
     out: dict[str, str] = {}
+
     for rule_key in core:
         rows = [a for a in local_assertions if a.rule_key == rule_key]
-        if any(a.review_status == "verified" for a in rows):
-            out[rule_key] = "yes"
-        elif rows:
+        if not rows:
             out[rule_key] = "unknown"
+            continue
+
+        verified_rows = [a for a in rows if a.review_status == "verified"]
+        if verified_rows:
+            statuses: list[str] = []
+            for a in verified_rows:
+                value = _loads(a.value_json, {})
+                explicit_status = str(value.get("status") or "").strip().lower()
+                if explicit_status in {"yes", "no", "conditional"}:
+                    statuses.append(explicit_status)
+                else:
+                    statuses.append("yes")
+
+            if "yes" in statuses:
+                out[rule_key] = "yes"
+            elif "conditional" in statuses:
+                out[rule_key] = "conditional"
+            elif "no" in statuses:
+                out[rule_key] = "no"
+            else:
+                out[rule_key] = "unknown"
         else:
             out[rule_key] = "unknown"
+
     return out
 
 
@@ -372,6 +420,7 @@ def build_policy_summary(
     verified_rules: list[dict[str, Any]] = []
     evidence_links: list[dict[str, Any]] = []
     source_ids: list[int] = []
+    seen_source_ids: set[int] = set()
 
     for a in winners:
         value = _loads(a.value_json, {})
@@ -394,16 +443,19 @@ def build_policy_summary(
         )
 
         if src is not None:
-            evidence_links.append(
-                {
-                    "source_id": src.id,
-                    "publisher": src.publisher,
-                    "title": src.title,
-                    "url": src.url,
-                    "retrieved_at": src.retrieved_at.isoformat() if src.retrieved_at else None,
-                    "http_status": src.http_status,
-                }
-            )
+            status_ok = src.http_status is not None and 200 <= int(src.http_status) < 400
+            if status_ok and src.id not in seen_source_ids:
+                evidence_links.append(
+                    {
+                        "source_id": src.id,
+                        "publisher": src.publisher,
+                        "title": src.title,
+                        "url": src.url,
+                        "retrieved_at": src.retrieved_at.isoformat() if src.retrieved_at else None,
+                        "http_status": src.http_status,
+                    }
+                )
+                seen_source_ids.add(src.id)
 
     return {
         "summary": "Built from verified policy assertions with conflict resolution and inheritance.",
@@ -466,7 +518,11 @@ def project_verified_assertions_to_profile(
         .filter(JurisdictionProfile.state == st)
         .filter(JurisdictionProfile.county == cnty)
         .filter(JurisdictionProfile.city == cty)
-        .filter(JurisdictionProfile.org_id.is_(None) if org_id is None else JurisdictionProfile.org_id == org_id)
+        .filter(
+            JurisdictionProfile.org_id.is_(None)
+            if org_id is None
+            else JurisdictionProfile.org_id == org_id
+        )
         .first()
     )
 
@@ -560,20 +616,31 @@ def build_property_compliance_brief(
     }
 
     explanation_parts = []
+
     if compliance["registration_required"] == "yes":
         explanation_parts.append("local rental registration appears required")
+    elif compliance["registration_required"] == "conditional":
+        explanation_parts.append("local rental registration is conditionally required")
     elif compliance["registration_required"] == "unknown":
         explanation_parts.append("local rental registration is still under review")
 
     if compliance["inspection_required"] == "yes":
         explanation_parts.append("a local inspection workflow appears required")
+    elif compliance["inspection_required"] == "conditional":
+        explanation_parts.append("a local inspection workflow appears conditionally required")
     elif compliance["inspection_required"] == "unknown":
         explanation_parts.append("inspection requirements are still under review")
 
     if compliance["certificate_required_before_occupancy"] == "yes":
-        explanation_parts.append("certificate/compliance approval appears required before normal lease-up")
+        explanation_parts.append("certificate/compliance approval appears required before occupancy")
+    elif compliance["certificate_required_before_occupancy"] == "conditional":
+        explanation_parts.append(
+            "certificate/compliance approval is required in certain Warren occupancy scenarios "
+            "(for example no-occupancy/vacancy reoccupancy or altered/changed-use cases)"
+        )
     elif compliance["certificate_required_before_occupancy"] == "unknown":
         explanation_parts.append("certificate-before-occupancy requirements are still under review")
+
 
     if compliance["pha_specific_workflow"]:
         explanation_parts.append("voucher / PHA workflow requirements may also apply")
@@ -581,7 +648,7 @@ def build_property_compliance_brief(
     explanation = (
         f"This property resolves to {compliance['market_label']}. "
         + (
-            "Current verified and extracted rules indicate " + ", ".join(explanation_parts) + "."
+            "Current verified and inherited rules indicate " + ", ".join(explanation_parts) + "."
             if explanation_parts
             else "Verified market-specific compliance rules are still limited."
         )

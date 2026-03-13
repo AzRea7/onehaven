@@ -46,6 +46,11 @@ type BriefOut = {
   blocking_items?: any[];
   required_actions?: any[];
   evidence_links?: any[];
+  explanation?: string | null;
+  verified_rules?: any[];
+  local_rule_statuses?: Record<string, string>;
+  verified_rule_count_local?: number | null;
+  verified_rule_count_effective?: number | null;
 };
 
 type ProfileRow = {
@@ -77,6 +82,8 @@ type LegacyRuleRow = {
   notes?: string | null;
 };
 
+type MarketAction = "seed" | "collect" | "extract" | "build" | "pipeline";
+
 function parseMaybeJsonArray(v: any): string[] {
   if (Array.isArray(v)) return v.map(String);
 
@@ -99,6 +106,16 @@ function norm(s: any) {
   return String(s ?? "")
     .trim()
     .toLowerCase();
+}
+
+function titleCase(v: any) {
+  const s = String(v ?? "").trim();
+  if (!s) return "—";
+  return s
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function marketKey(x: {
@@ -195,7 +212,11 @@ function MarketCard({
     "Unknown market";
 
   const subtitleParts = [
-    row.city ? row.county : row.county || null,
+    row.city
+      ? titleCase(row.county)
+      : row.county
+        ? titleCase(row.county)
+        : null,
     row.state || "MI",
     row.pha_name ? `PHA: ${row.pha_name}` : null,
   ].filter(Boolean);
@@ -212,7 +233,9 @@ function MarketCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-white">{title}</div>
+          <div className="text-sm font-semibold text-white">
+            {titleCase(title)}
+          </div>
           <div className="mt-1 text-xs text-white/50">
             {subtitleParts.join(" • ") || "Michigan market"}
           </div>
@@ -255,20 +278,14 @@ export default function Jurisdictions() {
   const [onlyWeak, setOnlyWeak] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [detailBusy, setDetailBusy] = React.useState(false);
+  const [marketBusy, setMarketBusy] = React.useState<string>("");
   const [err, setErr] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
 
   const selectedRow = React.useMemo(
     () => coverageRows.find((r) => marketKey(r) === selectedKey) ?? null,
     [coverageRows, selectedKey],
   );
-
-  const coverageByKey = React.useMemo(() => {
-    const m = new Map<string, CoverageRow>();
-    for (const row of coverageRows) {
-      m.set(marketKey(row), row);
-    }
-    return m;
-  }, [coverageRows]);
 
   const profilesByKey = React.useMemo(() => {
     const m = new Map<string, ProfileRow[]>();
@@ -333,6 +350,46 @@ export default function Jurisdictions() {
     [selectedRow, legacyRulesByKey],
   );
 
+  function getOrgSlug() {
+    return (
+      ((import.meta as any).env?.VITE_ORG_SLUG as string | undefined)?.trim() ||
+      localStorage.getItem("org_slug") ||
+      ""
+    );
+  }
+
+  async function postMarketAction(
+    endpoint: string,
+    row: CoverageRow,
+    bodyExtra: Record<string, any> = {},
+  ) {
+    const res = await fetch(`/api/policy${endpoint}`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Org-Slug": getOrgSlug(),
+      },
+      body: JSON.stringify({
+        state: row.state || "MI",
+        county: row.county ?? null,
+        city: row.city ?? null,
+        pha_name: row.pha_name ?? null,
+        org_scope: false,
+        focus: "se_mi_extended",
+        ...bodyExtra,
+      }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(
+        json?.detail || json?.message || `Request failed: ${res.status}`,
+      );
+    }
+    return json;
+  }
+
   async function refresh() {
     setBusy(true);
     setErr(null);
@@ -348,10 +405,10 @@ export default function Jurisdictions() {
 
       const coverageList = Array.isArray(coverageOut)
         ? coverageOut
-        : Array.isArray(coverageOut?.rows)
-          ? coverageOut.rows
-          : Array.isArray(coverageOut?.items)
-            ? coverageOut.items
+        : Array.isArray((coverageOut as any)?.rows)
+          ? (coverageOut as any).rows
+          : Array.isArray((coverageOut as any)?.items)
+            ? (coverageOut as any).items
             : [];
 
       const sortedCoverage = [...coverageList].sort((a, b) => {
@@ -425,6 +482,44 @@ export default function Jurisdictions() {
     }
   }
 
+  async function runMarketAction(action: MarketAction, row: CoverageRow) {
+    const key = `${action}:${marketKey(row)}`;
+    setMarketBusy(key);
+    setErr(null);
+    setMessage(null);
+
+    try {
+      if (action === "seed") {
+        await postMarketAction("/market/seed", row);
+      } else if (action === "collect") {
+        await postMarketAction("/market/collect", row);
+      } else if (action === "extract") {
+        await postMarketAction("/market/extract", row);
+      } else if (action === "build") {
+        await postMarketAction("/market/build", row);
+      } else {
+        await postMarketAction("/market/pipeline", row);
+      }
+
+      setMessage(
+        `${action === "pipeline" ? "Pipeline" : titleCase(action)} completed for ${
+          row.city
+            ? titleCase(row.city)
+            : row.county
+              ? `${titleCase(row.county)} County`
+              : row.state
+        }.`,
+      );
+
+      await refresh();
+      await loadDetail(row);
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setMarketBusy("");
+    }
+  }
+
   React.useEffect(() => {
     refresh().catch((e) => setErr(String(e?.message || e)));
   }, []);
@@ -463,6 +558,22 @@ export default function Jurisdictions() {
               className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 hover:bg-white/15 disabled:opacity-50"
             >
               {busy ? "Refreshing…" : "Refresh"}
+            </button>
+
+            <button
+              onClick={() =>
+                runMarketAction("pipeline", {
+                  state: "MI",
+                  county: "macomb",
+                  city: "warren",
+                })
+              }
+              disabled={!!marketBusy}
+              className="rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-cyan-100 hover:bg-cyan-400/15 disabled:opacity-50"
+            >
+              {marketBusy === "pipeline:mi|macomb|warren|"
+                ? "Running Warren…"
+                : "Run Warren pipeline"}
             </button>
           </div>
         }
@@ -534,6 +645,12 @@ export default function Jurisdictions() {
           </label>
         </div>
 
+        {message ? (
+          <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-sm text-emerald-200">
+            {message}
+          </div>
+        ) : null}
+
         {err ? (
           <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-200">
             {err}
@@ -593,6 +710,38 @@ export default function Jurisdictions() {
                   }
                 />
 
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {(
+                    [
+                      "seed",
+                      "collect",
+                      "extract",
+                      "build",
+                      "pipeline",
+                    ] as MarketAction[]
+                  ).map((action) => {
+                    const key = `${action}:${marketKey(selectedRow)}`;
+                    return (
+                      <button
+                        key={action}
+                        onClick={() => runMarketAction(action, selectedRow)}
+                        disabled={!!marketBusy}
+                        className={`rounded-xl border px-3 py-2 text-sm transition disabled:opacity-50 ${
+                          action === "pipeline"
+                            ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/15"
+                            : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
+                        }`}
+                      >
+                        {marketBusy === key
+                          ? "Running…"
+                          : action === "pipeline"
+                            ? "Run pipeline"
+                            : titleCase(action)}
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                     <div className="space-y-2">
@@ -642,6 +791,12 @@ export default function Jurisdictions() {
                     </div>
                   </div>
                 </div>
+
+                {brief?.explanation ? (
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/75">
+                    {brief.explanation}
+                  </div>
+                ) : null}
               </GlassCard>
 
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -656,18 +811,23 @@ export default function Jurisdictions() {
                       (brief?.required_actions ?? []).map(
                         (item: any, idx: number) => (
                           <div
-                            key={`${item?.code || item?.title || idx}`}
+                            key={`${item?.code || item?.key || item?.title || idx}`}
                             className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
                           >
                             <div className="text-sm font-medium text-white">
                               {item?.title ||
                                 item?.description ||
                                 item?.code ||
+                                item?.key ||
                                 "Untitled action"}
                             </div>
                             <div className="mt-1 text-xs text-white/50">
-                              {(item?.category || "uncategorized").toString()} •
-                              code: {item?.code || "—"}
+                              {(
+                                item?.category ||
+                                item?.severity ||
+                                "uncategorized"
+                              ).toString()}{" "}
+                              • code: {item?.code || item?.key || "—"}
                             </div>
                           </div>
                         ),
@@ -687,18 +847,23 @@ export default function Jurisdictions() {
                       (brief?.blocking_items ?? []).map(
                         (item: any, idx: number) => (
                           <div
-                            key={`${item?.code || item?.title || idx}`}
+                            key={`${item?.code || item?.key || item?.title || idx}`}
                             className="rounded-xl border border-red-500/20 bg-red-500/[0.06] p-3"
                           >
                             <div className="text-sm font-medium text-red-100">
                               {item?.title ||
                                 item?.description ||
                                 item?.code ||
+                                item?.key ||
                                 "Untitled blocker"}
                             </div>
                             <div className="mt-1 text-xs text-red-100/70">
-                              {(item?.category || "uncategorized").toString()} •
-                              code: {item?.code || "—"}
+                              {(
+                                item?.category ||
+                                item?.severity ||
+                                "uncategorized"
+                              ).toString()}{" "}
+                              • code: {item?.code || item?.key || "—"}
                             </div>
                           </div>
                         ),

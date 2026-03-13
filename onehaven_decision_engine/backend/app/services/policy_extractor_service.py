@@ -86,6 +86,93 @@ def _source_rank_for(source: PolicySource) -> int:
         return 60
     return 100
 
+def _maybe_add_warren_certificate_rule(
+    created: list[PolicyAssertion],
+    *,
+    target_org_id: Optional[int],
+    source: PolicySource,
+    now: datetime,
+) -> None:
+    url = (source.url or "").lower()
+    title = (source.title or "").lower()
+
+    if "cityofwarren.org" not in url:
+        return
+
+    if (
+        "building_res_city_certification_app.pdf" in url
+        or "residential city certification" in title
+    ):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            now=now,
+            rule_key="certificate_required_before_occupancy",
+            value={
+                "summary": (
+                    "Warren requires residential city certification before occupancy "
+                    "for a vacant residential dwelling that has been posted 'no occupancy'."
+                ),
+                "status": "conditional",
+                "condition": (
+                    "Applies when a vacant residential dwelling has been posted "
+                    "'no occupancy' and is being reoccupied."
+                ),
+                "url": source.url,
+                "scope_hint": "city",
+            },
+            confidence=0.92,
+        )
+        return
+
+    if (
+        "building_certificate_of_compliance_application.pdf" in url
+        or "certificate of compliance application" in title
+    ):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            now=now,
+            rule_key="certificate_required_before_occupancy",
+            value={
+                "summary": (
+                    "Warren requires a certificate of compliance before occupancy "
+                    "where land, a building, or a structure is erected, altered, "
+                    "or changed in use."
+                ),
+                "status": "conditional",
+                "condition": (
+                    "Applies to erected, altered, or changed-in-use land/buildings/structures "
+                    "before occupancy or use."
+                ),
+                "url": source.url,
+                "scope_hint": "city",
+            },
+            confidence=0.92,
+        )
+        return
+
+
+def _haystack(source: PolicySource) -> str:
+    return " ".join(
+        [
+            str(source.url or ""),
+            str(source.title or ""),
+            str(source.publisher or ""),
+            str(source.notes or ""),
+        ]
+    ).lower()
+
+
+def _has_any(text: str, patterns: list[str]) -> bool:
+    return any(p in text for p in patterns)
+
+
+def _already_added(created: list[PolicyAssertion], rule_key: str) -> bool:
+    return any(a.rule_key == rule_key for a in created)
+
 
 def _add_assertion(
     created: list[PolicyAssertion],
@@ -97,6 +184,9 @@ def _add_assertion(
     value: dict[str, Any],
     confidence: float,
 ) -> None:
+    if _already_added(created, rule_key):
+        return
+
     created.append(
         PolicyAssertion(
             org_id=target_org_id,
@@ -130,6 +220,7 @@ def extract_assertions_for_source(
     Conservative extraction:
     - remove prior extracted assertions for this exact source + scope
     - re-emit clean extracted suggestions
+    - inference is based on source metadata only (url/title/publisher/notes)
     """
     target_org_id = org_id if org_scope else None
     now = datetime.utcnow()
@@ -147,6 +238,7 @@ def extract_assertions_for_source(
     url = (source.url or "").lower()
     title = (source.title or "").lower()
     publisher = (source.publisher or "").lower()
+    text = _haystack(source)
 
     _add_assertion(
         created,
@@ -227,7 +319,14 @@ def extract_assertions_for_source(
 
     # Detroit
     if "detroitmi.gov" in url:
-        if "landlord-rental" in url or "tenant-rental-property" in url:
+        if _has_any(
+            text,
+            [
+                "landlord-rental",
+                "tenant-rental-property",
+                "rental requirements faq",
+            ],
+        ):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -242,7 +341,7 @@ def extract_assertions_for_source(
                 confidence=0.55,
             )
 
-        if "rental-certificate" in url or "certificate of compliance" in title:
+        if _has_any(text, ["rental-certificate", "certificate of compliance"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -257,7 +356,7 @@ def extract_assertions_for_source(
                 confidence=0.55,
             )
 
-        if "inspections" in url or "faq" in url or "rental-compliance-map" in url:
+        if _has_any(text, ["inspections", "faq", "rental-compliance-map"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -273,7 +372,7 @@ def extract_assertions_for_source(
             )
 
     # Dearborn
-    if "dearborn.gov" in url and "rental-property-information" in url:
+    if "dearborn.gov" in url and "rental-property-information" in text:
         _add_assertion(
             created,
             target_org_id=target_org_id,
@@ -316,7 +415,14 @@ def extract_assertions_for_source(
 
     # Warren
     if "cityofwarren.org" in url:
-        if "rental-inspections-division" in url or "rental-application" in url:
+        _maybe_add_warren_certificate_rule(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            now=now,
+        )
+
+        if _has_any(text, ["rental-inspections-division", "rental application", "rental license application"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -344,7 +450,7 @@ def extract_assertions_for_source(
                 confidence=0.60,
             )
 
-        if "property-maintenance-division" in url:
+        if "property-maintenance-division" in text:
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -361,7 +467,7 @@ def extract_assertions_for_source(
 
     # Southfield
     if "cityofsouthfield.com" in url:
-        if "rental-housing" in url or "rental_registration_application" in url:
+        if _has_any(text, ["rental-housing", "rental registration application"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -389,7 +495,7 @@ def extract_assertions_for_source(
                 confidence=0.60,
             )
 
-        if "housing-section-8" in url:
+        if "housing-section-8" in text:
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -404,7 +510,7 @@ def extract_assertions_for_source(
                 confidence=0.55,
             )
 
-        if "transfer%20letter%202025" in url or "transfer letter" in title:
+        if _has_any(text, ["transfer letter 2025", "transfer%20letter%202025", "plymouth"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -422,7 +528,7 @@ def extract_assertions_for_source(
 
     # Pontiac
     if "pontiac.mi.us" in url or "pontiacminew" in url:
-        if "property_rentals" in url or "rentalapp" in url:
+        if _has_any(text, ["property_rentals", "rental registration application", "rentalapp"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -450,7 +556,7 @@ def extract_assertions_for_source(
                 confidence=0.60,
             )
 
-        if "building_safety" in url:
+        if "building_safety" in text:
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -467,10 +573,14 @@ def extract_assertions_for_source(
 
     # Livonia
     if "livonia.gov" in url:
-        if (
-            "inspection-building-enforcement" in url
-            or "rental-guide" in url
-            or "rental-license-application" in url
+        if _has_any(
+            text,
+            [
+                "inspection-building-enforcement",
+                "rental-guide",
+                "rental-license-application",
+                "rental properties guide",
+            ],
         ):
             _add_assertion(
                 created,
@@ -501,7 +611,7 @@ def extract_assertions_for_source(
 
     # Westland
     if "cityofwestland.com" in url:
-        if "residential-rental-program" in url or "rental-registration-application" in url:
+        if _has_any(text, ["residential-rental-program", "rental registration application"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -542,7 +652,7 @@ def extract_assertions_for_source(
                 confidence=0.60,
             )
 
-        if "building-division" in url:
+        if "building-division" in text:
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -559,7 +669,7 @@ def extract_assertions_for_source(
 
     # Taylor
     if "cityoftaylor.com" in url or "ci.taylor.mi.us" in url:
-        if "rental-department" in url or "rental-property-registration-application" in url:
+        if _has_any(text, ["rental-department", "rental property registration application"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -574,7 +684,7 @@ def extract_assertions_for_source(
                 confidence=0.65,
             )
 
-        if "rental-property-insp" in url or "rental-inspection" in url or "rental-department" in url:
+        if _has_any(text, ["rental-property-insp", "rental-inspection", "rental-department"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -605,7 +715,7 @@ def extract_assertions_for_source(
             confidence=0.70,
         )
 
-        if "landlord" in url or "faq" in url or "guide" in title or "guidebook" in title:
+        if _has_any(text, ["landlord", "faq", "guide", "guidebook"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -635,7 +745,7 @@ def extract_assertions_for_source(
             confidence=0.60,
         )
 
-        if "hcv-landlords" in url:
+        if "hcv-landlords" in text:
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
@@ -649,7 +759,7 @@ def extract_assertions_for_source(
                 confidence=0.60,
             )
 
-        if "payment" in url or "schedule" in url:
+        if _has_any(text, ["payment", "schedule", "hap/uap"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_principal, require_owner
 from app.db import get_db
-from app.policy_models import JurisdictionCoverageStatus, PolicyAssertion, PolicySource
+from app.policy_models import PolicyAssertion, PolicySource
 from app.services.policy_catalog import (
     catalog_for_market,
     catalog_mi_authoritative,
@@ -20,10 +20,15 @@ from app.services.policy_coverage_service import (
     compute_coverage_status,
     upsert_coverage_status,
 )
-from app.services.policy_extractor_service import extract_assertions_for_source
+from app.services.policy_extractor_service import extract_assertions_for_source, _rule_family_for, _assertion_type_for, _priority_for, _source_rank_for
+from app.services.policy_pipeline_service import run_market_pipeline
 from app.services.policy_projection_service import (
     build_property_compliance_brief,
     project_verified_assertions_to_profile,
+)
+from app.services.policy_review_service import (
+    auto_verify_market_assertions,
+    supersede_replaced_assertions,
 )
 from app.services.policy_source_service import (
     collect_catalog_all_municipalities,
@@ -73,6 +78,15 @@ class BatchReviewIn(BaseModel):
     review_notes: Optional[str] = None
     verification_reason: Optional[str] = None
 
+class SourceBackedAssertionIn(BaseModel):
+    source_id: int
+    rule_key: str
+    value: dict[str, Any]
+    confidence: float = Field(0.95, ge=0.0, le=1.0)
+    review_notes: str
+    verification_reason: str = "official_source_review"
+    org_scope: bool = False
+
 
 class BuildProfileIn(BaseModel):
     state: str = "MI"
@@ -96,8 +110,19 @@ class MarketIn(BaseModel):
     state: str = "MI"
     county: Optional[str] = None
     city: Optional[str] = None
+    pha_name: Optional[str] = None
     org_scope: bool = False
     focus: str = "se_mi_extended"
+
+
+class MarketBuildIn(BaseModel):
+    state: str = "MI"
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    org_scope: bool = False
+    focus: str = "se_mi_extended"
+    notes: Optional[str] = None
 
 
 def _loads(s: Optional[str], default: Any = None) -> Any:
@@ -123,6 +148,41 @@ def _norm_lower(s: Optional[str]) -> Optional[str]:
         return None
     v = s.strip().lower()
     return v or None
+
+
+def _norm_text(s: Optional[str]) -> Optional[str]:
+    if s is None:
+        return None
+    v = s.strip()
+    return v or None
+
+
+def _market_sources_for_catalog(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    focus: str,
+) -> list[PolicySource]:
+    items = catalog_for_market(
+        state=state,
+        county=county,
+        city=city,
+        focus=focus,
+    )
+    urls = [item.url.strip() for item in items]
+    if not urls:
+        return []
+
+    q = db.query(PolicySource).filter(PolicySource.url.in_(urls))
+    if org_id is None:
+        q = q.filter(PolicySource.org_id.is_(None))
+    else:
+        q = q.filter(PolicySource.org_id == org_id)
+
+    return q.order_by(PolicySource.id.asc()).all()
 
 
 @router.get("/catalog")
@@ -278,7 +338,7 @@ def collect_source(
             "url": s.url,
             "content_type": s.content_type,
             "http_status": s.http_status,
-            "retrieved_at": s.retrieved_at.isoformat(),
+            "retrieved_at": s.retrieved_at.isoformat() if s.retrieved_at else None,
             "content_sha256": s.content_sha256,
             "raw_path": s.raw_path,
             "notes": s.notes,
@@ -335,7 +395,7 @@ def list_sources(
                 "url": s.url,
                 "content_type": s.content_type,
                 "http_status": s.http_status,
-                "retrieved_at": s.retrieved_at.isoformat(),
+                "retrieved_at": s.retrieved_at.isoformat() if s.retrieved_at else None,
                 "content_sha256": s.content_sha256,
                 "raw_path": s.raw_path,
                 "notes": s.notes,
@@ -370,20 +430,16 @@ def extract_market(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    q = db.query(PolicySource)
+    target_org_id = principal.org_id if payload.org_scope else None
 
-    if payload.org_scope:
-        q = q.filter(PolicySource.org_id == principal.org_id)
-    else:
-        q = q.filter(PolicySource.org_id.is_(None))
-
-    q = q.filter(PolicySource.state == _norm_state(payload.state))
-    if payload.county:
-        q = q.filter(PolicySource.county == _norm_lower(payload.county))
-    if payload.city:
-        q = q.filter(PolicySource.city == _norm_lower(payload.city))
-
-    rows = q.order_by(PolicySource.id.asc()).all()
+    rows = _market_sources_for_catalog(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        focus=payload.focus,
+    )
 
     created_ids: list[int] = []
     results: list[dict] = []
@@ -392,7 +448,7 @@ def extract_market(
         created = extract_assertions_for_source(
             db,
             source=src,
-            org_id=principal.org_id,
+            org_id=principal.user_id,
             org_scope=payload.org_scope,
         )
         created_ids.extend([a.id for a in created])
@@ -608,6 +664,60 @@ def review_assertions_batch(
         "updated_ids": updated,
     }
 
+@router.post("/assertions/from-source")
+def create_verified_assertion_from_source(
+    payload: SourceBackedAssertionIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    src = db.query(PolicySource).filter(PolicySource.id == payload.source_id).first()
+    if not src:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    if src.org_id is not None and src.org_id != principal.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    target_org_id = principal.org_id if payload.org_scope else None
+
+    row = PolicyAssertion(
+        org_id=target_org_id,
+        source_id=src.id,
+        state=src.state,
+        county=src.county,
+        city=src.city,
+        pha_name=src.pha_name,
+        program_type=src.program_type,
+        rule_key=payload.rule_key,
+        rule_family=_rule_family_for(payload.rule_key),
+        assertion_type=_assertion_type_for(payload.rule_key),
+        value_json=json.dumps(payload.value, ensure_ascii=False),
+        confidence=float(payload.confidence),
+        priority=_priority_for(payload.rule_key),
+        source_rank=_source_rank_for(src),
+        review_status="verified",
+        review_notes=payload.review_notes,
+        reviewed_by_user_id=principal.user_id,
+        reviewed_at=datetime.utcnow(),
+        verification_reason=payload.verification_reason,
+        extracted_at=datetime.utcnow(),
+    )
+
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    return {
+        "ok": True,
+        "assertion": {
+            "id": row.id,
+            "source_id": row.source_id,
+            "rule_key": row.rule_key,
+            "review_status": row.review_status,
+            "confidence": row.confidence,
+        },
+    }
+
+
 
 @router.post("/profiles/build")
 def build_profile_from_verified_assertions(
@@ -806,4 +916,229 @@ def get_property_compliance_brief(
         county=county,
         city=city,
         pha_name=pha_name,
+    )
+
+
+# ---------------------------
+# New one-button market routes
+# ---------------------------
+
+@router.post("/market/seed")
+def seed_market(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+    row = upsert_coverage_status(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        notes=f"Seeded market row for {payload.city or payload.county or payload.state}.",
+    )
+    return {
+        "ok": True,
+        "market": {
+            "state": row.state,
+            "county": row.county,
+            "city": row.city,
+            "pha_name": row.pha_name,
+        },
+        "coverage": {
+            "id": row.id,
+            "coverage_status": row.coverage_status,
+            "production_readiness": row.production_readiness,
+        },
+    }
+
+
+@router.post("/market/collect")
+def collect_market_step(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+    results = collect_catalog_for_market(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        focus=payload.focus,
+    )
+    return {
+        "ok": True,
+        "market": {
+            "state": _norm_state(payload.state),
+            "county": _norm_lower(payload.county),
+            "city": _norm_lower(payload.city),
+            "pha_name": _norm_text(payload.pha_name),
+        },
+        "count": len(results),
+        "ok_count": sum(1 for r in results if r.fetch_ok),
+        "failed_count": sum(1 for r in results if not r.fetch_ok),
+        "results": [
+            {
+                "source_id": r.source.id,
+                "url": r.source.url,
+                "changed": r.changed,
+                "fetch_ok": r.fetch_ok,
+                "fetch_error": r.fetch_error,
+            }
+            for r in results
+        ],
+    }
+
+
+@router.post("/market/extract")
+def extract_market_step(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+
+    rows = _market_sources_for_catalog(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        focus=payload.focus,
+    )
+
+    created_ids: list[int] = []
+    results: list[dict] = []
+
+    for src in rows:
+        created = extract_assertions_for_source(
+            db,
+            source=src,
+            org_id=principal.user_id,
+            org_scope=payload.org_scope,
+        )
+        created_ids.extend([a.id for a in created])
+        results.append(
+            {
+                "source_id": src.id,
+                "url": src.url,
+                "created": len(created),
+            }
+        )
+
+    review_result = auto_verify_market_assertions(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        reviewer_user_id=principal.user_id,
+    )
+    supersede_result = supersede_replaced_assertions(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        reviewer_user_id=principal.user_id,
+    )
+
+    return {
+        "ok": True,
+        "market": {
+            "state": _norm_state(payload.state),
+            "county": _norm_lower(payload.county),
+            "city": _norm_lower(payload.city),
+            "pha_name": _norm_text(payload.pha_name),
+        },
+        "source_count": len(rows),
+        "assertion_count_created": len(created_ids),
+        "results": results,
+        "review": {
+            **review_result,
+            **supersede_result,
+        },
+    }
+
+
+@router.post("/market/build")
+def build_market_step(
+    payload: MarketBuildIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+
+    profile = project_verified_assertions_to_profile(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        notes=payload.notes or f"Projected from verified assertions for {payload.city or payload.county or payload.state}.",
+    )
+    coverage = upsert_coverage_status(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        notes=f"Coverage refreshed after build for {payload.city or payload.county or payload.state}.",
+    )
+    brief = build_property_compliance_brief(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+    )
+
+    return {
+        "ok": True,
+        "profile": {
+            "id": profile.id,
+            "state": profile.state,
+            "county": profile.county,
+            "city": profile.city,
+            "pha_name": profile.pha_name,
+            "friction_multiplier": profile.friction_multiplier,
+            "notes": profile.notes,
+            "policy": _loads(profile.policy_json, {}),
+        },
+        "coverage": {
+            "id": coverage.id,
+            "coverage_status": coverage.coverage_status,
+            "production_readiness": coverage.production_readiness,
+            "verified_rule_count": coverage.verified_rule_count,
+            "stale_warning_count": coverage.stale_warning_count,
+        },
+        "brief": brief,
+    }
+
+
+@router.post("/market/pipeline")
+def run_market_pipeline_route(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+    return run_market_pipeline(
+        db,
+        org_id=target_org_id,
+        reviewer_user_id=principal.user_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
     )

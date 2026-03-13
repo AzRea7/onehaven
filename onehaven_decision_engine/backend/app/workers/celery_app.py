@@ -39,5 +39,6 @@ celery_app.conf.update(
     # Task discovery
     imports=(
         "app.workers.agent_tasks",
+        "app.tasks.policy_ingestion_tasks",
     ),
 )

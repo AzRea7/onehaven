@@ -15,6 +15,40 @@ export type Principal = {
   plan_code?: string | null;
 };
 
+export type PolicyMarketPayload = {
+  state: string;
+  county?: string | null;
+  city?: string | null;
+  focus?: string;
+  org_scope?: boolean;
+  async_mode?: boolean;
+};
+
+export type PolicyReadinessRow = {
+  state: string;
+  county?: string | null;
+  city?: string | null;
+  label?: string | null;
+  coverage_status?: string | null;
+  production_readiness?: string | null;
+  confidence_label?: string | null;
+  verified_rule_count?: number | null;
+  source_count?: number | null;
+  fetch_failure_count?: number | null;
+  stale_warning_count?: number | null;
+};
+
+export type PolicyReviewQueueItem = {
+  id: number;
+  rule_key: string;
+  rule_family?: string | null;
+  review_status: string;
+  confidence?: number | null;
+  priority?: number | null;
+  severity?: string | null;
+  source_id?: number | null;
+};
+
 export type PropertyPhoto = {
   id: number;
   org_id?: number | null;
@@ -562,6 +596,100 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+
+  seedPolicyMarket: (payload: PolicyMarketPayload) =>
+    request<any>(`/policy/market/seed`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        focus: payload.focus ?? "se_mi_extended",
+        org_scope: payload.org_scope ?? false,
+        async_mode: payload.async_mode ?? false,
+      }),
+    }),
+
+  collectPolicyMarket: (payload: PolicyMarketPayload) =>
+    request<any>(`/policy/market/collect`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        focus: payload.focus ?? "se_mi_extended",
+        org_scope: payload.org_scope ?? false,
+        async_mode: payload.async_mode ?? false,
+      }),
+    }),
+
+  extractPolicyMarket: (payload: PolicyMarketPayload) =>
+    request<any>(`/policy/market/extract`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        focus: payload.focus ?? "se_mi_extended",
+        org_scope: payload.org_scope ?? false,
+        async_mode: payload.async_mode ?? false,
+      }),
+    }),
+
+  rebuildPolicyMarket: (
+    payload: PolicyMarketPayload & { pha_name?: string | null },
+  ) =>
+    request<any>(`/policy/profiles/build`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: payload.state,
+        county: payload.county ?? null,
+        city: payload.city ?? null,
+        pha_name: payload.pha_name ?? null,
+        org_scope: payload.org_scope ?? false,
+      }),
+    }),
+
+  getPolicyMarketStatus: (params: {
+    state?: string;
+    county?: string | null;
+    city?: string | null;
+    org_scope?: boolean;
+  }) =>
+    request<any>(
+      `/policy/market/status${qs({
+        state: params.state ?? "MI",
+        county: params.county ?? undefined,
+        city: params.city ?? undefined,
+        org_scope: params.org_scope ?? false,
+      })}`,
+    ),
+
+  getPolicyMarketReadiness: (params?: {
+    focus?: string;
+    org_scope?: boolean;
+  }) =>
+    request<{ ok: boolean; items: PolicyReadinessRow[] }>(
+      `/policy/market/readiness${qs({
+        focus: params?.focus ?? "se_mi_extended",
+        org_scope: params?.org_scope ?? false,
+      })}`,
+    ),
+
+  getPolicyReviewQueue: (params: {
+    state?: string;
+    county?: string | null;
+    city?: string | null;
+    org_scope?: boolean;
+  }) =>
+    request<{ ok: boolean; count: number; items: PolicyReviewQueueItem[] }>(
+      `/policy/review-queue${qs({
+        state: params.state ?? "MI",
+        county: params.county ?? undefined,
+        city: params.city ?? undefined,
+        org_scope: params.org_scope ?? false,
+      })}`,
+    ),
 
   createDeal: (payload: {
     property_id: number;

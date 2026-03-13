@@ -5,11 +5,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.policy_models import (
-    JurisdictionCoverageStatus,
-    PolicyAssertion,
-    PolicySource,
-)
+from app.policy_models import JurisdictionCoverageStatus, PolicyAssertion, PolicySource
 
 CORE_MUNICIPAL_RULES = {
     "rental_registration_required",
@@ -27,6 +23,7 @@ CORE_PHA_RULES = {
     "pha_admin_plan_anchor",
     "pha_administrator_changed",
     "hap_contract_and_tenancy_addendum_required",
+    "pha_landlord_packet_required",
 }
 
 
@@ -41,28 +38,103 @@ def _norm_lower(s: Optional[str]) -> Optional[str]:
     return v or None
 
 
-def _apply_scope_filters(
-    q,
-    model,
+def _norm_text(s: Optional[str]) -> Optional[str]:
+    if s is None:
+        return None
+    v = s.strip()
+    return v or None
+
+
+def _in_scope_assertion(
+    row: PolicyAssertion,
+    *,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> bool:
+    if row.county is not None and row.county != county:
+        return False
+    if row.city is not None and row.city != city:
+        return False
+    if row.pha_name is not None and row.pha_name != pha_name:
+        return False
+    return True
+
+
+def _in_scope_source(
+    row: PolicySource,
+    *,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> bool:
+    if row.county is not None and row.county != county:
+        return False
+    if row.city is not None and row.city != city:
+        return False
+    if row.pha_name is not None and row.pha_name != pha_name:
+        return False
+    return True
+
+
+def _query_market_assertions(
+    db: Session,
     *,
     org_id: Optional[int],
     state: str,
     county: Optional[str],
     city: Optional[str],
     pha_name: Optional[str],
-):
-    q = q.filter(model.state == state)
+) -> list[PolicyAssertion]:
+    q = db.query(PolicyAssertion).filter(PolicyAssertion.state == state)
     if org_id is None:
-        q = q.filter(model.org_id.is_(None))
+        q = q.filter(PolicyAssertion.org_id.is_(None))
     else:
-        q = q.filter((model.org_id == org_id) | (model.org_id.is_(None)))
-    if county is not None:
-        q = q.filter(model.county == county)
-    if city is not None:
-        q = q.filter(model.city == city)
-    if pha_name is not None and hasattr(model, "pha_name"):
-        q = q.filter(model.pha_name == pha_name)
-    return q
+        q = q.filter(
+            (PolicyAssertion.org_id == org_id) | (PolicyAssertion.org_id.is_(None))
+        )
+
+    rows = q.all()
+    return [
+        row
+        for row in rows
+        if _in_scope_assertion(
+            row,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+    ]
+
+
+def _query_market_sources(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> list[PolicySource]:
+    q = db.query(PolicySource).filter(PolicySource.state == state)
+    if org_id is None:
+        q = q.filter(PolicySource.org_id.is_(None))
+    else:
+        q = q.filter(
+            (PolicySource.org_id == org_id) | (PolicySource.org_id.is_(None))
+        )
+
+    rows = q.all()
+    return [
+        row
+        for row in rows
+        if _in_scope_source(
+            row,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+    ]
 
 
 def compute_coverage_status(
@@ -77,76 +149,88 @@ def compute_coverage_status(
     st = _norm_state(state)
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
-    pha = pha_name.strip() if pha_name else None
+    pha = _norm_text(pha_name)
 
-    src_q = db.query(PolicySource)
-    src_q = _apply_scope_filters(
-        src_q,
-        PolicySource,
+    sources = _query_market_sources(
+        db,
         org_id=org_id,
         state=st,
         county=cnty,
         city=cty,
         pha_name=pha,
     )
-    sources = src_q.all()
-
-    assertion_q = db.query(PolicyAssertion)
-    assertion_q = _apply_scope_filters(
-        assertion_q,
-        PolicyAssertion,
+    assertions = _query_market_assertions(
+        db,
         org_id=org_id,
         state=st,
         county=cnty,
         city=cty,
         pha_name=pha,
     )
-    assertions = assertion_q.all()
 
     verified = [a for a in assertions if a.review_status == "verified"]
     extracted = [a for a in assertions if a.review_status == "extracted"]
-    staleish = [a for a in assertions if a.review_status in {"needs_recheck", "stale"}]
+    staleish = [
+        a
+        for a in assertions
+        if a.review_status in {"needs_recheck", "stale"}
+        and a.superseded_by_assertion_id is None
+    ]
 
     verified_rule_keys = {a.rule_key for a in verified}
+
     source_count = len(sources)
-    fetch_failure_count = sum(1 for s in sources if s.http_status is None)
+    fetch_failure_count = sum(
+        1
+        for s in sources
+        if s.http_status is None
+    )
     stale_warning_count = len(staleish)
 
     has_sources = source_count > 0
-    has_extracted = len(extracted) > 0 or len(verified) > 0
+    has_extracted = bool(extracted or verified)
 
-    municipal_ok = len(CORE_MUNICIPAL_RULES & verified_rule_keys) >= 2
-    statefed_ok = len(CORE_STATE_FEDERAL_RULES & verified_rule_keys) >= 2
-    pha_ok = len(CORE_PHA_RULES & verified_rule_keys) >= 1
+    municipal_verified_count = len(CORE_MUNICIPAL_RULES & verified_rule_keys)
+    state_federal_verified_count = len(CORE_STATE_FEDERAL_RULES & verified_rule_keys)
+
+    # Municipal can be ready with registration + inspection verified.
+    municipal_ok = (
+        "rental_registration_required" in verified_rule_keys
+        and "inspection_program_exists" in verified_rule_keys
+    )
+
+    statefed_ok = state_federal_verified_count >= 2
+
+    pha_required = pha is not None
+    pha_ok = (not pha_required) or (len(CORE_PHA_RULES & verified_rule_keys) >= 1)
 
     coverage_status = "not_started"
-    production_readiness = "partial"
-
     if has_sources:
         coverage_status = "sources_ingested"
     if has_extracted:
         coverage_status = "assertions_extracted"
-    if len(verified) > 0:
+    if verified:
         coverage_status = "review_in_progress"
-
     if municipal_ok and statefed_ok:
         coverage_status = "verified_core"
-        production_readiness = "verified_core"
-
-    if municipal_ok and statefed_ok and (pha_ok or pha is None):
+    if municipal_ok and statefed_ok and pha_ok:
         coverage_status = "verified_extended"
-        production_readiness = "verified_extended"
+
+    production_readiness = "partial"
+    if has_extracted and not verified:
+        production_readiness = "needs_review"
+    if municipal_ok and statefed_ok and pha_ok:
+        production_readiness = "ready"
+    elif municipal_ok or statefed_ok:
+        production_readiness = "partial"
 
     if stale_warning_count > 0:
         production_readiness = "stale_warning"
 
-    if len(verified) == 0 and has_extracted:
-        production_readiness = "needs_review"
-
     confidence_label = "low"
-    if production_readiness == "verified_core":
+    if municipal_ok and statefed_ok:
         confidence_label = "medium"
-    if production_readiness == "verified_extended":
+    if production_readiness == "ready":
         confidence_label = "high"
     if production_readiness == "stale_warning":
         confidence_label = "medium"
@@ -169,6 +253,8 @@ def compute_coverage_status(
         "municipal_core_ok": municipal_ok,
         "state_federal_core_ok": statefed_ok,
         "pha_core_ok": pha_ok,
+        "municipal_verified_count": municipal_verified_count,
+        "state_federal_verified_count": state_federal_verified_count,
     }
 
 

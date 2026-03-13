@@ -61,14 +61,20 @@ def _dedupe(items: list[PolicyCatalogItem]) -> list[PolicyCatalogItem]:
     return out
 
 
-def catalog_municipalities(items: list[PolicyCatalogItem]) -> list[dict[str, Optional[str]]]:
+def catalog_municipalities(
+    items: list[PolicyCatalogItem],
+) -> list[dict[str, Optional[str]]]:
     seen: set[tuple[str, Optional[str], Optional[str]]] = set()
     out: list[dict[str, Optional[str]]] = []
 
     for item in items:
         if not item.city:
             continue
-        key = (_norm_state(item.state) or "MI", _norm_lower(item.county), _norm_lower(item.city))
+        key = (
+            _norm_state(item.state) or "MI",
+            _norm_lower(item.county),
+            _norm_lower(item.city),
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -102,18 +108,18 @@ def catalog_for_market(
         if (item.state or "MI") != st:
             continue
 
-        # State/global anchors always included for the state.
+        # State/global anchors always included.
         if item.city is None and item.county is None:
             out.append(item)
             continue
 
-        # County-scoped items
+        # County-scoped items.
         if item.city is None and item.county is not None:
             if cnty and item.county == cnty:
                 out.append(item)
             continue
 
-        # City-scoped items
+        # City-scoped items.
         if item.city is not None:
             if cty and item.city == cty:
                 out.append(item)
@@ -479,6 +485,40 @@ def _warren_pack() -> list[PolicyCatalogItem]:
             source_kind="municipal_registration",
             priority=10,
         ),
+                PolicyCatalogItem(
+            url="https://www.cityofwarren.org/departments/building-division/",
+            state="MI",
+            county="macomb",
+            city="warren",
+            publisher="City of Warren",
+            title="Building Division",
+            notes="Official Warren Building Division page with certificate and city certification application links.",
+            source_kind="municipal_building_anchor",
+            priority=15,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofwarren.org/wp-content/uploads/2019/08/Building_Res_City_Certification_App.pdf",
+            state="MI",
+            county="macomb",
+            city="warren",
+            publisher="City of Warren",
+            title="Application for Residential City Certification",
+            notes="Official Warren residential city certification application. Relevant to vacant residential dwellings posted no occupancy.",
+            source_kind="municipal_certificate",
+            priority=10,
+        ),
+        PolicyCatalogItem(
+            url="https://www.cityofwarren.org/wp-content/uploads/2019/08/Building_Certificate_of_Compliance_Application.pdf",
+            state="MI",
+            county="macomb",
+            city="warren",
+            publisher="City of Warren",
+            title="Certificate of Compliance Application",
+            notes="Official Warren certificate of compliance application. Relevant to changed use, altered buildings, and occupancy approvals.",
+            source_kind="municipal_certificate",
+            priority=10,
+        ),
+
         PolicyCatalogItem(
             url="https://www.cityofwarren.org/departments/property-maintenance-division/",
             state="MI",
@@ -720,40 +760,73 @@ def _taylor_pack() -> list[PolicyCatalogItem]:
     ]
 
 
+def _focus_county_sets() -> dict[str, list[str]]:
+    return {
+        "wayne_county_core": ["detroit", "dearborn", "livonia", "westland", "taylor"],
+        "oakland_county_core": ["southfield", "pontiac"],
+        "macomb_county_core": ["warren"],
+    }
+
+
 def catalog_mi_authoritative(focus: str = "se_mi_extended") -> list[PolicyCatalogItem]:
     """
     Focuses:
     - se_mi: federal/state + Detroit
     - se_mi_extended: federal/state + Detroit + Dearborn + Warren + Southfield + Pontiac + Livonia + Westland + Taylor
     - all_verified_core: alias for se_mi_extended
+    - wayne_county_core / oakland_county_core / macomb_county_core
     - detroit / dearborn / warren / southfield / pontiac / livonia / westland / taylor
     """
     focus = (focus or "se_mi_extended").strip().lower()
 
     items = _federal_and_state_baseline()
 
-    if focus in {"detroit", "se_mi", "se_mi_extended", "all_verified_core"}:
-        items.extend(_detroit_pack())
+    county_sets = _focus_county_sets()
+    if focus in county_sets:
+        expanded_focuses = county_sets[focus]
+    elif focus in {"all_verified_core"}:
+        expanded_focuses = [
+            "detroit",
+            "dearborn",
+            "warren",
+            "southfield",
+            "pontiac",
+            "livonia",
+            "westland",
+            "taylor",
+        ]
+    elif focus == "se_mi":
+        expanded_focuses = ["detroit"]
+    elif focus == "se_mi_extended":
+        expanded_focuses = [
+            "detroit",
+            "dearborn",
+            "warren",
+            "southfield",
+            "pontiac",
+            "livonia",
+            "westland",
+            "taylor",
+        ]
+    else:
+        expanded_focuses = [focus]
 
-    if focus in {"dearborn", "se_mi_extended", "all_verified_core"}:
-        items.extend(_dearborn_pack())
-
-    if focus in {"warren", "se_mi_extended", "all_verified_core"}:
-        items.extend(_warren_pack())
-
-    if focus in {"southfield", "se_mi_extended", "all_verified_core"}:
-        items.extend(_southfield_pack())
-
-    if focus in {"pontiac", "se_mi_extended", "all_verified_core"}:
-        items.extend(_pontiac_pack())
-
-    if focus in {"livonia", "se_mi_extended", "all_verified_core"}:
-        items.extend(_livonia_pack())
-
-    if focus in {"westland", "se_mi_extended", "all_verified_core"}:
-        items.extend(_westland_pack())
-
-    if focus in {"taylor", "se_mi_extended", "all_verified_core"}:
-        items.extend(_taylor_pack())
+    for f in expanded_focuses:
+        if f == "detroit":
+            items.extend(_detroit_pack())
+        elif f == "dearborn":
+            items.extend(_dearborn_pack())
+        elif f == "warren":
+            items.extend(_warren_pack())
+        elif f == "southfield":
+            items.extend(_southfield_pack())
+        elif f == "pontiac":
+            items.extend(_pontiac_pack())
+        elif f == "livonia":
+            items.extend(_livonia_pack())
+        elif f == "westland":
+            items.extend(_westland_pack())
+        elif f == "taylor":
+            items.extend(_taylor_pack())
 
     return _dedupe(items)
