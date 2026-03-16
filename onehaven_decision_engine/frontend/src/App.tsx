@@ -1,6 +1,6 @@
 import React from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
-import Shell from "./components/Shell";
+import { Navigate, Route, Routes } from "react-router-dom";
+import AppShell from "./components/AppShell";
 
 import Dashboard from "./pages/Dashboard";
 import Property from "./pages/Property";
@@ -30,7 +30,7 @@ function Protected({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <Shell>
+    <AppShell>
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
@@ -188,6 +188,6 @@ export default function App() {
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
-    </Shell>
+    </AppShell>
   );
 }

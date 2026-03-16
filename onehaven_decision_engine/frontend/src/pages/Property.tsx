@@ -1,10 +1,20 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
+import {
+  ArrowUpRight,
+  Banknote,
+  Filter,
+  Home,
+  ShieldAlert,
+  Wallet,
+} from "lucide-react";
+
 import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
-import VirtualList from "../components/VirtualList";
 import PageShell from "../components/PageShell";
 import GlobalFilters from "../components/GlobalFilters";
+import Surface from "../components/Surface";
+import EmptyState from "../components/EmptyState";
 import { filtersToApiParams, readFilters } from "../lib/filters";
 
 type Row = any;
@@ -16,27 +26,23 @@ function money(v: any) {
 
 function clsDecision(d?: string) {
   const x = (d || "REJECT").toUpperCase();
-  if (x === "PASS") return "border-green-400/25 bg-green-400/10 text-green-200";
-  if (x === "REVIEW")
-    return "border-yellow-300/25 bg-yellow-300/10 text-yellow-100";
-  return "border-red-400/25 bg-red-400/10 text-red-200";
+  if (x === "PASS") return "badge badge-success";
+  if (x === "REVIEW") return "badge badge-warning";
+  return "badge badge-danger";
 }
 
 function clsStage(s?: string) {
   const x = (s || "").toLowerCase();
-  if (x === "equity")
-    return "border-green-400/25 bg-green-400/10 text-green-200";
-  if (x === "cash" || x === "lease")
-    return "border-cyan-400/25 bg-cyan-400/10 text-cyan-200";
-  if (x === "tenant" || x === "compliance")
-    return "border-yellow-300/25 bg-yellow-300/10 text-yellow-100";
-  return "border-white/10 bg-white/[0.03] text-white/80";
+  if (x === "equity") return "badge badge-success";
+  if (x === "cash" || x === "lease") return "badge badge-accent";
+  if (x === "tenant" || x === "compliance") return "badge badge-warning";
+  return "badge";
 }
 
 function getFinancingType(price?: number | null) {
-  if (price == null || !Number.isFinite(Number(price))) return "unknown";
-  if (Number(price) < 75000) return "CASH DEAL";
-  return "DSCR LOAN";
+  if (price == null || !Number.isFinite(Number(price))) return "Unknown";
+  if (Number(price) < 75000) return "Cash";
+  return "DSCR";
 }
 
 type FinancingFilter = "ALL" | "CASH" | "DSCR";
@@ -112,8 +118,8 @@ export default function Properties() {
         null;
 
       const fin = getFinancingType(priceRaw == null ? null : Number(priceRaw));
-      if (financing === "CASH") return fin === "CASH DEAL";
-      if (financing === "DSCR") return fin === "DSCR LOAN";
+      if (financing === "CASH") return fin === "Cash";
+      if (financing === "DSCR") return fin === "DSCR";
       return true;
     });
   }, [rows, deferredQ, decision, financing]);
@@ -131,191 +137,213 @@ export default function Properties() {
     return c;
   }, [rows]);
 
-  const rowHeight = 104;
-
-  const renderRow = React.useCallback((r: any) => {
-    const p = r.property || r || {};
-    const deal = r.deal || {};
-    const u = r.last_underwriting_result || {};
-    const decisionTxt = (u.decision || "REJECT").toUpperCase();
-
-    const stage =
-      r?.workflow?.current_stage ||
-      r?.property_state?.current_stage ||
-      r?.stage ||
-      "deal";
-
-    const financingType = getFinancingType(
-      deal?.asking_price ?? deal?.price ?? p?.price ?? null,
-    );
-
-    return (
-      <Link
-        to={`/properties/${p.id}`}
-        className="block rounded-xl border border-transparent hover:border-white/10 hover:bg-white/[0.03] transition px-3 py-3"
-        style={{ contain: "layout paint" }}
-      >
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_120px_140px] gap-3 items-center">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-white truncate">
-              {p.address || `Property #${p.id}`}
-            </div>
-            <div className="text-xs text-white/50 truncate mt-0.5">
-              {p.city ? `${p.city}, ${p.state || ""} ${p.zip || ""}` : "—"}
-              {p.bedrooms != null ? ` · ${p.bedrooms}bd` : ""}
-              {deal.strategy
-                ? ` · ${(deal.strategy as string).toUpperCase()}`
-                : ""}
-            </div>
-
-            <div className="flex flex-wrap gap-2 mt-2">
-              <span
-                className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] ${clsDecision(decisionTxt)}`}
-              >
-                {decisionTxt}
-              </span>
-              <span
-                className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] ${clsStage(stage)}`}
-              >
-                {stage}
-              </span>
-              <span className="inline-flex rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/75">
-                {financingType}
-              </span>
-            </div>
-          </div>
-
-          <div className="text-right">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
-              DSCR
-            </div>
-            <div className="text-sm text-white/85 font-semibold mt-1">
-              {u.dscr != null ? Number(u.dscr).toFixed(2) : "—"}
-            </div>
-          </div>
-
-          <div className="text-right">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
-              Cash Flow
-            </div>
-            <div className="text-sm text-white/85 font-semibold mt-1">
-              {u.cash_flow != null ? money(u.cash_flow) : "—"}
-            </div>
-          </div>
-
-          <div className="text-right">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
-              Price
-            </div>
-            <div className="text-sm text-white/85 font-semibold mt-1">
-              {money(deal?.asking_price ?? deal?.price ?? p?.price)}
-            </div>
-          </div>
-        </div>
-      </Link>
-    );
-  }, []);
-
   return (
     <PageShell>
-      <div className="space-y-6">
+      <div className="app-stack">
         <PageHero
-          eyebrow="Portfolio"
+          eyebrow="Portfolio inventory"
           title="Properties"
-          subtitle="Scan investor readiness, jump into the cockpit, and track where each property sits in the tenant → lease → cash → equity chain."
+          subtitle="A cleaner property pipeline: glanceable decisions, financing posture, stage, and the fastest click path into the cockpit."
           actions={
             <>
-              <button
-                onClick={refresh}
-                className="oh-btn cursor-pointer"
-                title="Refresh"
-              >
-                sync
+              <button onClick={refresh} className="btn btn-secondary">
+                Refresh
               </button>
-              <span className="oh-badge border-green-400/25 bg-green-400/10 text-green-200">
-                PASS {counts.PASS}
-              </span>
-              <span className="oh-badge border-yellow-300/25 bg-yellow-300/10 text-yellow-100">
+              <span className="badge badge-success">PASS {counts.PASS}</span>
+              <span className="badge badge-warning">
                 REVIEW {counts.REVIEW}
               </span>
-              <span className="oh-badge border-red-400/25 bg-red-400/10 text-red-200">
-                REJECT {counts.REJECT}
-              </span>
+              <span className="badge badge-danger">REJECT {counts.REJECT}</span>
             </>
           }
         />
 
         <GlobalFilters />
 
-        <div className="oh-panel p-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search address / city / zip"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/90 placeholder:text-white/40 outline-none focus:border-white/20 focus:ring-2 focus:ring-white/10"
-            />
-            <select
-              value={decision}
-              onChange={(e) => setDecision(e.target.value as any)}
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/90 outline-none"
-            >
-              <option value="ALL">All decisions</option>
-              <option value="PASS">PASS</option>
-              <option value="REVIEW">REVIEW</option>
-              <option value="REJECT">REJECT</option>
-            </select>
-            <select
-              value={financing}
-              onChange={(e) => setFinancing(e.target.value as any)}
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/90 outline-none"
-            >
-              <option value="ALL">All financing</option>
-              <option value="CASH">Cash deals</option>
-              <option value="DSCR">DSCR deals</option>
-            </select>
-          </div>
-        </div>
+        <Surface
+          title="Local property filters"
+          subtitle="Fast client-side narrowing on top of your global URL filters."
+          padding="md"
+        >
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className="field">
+              <span className="field-label">Search</span>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search address / city / zip"
+                className="field-input"
+              />
+            </label>
 
-        {err && (
-          <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
-            {err}
-          </div>
-        )}
+            <label className="field">
+              <span className="field-label">Decision</span>
+              <select
+                value={decision}
+                onChange={(e) => setDecision(e.target.value as any)}
+                className="field-input"
+              >
+                <option value="ALL">All decisions</option>
+                <option value="PASS">PASS</option>
+                <option value="REVIEW">REVIEW</option>
+                <option value="REJECT">REJECT</option>
+              </select>
+            </label>
 
-        {loading ? (
-          <div className="oh-panel p-5">
-            <div className="text-sm text-white/70">Loading properties…</div>
+            <label className="field">
+              <span className="field-label">Financing</span>
+              <select
+                value={financing}
+                onChange={(e) => setFinancing(e.target.value as any)}
+                className="field-input"
+              >
+                <option value="ALL">All financing</option>
+                <option value="CASH">Cash</option>
+                <option value="DSCR">DSCR</option>
+              </select>
+            </label>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="oh-panel p-5">
-            <div className="text-sm text-white/70">No matching properties.</div>
-            <div className="text-xs text-white/45 mt-2">
-              Try clearing filters or import/create deals first.
+        </Surface>
+
+        {err ? (
+          <Surface tone="danger" padding="md">
+            <div className="text-sm text-red-300">{err}</div>
+          </Surface>
+        ) : null}
+
+        <Surface
+          title="Property list"
+          subtitle={`${filtered.length} visible ${
+            filtered.length === 1 ? "property" : "properties"
+          }`}
+          padding="md"
+        >
+          {loading ? (
+            <div className="grid gap-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="skeleton h-[120px] rounded-3xl" />
+              ))}
             </div>
-          </div>
-        ) : (
-          <div className="oh-panel p-2" style={{ contain: "layout paint" }}>
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_120px_140px] gap-3 px-3 py-2 text-[11px] uppercase tracking-[0.22em] text-white/45">
-              <div>Property</div>
-              <div className="text-right">DSCR</div>
-              <div className="text-right">Cash Flow</div>
-              <div className="text-right">Price</div>
-            </div>
-
-            <div className="hr my-1" />
-
-            <VirtualList
-              items={filtered}
-              itemHeight={rowHeight}
-              overscan={8}
-              itemKey={(r) => String(r?.property?.id ?? r?.id ?? Math.random())}
-              className="rounded-xl"
-              style={{ height: "calc(100vh - 470px)" }}
-              renderRow={(item) => renderRow(item)}
+          ) : !filtered.length ? (
+            <EmptyState
+              icon={Filter}
+              title="No properties matched"
+              description="Adjust the global or local filters. The list is working; it's just being ruthlessly obedient."
             />
-          </div>
-        )}
+          ) : (
+            <div className="grid gap-4">
+              {filtered.map((r: any) => {
+                const p = r.property || r || {};
+                const deal = r.deal || {};
+                const u = r.last_underwriting_result || {};
+                const decisionTxt = (u.decision || "REJECT").toUpperCase();
+
+                const stage =
+                  r?.workflow?.current_stage ||
+                  r?.property_state?.current_stage ||
+                  r?.stage ||
+                  "deal";
+
+                const financingType = getFinancingType(
+                  deal?.asking_price ?? deal?.price ?? p?.price ?? null,
+                );
+
+                return (
+                  <Link
+                    key={p.id}
+                    to={`/properties/${p.id}`}
+                    className="group block rounded-3xl border border-app bg-app-panel px-5 py-5 shadow-soft hover:-translate-y-[1px] hover:border-app-strong hover:shadow-soft-lg"
+                  >
+                    <div className="grid gap-5 xl:grid-cols-[1.4fr_0.9fr]">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-lg font-semibold text-app-0">
+                              {p.address || `Property #${p.id}`}
+                            </div>
+                            <div className="mt-1 truncate text-sm text-app-3">
+                              {p.city
+                                ? `${p.city}, ${p.state || ""} ${p.zip || ""}`
+                                : "—"}
+                              {p.bedrooms != null ? ` · ${p.bedrooms}bd` : ""}
+                              {deal.strategy
+                                ? ` · ${(deal.strategy as string).toUpperCase()}`
+                                : ""}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 text-app-4 group-hover:text-app-1">
+                            <span className="text-sm">Open</span>
+                            <ArrowUpRight className="h-4 w-4" />
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <span className={clsDecision(decisionTxt)}>
+                            {decisionTxt}
+                          </span>
+                          <span className={clsStage(stage)}>
+                            {stage.replaceAll("_", " ")}
+                          </span>
+                          <span className="badge">{financingType}</span>
+                          {p.red_zone ? (
+                            <span className="badge badge-danger">Red zone</span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
+                        <div className="rounded-2xl border border-app px-4 py-3">
+                          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                            <Wallet className="h-3.5 w-3.5" />
+                            Cash flow
+                          </div>
+                          <div className="mt-2 text-base font-semibold text-app-0">
+                            {u.cash_flow != null ? money(u.cash_flow) : "—"}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-app px-4 py-3">
+                          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                            <Banknote className="h-3.5 w-3.5" />
+                            Price
+                          </div>
+                          <div className="mt-2 text-base font-semibold text-app-0">
+                            {money(
+                              deal?.asking_price ?? deal?.price ?? p?.price,
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-app px-4 py-3">
+                          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                            <Home className="h-3.5 w-3.5" />
+                            DSCR
+                          </div>
+                          <div className="mt-2 text-base font-semibold text-app-0">
+                            {u.dscr != null ? Number(u.dscr).toFixed(2) : "—"}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-app px-4 py-3">
+                          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                            <ShieldAlert className="h-3.5 w-3.5" />
+                            Crime
+                          </div>
+                          <div className="mt-2 text-base font-semibold text-app-0">
+                            {p.crime_score != null
+                              ? Number(p.crime_score).toFixed(1)
+                              : "—"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </Surface>
       </div>
     </PageShell>
   );

@@ -7,39 +7,44 @@ export default function PageShell({
   right,
   children,
   className,
+  contentClassName,
 }: {
   title?: string;
   subtitle?: string;
   right?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  contentClassName?: string;
 }) {
   return (
-    <div
+    <section
       className={clsx(
-        "mx-auto w-full max-w-[1200px] px-4 md:px-6 py-6",
+        "mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-5 lg:px-8 lg:py-8",
         className,
       )}
     >
       {title || subtitle || right ? (
-        <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
+        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
             {title ? (
-              <div className="text-xl font-semibold tracking-tight text-white">
+              <h1 className="text-balance text-2xl font-semibold tracking-tight text-app-0 sm:text-3xl">
                 {title}
-              </div>
+              </h1>
             ) : null}
             {subtitle ? (
-              <div className="text-sm text-white/55 mt-1">{subtitle}</div>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-app-3 sm:text-[15px]">
+                {subtitle}
+              </p>
             ) : null}
           </div>
+
           {right ? (
-            <div className="flex items-center gap-2">{right}</div>
+            <div className="flex shrink-0 items-center gap-2">{right}</div>
           ) : null}
         </div>
       ) : null}
 
-      {children}
-    </div>
+      <div className={clsx("min-w-0", contentClassName)}>{children}</div>
+    </section>
   );
 }

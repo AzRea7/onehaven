@@ -1,0 +1,54 @@
+:root {
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-snappy: cubic-bezier(0.2, 0.9, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-med: 180ms;
+  --dur-slow: 260ms;
+}
+
+.surface,
+.kpi-card,
+.btn,
+.icon-btn,
+.nav-link,
+.brand-lockup,
+.hero-shell,
+.field-input {
+  transition:
+    border-color var(--dur-med) var(--ease-standard),
+    background-color var(--dur-med) var(--ease-standard),
+    color var(--dur-med) var(--ease-standard),
+    transform var(--dur-med) var(--ease-standard),
+    box-shadow var(--dur-med) var(--ease-standard),
+    opacity var(--dur-med) var(--ease-standard);
+}
+
+.surface:hover,
+.kpi-card:hover,
+.hero-shell:hover {
+  transform: translateY(-1px);
+}
+
+.btn:active,
+.icon-btn:active,
+.nav-link:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .surface,
+  .kpi-card,
+  .btn,
+  .icon-btn,
+  .nav-link,
+  .brand-lockup,
+  .hero-shell,
+  .field-input {
+    transition: none !important;
+  }
+
+  .app-blob,
+  .hero-glow {
+    animation: none !important;
+  }
+}

@@ -1,6 +1,5 @@
 import React from "react";
 import clsx from "clsx";
-import { HoverTilt } from "./Artwork";
 
 export default function PageHero({
   eyebrow,
@@ -9,7 +8,6 @@ export default function PageHero({
   right,
   actions,
   className,
-  tilt = false,
 }: {
   eyebrow?: string;
   title: string;
@@ -17,58 +15,33 @@ export default function PageHero({
   right?: React.ReactNode;
   actions?: React.ReactNode;
   className?: string;
-  tilt?: boolean;
 }) {
-  const RightShell = ({ children }: { children: React.ReactNode }) => {
-    if (!tilt) {
-      return (
-        <div className="relative h-[140px] w-[240px] md:h-[160px] md:w-[300px] overflow-visible">
-          {children}
-        </div>
-      );
-    }
-    return (
-      <HoverTilt className="relative h-[140px] w-[240px] md:h-[160px] md:w-[300px] overflow-visible">
-        {children}
-      </HoverTilt>
-    );
-  };
-
   return (
-    <div className={clsx("gradient-border rounded-3xl p-[1px]", className)}>
-      <div className="glass rounded-3xl px-6 py-6 md:px-7 md:py-7">
-        <div className="flex items-start justify-between gap-6 flex-wrap">
-          <div className="max-w-2xl">
-            {eyebrow && (
-              <div className="text-[11px] uppercase tracking-[0.22em] text-white/55">
-                {eyebrow}
-              </div>
-            )}
+    <section className={clsx("hero-shell", className)}>
+      <div className="hero-grid">
+        <div className="min-w-0">
+          {eyebrow ? <div className="hero-eyebrow">{eyebrow}</div> : null}
 
-            <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-white">
-              {title}
+          <h1 className="hero-title">{title}</h1>
+
+          {subtitle ? <p className="hero-subtitle">{subtitle}</p> : null}
+
+          {actions ? (
+            <div className="mt-5 flex flex-wrap items-center gap-2.5">
+              {actions}
             </div>
-
-            {subtitle && (
-              <div className="mt-2 text-sm text-white/60 leading-relaxed">
-                {subtitle}
-              </div>
-            )}
-
-            {actions && (
-              <div className="mt-4 flex items-center gap-2 flex-wrap">
-                {actions}
-              </div>
-            )}
-          </div>
-
-          {right && (
-            <RightShell>
-              <div className="relative w-full h-full">{right}</div>
-            </RightShell>
-          )}
+          ) : null}
         </div>
+
+        {right ? (
+          <div className="hero-aside">
+            <div className="hero-aside-surface">{right}</div>
+          </div>
+        ) : null}
       </div>
-    </div>
+
+      <div className="hero-glow hero-glow-a" />
+      <div className="hero-glow hero-glow-b" />
+    </section>
   );
 }
