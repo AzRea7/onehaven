@@ -1,32 +1,22 @@
-# backend/app/domain/agents/llm_router.py
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import json
+from typing import Any, Dict
 
 from ...integrations.lm_studio_client import LMStudioClient
 
 
-class LLMProvider:
-    """
-    Provider interface. Later implement:
-      - OpenAIProvider
-      - AnthropicProvider
-      - LMStudioProvider (OpenAI-compatible local)
-    """
-
-    def chat_complete(
-        self,
-        *,
-        system: str,
-        user: str,
-        temperature: float = 0.2,
-        tools: Optional[List[dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        raise NotImplementedError
+def _schema_response_format(schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "onehaven_agent_output",
+            "schema": schema,
+        },
+    }
 
 
-class LMStudioProvider(LLMProvider):
+class LMStudioProvider:
     def __init__(self) -> None:
         self.client = LMStudioClient()
 
@@ -35,29 +25,33 @@ class LMStudioProvider(LLMProvider):
         *,
         system: str,
         user: str,
+        schema: dict[str, Any] | None = None,
+        model: str | None = None,
         temperature: float = 0.2,
-        tools: Optional[List[dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None,
     ) -> Dict[str, Any]:
-        # When you enable LM Studio network calls, add:
-        #  - tools serialization
-        #  - tool_choice handling
-        #  - response normalization to your agent contract schema
-        _ = tools
-        _ = tool_choice
-        return self.client.chat_complete(system=system, user=user, temperature=temperature)
+        response = self.client.chat_complete(
+            system=system,
+            user=user,
+            temperature=temperature,
+            response_format=_schema_response_format(schema) if schema else None,
+            model=model,
+        )
+        content = response.get("content")
+        if isinstance(content, list):
+            content = "".join(str(part.get("text") or "") for part in content if isinstance(part, dict))
+        if isinstance(content, dict):
+            return content
+        if isinstance(content, str):
+            return json.loads(content)
+        raise ValueError("LM Studio returned empty or unsupported content")
 
 
-def run_llm_agent(*, agent_key: str, context: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    LLM seam (SAFE by design):
-      - LLM will only ever PROPOSE output (summary/facts/recommendations/actions)
-      - validate_agent_output() must pass before anything can be applied
-      - apply_run_actions() remains the only place that mutates DB
-
-    Not enabled yet.
-    """
-    _ = agent_key
-    _ = context
-    _ = LMStudioProvider()
-    raise NotImplementedError("LLM agent routing not enabled yet.")
+def run_llm_agent(*, agent_key: str, context: Dict[str, Any], prompt: str, schema: dict[str, Any], model: str | None = None) -> Dict[str, Any]:
+    system = (
+        "You are a structured real-estate workflow agent for OneHaven. "
+        "Return only JSON that exactly follows the provided schema. "
+        "Never invent properties, values, or citations. If data is missing, state that plainly in JSON."
+    )
+    user = json.dumps({"agent_key": agent_key, "context": context, "prompt": prompt}, ensure_ascii=False)
+    provider = LMStudioProvider()
+    return provider.chat_complete(system=system, user=user, schema=schema, model=model)
