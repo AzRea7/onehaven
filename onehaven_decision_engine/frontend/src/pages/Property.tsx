@@ -16,6 +16,7 @@ import GlobalFilters from "../components/GlobalFilters";
 import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
 import { filtersToApiParams, readFilters } from "../lib/filters";
+import Golem from "../components/Golem";
 
 type Row = any;
 
@@ -144,6 +145,13 @@ export default function Properties() {
           eyebrow="Portfolio inventory"
           title="Properties"
           subtitle="A cleaner property pipeline: glanceable decisions, financing posture, stage, and the fastest click path into the cockpit."
+          right={
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
+              <div className="h-[240px] w-[240px] md:h-[270px] md:w-[270px] translate-y-[-6px] opacity-95">
+                <Golem className="h-full w-full" />
+              </div>
+            </div>
+          }
           actions={
             <>
               <button onClick={refresh} className="oh-btn oh-btn-secondary">

@@ -1,4 +1,6 @@
 import React from "react";
+import { CheckSquare, History, SquareTerminal } from "lucide-react";
+import EmptyState from "./EmptyState";
 
 type RunRow = {
   id: number;
@@ -25,16 +27,12 @@ type Props = {
 
 function tone(status: string) {
   const s = (status || "").toLowerCase();
-  if (s === "done")
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
-  if (s === "failed" || s === "timed_out")
-    return "border-red-500/30 bg-red-500/10 text-red-200";
-  if (s === "blocked")
-    return "border-amber-500/30 bg-amber-500/10 text-amber-200";
-  if (s === "running") return "border-sky-500/30 bg-sky-500/10 text-sky-200";
-  if (s === "queued")
-    return "border-yellow-400/30 bg-yellow-400/10 text-yellow-100";
-  return "border-white/10 bg-white/5 text-zinc-200";
+  if (s === "done") return "oh-pill oh-pill-good";
+  if (s === "failed" || s === "timed_out") return "oh-pill oh-pill-bad";
+  if (s === "blocked") return "oh-pill oh-pill-warn";
+  if (s === "running") return "oh-pill oh-pill-accent";
+  if (s === "queued") return "oh-pill oh-pill-warn";
+  return "oh-pill";
 }
 
 function fmtMs(v?: number | null) {
@@ -46,6 +44,13 @@ function fmtMs(v?: number | null) {
   return `${min}m ${Math.round(sec % 60)}s`;
 }
 
+function fmtDate(v?: string | null) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString();
+}
+
 export default function AgentRunHistory({
   rows,
   selectedRunIds,
@@ -54,31 +59,43 @@ export default function AgentRunHistory({
   loading,
 }: Props) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-zinc-100">Run history</div>
-          <div className="text-xs text-zinc-400 mt-1">
+          <div className="text-sm font-semibold text-app-0">Run history</div>
+          <div className="text-xs text-app-4 mt-1">
             Pick up to 4 runs to compare. Click a row to inspect the full trace.
           </div>
         </div>
-        <div className="text-xs text-zinc-400">{rows.length} rows</div>
+        <div className="text-xs text-app-4">{rows.length} rows</div>
       </div>
 
-      <div className="mt-4 space-y-2">
-        {loading ? (
-          <div className="text-sm text-zinc-400">Loading history…</div>
-        ) : rows.length === 0 ? (
-          <div className="text-sm text-zinc-400">
-            No runs found for the current filters.
-          </div>
-        ) : (
-          rows.map((row) => {
+      {loading ? (
+        <div className="grid gap-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="oh-skeleton h-[102px] rounded-2xl" />
+          ))}
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          compact
+          icon={History}
+          title="No runs found"
+          description="No agent runs matched the current property and filter selection."
+        />
+      ) : (
+        <div className="space-y-2">
+          {rows.map((row) => {
             const selected = selectedRunIds.includes(row.id);
+
             return (
               <div
                 key={row.id}
-                className={`rounded-2xl border p-3 transition ${selected ? "border-fuchsia-400/40 bg-fuchsia-400/10" : "border-white/10 bg-black/20 hover:bg-white/5"}`}
+                className={`rounded-2xl border p-4 transition ${
+                  selected
+                    ? "border-fuchsia-400/40 bg-fuchsia-400/10"
+                    : "border-app bg-app-panel hover:border-app-strong hover:bg-app-muted"
+                }`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <button
@@ -86,21 +103,16 @@ export default function AgentRunHistory({
                     onClick={() => onOpenRun(row.id)}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-zinc-100">
+                      <span className="text-sm font-semibold text-app-0">
                         {row.agent_key}
                       </span>
-                      <span
-                        className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${tone(row.status)}`}
-                      >
-                        {row.status}
-                      </span>
+                      <span className={tone(row.status)}>{row.status}</span>
                       {row.runtime_health ? (
-                        <span className="inline-flex rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-zinc-300">
-                          {row.runtime_health}
-                        </span>
+                        <span className="oh-pill">{row.runtime_health}</span>
                       ) : null}
                     </div>
-                    <div className="mt-2 text-xs text-zinc-400 flex flex-wrap gap-x-4 gap-y-1">
+
+                    <div className="mt-2 text-xs text-app-4 flex flex-wrap gap-x-4 gap-y-1">
                       <span>run #{row.id}</span>
                       <span>property #{row.property_id ?? "—"}</span>
                       <span>
@@ -109,25 +121,45 @@ export default function AgentRunHistory({
                       <span>attempts: {row.attempts ?? 0}</span>
                       <span>duration: {fmtMs(row.duration_ms)}</span>
                     </div>
+
+                    <div className="mt-2 text-[11px] text-app-4 flex flex-wrap gap-x-4 gap-y-1">
+                      <span>created: {fmtDate(row.created_at)}</span>
+                      <span>started: {fmtDate(row.started_at)}</span>
+                      <span>finished: {fmtDate(row.finished_at)}</span>
+                    </div>
+
                     {row.last_error ? (
-                      <div className="mt-2 text-xs text-red-200/90 line-clamp-2">
+                      <div className="mt-2 text-xs text-red-300/90 line-clamp-2">
                         {row.last_error}
                       </div>
                     ) : null}
                   </button>
 
-                  <button
-                    className={`rounded-xl border px-3 py-2 text-xs ${selected ? "border-fuchsia-400/40 bg-fuchsia-400/10 text-fuchsia-100" : "border-white/10 bg-white/5 text-zinc-200 hover:bg-white/10"}`}
-                    onClick={() => onToggleSelect(row.id)}
-                  >
-                    {selected ? "selected" : "compare"}
-                  </button>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      className="oh-btn oh-btn-secondary"
+                      onClick={() => onOpenRun(row.id)}
+                    >
+                      <SquareTerminal className="h-4 w-4" />
+                      Inspect
+                    </button>
+
+                    <button
+                      className={`oh-btn ${
+                        selected ? "oh-btn-primary" : "oh-btn-secondary"
+                      }`}
+                      onClick={() => onToggleSelect(row.id)}
+                    >
+                      <CheckSquare className="h-4 w-4" />
+                      {selected ? "Selected" : "Compare"}
+                    </button>
+                  </div>
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
     </div>
   );
 }

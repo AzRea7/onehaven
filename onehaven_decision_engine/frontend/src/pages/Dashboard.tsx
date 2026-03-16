@@ -1,10 +1,7 @@
 import React from "react";
 import {
   ArrowRight,
-  BadgeDollarSign,
-  Building2,
   ClipboardCheck,
-  GitBranch,
   Hammer,
   Landmark,
   ShieldCheck,
@@ -66,7 +63,6 @@ type RollupPayload = {
     rehab_backlog?: any[];
     compliance_attention?: any[];
   };
-  properties?: any[];
 };
 
 function money(v?: number | null) {
@@ -205,9 +201,7 @@ function MiniBars({
         )
       : 1;
 
-  if (!rows.length) {
-    return <EmptyState compact title={emptyLabel} />;
-  }
+  if (!rows.length) return <EmptyState compact title={emptyLabel} />;
 
   return (
     <div className="space-y-3">
@@ -251,9 +245,7 @@ function Leaderboard({
   emptyLabel: string;
 }) {
   const items = Array.isArray(rows) ? rows : [];
-  if (!items.length) {
-    return <EmptyState compact title={emptyLabel} />;
-  }
+  if (!items.length) return <EmptyState compact title={emptyLabel} />;
 
   return (
     <div className="space-y-2">
@@ -347,7 +339,7 @@ export default function Dashboard() {
           subtitle="Decisions first. Next actions second. Details live inside each property."
           right={
             <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
-              <div className="h-[220px] w-[220px] md:h-[250px] md:w-[250px] translate-y-[-12px] opacity-95">
+              <div className="h-[240px] w-[240px] md:h-[270px] md:w-[270px] translate-y-[-6px] opacity-95">
                 <Golem className="h-full w-full" />
               </div>
             </div>
@@ -380,7 +372,7 @@ export default function Dashboard() {
         <GlobalFilters />
 
         {err ? (
-          <Surface tone="danger" padding="md">
+          <Surface tone="danger">
             <div className="text-sm text-red-300">{err}</div>
           </Surface>
         ) : null}
@@ -482,7 +474,7 @@ export default function Dashboard() {
 
           <Surface
             title="Decision mix"
-            subtitle="Quick sanity check so the deal engine does not become decorative pumpkin logic."
+            subtitle="Quick sanity check so the deal engine doesn’t become decorative pumpkin logic."
           >
             <MiniBars
               items={data?.series?.decision_mix}
@@ -655,53 +647,6 @@ export default function Dashboard() {
                 </div>
               </div>
             ))}
-          </div>
-        </Surface>
-
-        <Surface
-          title="Main navigation"
-          subtitle="Every serious panel drills into a page with investor-specific detail instead of just looking expensive."
-        >
-          <div className="flex flex-wrap gap-3">
-            <Link
-              to={`/drilldowns/trust${qs}`}
-              className="oh-btn oh-btn-secondary"
-            >
-              trust
-            </Link>
-            <Link
-              to={`/drilldowns/compliance${qs}`}
-              className="oh-btn oh-btn-secondary"
-            >
-              compliance
-            </Link>
-            <Link
-              to={`/drilldowns/rehab${qs}`}
-              className="oh-btn oh-btn-secondary"
-            >
-              rehab
-            </Link>
-            <Link
-              to={`/drilldowns/cashflow${qs}`}
-              className="oh-btn oh-btn-secondary"
-            >
-              cashflow
-            </Link>
-            <Link
-              to={`/drilldowns/equity${qs}`}
-              className="oh-btn oh-btn-secondary"
-            >
-              equity
-            </Link>
-            <Link to={`/pipeline${qs}`} className="oh-btn oh-btn-secondary">
-              pipeline
-            </Link>
-            <Link to={`/properties${qs}`} className="oh-btn oh-btn-secondary">
-              properties
-            </Link>
-            <Link to="/agents" className="oh-btn oh-btn-secondary">
-              agents
-            </Link>
           </div>
         </Surface>
       </div>

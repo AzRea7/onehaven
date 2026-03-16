@@ -1,9 +1,20 @@
 import React from "react";
 import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
-import GlassCard from "../components/GlassCard";
 import PageShell from "../components/PageShell";
+import Surface from "../components/Surface";
+import KpiCard from "../components/KpiCard";
+import EmptyState from "../components/EmptyState";
 import MarketSourcePackModal from "../components/MarketSourcePackModal";
+import Golem from "../components/Golem";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Database,
+  MapPinned,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
 
 type CoverageRow = {
   state: string;
@@ -162,20 +173,14 @@ function Badge({
 }) {
   const cls =
     tone === "good"
-      ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-200"
+      ? "oh-pill oh-pill-good"
       : tone === "warn"
-        ? "border-amber-300/25 bg-amber-300/10 text-amber-100"
+        ? "oh-pill oh-pill-warn"
         : tone === "bad"
-          ? "border-red-400/25 bg-red-400/10 text-red-200"
-          : "border-white/10 bg-white/5 text-white/75";
+          ? "oh-pill oh-pill-bad"
+          : "oh-pill";
 
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] ${cls}`}
-    >
-      {children}
-    </span>
-  );
+  return <span className={cls}>{children}</span>;
 }
 
 function SectionTitle({
@@ -187,7 +192,7 @@ function SectionTitle({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <div className="text-sm font-semibold text-white">{title}</div>
+      <div className="text-sm font-semibold text-app-0">{title}</div>
       {right ? <div>{right}</div> : null}
     </div>
   );
@@ -196,8 +201,8 @@ function SectionTitle({
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-4 text-sm">
-      <div className="text-white/55">{label}</div>
-      <div className="text-right text-white/85">{value}</div>
+      <div className="text-app-4">{label}</div>
+      <div className="text-right text-app-1">{value}</div>
     </div>
   );
 }
@@ -215,17 +220,13 @@ function ActionButton({
 }) {
   const cls =
     tone === "primary"
-      ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/15"
+      ? "oh-btn oh-btn-primary"
       : tone === "danger"
-        ? "border-amber-400/20 bg-amber-400/10 text-amber-100 hover:bg-amber-400/15"
-        : "border-white/10 bg-white/5 text-white/80 hover:bg-white/10";
+        ? "oh-btn oh-btn-secondary"
+        : "oh-btn oh-btn-secondary";
 
   return (
-    <button
-      onClick={onClick}
-      disabled={busy}
-      className={`rounded-xl border px-3 py-2 text-sm transition disabled:opacity-50 ${cls}`}
-    >
+    <button onClick={onClick} disabled={busy} className={cls}>
       {busy ? "Running…" : label}
     </button>
   );
@@ -263,16 +264,16 @@ function MarketCard({
       className={[
         "w-full text-left rounded-2xl border p-4 transition",
         active
-          ? "border-white/20 bg-white/[0.08]"
-          : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.14]",
+          ? "border-app-strong bg-app-panel"
+          : "border-app bg-app-panel hover:bg-app-muted hover:border-app-strong",
       ].join(" ")}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-white">
+          <div className="text-sm font-semibold text-app-0">
             {titleCase(title)}
           </div>
-          <div className="mt-1 text-xs text-white/50">
+          <div className="mt-1 text-xs text-app-4">
             {subtitleParts.join(" • ") || "Michigan market"}
           </div>
         </div>
@@ -583,138 +584,154 @@ export default function Jurisdictions() {
   }, [coverageRows]);
 
   return (
-    <PageShell className="space-y-6">
-      <PageHero
-        eyebrow="Compliance intelligence"
-        title="Jurisdictions"
-        subtitle="A few-click control plane for market repair, evidence inspection, and coverage verification."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => refresh()}
-              disabled={busy}
-              className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 hover:bg-white/15 disabled:opacity-50"
-            >
-              {busy ? "Refreshing…" : "Refresh page"}
-            </button>
-          </div>
-        }
-      />
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        <GlassCard>
-          <div className="text-xs uppercase tracking-wider text-white/45">
-            Markets tracked
-          </div>
-          <div className="mt-2 text-2xl font-semibold text-white">
-            {marketStats.total}
-          </div>
-        </GlassCard>
-
-        <GlassCard>
-          <div className="text-xs uppercase tracking-wider text-white/45">
-            Automation-ready
-          </div>
-          <div className="mt-2 text-2xl font-semibold text-emerald-200">
-            {marketStats.ready}
-          </div>
-        </GlassCard>
-
-        <GlassCard>
-          <div className="text-xs uppercase tracking-wider text-white/45">
-            Weak confidence
-          </div>
-          <div className="mt-2 text-2xl font-semibold text-amber-100">
-            {marketStats.weak}
-          </div>
-        </GlassCard>
-
-        <GlassCard>
-          <div className="text-xs uppercase tracking-wider text-white/45">
-            Verified rules
-          </div>
-          <div className="mt-2 text-2xl font-semibold text-white">
-            {marketStats.verifiedRules}
-          </div>
-        </GlassCard>
-      </div>
-
-      <GlassCard>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto]">
-          <input
-            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-white placeholder:text-white/35"
-            placeholder="Filter by city, county, state, readiness, or confidence…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-
-          <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-            <input
-              type="checkbox"
-              checked={onlyReady}
-              onChange={(e) => setOnlyReady(e.target.checked)}
-            />
-            ready only
-          </label>
-
-          <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/75">
-            <input
-              type="checkbox"
-              checked={onlyWeak}
-              onChange={(e) => setOnlyWeak(e.target.checked)}
-            />
-            weak confidence only
-          </label>
-        </div>
-
-        {message ? (
-          <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-sm text-emerald-200">
-            {message}
-          </div>
-        ) : null}
-
-        {err ? (
-          <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-200">
-            {err}
-          </div>
-        ) : null}
-      </GlassCard>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_1fr]">
-        <div className="space-y-3">
-          {filteredRows.length === 0 ? (
-            <GlassCard>
-              <div className="text-sm text-white/60">
-                No jurisdictions matched the current filter.
+    <PageShell>
+      <div className="space-y-6">
+        <PageHero
+          eyebrow="Compliance intelligence"
+          title="Jurisdictions"
+          subtitle="A few-click control plane for market repair, evidence inspection, and coverage verification."
+          right={
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
+              <div className="h-[240px] w-[240px] md:h-[270px] md:w-[270px] translate-y-[-6px] opacity-95">
+                <Golem className="h-full w-full" />
               </div>
-            </GlassCard>
-          ) : (
-            filteredRows.map((row) => (
-              <MarketCard
-                key={marketKey(row)}
-                row={row}
-                active={marketKey(row) === selectedKey}
-                onClick={() => setSelectedKey(marketKey(row))}
-              />
-            ))
-          )}
-        </div>
-
-        <div className="space-y-4">
-          {!selectedRow ? (
-            <GlassCard>
-              <div className="text-sm text-white/60">
-                Select a jurisdiction to inspect its real compliance posture.
-              </div>
-            </GlassCard>
-          ) : (
+            </div>
+          }
+          actions={
             <>
-              <GlassCard>
-                <SectionTitle
+              <button
+                onClick={() => refresh()}
+                disabled={busy}
+                className="oh-btn oh-btn-secondary"
+              >
+                {busy ? "Refreshing…" : "Refresh page"}
+              </button>
+            </>
+          }
+        />
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <KpiCard
+            title="Markets tracked"
+            value={marketStats.total}
+            subtitle="coverage rows"
+            icon={MapPinned}
+          />
+          <KpiCard
+            title="Automation-ready"
+            value={marketStats.ready}
+            subtitle="production ready"
+            icon={CheckCircle2}
+            tone="success"
+          />
+          <KpiCard
+            title="Weak confidence"
+            value={marketStats.weak}
+            subtitle="needs operator attention"
+            icon={AlertTriangle}
+            tone="warning"
+          />
+          <KpiCard
+            title="Verified rules"
+            value={marketStats.verifiedRules}
+            subtitle="across visible markets"
+            icon={ShieldCheck}
+            tone="accent"
+          />
+        </div>
+
+        <Surface
+          title="Search and focus"
+          subtitle="Filter market rows by city, county, state, readiness, or confidence."
+        >
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto]">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+              <input
+                className="oh-input pl-10"
+                placeholder="Filter by city, county, state, readiness, or confidence…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+
+            <label className="flex items-center gap-2 rounded-2xl border border-app bg-app-panel px-3 py-2 text-sm text-app-2">
+              <input
+                type="checkbox"
+                checked={onlyReady}
+                onChange={(e) => setOnlyReady(e.target.checked)}
+              />
+              ready only
+            </label>
+
+            <label className="flex items-center gap-2 rounded-2xl border border-app bg-app-panel px-3 py-2 text-sm text-app-2">
+              <input
+                type="checkbox"
+                checked={onlyWeak}
+                onChange={(e) => setOnlyWeak(e.target.checked)}
+              />
+              weak confidence only
+            </label>
+          </div>
+
+          {message ? (
+            <div className="mt-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-sm text-emerald-300">
+              {message}
+            </div>
+          ) : null}
+
+          {err ? (
+            <div className="mt-3 rounded-2xl border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-300">
+              {err}
+            </div>
+          ) : null}
+        </Surface>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_1fr]">
+          <Surface
+            title="Markets"
+            subtitle="Pick a market to inspect and repair."
+          >
+            <div className="space-y-3">
+              {filteredRows.length === 0 ? (
+                <EmptyState
+                  compact
+                  title="No jurisdictions matched"
+                  description="Try a broader filter or disable one of the focus toggles."
+                />
+              ) : (
+                filteredRows.map((row) => (
+                  <MarketCard
+                    key={marketKey(row)}
+                    row={row}
+                    active={marketKey(row) === selectedKey}
+                    onClick={() => setSelectedKey(marketKey(row))}
+                  />
+                ))
+              )}
+            </div>
+          </Surface>
+
+          <div className="space-y-4">
+            {!selectedRow ? (
+              <Surface
+                title="Market detail"
+                subtitle="Select a jurisdiction to inspect its real compliance posture."
+              >
+                <EmptyState
+                  compact
+                  title="No jurisdiction selected"
+                  description="Choose a market from the left column."
+                />
+              </Surface>
+            ) : (
+              <>
+                <Surface
                   title={`${selectedRow.city || selectedRow.county || selectedRow.pha_name || selectedRow.state} details`}
-                  right={
+                  subtitle="Pipeline workspace for the selected market."
+                  actions={
                     detailBusy ? (
-                      <span className="text-xs text-white/45">Loading…</span>
+                      <span className="text-xs text-app-4">Loading…</span>
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         <Badge
@@ -730,417 +747,424 @@ export default function Jurisdictions() {
                       </div>
                     )
                   }
-                />
+                >
+                  <div className="rounded-2xl border border-cyan-400/15 bg-cyan-500/8 p-3 text-sm text-cyan-100">
+                    Use the buttons below to refresh sources, run extraction,
+                    rebuild the profile, clean stale items, or repair the whole
+                    market.
+                  </div>
 
-                <div className="mt-3 rounded-2xl border border-cyan-400/15 bg-cyan-500/8 p-3 text-sm text-cyan-100">
-                  This is the pipeline workspace for the selected market. Use
-                  the buttons below to refresh sources, run extraction, rebuild
-                  the profile, clean stale items, or repair the whole market.
-                </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <ActionButton
+                      label="Repair market"
+                      busy={marketBusy === `repair:${marketKey(selectedRow)}`}
+                      onClick={() => runMarketAction("repair", selectedRow)}
+                      tone="primary"
+                    />
+                    <ActionButton
+                      label="Run pipeline"
+                      busy={marketBusy === `pipeline:${marketKey(selectedRow)}`}
+                      onClick={() => runMarketAction("pipeline", selectedRow)}
+                      tone="primary"
+                    />
+                    <ActionButton
+                      label="Refresh sources"
+                      busy={marketBusy === `collect:${marketKey(selectedRow)}`}
+                      onClick={() => runMarketAction("collect", selectedRow)}
+                    />
+                    <ActionButton
+                      label="Rebuild profile"
+                      busy={marketBusy === `build:${marketKey(selectedRow)}`}
+                      onClick={() => runMarketAction("build", selectedRow)}
+                    />
+                    <ActionButton
+                      label="Refresh coverage"
+                      busy={marketBusy === `coverage:${marketKey(selectedRow)}`}
+                      onClick={() => runMarketAction("coverage", selectedRow)}
+                    />
+                    <ActionButton
+                      label="Resolve stale items"
+                      busy={marketBusy === `cleanup:${marketKey(selectedRow)}`}
+                      onClick={() => runMarketAction("cleanup", selectedRow)}
+                      tone="danger"
+                    />
+                    <ActionButton
+                      label="Manage source pack"
+                      onClick={() => setSourcePackOpen(true)}
+                    />
+                    <ActionButton
+                      label={
+                        showSourceList ? "Hide source list" : "View source list"
+                      }
+                      onClick={() => setShowSourceList((v) => !v)}
+                    />
+                    <ActionButton
+                      label={
+                        showAssertionList
+                          ? "Hide assertions list"
+                          : "View assertions list"
+                      }
+                      onClick={() => setShowAssertionList((v) => !v)}
+                    />
+                  </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <ActionButton
-                    label="Repair market"
-                    busy={marketBusy === `repair:${marketKey(selectedRow)}`}
-                    onClick={() => runMarketAction("repair", selectedRow)}
-                    tone="primary"
-                  />
-                  <ActionButton
-                    label="Run pipeline"
-                    busy={marketBusy === `pipeline:${marketKey(selectedRow)}`}
-                    onClick={() => runMarketAction("pipeline", selectedRow)}
-                    tone="primary"
-                  />
-                  <ActionButton
-                    label="Refresh sources"
-                    busy={marketBusy === `collect:${marketKey(selectedRow)}`}
-                    onClick={() => runMarketAction("collect", selectedRow)}
-                  />
-                  <ActionButton
-                    label="Rebuild profile"
-                    busy={marketBusy === `build:${marketKey(selectedRow)}`}
-                    onClick={() => runMarketAction("build", selectedRow)}
-                  />
-                  <ActionButton
-                    label="Refresh coverage"
-                    busy={marketBusy === `coverage:${marketKey(selectedRow)}`}
-                    onClick={() => runMarketAction("coverage", selectedRow)}
-                  />
-                  <ActionButton
-                    label="Resolve stale items"
-                    busy={marketBusy === `cleanup:${marketKey(selectedRow)}`}
-                    onClick={() => runMarketAction("cleanup", selectedRow)}
-                    tone="danger"
-                  />
-                  <ActionButton
-                    label="Manage source pack"
-                    onClick={() => setSourcePackOpen(true)}
-                  />
-                  <ActionButton
-                    label={
-                      showSourceList ? "Hide source list" : "View source list"
-                    }
-                    onClick={() => setShowSourceList((v) => !v)}
-                  />
-                  <ActionButton
-                    label={
-                      showAssertionList
-                        ? "Hide assertions list"
-                        : "View assertions list"
-                    }
-                    onClick={() => setShowAssertionList((v) => !v)}
-                  />
-                </div>
+                  <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div className="rounded-2xl border border-app bg-app-muted p-4">
+                      <div className="space-y-2">
+                        <Row label="State" value={selectedRow.state || "MI"} />
+                        <Row
+                          label="County"
+                          value={titleCase(selectedRow.county)}
+                        />
+                        <Row label="City" value={titleCase(selectedRow.city)} />
+                        <Row label="PHA" value={selectedRow.pha_name || "—"} />
+                        <Row
+                          label="Coverage"
+                          value={selectedRow.coverage_status || "unknown"}
+                        />
+                        <Row
+                          label="Verified rules"
+                          value={selectedRow.verified_rule_count ?? 0}
+                        />
+                      </div>
+                    </div>
 
-                <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <div className="space-y-2">
-                      <Row label="State" value={selectedRow.state || "MI"} />
-                      <Row
-                        label="County"
-                        value={titleCase(selectedRow.county)}
-                      />
-                      <Row label="City" value={titleCase(selectedRow.city)} />
-                      <Row label="PHA" value={selectedRow.pha_name || "—"} />
-                      <Row
-                        label="Coverage"
-                        value={selectedRow.coverage_status || "unknown"}
-                      />
-                      <Row
-                        label="Verified rules"
-                        value={selectedRow.verified_rule_count ?? 0}
-                      />
+                    <div className="rounded-2xl border border-app bg-app-muted p-4">
+                      <div className="space-y-2">
+                        <Row
+                          label="Sources"
+                          value={selectedRow.source_count ?? 0}
+                        />
+                        <Row
+                          label="Fetch failures"
+                          value={selectedRow.fetch_failure_count ?? 0}
+                        />
+                        <Row
+                          label="Stale warnings"
+                          value={selectedRow.stale_warning_count ?? 0}
+                        />
+                        <Row
+                          label="Municipal core"
+                          value={
+                            selectedRow.municipal_core_ok ? "ok" : "missing"
+                          }
+                        />
+                        <Row
+                          label="State/Federal core"
+                          value={
+                            selectedRow.state_federal_core_ok ? "ok" : "missing"
+                          }
+                        />
+                        <Row
+                          label="PHA core"
+                          value={selectedRow.pha_core_ok ? "ok" : "missing"}
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <div className="space-y-2">
-                      <Row
-                        label="Sources"
-                        value={selectedRow.source_count ?? 0}
-                      />
-                      <Row
-                        label="Fetch failures"
-                        value={selectedRow.fetch_failure_count ?? 0}
-                      />
-                      <Row
-                        label="Stale warnings"
-                        value={selectedRow.stale_warning_count ?? 0}
-                      />
-                      <Row
-                        label="Municipal core"
-                        value={selectedRow.municipal_core_ok ? "ok" : "missing"}
-                      />
-                      <Row
-                        label="State/Federal core"
-                        value={
-                          selectedRow.state_federal_core_ok ? "ok" : "missing"
-                        }
-                      />
-                      <Row
-                        label="PHA core"
-                        value={selectedRow.pha_core_ok ? "ok" : "missing"}
-                      />
+                  {brief?.explanation ? (
+                    <div className="mt-4 rounded-2xl border border-app bg-app-panel p-4 text-sm leading-6 text-app-2">
+                      {brief.explanation}
                     </div>
-                  </div>
-                </div>
+                  ) : null}
+                </Surface>
 
-                {brief?.explanation ? (
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-white/75">
-                    {brief.explanation}
-                  </div>
-                ) : null}
-              </GlassCard>
-
-              {showSourceList ? (
-                <GlassCard>
-                  <SectionTitle
+                {showSourceList ? (
+                  <Surface
                     title={`Source list (${selectedSources.length})`}
-                    right={
+                    subtitle="Tracked source records for this market."
+                    actions={
                       <Badge>{selectedRow.source_count ?? 0} tracked</Badge>
                     }
-                  />
-                  <div className="mt-3 space-y-2">
-                    {selectedSources.length === 0 ? (
-                      <div className="text-sm text-white/55">
-                        No sources loaded for this market yet.
-                      </div>
-                    ) : (
-                      selectedSources.map((s: any) => (
-                        <div
-                          key={s.id}
-                          className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium text-white">
-                                {s.title ||
-                                  s.publisher ||
-                                  s.url ||
-                                  `Source ${s.id}`}
+                  >
+                    <div className="space-y-2">
+                      {selectedSources.length === 0 ? (
+                        <EmptyState compact title="No sources loaded yet" />
+                      ) : (
+                        selectedSources.map((s: any) => (
+                          <div
+                            key={s.id}
+                            className="rounded-2xl border border-app bg-app-panel p-3"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium text-app-0">
+                                  {s.title ||
+                                    s.publisher ||
+                                    s.url ||
+                                    `Source ${s.id}`}
+                                </div>
+                                <div className="mt-1 text-xs text-app-4">
+                                  {s.publisher || "Unknown publisher"} • HTTP{" "}
+                                  {s.http_status ?? "—"}
+                                </div>
                               </div>
-                              <div className="mt-1 text-xs text-white/50">
-                                {s.publisher || "Unknown publisher"} • HTTP{" "}
-                                {s.http_status ?? "—"}
+                              <Badge>{s.id}</Badge>
+                            </div>
+                            <div className="mt-2 break-all text-xs text-app-4">
+                              {s.url || "No URL"}
+                            </div>
+                            {s.notes ? (
+                              <div className="mt-2 text-sm text-app-2">
+                                {s.notes}
                               </div>
-                            </div>
-                            <Badge>{s.id}</Badge>
+                            ) : null}
                           </div>
-                          <div className="mt-2 break-all text-xs text-white/60">
-                            {s.url || "No URL"}
-                          </div>
-                          {s.notes ? (
-                            <div className="mt-2 text-sm text-white/70">
-                              {s.notes}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </GlassCard>
-              ) : null}
+                        ))
+                      )}
+                    </div>
+                  </Surface>
+                ) : null}
 
-              {showAssertionList ? (
-                <GlassCard>
-                  <SectionTitle
+                {showAssertionList ? (
+                  <Surface
                     title={`Assertions list (${selectedAssertions.length})`}
-                    right={
+                    subtitle="Extracted and reviewed rule assertions."
+                    actions={
                       <Badge>
                         {selectedRow.verified_rule_count ?? 0} verified
                       </Badge>
                     }
-                  />
-                  <div className="mt-3 space-y-2">
-                    {selectedAssertions.length === 0 ? (
-                      <div className="text-sm text-white/55">
-                        No assertions loaded for this market yet.
-                      </div>
-                    ) : (
-                      selectedAssertions.map((a: any) => (
-                        <div
-                          key={a.id}
-                          className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium text-white">
-                                {a.rule_key}
+                  >
+                    <div className="space-y-2">
+                      {selectedAssertions.length === 0 ? (
+                        <EmptyState compact title="No assertions loaded yet" />
+                      ) : (
+                        selectedAssertions.map((a: any) => (
+                          <div
+                            key={a.id}
+                            className="rounded-2xl border border-app bg-app-panel p-3"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium text-app-0">
+                                  {a.rule_key}
+                                </div>
+                                <div className="mt-1 text-xs text-app-4">
+                                  {a.rule_family || "unknown family"} •{" "}
+                                  {a.assertion_type || "unknown type"} • source{" "}
+                                  {a.source_id ?? "—"}
+                                </div>
                               </div>
-                              <div className="mt-1 text-xs text-white/50">
-                                {a.rule_family || "unknown family"} •{" "}
-                                {a.assertion_type || "unknown type"} • source{" "}
-                                {a.source_id ?? "—"}
+                              <div className="flex flex-wrap gap-2">
+                                <Badge
+                                  tone={
+                                    a.review_status === "verified"
+                                      ? "good"
+                                      : a.review_status === "superseded"
+                                        ? "warn"
+                                        : "neutral"
+                                  }
+                                >
+                                  {a.review_status}
+                                </Badge>
+                                <Badge>
+                                  {Number(a.confidence ?? 0).toFixed(2)}
+                                </Badge>
                               </div>
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                              <Badge
-                                tone={
-                                  a.review_status === "verified"
-                                    ? "good"
-                                    : a.review_status === "superseded"
-                                      ? "warn"
-                                      : "neutral"
-                                }
-                              >
-                                {a.review_status}
-                              </Badge>
-                              <Badge>
-                                {Number(a.confidence ?? 0).toFixed(2)}
-                              </Badge>
-                            </div>
+                            <pre className="mt-3 overflow-auto rounded-2xl bg-app-muted p-3 text-xs text-app-1">
+                              {JSON.stringify(a.value ?? {}, null, 2)}
+                            </pre>
+                            {a.review_notes ? (
+                              <div className="mt-2 text-sm text-app-2">
+                                {a.review_notes}
+                              </div>
+                            ) : null}
                           </div>
-                          <pre className="mt-3 overflow-auto rounded-lg bg-black/20 p-3 text-xs text-white/70">
-                            {JSON.stringify(a.value ?? {}, null, 2)}
-                          </pre>
-                          {a.review_notes ? (
-                            <div className="mt-2 text-sm text-white/70">
-                              {a.review_notes}
+                        ))
+                      )}
+                    </div>
+                  </Surface>
+                ) : null}
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <Surface
+                    title="Required actions"
+                    subtitle="Operator tasks surfaced by the brief."
+                  >
+                    <div className="space-y-2">
+                      {(brief?.required_actions ?? []).length === 0 ? (
+                        <EmptyState
+                          compact
+                          title="No required actions returned"
+                        />
+                      ) : (
+                        (brief?.required_actions ?? []).map(
+                          (item: any, idx: number) => (
+                            <div
+                              key={`${item?.code || item?.key || item?.title || idx}`}
+                              className="rounded-2xl border border-app bg-app-panel p-3"
+                            >
+                              <div className="text-sm font-medium text-app-0">
+                                {item?.title ||
+                                  item?.description ||
+                                  item?.code ||
+                                  item?.key ||
+                                  "Untitled action"}
+                              </div>
+                              <div className="mt-1 text-xs text-app-4">
+                                {(
+                                  item?.category ||
+                                  item?.severity ||
+                                  "uncategorized"
+                                ).toString()}{" "}
+                                • code: {item?.code || item?.key || "—"}
+                              </div>
+                            </div>
+                          ),
+                        )
+                      )}
+                    </div>
+                  </Surface>
+
+                  <Surface
+                    title="Blocking items"
+                    subtitle="These are still in the way."
+                  >
+                    <div className="space-y-2">
+                      {(brief?.blocking_items ?? []).length === 0 ? (
+                        <EmptyState compact title="No blockers returned" />
+                      ) : (
+                        (brief?.blocking_items ?? []).map(
+                          (item: any, idx: number) => (
+                            <div
+                              key={`${item?.code || item?.key || item?.title || idx}`}
+                              className="rounded-2xl border border-red-500/20 bg-red-500/[0.06] p-3"
+                            >
+                              <div className="text-sm font-medium text-red-200">
+                                {item?.title ||
+                                  item?.description ||
+                                  item?.code ||
+                                  item?.key ||
+                                  "Untitled blocker"}
+                              </div>
+                              <div className="mt-1 text-xs text-red-200/70">
+                                {(
+                                  item?.category ||
+                                  item?.severity ||
+                                  "uncategorized"
+                                ).toString()}{" "}
+                                • code: {item?.code || item?.key || "—"}
+                              </div>
+                            </div>
+                          ),
+                        )
+                      )}
+                    </div>
+                  </Surface>
+                </div>
+
+                <Surface
+                  title="Resolved jurisdiction profiles"
+                  subtitle="Explicit matched profile rows."
+                >
+                  <div className="space-y-2">
+                    {selectedProfiles.length === 0 ? (
+                      <EmptyState
+                        compact
+                        title="No explicit jurisdiction profile rows matched this market"
+                      />
+                    ) : (
+                      selectedProfiles.map((p) => (
+                        <div
+                          key={p.id}
+                          className="rounded-2xl border border-app bg-app-panel p-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-medium text-app-0">
+                              Profile #{p.id}
+                            </div>
+                            <Badge tone={p.org_id ? "warn" : "neutral"}>
+                              {p.org_id ? "org override" : "global"}
+                            </Badge>
+                          </div>
+                          <div className="mt-2 text-xs text-app-4">
+                            friction: {p.friction_multiplier ?? "—"} • PHA:{" "}
+                            {p.pha_name || "—"}
+                          </div>
+                          {p.notes ? (
+                            <div className="mt-2 text-sm text-app-2">
+                              {p.notes}
                             </div>
                           ) : null}
                         </div>
                       ))
                     )}
                   </div>
-                </GlassCard>
-              ) : null}
+                </Surface>
 
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <GlassCard>
-                  <SectionTitle title="Required actions" />
-                  <div className="mt-3 space-y-2">
-                    {(brief?.required_actions ?? []).length === 0 ? (
-                      <div className="text-sm text-white/55">
-                        No required actions returned.
-                      </div>
+                <Surface
+                  title="Legacy jurisdiction rules"
+                  subtitle="Fallback-only legacy rule rows."
+                >
+                  <div className="space-y-2">
+                    {selectedLegacyRules.length === 0 ? (
+                      <EmptyState
+                        compact
+                        title="No legacy rule rows matched this market"
+                      />
                     ) : (
-                      (brief?.required_actions ?? []).map(
-                        (item: any, idx: number) => (
+                      selectedLegacyRules.map((r) => {
+                        const failPoints = parseMaybeJsonArray(
+                          r.typical_fail_points_json ?? r.typical_fail_points,
+                        );
+
+                        return (
                           <div
-                            key={`${item?.code || item?.key || item?.title || idx}`}
-                            className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                            key={r.id}
+                            className="rounded-2xl border border-app bg-app-panel p-3"
                           >
-                            <div className="text-sm font-medium text-white">
-                              {item?.title ||
-                                item?.description ||
-                                item?.code ||
-                                item?.key ||
-                                "Untitled action"}
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-medium text-app-0">
+                                Legacy rule #{r.id}
+                              </div>
+                              <Badge tone={r.org_id ? "warn" : "neutral"}>
+                                {r.org_id ? "org override" : "global"}
+                              </Badge>
                             </div>
-                            <div className="mt-1 text-xs text-white/50">
-                              {(
-                                item?.category ||
-                                item?.severity ||
-                                "uncategorized"
-                              ).toString()}{" "}
-                              • code: {item?.code || item?.key || "—"}
+                            <div className="mt-2 text-xs text-app-4">
+                              license: {String(!!r.rental_license_required)} •
+                              authority: {r.inspection_authority || "—"} • freq:{" "}
+                              {r.inspection_frequency || "—"}
+                            </div>
+                            <div className="mt-2 text-sm text-app-2">
+                              fail points:{" "}
+                              {failPoints.length ? failPoints.join(", ") : "—"}
                             </div>
                           </div>
-                        ),
-                      )
+                        );
+                      })
                     )}
                   </div>
-                </GlassCard>
-
-                <GlassCard>
-                  <SectionTitle title="Blocking items" />
-                  <div className="mt-3 space-y-2">
-                    {(brief?.blocking_items ?? []).length === 0 ? (
-                      <div className="text-sm text-white/55">
-                        No blockers returned.
-                      </div>
-                    ) : (
-                      (brief?.blocking_items ?? []).map(
-                        (item: any, idx: number) => (
-                          <div
-                            key={`${item?.code || item?.key || item?.title || idx}`}
-                            className="rounded-xl border border-red-500/20 bg-red-500/[0.06] p-3"
-                          >
-                            <div className="text-sm font-medium text-red-100">
-                              {item?.title ||
-                                item?.description ||
-                                item?.code ||
-                                item?.key ||
-                                "Untitled blocker"}
-                            </div>
-                            <div className="mt-1 text-xs text-red-100/70">
-                              {(
-                                item?.category ||
-                                item?.severity ||
-                                "uncategorized"
-                              ).toString()}{" "}
-                              • code: {item?.code || item?.key || "—"}
-                            </div>
-                          </div>
-                        ),
-                      )
-                    )}
-                  </div>
-                </GlassCard>
-              </div>
-
-              <GlassCard>
-                <SectionTitle title="Resolved jurisdiction profiles" />
-                <div className="mt-3 space-y-2">
-                  {selectedProfiles.length === 0 ? (
-                    <div className="text-sm text-white/55">
-                      No explicit jurisdiction profile rows matched this market.
-                    </div>
-                  ) : (
-                    selectedProfiles.map((p) => (
-                      <div
-                        key={p.id}
-                        className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-medium text-white">
-                            Profile #{p.id}
-                          </div>
-                          <Badge tone={p.org_id ? "warn" : "neutral"}>
-                            {p.org_id ? "org override" : "global"}
-                          </Badge>
-                        </div>
-                        <div className="mt-2 text-xs text-white/55">
-                          friction: {p.friction_multiplier ?? "—"} • PHA:{" "}
-                          {p.pha_name || "—"}
-                        </div>
-                        {p.notes ? (
-                          <div className="mt-2 text-sm text-white/70">
-                            {p.notes}
-                          </div>
-                        ) : null}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </GlassCard>
-
-              <GlassCard>
-                <SectionTitle title="Legacy jurisdiction rules (fallback only)" />
-                <div className="mt-3 space-y-2">
-                  {selectedLegacyRules.length === 0 ? (
-                    <div className="text-sm text-white/55">
-                      No legacy rule rows matched this market.
-                    </div>
-                  ) : (
-                    selectedLegacyRules.map((r) => {
-                      const failPoints = parseMaybeJsonArray(
-                        r.typical_fail_points_json ?? r.typical_fail_points,
-                      );
-
-                      return (
-                        <div
-                          key={r.id}
-                          className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-medium text-white">
-                              Legacy rule #{r.id}
-                            </div>
-                            <Badge tone={r.org_id ? "warn" : "neutral"}>
-                              {r.org_id ? "org override" : "global"}
-                            </Badge>
-                          </div>
-                          <div className="mt-2 text-xs text-white/55">
-                            license: {String(!!r.rental_license_required)} •
-                            authority: {r.inspection_authority || "—"} • freq:{" "}
-                            {r.inspection_frequency || "—"}
-                          </div>
-                          <div className="mt-2 text-sm text-white/70">
-                            fail points:{" "}
-                            {failPoints.length ? failPoints.join(", ") : "—"}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </GlassCard>
-            </>
-          )}
+                </Surface>
+              </>
+            )}
+          </div>
         </div>
-      </div>
 
-      <MarketSourcePackModal
-        open={sourcePackOpen}
-        market={
-          selectedRow
-            ? {
-                state: selectedRow.state || "MI",
-                county: selectedRow.county ?? null,
-                city: selectedRow.city ?? null,
-                pha_name: selectedRow.pha_name ?? null,
-              }
-            : null
-        }
-        onClose={() => setSourcePackOpen(false)}
-        onChanged={async () => {
-          await refresh();
-          if (selectedRow) {
-            await loadDetail(selectedRow);
+        <MarketSourcePackModal
+          open={sourcePackOpen}
+          market={
+            selectedRow
+              ? {
+                  state: selectedRow.state || "MI",
+                  county: selectedRow.county ?? null,
+                  city: selectedRow.city ?? null,
+                  pha_name: selectedRow.pha_name ?? null,
+                }
+              : null
           }
-        }}
-      />
+          onClose={() => setSourcePackOpen(false)}
+          onChanged={async () => {
+            await refresh();
+            if (selectedRow) {
+              await loadDetail(selectedRow);
+            }
+          }}
+        />
+      </div>
     </PageShell>
   );
 }
