@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
@@ -20,7 +21,11 @@ from ..services.workflow_gate_service import build_workflow_summary
 router = APIRouter(prefix="/equity", tags=["equity"])
 
 
-def _valuation_payload(row: Valuation) -> dict:
+def _now() -> datetime:
+    return datetime.utcnow()
+
+
+def _valuation_payload(row: Valuation) -> dict[str, Any]:
     return {
         "id": row.id,
         "property_id": row.property_id,
@@ -28,6 +33,19 @@ def _valuation_payload(row: Valuation) -> dict:
         "estimated_value": row.estimated_value,
         "loan_balance": row.loan_balance,
         "notes": row.notes,
+    }
+
+
+def _valuation_row(row: Valuation) -> dict[str, Any]:
+    estimated_value = float(row.estimated_value or 0.0)
+    loan_balance = float(row.loan_balance or 0.0) if row.loan_balance is not None else 0.0
+    equity = estimated_value - loan_balance
+    ltv = round((loan_balance / estimated_value) * 100.0, 2) if estimated_value > 0 else None
+
+    return {
+        **_valuation_payload(row),
+        "estimated_equity": round(equity, 2),
+        "ltv_pct": ltv,
     }
 
 
@@ -51,7 +69,7 @@ def create_valuation(
 
     data = payload.model_dump()
     data["org_id"] = p.org_id
-    data.setdefault("as_of", datetime.utcnow())
+    data.setdefault("as_of", _now())
 
     row = Valuation(**data)
     db.add(row)
@@ -227,6 +245,94 @@ def delete_valuation(
     return {"ok": True}
 
 
+@router.get("/property/{property_id}/snapshot", response_model=dict)
+def equity_snapshot(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="cash",
+        action="view equity snapshot",
+    )
+
+    rows = list(
+        db.scalars(
+            select(Valuation)
+            .where(Valuation.org_id == p.org_id, Valuation.property_id == property_id)
+            .order_by(desc(Valuation.as_of), desc(Valuation.id))
+        ).all()
+    )
+
+    latest = rows[0] if rows else None
+    oldest = rows[-1] if rows else None
+
+    latest_row = _valuation_row(latest) if latest else None
+    oldest_row = _valuation_row(oldest) if oldest else None
+
+    appreciation_value = None
+    appreciation_pct = None
+    if latest and oldest:
+        base = float(oldest.estimated_value or 0.0)
+        current = float(latest.estimated_value or 0.0)
+        appreciation_value = round(current - base, 2)
+        appreciation_pct = round(((current - base) / base) * 100.0, 2) if base > 0 else None
+
+    return {
+        "property_id": property_id,
+        "has_valuation": latest is not None,
+        "latest": latest_row,
+        "first": oldest_row,
+        "kpis": {
+            "estimated_value": latest_row["estimated_value"] if latest_row else None,
+            "loan_balance": latest_row["loan_balance"] if latest_row else None,
+            "estimated_equity": latest_row["estimated_equity"] if latest_row else None,
+            "ltv_pct": latest_row["ltv_pct"] if latest_row else None,
+            "valuation_count": len(rows),
+            "appreciation_value": appreciation_value,
+            "appreciation_pct": appreciation_pct,
+        },
+        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
+    }
+
+
+@router.get("/property/{property_id}/timeline", response_model=dict)
+def equity_timeline(
+    property_id: int,
+    limit: int = Query(default=24, ge=1, le=240),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="cash",
+        action="view equity timeline",
+    )
+
+    rows = list(
+        db.scalars(
+            select(Valuation)
+            .where(Valuation.org_id == p.org_id, Valuation.property_id == property_id)
+            .order_by(desc(Valuation.as_of), desc(Valuation.id))
+            .limit(limit)
+        ).all()
+    )
+
+    items = [_valuation_row(x) for x in reversed(rows)]
+    return {
+        "property_id": property_id,
+        "items": items,
+        "count": len(items),
+    }
+
+
 @router.get("/valuation/suggestions", response_model=dict)
 def valuation_suggestions(
     property_id: int,
@@ -251,7 +357,7 @@ def valuation_suggestions(
         .limit(1)
     )
 
-    base = latest.as_of if latest else datetime.utcnow()
+    base = latest.as_of if latest else _now()
 
     cadence_clean = (cadence or "quarterly").strip().lower()
     if cadence_clean not in {"quarterly", "monthly"}:

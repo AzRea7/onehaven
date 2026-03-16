@@ -22,6 +22,17 @@ function clsDecision(d?: string) {
   return "border-red-400/25 bg-red-400/10 text-red-200";
 }
 
+function clsStage(s?: string) {
+  const x = (s || "").toLowerCase();
+  if (x === "equity")
+    return "border-green-400/25 bg-green-400/10 text-green-200";
+  if (x === "cash" || x === "lease")
+    return "border-cyan-400/25 bg-cyan-400/10 text-cyan-200";
+  if (x === "tenant" || x === "compliance")
+    return "border-yellow-300/25 bg-yellow-300/10 text-yellow-100";
+  return "border-white/10 bg-white/[0.03] text-white/80";
+}
+
 function getFinancingType(price?: number | null) {
   if (price == null || !Number.isFinite(Number(price))) return "unknown";
   if (Number(price) < 75000) return "CASH DEAL";
@@ -29,15 +40,6 @@ function getFinancingType(price?: number | null) {
 }
 
 type FinancingFilter = "ALL" | "CASH" | "DSCR";
-
-function inputClass() {
-  return [
-    "w-full rounded-xl border border-white/10 bg-white/[0.04]",
-    "px-3 py-2.5 text-sm text-white/90 placeholder:text-white/40",
-    "outline-none transition",
-    "focus:border-white/20 focus:ring-2 focus:ring-white/10",
-  ].join(" ");
-}
 
 export default function Properties() {
   const [rows, setRows] = React.useState<Row[]>([]);
@@ -50,7 +52,6 @@ export default function Properties() {
   const [decision, setDecision] = React.useState<
     "ALL" | "PASS" | "REVIEW" | "REJECT"
   >("ALL");
-
   const [financing, setFinancing] = React.useState<FinancingFilter>("ALL");
 
   const location = useLocation();
@@ -72,7 +73,6 @@ export default function Properties() {
     try {
       setErr(null);
       setLoading(true);
-
       const out = await api.properties(apiFilterParams, ac.signal);
       setRows(Array.isArray(out) ? out : []);
     } catch (e: any) {
@@ -95,7 +95,6 @@ export default function Properties() {
       const p = r?.property || r || {};
       const deal = r?.deal || {};
       const u = r?.last_underwriting_result || {};
-
       const d = (u?.decision || "REJECT").toUpperCase();
 
       const hay =
@@ -113,7 +112,6 @@ export default function Properties() {
         null;
 
       const fin = getFinancingType(priceRaw == null ? null : Number(priceRaw));
-
       if (financing === "CASH") return fin === "CASH DEAL";
       if (financing === "DSCR") return fin === "DSCR LOAN";
       return true;
@@ -133,7 +131,7 @@ export default function Properties() {
     return c;
   }, [rows]);
 
-  const rowHeight = 86;
+  const rowHeight = 104;
 
   const renderRow = React.useCallback((r: any) => {
     const p = r.property || r || {};
@@ -141,13 +139,23 @@ export default function Properties() {
     const u = r.last_underwriting_result || {};
     const decisionTxt = (u.decision || "REJECT").toUpperCase();
 
+    const stage =
+      r?.workflow?.current_stage ||
+      r?.property_state?.current_stage ||
+      r?.stage ||
+      "deal";
+
+    const financingType = getFinancingType(
+      deal?.asking_price ?? deal?.price ?? p?.price ?? null,
+    );
+
     return (
       <Link
         to={`/properties/${p.id}`}
         className="block rounded-xl border border-transparent hover:border-white/10 hover:bg-white/[0.03] transition px-3 py-3"
         style={{ contain: "layout paint" }}
       >
-        <div className="grid grid-cols-[1fr_120px_120px_120px] gap-2 items-center">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_120px_140px] gap-3 items-center">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-white truncate">
               {p.address || `Property #${p.id}`}
@@ -159,23 +167,49 @@ export default function Properties() {
                 ? ` · ${(deal.strategy as string).toUpperCase()}`
                 : ""}
             </div>
+
+            <div className="flex flex-wrap gap-2 mt-2">
+              <span
+                className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] ${clsDecision(decisionTxt)}`}
+              >
+                {decisionTxt}
+              </span>
+              <span
+                className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] ${clsStage(stage)}`}
+              >
+                {stage}
+              </span>
+              <span className="inline-flex rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/75">
+                {financingType}
+              </span>
+            </div>
           </div>
 
           <div className="text-right">
-            <span
-              className={`inline-flex rounded-full border px-3 py-1 text-xs ${clsDecision(decisionTxt)}`}
-            >
-              {decisionTxt}
-              {u.score != null ? ` · ${u.score}` : ""}
-            </span>
+            <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
+              DSCR
+            </div>
+            <div className="text-sm text-white/85 font-semibold mt-1">
+              {u.dscr != null ? Number(u.dscr).toFixed(2) : "—"}
+            </div>
           </div>
 
-          <div className="text-right text-sm text-white/80 font-semibold">
-            {u.dscr != null ? Number(u.dscr).toFixed(2) : "—"}
+          <div className="text-right">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
+              Cash Flow
+            </div>
+            <div className="text-sm text-white/85 font-semibold mt-1">
+              {u.cash_flow != null ? money(u.cash_flow) : "—"}
+            </div>
           </div>
 
-          <div className="text-right text-sm text-white/80 font-semibold">
-            {u.cash_flow != null ? money(u.cash_flow) : "—"}
+          <div className="text-right">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
+              Price
+            </div>
+            <div className="text-sm text-white/85 font-semibold mt-1">
+              {money(deal?.asking_price ?? deal?.price ?? p?.price)}
+            </div>
           </div>
         </div>
       </Link>
@@ -188,7 +222,7 @@ export default function Properties() {
         <PageHero
           eyebrow="Portfolio"
           title="Properties"
-          subtitle="Scan and triage. Filter by decision, search by address, then click into the cockpit view."
+          subtitle="Scan investor readiness, jump into the cockpit, and track where each property sits in the tenant → lease → cash → equity chain."
           actions={
             <>
               <button
@@ -213,6 +247,36 @@ export default function Properties() {
 
         <GlobalFilters />
 
+        <div className="oh-panel p-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search address / city / zip"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/90 placeholder:text-white/40 outline-none focus:border-white/20 focus:ring-2 focus:ring-white/10"
+            />
+            <select
+              value={decision}
+              onChange={(e) => setDecision(e.target.value as any)}
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/90 outline-none"
+            >
+              <option value="ALL">All decisions</option>
+              <option value="PASS">PASS</option>
+              <option value="REVIEW">REVIEW</option>
+              <option value="REJECT">REJECT</option>
+            </select>
+            <select
+              value={financing}
+              onChange={(e) => setFinancing(e.target.value as any)}
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white/90 outline-none"
+            >
+              <option value="ALL">All financing</option>
+              <option value="CASH">Cash deals</option>
+              <option value="DSCR">DSCR deals</option>
+            </select>
+          </div>
+        </div>
+
         {err && (
           <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
             {err}
@@ -232,11 +296,11 @@ export default function Properties() {
           </div>
         ) : (
           <div className="oh-panel p-2" style={{ contain: "layout paint" }}>
-            <div className="grid grid-cols-[1fr_120px_120px_120px] gap-2 px-3 py-2 text-[11px] uppercase tracking-[0.22em] text-white/45">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_120px_140px] gap-3 px-3 py-2 text-[11px] uppercase tracking-[0.22em] text-white/45">
               <div>Property</div>
-              <div className="text-right">Decision</div>
               <div className="text-right">DSCR</div>
               <div className="text-right">Cash Flow</div>
+              <div className="text-right">Price</div>
             </div>
 
             <div className="hr my-1" />
@@ -247,7 +311,7 @@ export default function Properties() {
               overscan={8}
               itemKey={(r) => String(r?.property?.id ?? r?.id ?? Math.random())}
               className="rounded-xl"
-              style={{ height: "calc(100vh - 430px)" }}
+              style={{ height: "calc(100vh - 470px)" }}
               renderRow={(item) => renderRow(item)}
             />
           </div>

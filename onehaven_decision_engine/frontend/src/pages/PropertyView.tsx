@@ -16,6 +16,7 @@ import PhotoUploader from "../components/PhotoUploader";
 import PhotoGallery from "../components/PhotoGallery";
 import RehabFromPhotosCTA from "../components/RehabFromPhotosCTA";
 import InspectionReadiness from "../components/InspectionReadiness";
+import TenantPipeline from "../components/TenantPipeline";
 
 const tabs = [
   "Deal",
@@ -46,6 +47,12 @@ function pct01(v: any) {
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
   return `${Math.round(n * 100)}%`;
+}
+
+function pct(v: any, digits = 1) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toFixed(digits)}%`;
 }
 
 function stageRank(stage: string | null | undefined) {
@@ -110,7 +117,7 @@ const Panel = React.memo(function Panel({
 }) {
   return (
     <div className="oh-panel p-5" style={{ contain: "layout paint" }}>
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="text-sm font-semibold text-white">{title}</div>
         {right ? <div>{right}</div> : null}
       </div>
@@ -355,20 +362,20 @@ export default function PropertyView() {
   const [photoAnalysis, setPhotoAnalysis] = React.useState<any | null>(null);
   const [photoBusy, setPhotoBusy] = React.useState(false);
 
-    const [complianceBrief, setComplianceBrief] = React.useState<any | null>(
-      null,
-    );
-    const [complianceStatus, setComplianceStatus] = React.useState<any | null>(
-      null,
-    );
-    const [complianceRunSummary, setComplianceRunSummary] = React.useState<
-      any | null
-    >(null);
-    const [inspectionReadiness, setInspectionReadiness] = React.useState<
-      any | null
-    >(null);
-    const [complianceAutomationBusy, setComplianceAutomationBusy] =
-      React.useState(false);
+  const [complianceBrief, setComplianceBrief] = React.useState<any | null>(
+    null,
+  );
+  const [complianceStatus, setComplianceStatus] = React.useState<any | null>(
+    null,
+  );
+  const [complianceRunSummary, setComplianceRunSummary] = React.useState<
+    any | null
+  >(null);
+  const [inspectionReadiness, setInspectionReadiness] = React.useState<
+    any | null
+  >(null);
+  const [complianceAutomationBusy, setComplianceAutomationBusy] =
+    React.useState(false);
 
   const abortRef = React.useRef<AbortController | null>(null);
 
@@ -383,6 +390,7 @@ export default function PropertyView() {
   const leases = bundle?.leases || [];
   const txns = bundle?.transactions || [];
   const vals = bundle?.valuations || [];
+  const tenants = bundle?.tenants || [];
 
   const noDeal = (err || "").toLowerCase().includes("nodealfoundforproperty");
 
@@ -399,6 +407,14 @@ export default function PropertyView() {
     [propertyId],
   );
 
+  const refreshChecklist = React.useCallback(
+    async (signal?: AbortSignal) => {
+      const latest = await api.checklistLatest(propertyId, signal);
+      setChecklist(latest);
+    },
+    [propertyId],
+  );
+
   const loadAll = React.useCallback(async () => {
     abortRef.current?.abort();
     const ac = new AbortController();
@@ -407,44 +423,36 @@ export default function PropertyView() {
     try {
       setErr(null);
 
-                const [
-                  out,
-                  opsOut,
-                  workflowOut,
-                  trustOut,
-                  complianceBriefOut,
-                  complianceStatusOut,
-                  complianceRunSummaryOut,
-                  inspectionReadinessOut,
-                ] = await Promise.all([
-                  api.propertyBundle(propertyId, ac.signal),
-                  api
-                    .opsPropertySummary(propertyId, 90, ac.signal)
-                    .catch(() => null),
-                  api
-                    .opsPropertyWorkflow(propertyId, ac.signal)
-                    .catch(() => null),
-                  api
-                    .trustGet("property", propertyId, ac.signal)
-                    .then((x) => {
-                      setTrustErr(null);
-                      return x;
-                    })
-                    .catch((e) => {
-                      setTrustErr(String(e?.message || e));
-                      return null;
-                    }),
-                  api
-                    .compliancePropertyBrief(propertyId, ac.signal)
-                    .catch(() => null),
-                  api.complianceStatus(propertyId, ac.signal).catch(() => null),
-                  api
-                    .complianceRunSummary(propertyId, ac.signal)
-                    .catch(() => null),
-                  api
-                    .complianceInspectionReadiness(propertyId, ac.signal)
-                    .catch(() => null),
-                ]);
+      const [
+        out,
+        opsOut,
+        workflowOut,
+        trustOut,
+        complianceBriefOut,
+        complianceStatusOut,
+        complianceRunSummaryOut,
+        inspectionReadinessOut,
+      ] = await Promise.all([
+        api.propertyBundle(propertyId, ac.signal),
+        api.opsPropertySummary(propertyId, 90, ac.signal).catch(() => null),
+        api.opsPropertyWorkflow(propertyId, ac.signal).catch(() => null),
+        api
+          .trustGet("property", propertyId, ac.signal)
+          .then((x) => {
+            setTrustErr(null);
+            return x;
+          })
+          .catch((e) => {
+            setTrustErr(String(e?.message || e));
+            return null;
+          }),
+        api.compliancePropertyBrief(propertyId, ac.signal).catch(() => null),
+        api.complianceStatus(propertyId, ac.signal).catch(() => null),
+        api.complianceRunSummary(propertyId, ac.signal).catch(() => null),
+        api
+          .complianceInspectionReadiness(propertyId, ac.signal)
+          .catch(() => null),
+      ]);
 
       setBundle(out);
       setOps(opsOut);
@@ -454,13 +462,12 @@ export default function PropertyView() {
       setComplianceBrief(complianceBriefOut);
       setComplianceStatus(complianceStatusOut);
       setComplianceRunSummary(complianceRunSummaryOut);
-            setInspectionReadiness(inspectionReadinessOut);
+      setInspectionReadiness(inspectionReadinessOut);
+
       try {
-        const latest = await api.checklistLatest(propertyId, ac.signal);
-        setChecklist(latest);
+        await refreshChecklist(ac.signal);
       } catch {
         setChecklist(null);
-        setInspectionReadiness(null);
       }
 
       const galleryFromBundle = Array.isArray(out?.photo_gallery)
@@ -485,10 +492,11 @@ export default function PropertyView() {
       setComplianceBrief(null);
       setComplianceStatus(null);
       setComplianceRunSummary(null);
+      setInspectionReadiness(null);
       setPhotos([]);
       setErr(String(e.message || e));
     }
-  }, [propertyId, refreshPhotos]);
+  }, [propertyId, refreshChecklist, refreshPhotos]);
 
   React.useEffect(() => {
     if (!Number.isFinite(propertyId)) {
@@ -528,29 +536,27 @@ export default function PropertyView() {
   );
 
   const runComplianceAutomation = React.useCallback(async () => {
-      try {
-        setComplianceAutomationBusy(true);
-        setErr(null);
+    try {
+      setComplianceAutomationBusy(true);
+      setErr(null);
 
-        const out = await api.runComplianceAutomation(propertyId, true);
-        setInspectionReadiness(
-          out && typeof out === "object" && "inspection_readiness" in out
-            ? out.inspection_readiness
-            : null
-        );
-        setComplianceRunSummary(
-          out && typeof out === "object" && "summary" in out
-            ? out.summary
-            : null
-        );
+      const out = await api.runComplianceAutomation(propertyId, true);
+      setInspectionReadiness(
+        out && typeof out === "object" && "inspection_readiness" in out
+          ? out.inspection_readiness
+          : null,
+      );
+      setComplianceRunSummary(
+        out && typeof out === "object" && "summary" in out ? out.summary : null,
+      );
 
-        await loadAll();
-      } catch (e: any) {
-        setErr(String(e?.message || e));
-      } finally {
-        setComplianceAutomationBusy(false);
-      }
-    }, [propertyId, loadAll]);
+      await loadAll();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setComplianceAutomationBusy(false);
+    }
+  }, [propertyId, loadAll]);
 
   const advanceWorkflow = React.useCallback(async () => {
     await doAction("Advancing workflow…", async () => {
@@ -614,11 +620,6 @@ export default function PropertyView() {
       );
     });
   }, [doAction, propertyId, d?.strategy, bundle]);
-
-  const refreshChecklist = React.useCallback(async () => {
-    const latest = await api.checklistLatest(propertyId);
-    setChecklist(latest);
-  }, [propertyId]);
 
   const generateChecklist = React.useCallback(async () => {
     await doAction("Generating checklist…", async () => {
@@ -715,7 +716,10 @@ export default function PropertyView() {
   const cp = ops?.checklist_progress || {};
   const insp = ops?.inspection || {};
   const cash30 = ops?.cash?.last_30_days || {};
+  const cash90 =
+    ops?.cash?.last_90_days || ops?.cash?.last_90 || ops?.cash?.window_90 || {};
   const equity = ops?.equity || null;
+  const tenantSummary = ops?.tenant || {};
   const nextActions: string[] = Array.isArray(ops?.next_actions)
     ? ops.next_actions
     : Array.isArray(workflow?.next_actions)
@@ -889,6 +893,19 @@ export default function PropertyView() {
             <Badge>Score: {r?.score ?? "—"}</Badge>
             <Badge>DSCR: {r?.dscr?.toFixed?.(2) ?? "—"}</Badge>
             <Badge tone={financingTone}>{financing}</Badge>
+            {tenantSummary?.occupancy_status ? (
+              <Badge
+                tone={
+                  tenantSummary.occupancy_status === "occupied"
+                    ? "good"
+                    : tenantSummary.occupancy_status === "leased_not_started"
+                      ? "warn"
+                      : "bad"
+                }
+              >
+                {tenantSummary.occupancy_status}
+              </Badge>
+            ) : null}
           </div>
 
           <div className="mt-3">
@@ -953,10 +970,26 @@ export default function PropertyView() {
                 ) : (
                   <Badge>Inspection NONE</Badge>
                 )}
+
+                {cash30?.net != null ? (
+                  <Badge tone={Number(cash30.net) >= 0 ? "good" : "bad"}>
+                    30d net {money(cash30.net)}
+                  </Badge>
+                ) : null}
+
+                {equity?.estimated_equity != null ? (
+                  <Badge
+                    tone={
+                      Number(equity.estimated_equity) >= 0 ? "good" : "warn"
+                    }
+                  >
+                    equity {money(equity.estimated_equity)}
+                  </Badge>
+                ) : null}
               </div>
             }
           >
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                 <div className="text-xs text-white/45">Checklist</div>
                 <div className="mt-2">
@@ -979,6 +1012,28 @@ export default function PropertyView() {
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">Cash (90d)</div>
+                <div className="mt-2 space-y-1">
+                  <Row k="Income" v={money(cash90.income)} />
+                  <Row k="Net" v={money(cash90.net)} />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">Tenant</div>
+                <div className="mt-2 space-y-1">
+                  <Row
+                    k="Occupancy"
+                    v={tenantSummary?.occupancy_status ?? "—"}
+                  />
+                  <Row
+                    k="Active lease"
+                    v={tenantSummary?.active_lease_count ?? leases.length ?? 0}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                 <div className="text-xs text-white/45">Equity</div>
                 <div className="mt-2 space-y-1">
                   <Row
@@ -989,28 +1044,10 @@ export default function PropertyView() {
                     k="Equity"
                     v={equity ? money(equity.estimated_equity) : "—"}
                   />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <div className="text-xs text-white/45">One-click</div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={generateChecklist}
-                    className="oh-btn oh-btn-primary cursor-pointer"
-                    disabled={!!busy || !d}
-                    title="Generate and persist checklist"
-                  >
-                    checklist
-                  </button>
-                  <button
-                    onClick={generateRehabFromGaps}
-                    className="oh-btn cursor-pointer"
-                    disabled={!!busy}
-                    title="Creates rehab tasks from checklist gaps + unresolved inspection fails"
-                  >
-                    rehab gaps
-                  </button>
+                  <Row
+                    k="LTV"
+                    v={equity?.ltv_pct != null ? pct(equity.ltv_pct, 2) : "—"}
+                  />
                 </div>
               </div>
             </div>
@@ -1436,21 +1473,35 @@ export default function PropertyView() {
                         );
                         await refreshChecklist();
 
-                        const [opsOut, workflowOut, trustOut] =
-                          await Promise.all([
-                            api
-                              .opsPropertySummary(propertyId, 90)
-                              .catch(() => null),
-                            api
-                              .opsPropertyWorkflow(propertyId)
-                              .catch(() => null),
-                            api
-                              .trustGet("property", propertyId)
-                              .catch(() => null),
-                          ]);
+                        const [
+                          opsOut,
+                          workflowOut,
+                          trustOut,
+                          complianceStatusOut,
+                          complianceRunSummaryOut,
+                          inspectionReadinessOut,
+                        ] = await Promise.all([
+                          api
+                            .opsPropertySummary(propertyId, 90)
+                            .catch(() => null),
+                          api.opsPropertyWorkflow(propertyId).catch(() => null),
+                          api
+                            .trustGet("property", propertyId)
+                            .catch(() => null),
+                          api.complianceStatus(propertyId).catch(() => null),
+                          api
+                            .complianceRunSummary(propertyId)
+                            .catch(() => null),
+                          api
+                            .complianceInspectionReadiness(propertyId)
+                            .catch(() => null),
+                        ]);
                         setOps(opsOut);
                         setWorkflow(workflowOut ?? opsOut?.workflow ?? null);
                         setTrust(trustOut);
+                        setComplianceStatus(complianceStatusOut);
+                        setComplianceRunSummary(complianceRunSummaryOut);
+                        setInspectionReadiness(inspectionReadinessOut);
                       } finally {
                         setCheckBusyCode(null);
                       }
@@ -1464,104 +1515,181 @@ export default function PropertyView() {
       )}
 
       {tab === "Tenant" && (
-        <Panel title="Leases">
-          {leases.length === 0 ? (
-            <div className="text-sm text-white/55">No leases yet.</div>
-          ) : (
-            <div className="space-y-2">
-              {leases.map((l: any) => (
-                <div
-                  key={l.id}
-                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
-                  style={{ contain: "layout paint" }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold text-white">
-                      Tenant #{l.tenant_id}
+        <div className="space-y-4">
+          <TenantPipeline
+            tenants={tenants}
+            leases={leases}
+            opsTenant={tenantSummary}
+          />
+
+          <Panel title="Lease Ledger">
+            {leases.length === 0 ? (
+              <div className="text-sm text-white/55">No leases yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {leases.map((l: any) => (
+                  <div
+                    key={l.id}
+                    className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                    style={{ contain: "layout paint" }}
+                  >
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="font-semibold text-white">
+                        Tenant #{l.tenant_id}
+                      </div>
+                      <div className="text-sm text-white/85 font-semibold">
+                        {money(l.total_rent)}
+                      </div>
                     </div>
-                    <div className="text-sm text-white/85 font-semibold">
-                      {money(l.total_rent)}
+                    <div className="text-xs text-white/55 mt-1">
+                      Start: {new Date(l.start_date).toLocaleDateString()}
+                      {l.end_date
+                        ? ` · End: ${new Date(l.end_date).toLocaleDateString()}`
+                        : ""}
+                      {l.hap_contract_status
+                        ? ` · HAP: ${l.hap_contract_status}`
+                        : ""}
                     </div>
+                    {l.notes && (
+                      <div className="text-sm text-white/70 mt-2">
+                        {l.notes}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-xs text-white/55 mt-1">
-                    Start: {new Date(l.start_date).toLocaleDateString()}
-                    {l.end_date
-                      ? ` · End: ${new Date(l.end_date).toLocaleDateString()}`
-                      : ""}
-                  </div>
-                  {l.notes && (
-                    <div className="text-sm text-white/70 mt-2">{l.notes}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
       )}
 
       {tab === "Cash" && (
-        <Panel title="Transactions">
-          {txns.length === 0 ? (
-            <div className="text-sm text-white/55">No transactions yet.</div>
-          ) : (
-            <div className="space-y-2">
-              {txns.map((t: any) => (
-                <div
-                  key={t.id}
-                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
-                  style={{ contain: "layout paint" }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-white font-semibold">
-                      {t.txn_type || t.type || "txn"}
-                    </div>
-                    <div className="text-white/85 font-semibold">
-                      {money(t.amount)}
-                    </div>
-                  </div>
-                  <div className="text-xs text-white/55 mt-1">
-                    {t.txn_date
-                      ? new Date(t.txn_date).toLocaleDateString()
-                      : "—"}
-                    {t.memo ? ` · ${t.memo}` : ""}
-                  </div>
+        <div className="space-y-4">
+          <Panel title="Cash Snapshot">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">30d Income</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {money(cash30.income)}
                 </div>
-              ))}
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">30d Expense</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {money(cash30.expense)}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">30d Capex</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {money(cash30.capex)}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">30d Net</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {money(cash30.net)}
+                </div>
+              </div>
             </div>
-          )}
-        </Panel>
+          </Panel>
+
+          <Panel title="Transactions">
+            {txns.length === 0 ? (
+              <div className="text-sm text-white/55">No transactions yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {txns.map((t: any) => (
+                  <div
+                    key={t.id}
+                    className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                    style={{ contain: "layout paint" }}
+                  >
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="text-white font-semibold">
+                        {t.txn_type || t.type || "txn"}
+                      </div>
+                      <div className="text-white/85 font-semibold">
+                        {money(t.amount)}
+                      </div>
+                    </div>
+                    <div className="text-xs text-white/55 mt-1">
+                      {t.txn_date
+                        ? new Date(t.txn_date).toLocaleDateString()
+                        : "—"}
+                      {t.memo ? ` · ${t.memo}` : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
       )}
 
       {tab === "Equity" && (
-        <Panel title="Valuations">
-          {vals.length === 0 ? (
-            <div className="text-sm text-white/55">No valuations yet.</div>
-          ) : (
-            <div className="space-y-2">
-              {vals.map((v2: any) => (
-                <div
-                  key={v2.id}
-                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
-                  style={{ contain: "layout paint" }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-white font-semibold">
-                      {v2.as_of ? new Date(v2.as_of).toLocaleDateString() : "—"}
-                    </div>
-                    <div className="text-white/85 font-semibold">
-                      {money(v2.estimated_value)}
-                    </div>
-                  </div>
-                  <div className="text-xs text-white/55 mt-1">
-                    Loan:{" "}
-                    {v2.loan_balance != null ? money(v2.loan_balance) : "—"}
-                    {v2.notes ? ` · ${v2.notes}` : ""}
-                  </div>
+        <div className="space-y-4">
+          <Panel title="Equity Snapshot">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">Estimated Value</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {equity ? money(equity.estimated_value) : "—"}
                 </div>
-              ))}
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">Loan Balance</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {equity ? money(equity.loan_balance) : "—"}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">Estimated Equity</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {equity ? money(equity.estimated_equity) : "—"}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <div className="text-xs text-white/45">LTV</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {equity?.ltv_pct != null ? pct(equity.ltv_pct, 2) : "—"}
+                </div>
+              </div>
             </div>
-          )}
-        </Panel>
+          </Panel>
+
+          <Panel title="Valuations">
+            {vals.length === 0 ? (
+              <div className="text-sm text-white/55">No valuations yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {vals.map((v2: any) => (
+                  <div
+                    key={v2.id}
+                    className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                    style={{ contain: "layout paint" }}
+                  >
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="text-white font-semibold">
+                        {v2.as_of
+                          ? new Date(v2.as_of).toLocaleDateString()
+                          : "—"}
+                      </div>
+                      <div className="text-white/85 font-semibold">
+                        {money(v2.estimated_value)}
+                      </div>
+                    </div>
+                    <div className="text-xs text-white/55 mt-1">
+                      Loan:{" "}
+                      {v2.loan_balance != null ? money(v2.loan_balance) : "—"}
+                      {v2.notes ? ` · ${v2.notes}` : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
       )}
     </PageShell>
   );

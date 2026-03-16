@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
@@ -45,11 +45,20 @@ def _loads(s: Optional[str], default: Any):
         return default
 
 
-def _txn_bucket(txn_type: str) -> str:
+def _num(v: Any) -> float:
+    try:
+        if v is None:
+            return 0.0
+        return float(v)
+    except Exception:
+        return 0.0
+
+
+def _txn_bucket(txn_type: str | None) -> str:
     t = (txn_type or "").lower().strip()
-    if t in {"income", "rent"}:
+    if t in {"income", "rent", "hap", "voucher"}:
         return "income"
-    if t in {"expense"}:
+    if t in {"expense", "repair", "maintenance", "mortgage", "insurance", "tax"}:
         return "expense"
     if t in {"capex"}:
         return "capex"
@@ -102,68 +111,24 @@ def _latest_inspection(db: Session, *, org_id: int, property_id: int) -> Optiona
 
 
 def _open_failed_inspection_items(db: Session, *, org_id: int, property_id: int) -> int:
-    return int(
-        db.scalar(
-            select(func.count(InspectionItem.id))
-            .select_from(InspectionItem)
-            .join(Inspection, Inspection.id == InspectionItem.inspection_id)
-            .where(
-                Inspection.org_id == org_id,
-                Inspection.property_id == property_id,
-                InspectionItem.failed.is_(True),
-                InspectionItem.resolved_at.is_(None),
-            )
-        )
-        or 0
-    )
-
-
-def _active_lease(db: Session, *, org_id: int, property_id: int) -> Optional[Lease]:
-    now = _now_utc()
-    far_future = now + timedelta(days=3650)
-    return db.scalar(
-        select(Lease)
+    rows = db.scalars(
+        select(InspectionItem)
+        .join(Inspection, Inspection.id == InspectionItem.inspection_id)
         .where(
-            Lease.org_id == org_id,
-            Lease.property_id == property_id,
-            Lease.start_date <= now,
-            func.coalesce(Lease.end_date, far_future) >= now,
-        )
-        .order_by(desc(Lease.start_date), desc(Lease.id))
-    )
-
-
-def _cash_rollup(db: Session, *, org_id: int, property_id: int, days: int) -> dict[str, float]:
-    since = _now_utc() - timedelta(days=days)
-    txns = db.scalars(
-        select(Transaction).where(
-            Transaction.org_id == org_id,
-            Transaction.property_id == property_id,
-            Transaction.txn_date >= since,
+            Inspection.org_id == org_id,
+            Inspection.property_id == property_id,
+            InspectionItem.failed.is_(True),
+            InspectionItem.resolved_at.is_(None),
         )
     ).all()
-
-    out = {"income": 0.0, "expense": 0.0, "capex": 0.0, "other": 0.0, "net": 0.0}
-    for t in txns:
-        b = _txn_bucket(t.txn_type)
-        out[b] += float(t.amount or 0.0)
-    out["net"] = out["income"] - out["expense"] - out["capex"] + out["other"]
-    return out
-
-
-def _latest_valuation(db: Session, *, org_id: int, property_id: int) -> Optional[Valuation]:
-    return db.scalar(
-        select(Valuation)
-        .where(Valuation.org_id == org_id, Valuation.property_id == property_id)
-        .order_by(desc(Valuation.as_of), desc(Valuation.id))
-    )
+    return len(rows)
 
 
 def _latest_underwriting(db: Session, *, org_id: int, property_id: int) -> Optional[UnderwritingResult]:
     return db.scalar(
         select(UnderwritingResult)
         .join(Deal, Deal.id == UnderwritingResult.deal_id)
-        .where(UnderwritingResult.org_id == org_id, Deal.property_id == property_id)
+        .where(Deal.org_id == org_id, Deal.property_id == property_id)
         .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
     )
 
@@ -180,8 +145,7 @@ def _rehab_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, A
 
     cost_est = 0.0
     for r in rows:
-        if r.cost_estimate is not None:
-            cost_est += float(r.cost_estimate)
+        cost_est += _num(getattr(r, "cost_estimate", None) or getattr(r, "estimated_cost", None))
 
     return {
         "total": total,
@@ -189,8 +153,137 @@ def _rehab_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, A
         "in_progress": inprog,
         "blocked": blocked,
         "done": done,
-        "cost_estimate_sum": cost_est,
+        "cost_estimate_sum": round(cost_est, 2),
         "is_complete": total > 0 and todo == 0 and inprog == 0 and blocked == 0,
+    }
+
+
+def _active_lease(db: Session, *, org_id: int, property_id: int) -> Optional[Lease]:
+    now = _now_utc()
+    rows = db.scalars(
+        select(Lease)
+        .where(Lease.org_id == org_id, Lease.property_id == property_id)
+        .order_by(desc(Lease.start_date), desc(Lease.id))
+    ).all()
+
+    for row in rows:
+        if row.start_date and row.start_date > now:
+            continue
+        if row.end_date and row.end_date < now:
+            continue
+        return row
+    return None
+
+
+def _latest_valuation(db: Session, *, org_id: int, property_id: int) -> Optional[Valuation]:
+    return db.scalar(
+        select(Valuation)
+        .where(Valuation.org_id == org_id, Valuation.property_id == property_id)
+        .order_by(desc(Valuation.as_of), desc(Valuation.id))
+    )
+
+
+def _cash_rollup(db: Session, *, org_id: int, property_id: int, days: int) -> dict[str, float]:
+    since = _now_utc() - timedelta(days=days)
+    rows = db.scalars(
+        select(Transaction)
+        .where(Transaction.org_id == org_id, Transaction.property_id == property_id)
+        .order_by(desc(Transaction.txn_date), desc(Transaction.id))
+    ).all()
+
+    income = expense = capex = 0.0
+    for r in rows:
+        dt = r.txn_date or _now_utc()
+        if dt < since:
+            continue
+        amt = _num(r.amount)
+        bucket = _txn_bucket(getattr(r, "txn_type", None))
+        if bucket == "income":
+            income += amt
+        elif bucket == "expense":
+            expense += abs(amt)
+        elif bucket == "capex":
+            capex += abs(amt)
+
+    return {
+        "income": round(income, 2),
+        "expense": round(expense, 2),
+        "capex": round(capex, 2),
+        "net": round(income - expense - capex, 2),
+    }
+
+
+def _tenant_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    now = _now_utc()
+    leases = list(
+        db.scalars(
+            select(Lease)
+            .where(Lease.org_id == org_id, Lease.property_id == property_id)
+            .order_by(desc(Lease.start_date), desc(Lease.id))
+        ).all()
+    )
+
+    active = []
+    upcoming = []
+    ended = []
+    for l in leases:
+        if l.start_date and l.start_date > now:
+            upcoming.append(l)
+        elif l.end_date and l.end_date < now:
+            ended.append(l)
+        else:
+            active.append(l)
+
+    current = active[0] if active else None
+    occupancy_status = "vacant"
+    if current:
+        occupancy_status = "occupied"
+    elif upcoming:
+        occupancy_status = "leased_not_started"
+
+    return {
+        "occupancy_status": occupancy_status,
+        "lease_count": len(leases),
+        "active_lease_count": len(active),
+        "upcoming_lease_count": len(upcoming),
+        "ended_lease_count": len(ended),
+        "active_lease": (
+            {
+                "id": current.id,
+                "tenant_id": current.tenant_id,
+                "start_date": current.start_date.isoformat() if current.start_date else None,
+                "end_date": current.end_date.isoformat() if current.end_date else None,
+                "total_rent": _num(current.total_rent),
+                "tenant_portion": _num(current.tenant_portion) if current.tenant_portion is not None else None,
+                "housing_authority_portion": _num(current.housing_authority_portion)
+                if current.housing_authority_portion is not None
+                else None,
+                "hap_contract_status": current.hap_contract_status,
+                "notes": current.notes,
+            }
+            if current
+            else None
+        ),
+    }
+
+
+def _equity_summary(db: Session, *, org_id: int, property_id: int) -> Optional[dict[str, Any]]:
+    latest = _latest_valuation(db, org_id=org_id, property_id=property_id)
+    if latest is None:
+        return None
+
+    estimated_value = _num(latest.estimated_value)
+    loan_balance = _num(latest.loan_balance)
+    estimated_equity = estimated_value - loan_balance
+    ltv_pct = round((loan_balance / estimated_value) * 100.0, 2) if estimated_value > 0 else None
+
+    return {
+        "as_of": latest.as_of.isoformat() if latest.as_of else None,
+        "estimated_value": round(estimated_value, 2),
+        "loan_balance": round(loan_balance, 2),
+        "estimated_equity": round(estimated_equity, 2),
+        "ltv_pct": ltv_pct,
+        "notes": latest.notes,
     }
 
 
@@ -223,8 +316,7 @@ def _decision_health(
         warnings.append("missing_underwriting")
 
     if checklist.total > 0:
-        checklist_pts = round(checklist.pct_done * 20)
-        score += checklist_pts
+        score += round(checklist.pct_done * 20)
         if checklist.done == checklist.total:
             flags.append("checklist_complete")
         elif checklist.blocked > 0:
@@ -237,7 +329,6 @@ def _decision_health(
             score += 15
             flags.append("rehab_complete")
         else:
-            score += min(10, rehab.get("done", 0))
             warnings.append("rehab_incomplete")
     else:
         warnings.append("missing_rehab_tasks")
@@ -303,23 +394,14 @@ def property_ops_summary(
     latest_insp = _latest_inspection(db, org_id=p.org_id, property_id=property_id)
     open_failed_items = _open_failed_inspection_items(db, org_id=p.org_id, property_id=property_id)
     rehab = _rehab_summary(db, org_id=p.org_id, property_id=property_id)
+
+    tenant = _tenant_summary(db, org_id=p.org_id, property_id=property_id)
     active_lease = _active_lease(db, org_id=p.org_id, property_id=property_id)
 
     cash_30 = _cash_rollup(db, org_id=p.org_id, property_id=property_id, days=30)
     cash_n = _cash_rollup(db, org_id=p.org_id, property_id=property_id, days=cash_days)
 
-    val = _latest_valuation(db, org_id=p.org_id, property_id=property_id)
-    equity = None
-    if val:
-        estimated_value = float(val.estimated_value or 0.0)
-        loan_balance = float(val.loan_balance or 0.0)
-        equity = {
-            "as_of": val.as_of.isoformat() if val.as_of else None,
-            "estimated_value": estimated_value,
-            "loan_balance": loan_balance,
-            "estimated_equity": estimated_value - loan_balance,
-            "notes": val.notes,
-        }
+    equity = _equity_summary(db, org_id=p.org_id, property_id=property_id)
 
     uw = _latest_underwriting(db, org_id=p.org_id, property_id=property_id)
     underwriting = None
@@ -331,7 +413,7 @@ def property_ops_summary(
             "dscr": uw.dscr,
             "cash_flow": uw.cash_flow,
             "gross_rent_used": uw.gross_rent_used,
-            "opex_used": uw.opex_used,
+            "opex_used": getattr(uw, "opex_used", None),
             "reason_json": _loads(getattr(uw, "reason_json", None), {}),
             "created_at": uw.created_at.isoformat() if uw.created_at else None,
         }
@@ -349,9 +431,7 @@ def property_ops_summary(
 
     counts = {
         "rehab_tasks_total": rehab.get("total", 0),
-        "rehab_tasks_open": int(rehab.get("todo", 0))
-        + int(rehab.get("in_progress", 0))
-        + int(rehab.get("blocked", 0)),
+        "rehab_tasks_open": int(rehab.get("todo", 0)) + int(rehab.get("in_progress", 0)) + int(rehab.get("blocked", 0)),
         "checklist_total": checklist.total,
         "checklist_done": checklist.done,
         "inspection_open_failed_items": open_failed_items,
@@ -359,6 +439,18 @@ def property_ops_summary(
         "cash_days_window": cash_days,
         "has_valuation": equity is not None,
         "has_underwriting": underwriting is not None,
+    }
+
+    endgame = {
+        "tenant_ready": tenant["occupancy_status"] in {"occupied", "leased_not_started"},
+        "cash_live": cash_n["income"] > 0 or cash_n["expense"] > 0 or cash_n["capex"] > 0,
+        "equity_tracked": equity is not None,
+        "ops_maturity_score": (
+            (25 if tenant["occupancy_status"] in {"occupied", "leased_not_started"} else 0)
+            + (25 if cash_n["income"] > 0 else 0)
+            + (25 if equity is not None else 0)
+            + (25 if active_lease is not None else 0)
+        ),
     }
 
     return {
@@ -405,22 +497,8 @@ def property_ops_summary(
             "open_failed_items": open_failed_items,
         },
         "rehab_summary": rehab,
-        "lease": (
-            {
-                "id": active_lease.id,
-                "start_date": active_lease.start_date.isoformat() if active_lease.start_date else None,
-                "end_date": active_lease.end_date.isoformat() if active_lease.end_date else None,
-                "total_rent": float(active_lease.total_rent),
-                "tenant_portion": float(active_lease.tenant_portion or 0.0)
-                if active_lease.tenant_portion is not None
-                else None,
-                "housing_authority_portion": float(active_lease.housing_authority_portion or 0.0)
-                if active_lease.housing_authority_portion is not None
-                else None,
-            }
-            if active_lease
-            else None
-        ),
+        "tenant": tenant,
+        "lease": tenant.get("active_lease"),
         "cash": {
             "last_30_days": cash_30,
             f"last_{cash_days}_days": cash_n,
@@ -429,6 +507,7 @@ def property_ops_summary(
         "underwriting": underwriting,
         "decision_health": decision_health,
         "counts": counts,
+        "endgame": endgame,
         "constraints": state_payload.get("constraints", {}),
         "outstanding_tasks": state_payload.get("outstanding_tasks", {}),
         "next_actions": state_payload.get("next_actions", []),
