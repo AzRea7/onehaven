@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     app_env: str = "local"  # local|dev|prod
     database_url: str = "sqlite:///./onehaven.db"
 
-    # ---- CORS (used by main.py) ----
+    # ---- CORS ----
     cors_allow_origins: list[str] | str = ["*"]
 
     # ---- Operating Truth / Reproducibility ----
@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     min_bedrooms: int = 2
     min_inventory: int | None = None
 
-    rent_rule_min_pct: float = 0.013  # 1.3%
-    rent_rule_target_pct: float = 0.015  # 1.5%
+    rent_rule_min_pct: float = 0.013
+    rent_rule_target_pct: float = 0.015
 
     # ---- Underwriting defaults ----
     vacancy_rate: float = 0.05
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     dscr_min: float = 1.20
     dscr_penalty_enabled: bool = True
 
-    # ---- Rent calibration (learning loop) ----
+    # ---- Rent calibration ----
     rent_calibration_alpha: float = 0.20
     rent_calibration_apha: float | None = None  # back-compat typo
     rent_calibration_min_mult: float = 0.70
@@ -60,11 +60,8 @@ class Settings(BaseSettings):
     auth_mode: str = "dev"  # dev|jwt
     dev_auto_provision: bool = True
     dev_auto_verify_email: bool = True
-
-    # ✅ allow dev-bypass in local/dev ONLY when explicitly enabled via env
     allow_local_auth_bypass: bool = False
 
-    # Dev header names
     dev_header_org_slug: str = "X-Org-Slug"
     dev_header_user_email: str = "X-User-Email"
     dev_header_user_role: str = "X-User-Role"
@@ -79,7 +76,7 @@ class Settings(BaseSettings):
 
     # ---- JWT cookie ----
     jwt_secret: str = "dev-change-me"
-    jwt_exp_minutes: int = 60 * 24 * 7  # 7 days
+    jwt_exp_minutes: int = 60 * 24 * 7
     jwt_cookie_name: str = "onehaven_jwt"
     jwt_cookie_secure: int = 0
     jwt_cookie_samesite: str = "lax"
@@ -89,22 +86,42 @@ class Settings(BaseSettings):
     celery_result_backend: str | None = None
 
     # ---- Agent runtime limits ----
-    agents_max_runs_per_property_per_hour: int = 3
+    agents_max_runs_per_property_per_hour: int = 6
     agents_max_retries: int = 3
-    agents_run_timeout_seconds: int = 120
+    agents_run_timeout_seconds: int = 180
+    agents_max_running_per_org: int = 3
+    agents_enable_org_concurrency_guard: bool = True
+    agents_enable_pg_advisory_locks: bool = True
 
-    # ---- Trace ----
+    # ---- Agent orchestration toggles ----
+    agents_enable_auto_planning: bool = True
+    agents_enable_followup_fanout: bool = True
+    agents_enable_ops_judge: bool = True
+    agents_enable_trust_recompute: bool = True
+    agents_enable_photo_rehab: bool = True
+
+    # ---- LM Studio / local LLM ----
+    llm_provider: str = "lm_studio"  # lm_studio|disabled
+    lm_studio_enabled: bool = True
+    lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
+    lm_studio_api_key: str = "lm-studio"
+    lm_studio_model: str = "qwen3-coder-30b-a3b-instruct"
+    lm_studio_vision_model: str = "qwen2.5-vl-7b-instruct"
+    lm_studio_timeout_seconds: int = 120
+    lm_studio_temperature: float = 0.2
+    lm_studio_max_tokens: int = 2048
+    lm_studio_json_mode: bool = True
+
+    # ---- Trace / observability ----
     trace_mirror_to_messages: int = 0
 
     def model_post_init(self, __context) -> None:
-        # Back-compat for earlier typo
         if self.rent_calibration_apha is not None:
             object.__setattr__(self, "rent_calibration_alpha", float(self.rent_calibration_apha))
 
         env = (self.app_env or "local").strip().lower()
         is_prod = env in ("prod", "production")
 
-        # Hard fail in prod only
         if is_prod:
             if (self.auth_mode or "").strip().lower() == "dev":
                 raise ValueError("SECURITY: auth_mode=dev is not allowed in prod")
@@ -114,6 +131,22 @@ class Settings(BaseSettings):
             origins = self.cors_allow_origins
             if origins == "*" or origins == ["*"] or (isinstance(origins, str) and "*" in origins):
                 raise ValueError("SECURITY: cors_allow_origins wildcard is not allowed in prod")
+
+            if not self.jwt_secret or self.jwt_secret == "dev-change-me":
+                raise ValueError("SECURITY: jwt_secret must be set in prod")
+
+            if self.lm_studio_enabled and not self.lm_studio_base_url:
+                raise ValueError("SECURITY: lm_studio_base_url must be configured when LM Studio is enabled")
+
+        # local/dev safety defaults
+        if not getattr(self, "agents_max_running_per_org", None):
+            object.__setattr__(self, "agents_max_running_per_org", 3)
+
+        if self.agents_run_timeout_seconds < 30:
+            object.__setattr__(self, "agents_run_timeout_seconds", 30)
+
+        if self.agents_max_runs_per_property_per_hour < 1:
+            object.__setattr__(self, "agents_max_runs_per_property_per_hour", 1)
 
 
 settings = Settings()

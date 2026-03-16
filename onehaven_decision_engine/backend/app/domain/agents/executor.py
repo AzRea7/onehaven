@@ -7,22 +7,27 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.domain.agents.contracts import canonical_agent_key, get_contract
 from app.domain.agents.registry import AGENTS
+from app.services.agent_concurrency import (
+    enforce_org_concurrency,
+    release_agent_lock,
+    try_acquire_agent_lock,
+)
 
-# Optional trust wiring (no hard dependency)
 try:
     from app.services.trust_service import record_signal, recompute_and_persist  # type: ignore
 except Exception:  # pragma: no cover
-    def record_signal(*args, **kwargs):  # type: ignore
+    def record_signal(*args, **kwargs):
         return None
 
-    def recompute_and_persist(*args, **kwargs):  # type: ignore
+    def recompute_and_persist(*args, **kwargs):
         return None
 
 
 @dataclass
 class AgentResult:
-    status: str  # "done" | "failed"
+    status: str
     output: dict[str, Any]
     error: Optional[str] = None
 
@@ -36,6 +41,58 @@ def _loads(s: Optional[str], default: Any) -> Any:
         return default
 
 
+def _trust(
+    db: Session,
+    *,
+    org_id: int,
+    agent_key: str,
+    property_id: Optional[int],
+    ok: float,
+    meta: dict[str, Any],
+) -> None:
+    try:
+        record_signal(
+            db,
+            org_id=int(org_id),
+            entity_type="provider",
+            entity_id=f"agent:{agent_key}",
+            signal_key=f"agent.{agent_key}.success",
+            value=float(ok),
+            meta=meta,
+        )
+        try:
+            recompute_and_persist(db, int(org_id), "provider", f"agent:{agent_key}")
+        except TypeError:
+            recompute_and_persist(
+                db,
+                org_id=int(org_id),
+                entity_type="provider",
+                entity_id=f"agent:{agent_key}",
+            )
+
+        if property_id is not None:
+            record_signal(
+                db,
+                org_id=int(org_id),
+                entity_type="property",
+                entity_id=str(property_id),
+                signal_key=f"agent.{agent_key}.success",
+                value=float(ok),
+                meta=meta,
+            )
+            try:
+                recompute_and_persist(db, int(org_id), "property", str(property_id))
+            except TypeError:
+                recompute_and_persist(
+                    db,
+                    org_id=int(org_id),
+                    entity_type="property",
+                    entity_id=str(property_id),
+                )
+    except Exception:
+        pass
+
+
 def execute_agent(
     db: Session,
     *,
@@ -44,106 +101,128 @@ def execute_agent(
     property_id: Optional[int],
     input_json: Optional[str],
 ) -> AgentResult:
-    fn = AGENTS.get(agent_key)
-    if fn is None:
-        # Trust: unknown agent is a stability failure (schema drift / UI mismatch).
-        try:
-            record_signal(
-                db,
-                org_id=org_id,
-                entity_type="provider",
-                entity_id="agent_engine",
-                signal_key="agent.unknown_agent_key",
-                value=0.0,
-                meta={"agent_key": agent_key},
-            )
-            recompute_and_persist(db, org_id, "provider", "agent_engine")
-        except Exception:
-            pass
+    resolved_agent_key = canonical_agent_key(agent_key)
+    fn = AGENTS.get(resolved_agent_key)
 
-        return AgentResult(status="failed", output={}, error=f"Unknown agent_key: {agent_key}")
+    if fn is None:
+        _trust(
+            db,
+            org_id=int(org_id),
+            agent_key="agent_engine",
+            property_id=property_id,
+            ok=0.0,
+            meta={"unknown_agent_key": agent_key, "resolved_agent_key": resolved_agent_key},
+        )
+        return AgentResult(
+            status="failed",
+            output={},
+            error=f"Unknown agent_key: {agent_key}",
+        )
 
     payload = _loads(input_json, {})
+    if not isinstance(payload, dict):
+        payload = {}
+
+    contract = get_contract(resolved_agent_key)
+    lock_acquired = False
+
     try:
-        out = fn(
+        enforce_org_concurrency(db, org_id=int(org_id))
+        lock_acquired = try_acquire_agent_lock(
             db,
-            org_id=org_id,
+            org_id=int(org_id),
+            agent_key=str(resolved_agent_key),
+        )
+        if not lock_acquired:
+            _trust(
+                db,
+                org_id=int(org_id),
+                agent_key=resolved_agent_key,
+                property_id=property_id,
+                ok=0.0,
+                meta={"error": "agent_lock_busy", "resolved_agent_key": resolved_agent_key},
+            )
+            return AgentResult(
+                status="failed",
+                output={},
+                error=f"agent_lock_busy:{resolved_agent_key}",
+            )
+
+        output = fn(
+            db,
+            org_id=int(org_id),
             property_id=property_id,
-            input_payload=payload if isinstance(payload, dict) else {},
+            input_payload=payload,
         )
-    except Exception as e:
-        # Trust: agent hard-failed during execution.
-        try:
-            record_signal(
+
+        if not isinstance(output, dict):
+            _trust(
                 db,
-                org_id=org_id,
-                entity_type="provider",
-                entity_id=f"agent:{agent_key}",
-                signal_key=f"agent.{agent_key}.success",
-                value=0.0,
-                meta={"property_id": property_id, "error": str(e)},
+                org_id=int(org_id),
+                agent_key=resolved_agent_key,
+                property_id=property_id,
+                ok=0.0,
+                meta={"error": "non_dict_output", "resolved_agent_key": resolved_agent_key},
             )
-            recompute_and_persist(db, org_id, "provider", f"agent:{agent_key}")
-            if property_id is not None:
-                record_signal(
-                    db,
-                    org_id=org_id,
-                    entity_type="property",
-                    entity_id=str(property_id),
-                    signal_key=f"agent.{agent_key}.success",
-                    value=0.0,
-                    meta={"error": str(e)},
-                )
-                recompute_and_persist(db, org_id, "property", str(property_id))
-        except Exception:
-            pass
-
-        return AgentResult(status="failed", output={}, error=str(e))
-
-    if not isinstance(out, dict):
-        try:
-            record_signal(
-                db,
-                org_id=org_id,
-                entity_type="provider",
-                entity_id=f"agent:{agent_key}",
-                signal_key=f"agent.{agent_key}.output_is_dict",
-                value=0.0,
-                meta={"property_id": property_id},
+            return AgentResult(
+                status="failed",
+                output={},
+                error="Agent returned non-dict output",
             )
-            recompute_and_persist(db, org_id, "provider", f"agent:{agent_key}")
-        except Exception:
-            pass
 
-        return AgentResult(status="failed", output={}, error="Agent returned non-dict output")
+        output.setdefault("agent_key", resolved_agent_key)
+        output.setdefault("summary", f"{resolved_agent_key} completed")
+        output.setdefault("facts", {"property_id": property_id})
+        output.setdefault("confidence", 0.75)
 
-    out.setdefault("actions", [])
+        if contract.mode != "recommend_only":
+            output.setdefault("actions", [])
+            output.setdefault("recommendations", [])
+            output.setdefault("needs_human_review", bool(contract.requires_human))
+        else:
+            output.setdefault("recommendations", [])
+            output["actions"] = []
+            output.setdefault("needs_human_review", False)
 
-    # Trust: agent executed successfully (not “actions applied”, just “agent returned a valid dict output”).
-    try:
-        record_signal(
+        _trust(
             db,
-            org_id=org_id,
-            entity_type="provider",
-            entity_id=f"agent:{agent_key}",
-            signal_key=f"agent.{agent_key}.success",
-            value=1.0,
-            meta={"property_id": property_id, "actions_count": len(out.get("actions") or [])},
+            org_id=int(org_id),
+            agent_key=resolved_agent_key,
+            property_id=property_id,
+            ok=1.0,
+            meta={
+                "property_id": property_id,
+                "resolved_agent_key": resolved_agent_key,
+                "requested_agent_key": agent_key,
+                "actions_count": len(output.get("actions") or []),
+                "recommendations_count": len(output.get("recommendations") or []),
+            },
         )
-        recompute_and_persist(db, org_id, "provider", f"agent:{agent_key}")
+        return AgentResult(status="done", output=output, error=None)
 
-        if property_id is not None:
-            record_signal(
-                db,
-                org_id=org_id,
-                entity_type="property",
-                entity_id=str(property_id),
-                signal_key=f"agent.{agent_key}.success",
-                value=1.0,
-                meta={"actions_count": len(out.get("actions") or [])},
-            )
-            recompute_and_persist(db, org_id, "property", str(property_id))
-    except Exception:
-        pass
+    except Exception as exc:
+        _trust(
+            db,
+            org_id=int(org_id),
+            agent_key=resolved_agent_key,
+            property_id=property_id,
+            ok=0.0,
+            meta={
+                "error": str(exc),
+                "resolved_agent_key": resolved_agent_key,
+                "requested_agent_key": agent_key,
+            },
+        )
+        return AgentResult(status="failed", output={}, error=str(exc))
 
-    return AgentResult(status="done", output=out, error=None)
+    finally:
+        if lock_acquired:
+            try:
+                release_agent_lock(
+                    db,
+                    org_id=int(org_id),
+                    agent_key=str(resolved_agent_key),
+                )
+            except Exception:
+                pass
+            

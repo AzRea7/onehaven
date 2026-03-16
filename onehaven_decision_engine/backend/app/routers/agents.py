@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
@@ -24,7 +25,6 @@ from ..schemas import (
 from ..domain.agents.registry import AGENTS, SLOTS, AGENT_SPECS
 from ..services.agent_engine import create_and_execute_run
 
-# Optional trust wiring (no hard dependency)
 try:
     from ..services.trust_service import record_signal, recompute_and_persist  # type: ignore
 except Exception:  # pragma: no cover
@@ -36,6 +36,142 @@ except Exception:  # pragma: no cover
 
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+VALID_SLOT_KEYS = {s.slot_key for s in SLOTS}
+DEFAULT_SLOT_BY_KEY = {s.slot_key: s for s in SLOTS}
+VALID_OWNER_TYPES = {"human", "agent"}
+VALID_SLOT_STATUSES = {"idle", "queued", "running", "blocked", "done", "failed", "disabled"}
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
+
+
+def _json_dumps(v: Any) -> str:
+    try:
+        return json.dumps(v)
+    except Exception:
+        return "{}"
+
+
+def _canonical_agent_key(agent_key: str) -> str:
+    raw = str(agent_key or "").strip()
+    if raw in AGENT_SPECS:
+        spec = AGENT_SPECS[raw]
+        return str(spec.get("canonical_key") or raw)
+    if raw in AGENTS:
+        return raw
+    return raw
+
+
+def _assert_property_access(db: Session, *, org_id: int, property_id: int | None) -> Property | None:
+    if property_id is None:
+        return None
+    prop = db.scalar(select(Property).where(Property.id == int(property_id), Property.org_id == int(org_id)))
+    if not prop:
+        raise HTTPException(status_code=404, detail="property not found")
+    return prop
+
+
+def _emit_slot_event(
+    db: Session,
+    *,
+    org_id: int,
+    actor_user_id: int,
+    property_id: int | None,
+    slot_key: str,
+    owner_type: str,
+    assignee: str | None,
+    status: str,
+) -> None:
+    db.add(
+        WorkflowEvent(
+            org_id=int(org_id),
+            property_id=property_id,
+            actor_user_id=int(actor_user_id),
+            event_type="slot_assigned",
+            payload_json=_json_dumps(
+                {
+                    "slot_key": slot_key,
+                    "owner_type": owner_type,
+                    "assignee": assignee,
+                    "status": status,
+                }
+            ),
+            created_at=_utcnow(),
+        )
+    )
+
+
+def _record_agent_requested_signal(
+    db: Session,
+    *,
+    org_id: int,
+    actor_user_id: int,
+    property_id: int | None,
+    agent_key: str,
+    run_id: int,
+) -> None:
+    try:
+        entity_type = "property" if property_id is not None else "org"
+        entity_id = str(property_id if property_id is not None else org_id)
+
+        record_signal(
+            db,
+            org_id=int(org_id),
+            entity_type=entity_type,
+            entity_id=entity_id,
+            signal_key=f"agent.{agent_key}.requested",
+            value=1.0,
+            meta={"run_id": int(run_id), "actor_user_id": int(actor_user_id)},
+        )
+        try:
+            recompute_and_persist(db, int(org_id), entity_type, entity_id)
+        except TypeError:
+            recompute_and_persist(
+                db,
+                org_id=int(org_id),
+                entity_type=entity_type,
+                entity_id=entity_id,
+            )
+    except Exception:
+        pass
+
+
+def _record_slot_override_signal(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int | None,
+    slot_key: str,
+    assignee: str | None,
+    status: str,
+) -> None:
+    try:
+        entity_type = "property" if property_id is not None else "org"
+        entity_id = str(property_id if property_id is not None else org_id)
+
+        record_signal(
+            db,
+            org_id=int(org_id),
+            entity_type=entity_type,
+            entity_id=entity_id,
+            signal_key="property.manual_override.slot_assignment",
+            value=0.4,
+            meta={"slot_key": slot_key, "assignee": assignee, "status": status},
+        )
+        try:
+            recompute_and_persist(db, int(org_id), entity_type, entity_id)
+        except TypeError:
+            recompute_and_persist(
+                db,
+                org_id=int(org_id),
+                entity_type=entity_type,
+                entity_id=entity_id,
+            )
+    except Exception:
+        pass
 
 
 @router.get("", response_model=list[AgentSpecOut])
@@ -66,6 +202,8 @@ def registry(p=Depends(get_principal)):
                 "description": s.description,
                 "owner_type": s.owner_type,
                 "default_status": s.default_status,
+                "default_agent_key": s.default_agent_key,
+                "default_payload_schema": s.default_payload_schema,
             }
             for s in SLOTS
         ],
@@ -74,23 +212,26 @@ def registry(p=Depends(get_principal)):
 
 @router.post("/runs", response_model=AgentRunOut)
 def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    if payload.agent_key not in AGENTS:
+    requested_key = str(payload.agent_key or "").strip()
+    canonical_key = _canonical_agent_key(requested_key)
+
+    if canonical_key not in AGENTS:
         raise HTTPException(status_code=404, detail="unknown agent_key")
 
-    if payload.property_id is not None:
-        prop = db.scalar(select(Property).where(Property.id == payload.property_id, Property.org_id == p.org_id))
-        if not prop:
-            raise HTTPException(status_code=404, detail="property not found")
+    _assert_property_access(db, org_id=p.org_id, property_id=payload.property_id)
 
-    # Create + dispatch run (usually async via worker)
+    dispatch = bool(getattr(payload, "dispatch", True))
+    idempotency_key = getattr(payload, "idempotency_key", None)
+
     res = create_and_execute_run(
         db,
         org_id=p.org_id,
         actor_user_id=p.user_id,
-        agent_key=payload.agent_key,
+        agent_key=canonical_key,
         property_id=payload.property_id,
         input_payload=payload.input_json or {},
-        dispatch=True,
+        idempotency_key=idempotency_key,
+        dispatch=dispatch,
     )
 
     run_id = int(res["run_id"])
@@ -98,27 +239,14 @@ def create_run(payload: AgentRunCreate, db: Session = Depends(get_db), p=Depends
     if not run:
         raise HTTPException(status_code=500, detail="run created but not found")
 
-    # Trust: the *creation* of a run is not success/failure, but it is a signal that an agent was requested.
-    # This helps you answer: “why is the system busy?” and makes runs observable.
-    try:
-        record_signal(
-            db,
-            org_id=p.org_id,
-            entity_type="property" if payload.property_id is not None else "org",
-            entity_id=str(payload.property_id if payload.property_id is not None else p.org_id),
-            signal_key=f"agent.{payload.agent_key}.requested",
-            value=1.0,
-            meta={"run_id": run_id, "actor_user_id": p.user_id},
-        )
-        recompute_and_persist(
-            db,
-            p.org_id,
-            "property" if payload.property_id is not None else "org",
-            str(payload.property_id if payload.property_id is not None else p.org_id),
-        )
-    except Exception:
-        pass
-
+    _record_agent_requested_signal(
+        db,
+        org_id=int(p.org_id),
+        actor_user_id=int(p.user_id),
+        property_id=payload.property_id,
+        agent_key=canonical_key,
+        run_id=run_id,
+    )
     return run
 
 
@@ -130,12 +258,15 @@ def list_runs(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
+    if property_id is not None:
+        _assert_property_access(db, org_id=p.org_id, property_id=property_id)
+
     q = select(AgentRun).where(AgentRun.org_id == p.org_id).order_by(desc(AgentRun.id))
     if agent_key:
-        q = q.where(AgentRun.agent_key == agent_key)
+        q = q.where(AgentRun.agent_key == _canonical_agent_key(agent_key))
     if property_id is not None:
         q = q.where(AgentRun.property_id == property_id)
-    return list(db.scalars(q.limit(limit)).all())
+    return list(db.scalars(q.limit(int(limit))).all())
 
 
 @router.post("/messages", response_model=AgentMessageOut)
@@ -146,7 +277,7 @@ def post_message(payload: AgentMessageCreate, db: Session = Depends(get_db), p=D
         sender=payload.sender,
         recipient=payload.recipient,
         message=payload.message,
-        created_at=datetime.utcnow(),
+        created_at=_utcnow(),
     )
     db.add(msg)
     db.commit()
@@ -170,7 +301,7 @@ def list_messages(
     )
     if recipient:
         q = q.where(AgentMessage.recipient == recipient)
-    return list(db.scalars(q.limit(limit)).all())
+    return list(db.scalars(q.limit(int(limit))).all())
 
 
 @router.get("/slots/specs", response_model=list[AgentSlotSpecOut])
@@ -194,85 +325,74 @@ def slot_assignments(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
+    if property_id is not None:
+        _assert_property_access(db, org_id=p.org_id, property_id=property_id)
+
     q = select(AgentSlotAssignment).where(AgentSlotAssignment.org_id == p.org_id).order_by(
         desc(AgentSlotAssignment.updated_at)
     )
     if property_id is not None:
-        prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-        if not prop:
-            raise HTTPException(status_code=404, detail="property not found")
-        q = q.where(AgentSlotAssignment.property_id == property_id)
+        q = q.where(AgentSlotAssignment.property_id == int(property_id))
 
-    return list(db.scalars(q.limit(limit)).all())
+    return list(db.scalars(q.limit(int(limit))).all())
 
 
 @router.post("/slots/assignments", response_model=AgentSlotAssignmentOut)
 def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Depends(get_db), p=Depends(get_principal)):
-    if payload.property_id is not None:
-        prop = db.scalar(select(Property).where(Property.id == payload.property_id, Property.org_id == p.org_id))
-        if not prop:
-            raise HTTPException(status_code=404, detail="property not found")
+    _assert_property_access(db, org_id=p.org_id, property_id=payload.property_id)
+
+    slot_key = str(payload.slot_key or "").strip()
+    if slot_key not in VALID_SLOT_KEYS:
+        raise HTTPException(status_code=404, detail="unknown slot_key")
+
+    spec = DEFAULT_SLOT_BY_KEY[slot_key]
+    owner_type = str(payload.owner_type or spec.owner_type).strip().lower()
+    status = str(payload.status or spec.default_status).strip().lower()
+
+    if owner_type not in VALID_OWNER_TYPES:
+        raise HTTPException(status_code=422, detail="invalid owner_type")
+    if status not in VALID_SLOT_STATUSES:
+        raise HTTPException(status_code=422, detail="invalid slot status")
 
     existing = db.scalar(
         select(AgentSlotAssignment)
         .where(
             AgentSlotAssignment.org_id == p.org_id,
-            AgentSlotAssignment.slot_key == payload.slot_key,
+            AgentSlotAssignment.slot_key == slot_key,
             AgentSlotAssignment.property_id == payload.property_id,
         )
         .limit(1)
     )
 
-    now = datetime.utcnow()
-
-    def _emit_event(owner_type: str, assignee: str | None, status: str):
-        db.add(
-            WorkflowEvent(
-                org_id=p.org_id,
-                property_id=payload.property_id,
-                actor_user_id=p.user_id,
-                event_type="slot_assigned",
-                payload_json=json.dumps(
-                    {"slot_key": payload.slot_key, "owner_type": owner_type, "assignee": assignee, "status": status}
-                ),
-                created_at=now,
-            )
-        )
+    now = _utcnow()
 
     if existing:
-        if payload.owner_type is not None:
-            existing.owner_type = payload.owner_type
-        if payload.assignee is not None:
-            existing.assignee = payload.assignee
-        if payload.status is not None:
-            existing.status = payload.status
+        existing.owner_type = owner_type
+        existing.assignee = payload.assignee
+        existing.status = status
         if payload.notes is not None:
             existing.notes = payload.notes
         existing.updated_at = now
         db.add(existing)
 
-        _emit_event(existing.owner_type, existing.assignee, existing.status)
-
-        # Trust: manual slot assignment/override is *always* a trust-relevant event.
-        # We record it as “manual_override.slot_assignment”. Your trust formula can penalize or just lower confidence.
-        try:
-            record_signal(
-                db,
-                org_id=p.org_id,
-                entity_type="property" if payload.property_id is not None else "org",
-                entity_id=str(payload.property_id if payload.property_id is not None else p.org_id),
-                signal_key="property.manual_override.slot_assignment",
-                value=0.4,
-                meta={"slot_key": payload.slot_key, "assignee": existing.assignee, "status": existing.status},
-            )
-            recompute_and_persist(
-                db,
-                p.org_id,
-                "property" if payload.property_id is not None else "org",
-                str(payload.property_id if payload.property_id is not None else p.org_id),
-            )
-        except Exception:
-            pass
+        _emit_slot_event(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            property_id=payload.property_id,
+            slot_key=slot_key,
+            owner_type=existing.owner_type,
+            assignee=existing.assignee,
+            status=existing.status,
+        )
+        _record_slot_override_signal(
+            db,
+            org_id=int(p.org_id),
+            property_id=payload.property_id,
+            slot_key=slot_key,
+            assignee=existing.assignee,
+            status=existing.status,
+        )
 
         db.commit()
         db.refresh(existing)
@@ -280,36 +400,35 @@ def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Dep
 
     row = AgentSlotAssignment(
         org_id=p.org_id,
-        slot_key=payload.slot_key,
+        slot_key=slot_key,
         property_id=payload.property_id,
-        owner_type=payload.owner_type or "human",
+        owner_type=owner_type,
         assignee=payload.assignee,
-        status=payload.status or "idle",
+        status=status,
         notes=payload.notes,
         updated_at=now,
         created_at=now,
     )
     db.add(row)
-    _emit_event(row.owner_type, row.assignee, row.status)
 
-    try:
-        record_signal(
-            db,
-            org_id=p.org_id,
-            entity_type="property" if payload.property_id is not None else "org",
-            entity_id=str(payload.property_id if payload.property_id is not None else p.org_id),
-            signal_key="property.manual_override.slot_assignment",
-            value=0.4,
-            meta={"slot_key": payload.slot_key, "assignee": row.assignee, "status": row.status},
-        )
-        recompute_and_persist(
-            db,
-            p.org_id,
-            "property" if payload.property_id is not None else "org",
-            str(payload.property_id if payload.property_id is not None else p.org_id),
-        )
-    except Exception:
-        pass
+    _emit_slot_event(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        property_id=payload.property_id,
+        slot_key=slot_key,
+        owner_type=row.owner_type,
+        assignee=row.assignee,
+        status=row.status,
+    )
+    _record_slot_override_signal(
+        db,
+        org_id=int(p.org_id),
+        property_id=payload.property_id,
+        slot_key=slot_key,
+        assignee=row.assignee,
+        status=row.status,
+    )
 
     db.commit()
     db.refresh(row)
