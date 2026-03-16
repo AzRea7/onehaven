@@ -1,8 +1,7 @@
 import React from "react";
 import { useLocation } from "react-router-dom";
-
-import Header from "./Header";
-import Footer from "./Footer";
+import AppHeader from "./AppHeader";
+import AppFooter from "./AppFooter";
 
 type ThemeMode = "light" | "dark";
 
@@ -10,8 +9,9 @@ const STORAGE_KEY = "onehaven-theme";
 
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "dark";
-  const saved = window.localStorage.getItem(STORAGE_KEY);
-  if (saved === "light" || saved === "dark") return saved;
+
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  if (stored === "light" || stored === "dark") return stored;
 
   const prefersDark =
     typeof window.matchMedia === "function" &&
@@ -35,16 +35,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     location.pathname.startsWith("/register");
 
   return (
-    <div className="app-root">
-      <div className="app-backdrop">
-        <div className="app-blob app-blob-a" />
-        <div className="app-blob app-blob-b" />
-        <div className="app-blob app-blob-c" />
-        <div className="app-grid-mask" />
+    <div className="oh-root">
+      <div className="oh-bg">
+        <div className="oh-blob oh-a" />
+        <div className="oh-blob oh-b" />
+        <div className="oh-blob oh-c" />
+        <div className="oh-grid-mask" />
       </div>
 
       {!isAuthPage ? (
-        <Header
+        <AppHeader
           theme={theme}
           onToggleTheme={() =>
             setTheme((prev) => (prev === "dark" ? "light" : "dark"))
@@ -52,11 +52,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         />
       ) : null}
 
-      <main className={isAuthPage ? "app-main-auth" : "app-main"}>
+      <main className={isAuthPage ? "oh-main-auth" : "oh-main"}>
         {children}
       </main>
 
-      {!isAuthPage ? <Footer /> : null}
+      {!isAuthPage ? <AppFooter /> : null}
     </div>
   );
 }

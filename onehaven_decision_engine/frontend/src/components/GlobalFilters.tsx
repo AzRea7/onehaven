@@ -40,8 +40,8 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="field">
-      <span className="field-label">{label}</span>
+    <label className="block">
+      <span className="oh-field-label">{label}</span>
       {children}
     </label>
   );
@@ -112,19 +112,22 @@ export default function GlobalFilters({ className }: { className?: string }) {
       actions={
         <div className="flex items-center gap-2">
           <button
-            className="btn btn-secondary btn-sm"
+            className="oh-btn oh-btn-secondary oh-btn-sm"
             onClick={() => setExpanded((v) => !v)}
           >
             <SlidersHorizontal className="h-4 w-4" />
             {expanded ? "Collapse" : "Expand"}
           </button>
 
-          <button className="btn btn-secondary btn-sm" onClick={clearAll}>
+          <button
+            className="oh-btn oh-btn-secondary oh-btn-sm"
+            onClick={clearAll}
+          >
             <RotateCcw className="h-4 w-4" />
             Clear
           </button>
 
-          <span className="badge">{activeCount} active</span>
+          <span className="oh-pill">{activeCount} active</span>
         </div>
       }
     >
@@ -135,7 +138,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
               value={filters.search || ""}
               onChange={(e) => set({ ...filters, search: e.target.value })}
               placeholder="Search address / city / zip"
-              className="field-input"
+              className="oh-input"
             />
           </Field>
         </div>
@@ -146,7 +149,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
               value={filters.state || "MI"}
               onChange={(e) => set({ ...filters, state: e.target.value })}
               placeholder="State"
-              className="field-input"
+              className="oh-input"
             />
           </Field>
         </div>
@@ -157,7 +160,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
               value={filters.city || ""}
               onChange={(e) => set({ ...filters, city: e.target.value })}
               placeholder="City"
-              className="field-input"
+              className="oh-input"
             />
           </Field>
         </div>
@@ -167,7 +170,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
             <select
               value={filters.county || ""}
               onChange={(e) => set({ ...filters, county: e.target.value })}
-              className="field-input"
+              className="oh-input"
             >
               <option value="">All counties</option>
               {counties.map((c) => (
@@ -184,7 +187,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
             <select
               value={filters.stage || ""}
               onChange={(e) => set({ ...filters, stage: e.target.value })}
-              className="field-input"
+              className="oh-input"
             >
               {STAGES.map((s) => (
                 <option key={s.value || "all"} value={s.value}>
@@ -200,7 +203,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
             <select
               value={filters.decision || ""}
               onChange={(e) => set({ ...filters, decision: e.target.value })}
-              className="field-input"
+              className="oh-input"
             >
               <option value="">All decisions</option>
               <option value="PASS">PASS</option>
@@ -215,7 +218,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
             <select
               value={filters.red_zone || ""}
               onChange={(e) => set({ ...filters, red_zone: e.target.value })}
-              className="field-input"
+              className="oh-input"
             >
               <option value="">All areas</option>
               <option value="false">Exclude red zone</option>
@@ -229,7 +232,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
             <select
               value={filters.sort || ""}
               onChange={(e) => set({ ...filters, sort: e.target.value })}
-              className="field-input"
+              className="oh-input"
             >
               {SORTS.map((s) => (
                 <option key={s.value || "default"} value={s.value}>
@@ -251,7 +254,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
                   }
                   placeholder="Minimum"
                   inputMode="decimal"
-                  className="field-input"
+                  className="oh-input"
                 />
               </Field>
             </div>
@@ -265,7 +268,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
                   }
                   placeholder="Maximum"
                   inputMode="decimal"
-                  className="field-input"
+                  className="oh-input"
                 />
               </Field>
             </div>
@@ -279,7 +282,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
                   }
                   placeholder="Minimum"
                   inputMode="numeric"
-                  className="field-input"
+                  className="oh-input"
                 />
               </Field>
             </div>
@@ -293,7 +296,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
                   }
                   placeholder="Maximum"
                   inputMode="numeric"
-                  className="field-input"
+                  className="oh-input"
                 />
               </Field>
             </div>

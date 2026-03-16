@@ -6,10 +6,10 @@ type Tone = "default" | "success" | "warning" | "danger" | "accent";
 
 const toneClass: Record<Tone, string> = {
   default: "",
-  success: "kpi-success",
-  warning: "kpi-warning",
-  danger: "kpi-danger",
-  accent: "kpi-accent",
+  success: "oh-kpi-success",
+  warning: "oh-kpi-warning",
+  danger: "oh-kpi-danger",
+  accent: "oh-kpi-accent",
 };
 
 export default function KpiCard({
@@ -28,7 +28,7 @@ export default function KpiCard({
   className?: string;
 }) {
   return (
-    <div className={clsx("kpi-card", toneClass[tone], className)}>
+    <div className={clsx("oh-kpi-card", toneClass[tone], className)}>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
@@ -43,7 +43,7 @@ export default function KpiCard({
         </div>
 
         {Icon ? (
-          <div className="kpi-icon">
+          <div className="oh-kpi-icon">
             <Icon className="h-4 w-4" />
           </div>
         ) : null}

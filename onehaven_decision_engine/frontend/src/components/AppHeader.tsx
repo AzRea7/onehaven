@@ -1,19 +1,18 @@
-// frontend/src/components/AppHeader.tsx
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import clsx from "clsx";
+import { Moon, Sun, Sparkles } from "lucide-react";
 
 const NavLink = ({ to, label }: { to: string; label: string }) => {
   const loc = useLocation();
   const active = loc.pathname === to || loc.pathname.startsWith(to + "/");
+
   return (
     <Link
       to={to}
       className={clsx(
-        "px-3 py-2 rounded-xl text-sm border transition cursor-pointer select-none",
-        active
-          ? "bg-white/[0.10] border-white/[0.18] text-white"
-          : "bg-white/[0.04] border-white/10 text-white/80 hover:bg-white/[0.08] hover:border-white/[0.14]",
+        "oh-nav-link cursor-pointer select-none",
+        active && "oh-nav-link-active",
       )}
     >
       {label}
@@ -24,42 +23,68 @@ const NavLink = ({ to, label }: { to: string; label: string }) => {
 export default function AppHeader({
   right,
   children,
+  theme = "dark",
+  onToggleTheme,
 }: {
   right?: React.ReactNode;
   children?: React.ReactNode;
+  theme?: "light" | "dark";
+  onToggleTheme?: () => void;
 }) {
   return (
-    <header className="sticky top-0 z-40 backdrop-blur-md bg-black/35 border-b border-white/10">
-      <div className="mx-auto max-w-[1200px] px-4 md:px-6 h-14 flex items-center justify-between">
-        <Link
-          to="/"
-          className="flex items-center gap-2 cursor-pointer select-none"
-        >
-          <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-indigo-500/80 via-fuchsia-500/60 to-cyan-400/70 shadow-lg shadow-fuchsia-500/10" />
-          <div className="leading-tight">
-            <div className="text-white font-semibold text-sm">OneHaven</div>
-            <div className="text-white/60 text-[11px] -mt-[2px]">
-              Investment OS
+    <header className="oh-app-header">
+      <div className="mx-auto max-w-[1320px] px-4 md:px-6 h-16 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link
+            to="/"
+            className="flex items-center gap-3 cursor-pointer select-none min-w-0"
+          >
+            <div className="oh-brand-mark">
+              <Sparkles className="h-4 w-4" />
             </div>
-          </div>
-        </Link>
 
-        <nav className="hidden md:flex items-center gap-2">
-          <NavLink to="/properties" label="Properties" />
-          <NavLink to="/dashboard" label="Dashboard" />
-          <NavLink to="/agents" label="Agents" />
-          <NavLink to="/jurisdictions" label="Jurisdictions" />
-          <NavLink to="/constitution" label="Constitution" />
-        </nav>
+            <div className="leading-tight min-w-0">
+              <div className="text-app-0 font-semibold text-sm truncate">
+                OneHaven
+              </div>
+              <div className="text-app-4 text-[11px] -mt-[2px] truncate">
+                Investment OS
+              </div>
+            </div>
+          </Link>
 
-        <div className="flex items-center gap-2">
-          {/* Optional injected controls */}
+          <nav className="hidden lg:flex items-center gap-2 ml-3">
+            <NavLink to="/dashboard" label="Dashboard" />
+            <NavLink to="/properties" label="Properties" />
+            <NavLink to="/agents" label="Agents" />
+            <NavLink to="/jurisdictions" label="Jurisdictions" />
+            <NavLink to="/constitution" label="Constitution" />
+          </nav>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {onToggleTheme ? (
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              className="oh-icon-btn cursor-pointer"
+              aria-label="Toggle theme"
+              title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            >
+              {theme === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+            </button>
+          ) : null}
+
           {right}
           {children}
 
           <Link
             to="/deal-intake"
-            className="px-3 py-2 rounded-xl text-sm bg-indigo-500/20 border border-indigo-400/30 hover:bg-indigo-500/25 transition cursor-pointer text-white select-none"
+            className="oh-btn oh-btn-primary cursor-pointer"
           >
             Deal Intake
           </Link>

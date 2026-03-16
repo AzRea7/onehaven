@@ -1,240 +1,146 @@
 import React from "react";
+import { Building2, KeyRound, UserRound } from "lucide-react";
+import Surface from "./Surface";
+import EmptyState from "./EmptyState";
 
 function money(v: any) {
   if (v == null || Number.isNaN(Number(v))) return "—";
   return `$${Math.round(Number(v)).toLocaleString()}`;
 }
 
-function toneClass(kind: "good" | "warn" | "bad" | "neutral" = "neutral") {
-  if (kind === "good")
-    return "border-green-400/20 bg-green-400/10 text-green-200";
-  if (kind === "warn")
-    return "border-yellow-300/20 bg-yellow-300/10 text-yellow-100";
-  if (kind === "bad") return "border-red-400/20 bg-red-400/10 text-red-200";
-  return "border-white/10 bg-white/[0.03] text-white/80";
-}
-
-function statusTone(status?: string) {
-  const s = (status || "").toLowerCase();
-  if (s === "active" || s === "occupied") return "good";
-  if (s === "upcoming" || s === "leased_not_started") return "warn";
-  if (s === "ended" || s === "vacant") return "bad";
-  return "neutral";
-}
-
 export default function TenantPipeline({
-  tenants = [],
-  leases = [],
-  opsTenant = null,
+  tenants,
+  leases,
+  opsTenant,
 }: {
   tenants?: any[];
   leases?: any[];
   opsTenant?: any;
 }) {
-  const tenantMap = React.useMemo(() => {
-    const m = new Map<number, any>();
-    for (const t of tenants || []) {
-      if (t?.id != null) m.set(Number(t.id), t);
-    }
-    return m;
-  }, [tenants]);
-
-  const rows = React.useMemo(() => {
-    return (leases || []).map((lease: any) => {
-      const tenant = tenantMap.get(Number(lease?.tenant_id));
-      const now = Date.now();
-      const startTs = lease?.start_date
-        ? new Date(lease.start_date).getTime()
-        : null;
-      const endTs = lease?.end_date ? new Date(lease.end_date).getTime() : null;
-
-      let status = "active";
-      if (startTs && startTs > now) status = "upcoming";
-      else if (endTs && endTs < now) status = "ended";
-
-      const totalRent = Number(lease?.total_rent || 0);
-      const tenantPortion =
-        lease?.tenant_portion != null ? Number(lease.tenant_portion) : null;
-      const hapPortion =
-        lease?.housing_authority_portion != null
-          ? Number(lease.housing_authority_portion)
-          : null;
-
-      return {
-        ...lease,
-        status,
-        tenant_name: tenant?.full_name || `Tenant #${lease?.tenant_id ?? "—"}`,
-        tenant_email: tenant?.email || null,
-        voucher_status: tenant?.voucher_status || null,
-        total_rent: totalRent,
-        tenant_portion: tenantPortion,
-        housing_authority_portion: hapPortion,
-      };
-    });
-  }, [leases, tenantMap]);
-
-  const active = rows.filter((x) => x.status === "active");
-  const upcoming = rows.filter((x) => x.status === "upcoming");
-  const ended = rows.filter((x) => x.status === "ended");
-
-  const occupancyStatus =
-    opsTenant?.occupancy_status ||
-    (active.length > 0
-      ? "occupied"
-      : upcoming.length > 0
-        ? "leased_not_started"
-        : "vacant");
+  const tenantRows = Array.isArray(tenants) ? tenants : [];
+  const leaseRows = Array.isArray(leases) ? leases : [];
 
   return (
-    <div className="space-y-4">
-      <div className="oh-panel p-5">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <div className="text-sm font-semibold text-white">
-              Tenant / Lease Pipeline
-            </div>
-            <div className="text-xs text-white/50 mt-1">
-              Occupancy, lease timing, and voucher mix in one place.
-            </div>
+    <Surface
+      title="Tenant pipeline"
+      subtitle="Placement, occupancy, and lease posture in one view."
+      actions={
+        opsTenant?.occupancy_status ? (
+          <span className="oh-pill">{opsTenant.occupancy_status}</span>
+        ) : null
+      }
+    >
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Tenants
           </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <span
-              className={`text-[11px] px-2 py-1 rounded-full border ${toneClass(statusTone(occupancyStatus) as any)}`}
-            >
-              {occupancyStatus}
-            </span>
-            <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/[0.03] text-white/80">
-              active {active.length}
-            </span>
-            <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/[0.03] text-white/80">
-              upcoming {upcoming.length}
-            </span>
-            <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-white/[0.03] text-white/80">
-              ended {ended.length}
-            </span>
+          <div className="mt-2 text-xl font-semibold text-app-0">
+            {tenantRows.length}
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-[11px] uppercase tracking-wider text-white/45">
-              Occupancy
-            </div>
-            <div className="mt-2 text-sm text-white/90">{occupancyStatus}</div>
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Active leases
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-[11px] uppercase tracking-wider text-white/45">
-              Tenants
-            </div>
-            <div className="mt-2 text-sm text-white/90">{tenants.length}</div>
+          <div className="mt-2 text-xl font-semibold text-app-0">
+            {opsTenant?.active_lease_count ?? leaseRows.length}
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-[11px] uppercase tracking-wider text-white/45">
-              Leases
-            </div>
-            <div className="mt-2 text-sm text-white/90">{leases.length}</div>
+        </div>
+
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Occupancy
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-[11px] uppercase tracking-wider text-white/45">
-              Active Rent
-            </div>
-            <div className="mt-2 text-sm text-white/90">
-              {active.length > 0 ? money(active[0]?.total_rent) : "—"}
-            </div>
+          <div className="mt-2 text-xl font-semibold text-app-0">
+            {opsTenant?.occupancy_status || "—"}
           </div>
         </div>
       </div>
 
-      <div className="oh-panel p-5">
-        <div className="text-sm font-semibold text-white">Lease Timeline</div>
-        <div className="mt-4 space-y-3">
-          {rows.length === 0 ? (
-            <div className="text-sm text-white/55">No leases yet.</div>
-          ) : (
-            rows.map((row: any) => (
-              <div
-                key={row.id}
-                className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
-              >
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div>
-                    <div className="text-sm font-semibold text-white">
-                      {row.tenant_name}
-                    </div>
-                    <div className="text-xs text-white/55 mt-1">
-                      {row.tenant_email || "No email on file"}
-                      {row.voucher_status
-                        ? ` · voucher: ${row.voucher_status}`
-                        : ""}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      className={`text-[11px] px-2 py-1 rounded-full border ${toneClass(
-                        statusTone(row.status) as any,
-                      )}`}
-                    >
-                      {row.status}
-                    </span>
-                    <span className="text-sm text-white/90 font-semibold">
-                      {money(row.total_rent)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
-                  <div>
-                    <div className="text-white/45 text-[11px] uppercase tracking-wider">
-                      Start
-                    </div>
-                    <div className="text-white/85 mt-1">
-                      {row.start_date
-                        ? new Date(row.start_date).toLocaleDateString()
-                        : "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-white/45 text-[11px] uppercase tracking-wider">
-                      End
-                    </div>
-                    <div className="text-white/85 mt-1">
-                      {row.end_date
-                        ? new Date(row.end_date).toLocaleDateString()
-                        : "Open"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-white/45 text-[11px] uppercase tracking-wider">
-                      Tenant Portion
-                    </div>
-                    <div className="text-white/85 mt-1">
-                      {row.tenant_portion != null
-                        ? money(row.tenant_portion)
-                        : "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-white/45 text-[11px] uppercase tracking-wider">
-                      HAP Portion
-                    </div>
-                    <div className="text-white/85 mt-1">
-                      {row.housing_authority_portion != null
-                        ? money(row.housing_authority_portion)
-                        : "—"}
-                    </div>
-                  </div>
-                </div>
-
-                {row.notes ? (
-                  <div className="text-sm text-white/65 mt-3">{row.notes}</div>
-                ) : null}
+      {!tenantRows.length && !leaseRows.length ? (
+        <div className="mt-4">
+          <EmptyState
+            compact
+            title="No tenant pipeline activity yet"
+            description="Once screening, placement, or lease records exist, they show up here."
+          />
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-app-0">Tenants</div>
+            {!tenantRows.length ? (
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm text-app-4">
+                No tenant records yet.
               </div>
-            ))
-          )}
+            ) : (
+              tenantRows.map((tenant: any, i: number) => (
+                <div
+                  key={tenant?.id || i}
+                  className="rounded-2xl border border-app bg-app-panel px-4 py-3"
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                    <UserRound className="h-4 w-4 text-app-4" />
+                    {tenant?.full_name ||
+                      tenant?.name ||
+                      `Tenant #${tenant?.id || i + 1}`}
+                  </div>
+                  <div className="mt-1 text-xs text-app-4">
+                    {tenant?.email || "No email"}
+                    {tenant?.phone ? ` · ${tenant.phone}` : ""}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-sm font-semibold text-app-0">Leases</div>
+            {!leaseRows.length ? (
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm text-app-4">
+                No lease records yet.
+              </div>
+            ) : (
+              leaseRows.map((lease: any, i: number) => (
+                <div
+                  key={lease?.id || i}
+                  className="rounded-2xl border border-app bg-app-panel px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                      <KeyRound className="h-4 w-4 text-app-4" />
+                      Lease #{lease?.id || i + 1}
+                    </div>
+                    <div className="text-sm font-semibold text-app-1">
+                      {money(lease?.total_rent || lease?.rent)}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-xs text-app-4">
+                    {lease?.start_date
+                      ? new Date(lease.start_date).toLocaleDateString()
+                      : "—"}
+                    {lease?.end_date
+                      ? ` → ${new Date(lease.end_date).toLocaleDateString()}`
+                      : ""}
+                    {lease?.hap_contract_status
+                      ? ` · HAP ${lease.hap_contract_status}`
+                      : ""}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
-      </div>
-    </div>
+      )}
+
+      {opsTenant?.occupancy_status ? (
+        <div className="mt-4 flex items-center gap-2 text-xs text-app-4">
+          <Building2 className="h-3.5 w-3.5" />
+          occupancy status is derived from the ops summary, not vibes
+        </div>
+      ) : null}
+    </Surface>
   );
 }

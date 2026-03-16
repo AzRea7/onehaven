@@ -19,7 +19,7 @@ export default function PageShell({
   return (
     <section
       className={clsx(
-        "mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-5 lg:px-8 lg:py-8",
+        "mx-auto w-full max-w-[1320px] px-4 py-5 sm:px-5 lg:px-8 lg:py-8",
         className,
       )}
     >

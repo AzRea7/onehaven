@@ -1,135 +1,126 @@
-// frontend/src/components/RehabFromPhotosCTA.tsx
 import React from "react";
-import type { RehabPhotoAnalysis } from "../lib/api";
-
-type Props = {
-  busy: boolean;
-  analysis: RehabPhotoAnalysis | null;
-  onPreview: () => Promise<void>;
-  onGenerate: () => Promise<void>;
-};
-
-function severityTone(value: string) {
-  const v = (value || "").toLowerCase();
-  if (v === "critical") return "text-red-200 bg-red-400/10 border-red-400/20";
-  if (v === "high")
-    return "text-orange-200 bg-orange-400/10 border-orange-400/20";
-  if (v === "medium")
-    return "text-yellow-100 bg-yellow-300/10 border-yellow-300/20";
-  return "text-white/80 bg-white/5 border-white/10";
-}
+import { Sparkles, Wrench } from "lucide-react";
+import Surface from "./Surface";
+import EmptyState from "./EmptyState";
 
 export default function RehabFromPhotosCTA({
   busy,
   analysis,
   onPreview,
   onGenerate,
-}: Props) {
+}: {
+  busy?: boolean;
+  analysis?: any;
+  onPreview?: () => void | Promise<void>;
+  onGenerate?: () => void | Promise<void>;
+}) {
+  const findings = Array.isArray(analysis?.issues)
+    ? analysis.issues
+    : Array.isArray(analysis?.findings)
+      ? analysis.findings
+      : [];
+
   return (
-    <div className="oh-panel p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-white">
-            Rehab from photos
-          </div>
-          <div className="mt-1 text-xs text-white/55">
-            Analyze Zillow interior/exterior photos and generate rehab tasks.
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <Surface
+      title="Rehab from photos"
+      subtitle="Turn photo evidence into structured issues and then into rehab tasks."
+      actions={
+        <div className="flex gap-2">
           <button
-            className="oh-btn cursor-pointer"
+            onClick={() => onPreview?.()}
             disabled={busy}
-            onClick={onPreview}
+            className="oh-btn oh-btn-secondary"
           >
-            {busy ? "Running..." : "Preview analysis"}
+            {busy ? "working…" : "preview"}
           </button>
           <button
-            className="oh-btn oh-btn-primary cursor-pointer"
+            onClick={() => onGenerate?.()}
             disabled={busy}
-            onClick={onGenerate}
+            className="oh-btn oh-btn-primary"
           >
-            Generate rehab tasks
+            {busy ? "working…" : "generate tasks"}
           </button>
         </div>
-      </div>
+      }
+    >
+      {!analysis ? (
+        <EmptyState
+          compact
+          icon={Sparkles}
+          title="No photo analysis yet"
+          description="Preview first to inspect extracted issues. Generate only when the output looks sane and not like a caffeinated raccoon guessed at drywall."
+        />
+      ) : (
+        <div className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                Issues
+              </div>
+              <div className="mt-2 text-xl font-semibold text-app-0">
+                {findings.length}
+              </div>
+            </div>
 
-      {analysis ? (
-        <div className="mt-4 space-y-4">
-          <div className="grid gap-3 sm:grid-cols-4">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-              <div className="text-[11px] text-white/50">Photos</div>
-              <div className="mt-1 text-lg font-semibold text-white">
-                {analysis.photo_count}
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                Estimated total
+              </div>
+              <div className="mt-2 text-xl font-semibold text-app-0">
+                {analysis?.estimated_total_cost != null
+                  ? `$${Math.round(Number(analysis.estimated_total_cost)).toLocaleString()}`
+                  : "—"}
               </div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-              <div className="text-[11px] text-white/50">Interior</div>
-              <div className="mt-1 text-lg font-semibold text-white">
-                {analysis.summary?.interior ?? 0}
+
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                Status
               </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-              <div className="text-[11px] text-white/50">Exterior</div>
-              <div className="mt-1 text-lg font-semibold text-white">
-                {analysis.summary?.exterior ?? 0}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-              <div className="text-[11px] text-white/50">Issues</div>
-              <div className="mt-1 text-lg font-semibold text-white">
-                {analysis.issues?.length ?? 0}
+              <div className="mt-2 text-xl font-semibold text-app-0">
+                {analysis?.created_count != null
+                  ? `${analysis.created_count} task${analysis.created_count === 1 ? "" : "s"}`
+                  : "preview"}
               </div>
             </div>
           </div>
 
-          <div className="space-y-3">
-            {analysis.issues?.map((issue, idx) => (
-              <div
-                key={`${issue.title}-${idx}`}
-                className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="text-sm font-semibold text-white">
-                    {issue.title}
+          {findings.length ? (
+            <div className="space-y-2">
+              {findings.slice(0, 8).map((issue: any, i: number) => (
+                <div
+                  key={i}
+                  className="rounded-2xl border border-app bg-app-panel px-4 py-3"
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                    <Wrench className="h-4 w-4 text-app-4" />
+                    {issue?.title || issue?.issue || `Issue ${i + 1}`}
                   </div>
-                  <span
-                    className={`rounded-full border px-2 py-1 text-[10px] ${severityTone(issue.severity)}`}
-                  >
-                    {issue.severity}
-                  </span>
-                  {issue.blocker ? (
-                    <span className="rounded-full border border-red-400/20 bg-red-400/10 px-2 py-1 text-[10px] text-red-200">
-                      blocker
-                    </span>
+                  {issue?.notes || issue?.description ? (
+                    <div className="mt-2 text-sm text-app-3">
+                      {issue?.notes || issue?.description}
+                    </div>
                   ) : null}
-                </div>
-
-                <div className="mt-2 text-xs text-white/55">
-                  {issue.category} · est. cost{" "}
-                  {issue.estimated_cost != null
-                    ? `$${Math.round(issue.estimated_cost).toLocaleString()}`
-                    : "—"}
-                </div>
-
-                {issue.notes ? (
-                  <div className="mt-2 text-sm text-white/75">
-                    {issue.notes}
+                  <div className="mt-2 text-xs text-app-4">
+                    {issue?.estimated_cost != null
+                      ? `Est. $${Math.round(Number(issue.estimated_cost)).toLocaleString()}`
+                      : "No cost estimate"}
+                    {issue?.confidence != null
+                      ? ` · confidence ${issue.confidence}`
+                      : ""}
                   </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-
-          {analysis.created != null ? (
-            <div className="rounded-2xl border border-green-400/20 bg-green-400/10 p-3 text-sm text-green-100">
-              Created {analysis.created} rehab task
-              {analysis.created === 1 ? "" : "s"}.
+                </div>
+              ))}
             </div>
-          ) : null}
+          ) : (
+            <EmptyState
+              compact
+              title="No issues returned"
+              description="The analysis payload came back but did not include issue rows."
+            />
+          )}
         </div>
-      ) : null}
-    </div>
+      )}
+    </Surface>
   );
 }

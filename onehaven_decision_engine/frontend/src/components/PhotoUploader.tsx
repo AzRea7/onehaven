@@ -1,6 +1,7 @@
-// frontend/src/components/PhotoUploader.tsx
 import React from "react";
+import { Upload, Loader2 } from "lucide-react";
 import { api } from "../lib/api";
+import Surface from "./Surface";
 
 type Props = {
   propertyId: number;
@@ -35,14 +36,11 @@ export default function PhotoUploader({ propertyId, onUploaded }: Props) {
   }
 
   return (
-    <div className="oh-panel p-4">
-      <div className="text-sm font-semibold text-white">Attach photos</div>
-      <div className="text-xs text-white/60 mt-1">
-        Zillow photos are auto-attached during import. This uploader is for
-        manual add-ons.
-      </div>
-
-      <label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white hover:bg-white/10">
+    <Surface
+      title="Attach photos"
+      subtitle="Zillow photos are auto-attached during import. This uploader is for manual add-ons."
+    >
+      <label className="mt-1 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-app bg-app-panel px-4 py-3 text-sm text-app-1 hover:bg-app-muted">
         <input
           type="file"
           accept="image/*"
@@ -50,10 +48,15 @@ export default function PhotoUploader({ propertyId, onUploaded }: Props) {
           onChange={handleChange}
           disabled={busy}
         />
+        {busy ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Upload className="h-4 w-4" />
+        )}
         {busy ? "Uploading..." : "Upload image"}
       </label>
 
       {error ? <div className="mt-3 text-xs text-red-300">{error}</div> : null}
-    </div>
+    </Surface>
   );
 }

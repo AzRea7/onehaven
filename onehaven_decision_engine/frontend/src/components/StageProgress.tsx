@@ -1,29 +1,27 @@
 import React from "react";
+import { ArrowRight, Lock } from "lucide-react";
+import Surface from "./Surface";
 
-type StageRow = {
-  key: string;
-  label: string;
-  description?: string;
-  status?: string;
-};
-
-const DEFAULT_STAGES: StageRow[] = [
-  { key: "import", label: "Import" },
-  { key: "deal", label: "Deal" },
-  { key: "decision", label: "Decision" },
-  { key: "acquisition", label: "Acquisition" },
-  { key: "rehab_plan", label: "Rehab Plan" },
-  { key: "rehab_exec", label: "Rehab Exec" },
-  { key: "compliance", label: "Compliance" },
-  { key: "tenant", label: "Tenant" },
-  { key: "lease", label: "Lease" },
-  { key: "cash", label: "Cash" },
-  { key: "equity", label: "Equity" },
+const ORDER = [
+  "import",
+  "deal",
+  "decision",
+  "acquisition",
+  "rehab_plan",
+  "rehab_exec",
+  "compliance",
+  "tenant",
+  "lease",
+  "cash",
+  "equity",
 ];
 
-function stageIndex(stage: string | null | undefined) {
-  const key = String(stage || "").toLowerCase();
-  const idx = DEFAULT_STAGES.findIndex((s) => s.key === key);
+function labelize(stage: string) {
+  return stage.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function stageIndex(stage?: string | null) {
+  const idx = ORDER.indexOf(String(stage || "").toLowerCase());
   return idx >= 0 ? idx : 0;
 }
 
@@ -37,128 +35,78 @@ export default function StageProgress({
   workflow?: any;
   currentStage?: string | null;
   currentStageLabel?: string | null;
-  onAdvance?: (() => void | Promise<void>) | null;
+  onAdvance?: () => void | Promise<void>;
   busy?: boolean;
 }) {
-  const wfStages: StageRow[] = Array.isArray(workflow?.stages)
-    ? workflow.stages
-    : [];
-
-  const stages = wfStages.length
-    ? wfStages
-    : DEFAULT_STAGES.map((s, idx) => {
-        const activeIdx = stageIndex(currentStage);
-        return {
-          ...s,
-          status:
-            idx < activeIdx
-              ? "completed"
-              : idx === activeIdx
-                ? "current"
-                : idx === activeIdx + 1
-                  ? "next"
-                  : "locked",
-        };
-      });
-
-  const activeIdx = Math.max(
-    0,
-    stages.findIndex((s) => s.status === "current"),
-  );
-  const pct =
-    stages.length <= 1
-      ? 0
-      : Math.round((activeIdx / (stages.length - 1)) * 100);
-
-  const primaryAction = workflow?.primary_action;
-  const gate = workflow?.gate || {};
+  const current = String(
+    currentStage || workflow?.current_stage || "deal",
+  ).toLowerCase();
+  const idx = stageIndex(current);
+  const primaryAction = workflow?.primary_action || null;
+  const gate = workflow?.transition_gate || null;
 
   return (
-    <div className="oh-panel p-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <div className="text-sm font-semibold text-white">
-            Workflow Progress
-          </div>
-          <div className="mt-1 text-xs text-white/55">
-            Current stage:{" "}
-            {currentStageLabel || workflow?.current_stage_label || "—"}
-          </div>
-        </div>
-
-        {primaryAction?.kind === "advance" && onAdvance ? (
+    <Surface
+      title="Workflow progress"
+      subtitle={`Current stage: ${currentStageLabel || labelize(current)}`}
+      actions={
+        primaryAction?.kind === "advance" && onAdvance ? (
           <button
-            onClick={() => onAdvance()}
-            disabled={!!busy}
-            className="oh-btn oh-btn-primary cursor-pointer"
+            onClick={onAdvance}
+            disabled={busy}
+            className="oh-btn oh-btn-primary"
           >
-            {busy ? "advancing…" : primaryAction?.title || "advance"}
+            {busy ? "advancing…" : "advance"}
+            <ArrowRight className="h-4 w-4" />
           </button>
-        ) : null}
-      </div>
-
-      <div className="mt-4">
-        <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-          <div className="h-2 bg-white/70" style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-2">
-        {stages.map((s) => {
-          const status = String(s.status || "").toLowerCase();
-          const cls =
-            status === "completed"
-              ? "border-green-400/20 bg-green-400/8"
-              : status === "current"
-                ? "border-white/25 bg-white/10"
-                : status === "next"
-                  ? "border-yellow-300/20 bg-yellow-300/8"
-                  : "border-white/10 bg-white/[0.03]";
+        ) : null
+      }
+    >
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {ORDER.map((stage, i) => {
+          const done = i < idx;
+          const active = i === idx;
+          const locked = i > idx;
 
           return (
             <div
-              key={s.key}
-              className={`rounded-2xl border p-3 ${cls}`}
-              style={{ contain: "layout paint" }}
+              key={stage}
+              className={[
+                "rounded-2xl border px-4 py-3",
+                active
+                  ? "border-app-strong bg-app-panel"
+                  : done
+                    ? "border-app bg-app-muted"
+                    : "border-app bg-transparent opacity-75",
+              ].join(" ")}
             >
-              <div className="text-[11px] uppercase tracking-wider text-white/45">
-                {status || "locked"}
-              </div>
-              <div className="mt-1 text-sm font-semibold text-white">
-                {s.label}
-              </div>
-              {s.description ? (
-                <div className="mt-1 text-xs text-white/55 leading-relaxed">
-                  {s.description}
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  {i + 1}
                 </div>
-              ) : null}
+                {locked ? <Lock className="h-3.5 w-3.5 text-app-4" /> : null}
+              </div>
+              <div className="mt-2 text-sm font-semibold text-app-0">
+                {labelize(stage)}
+              </div>
+              <div className="mt-1 text-xs text-app-4">
+                {active ? "Current" : done ? "Completed / passed" : "Locked"}
+              </div>
             </div>
           );
         })}
       </div>
 
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1.1fr_.9fr] gap-3">
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-          <div className="text-xs text-white/45">Primary next move</div>
-          <div className="mt-2 text-sm font-semibold text-white">
-            {primaryAction?.title || "No action required"}
-          </div>
-          <div className="mt-2 text-xs text-white/55">
-            {workflow?.next_stage_label
-              ? `Next stage: ${workflow.next_stage_label}`
-              : "No further stage information yet."}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-          <div className="text-xs text-white/45">Transition gate</div>
-          <div className="mt-2 text-sm text-white/80">
+      {gate ? (
+        <div className="mt-4 rounded-2xl border border-app bg-app-muted p-4">
+          <div className="text-xs text-app-4">Transition gate</div>
+          <div className="mt-2 text-sm text-app-2">
             {gate?.ok
               ? `Ready to move into ${gate?.allowed_next_stage_label || gate?.allowed_next_stage || "next stage"}.`
               : gate?.blocked_reason || "Not ready yet."}
           </div>
         </div>
-      </div>
-    </div>
+      ) : null}
+    </Surface>
   );
 }

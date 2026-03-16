@@ -26,17 +26,17 @@ function money(v: any) {
 
 function clsDecision(d?: string) {
   const x = (d || "REJECT").toUpperCase();
-  if (x === "PASS") return "badge badge-success";
-  if (x === "REVIEW") return "badge badge-warning";
-  return "badge badge-danger";
+  if (x === "PASS") return "oh-pill oh-pill-good";
+  if (x === "REVIEW") return "oh-pill oh-pill-warn";
+  return "oh-pill oh-pill-bad";
 }
 
 function clsStage(s?: string) {
   const x = (s || "").toLowerCase();
-  if (x === "equity") return "badge badge-success";
-  if (x === "cash" || x === "lease") return "badge badge-accent";
-  if (x === "tenant" || x === "compliance") return "badge badge-warning";
-  return "badge";
+  if (x === "equity") return "oh-pill oh-pill-good";
+  if (x === "cash" || x === "lease") return "oh-pill oh-pill-accent";
+  if (x === "tenant" || x === "compliance") return "oh-pill oh-pill-warn";
+  return "oh-pill";
 }
 
 function getFinancingType(price?: number | null) {
@@ -139,21 +139,23 @@ export default function Properties() {
 
   return (
     <PageShell>
-      <div className="app-stack">
+      <div className="space-y-6">
         <PageHero
           eyebrow="Portfolio inventory"
           title="Properties"
           subtitle="A cleaner property pipeline: glanceable decisions, financing posture, stage, and the fastest click path into the cockpit."
           actions={
             <>
-              <button onClick={refresh} className="btn btn-secondary">
+              <button onClick={refresh} className="oh-btn oh-btn-secondary">
                 Refresh
               </button>
-              <span className="badge badge-success">PASS {counts.PASS}</span>
-              <span className="badge badge-warning">
+              <span className="oh-pill oh-pill-good">PASS {counts.PASS}</span>
+              <span className="oh-pill oh-pill-warn">
                 REVIEW {counts.REVIEW}
               </span>
-              <span className="badge badge-danger">REJECT {counts.REJECT}</span>
+              <span className="oh-pill oh-pill-bad">
+                REJECT {counts.REJECT}
+              </span>
             </>
           }
         />
@@ -163,25 +165,24 @@ export default function Properties() {
         <Surface
           title="Local property filters"
           subtitle="Fast client-side narrowing on top of your global URL filters."
-          padding="md"
         >
           <div className="grid gap-3 md:grid-cols-3">
-            <label className="field">
-              <span className="field-label">Search</span>
+            <label className="block">
+              <span className="oh-field-label">Search</span>
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search address / city / zip"
-                className="field-input"
+                className="oh-input"
               />
             </label>
 
-            <label className="field">
-              <span className="field-label">Decision</span>
+            <label className="block">
+              <span className="oh-field-label">Decision</span>
               <select
                 value={decision}
                 onChange={(e) => setDecision(e.target.value as any)}
-                className="field-input"
+                className="oh-input"
               >
                 <option value="ALL">All decisions</option>
                 <option value="PASS">PASS</option>
@@ -190,12 +191,12 @@ export default function Properties() {
               </select>
             </label>
 
-            <label className="field">
-              <span className="field-label">Financing</span>
+            <label className="block">
+              <span className="oh-field-label">Financing</span>
               <select
                 value={financing}
                 onChange={(e) => setFinancing(e.target.value as any)}
-                className="field-input"
+                className="oh-input"
               >
                 <option value="ALL">All financing</option>
                 <option value="CASH">Cash</option>
@@ -206,29 +207,26 @@ export default function Properties() {
         </Surface>
 
         {err ? (
-          <Surface tone="danger" padding="md">
+          <Surface tone="danger">
             <div className="text-sm text-red-300">{err}</div>
           </Surface>
         ) : null}
 
         <Surface
           title="Property list"
-          subtitle={`${filtered.length} visible ${
-            filtered.length === 1 ? "property" : "properties"
-          }`}
-          padding="md"
+          subtitle={`${filtered.length} visible ${filtered.length === 1 ? "property" : "properties"}`}
         >
           {loading ? (
             <div className="grid gap-3">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="skeleton h-[120px] rounded-3xl" />
+                <div key={i} className="oh-skeleton h-[120px] rounded-3xl" />
               ))}
             </div>
           ) : !filtered.length ? (
             <EmptyState
               icon={Filter}
               title="No properties matched"
-              description="Adjust the global or local filters. The list is working; it's just being ruthlessly obedient."
+              description="Adjust the global or local filters."
             />
           ) : (
             <div className="grid gap-4">
@@ -267,7 +265,7 @@ export default function Properties() {
                                 : "—"}
                               {p.bedrooms != null ? ` · ${p.bedrooms}bd` : ""}
                               {deal.strategy
-                                ? ` · ${(deal.strategy as string).toUpperCase()}`
+                                ? ` · ${String(deal.strategy).toUpperCase()}`
                                 : ""}
                             </div>
                           </div>
@@ -285,9 +283,11 @@ export default function Properties() {
                           <span className={clsStage(stage)}>
                             {stage.replaceAll("_", " ")}
                           </span>
-                          <span className="badge">{financingType}</span>
+                          <span className="oh-pill">{financingType}</span>
                           {p.red_zone ? (
-                            <span className="badge badge-danger">Red zone</span>
+                            <span className="oh-pill oh-pill-bad">
+                              Red zone
+                            </span>
                           ) : null}
                         </div>
                       </div>

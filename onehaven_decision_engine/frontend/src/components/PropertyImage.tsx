@@ -1,62 +1,45 @@
 import React from "react";
+import { ExternalLink, ImageIcon } from "lucide-react";
 
 type Props = {
-  photos?: string[] | null;
+  photos?: string[];
   zillowUrl?: string | null;
   className?: string;
   roundedClassName?: string;
 };
 
 export default function PropertyImage({
-  photos,
+  photos = [],
   zillowUrl,
-  className,
-  roundedClassName = "rounded-2xl",
+  className = "",
+  roundedClassName = "rounded-3xl",
 }: Props) {
-  const list = Array.isArray(photos) ? photos.filter(Boolean) : [];
-  const [active, setActive] = React.useState(0);
+  const [idx, setIdx] = React.useState(0);
+  const usable = Array.isArray(photos) ? photos.filter(Boolean) : [];
+  const active = usable[idx] || null;
 
   React.useEffect(() => {
-    setActive(0);
-  }, [list.length]);
+    if (idx > usable.length - 1) setIdx(0);
+  }, [idx, usable.length]);
 
-  const main = list[active] || list[0] || null;
-
-  if (!main) {
+  if (!usable.length) {
     return (
-      <div className={className}>
-        <div
-          className={[
-            "w-full h-full min-h-[220px] border border-white/10 bg-white/[0.03]",
-            "flex flex-col items-center justify-center text-center px-5",
-            roundedClassName,
-          ].join(" ")}
-        >
-          <div className="w-full h-[220px] rounded-[inherit] overflow-hidden flex items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.14),_rgba(255,255,255,0.03)_45%,_rgba(255,255,255,0.01)_100%)]">
-            <div className="space-y-3">
-              <div className="mx-auto h-14 w-14 rounded-2xl border border-white/10 bg-white/[0.04] flex items-center justify-center text-2xl">
-                🏠
-              </div>
-              <div className="text-sm font-semibold text-white">
-                Image placeholder
-              </div>
-              <div className="mx-auto max-w-[290px] text-xs text-white/55 leading-5">
-                Automated property ingestion is active. Listing images have not
-                been connected yet, so this property is using a placeholder for
-                now.
-              </div>
-
-              {zillowUrl ? (
-                <a
-                  href={zillowUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex mt-1 oh-btn cursor-pointer"
-                >
-                  open listing ↗
-                </a>
-              ) : null}
-            </div>
+      <div
+        className={[
+          "relative overflow-hidden border border-app bg-app-muted min-h-[260px] flex items-center justify-center",
+          roundedClassName,
+          className,
+        ].join(" ")}
+      >
+        <div className="text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-app bg-app-panel text-app-4">
+            <ImageIcon className="h-6 w-6" />
+          </div>
+          <div className="mt-3 text-sm font-semibold text-app-0">
+            No property image
+          </div>
+          <div className="mt-1 text-xs text-app-4">
+            Upload photos or ingest them later.
           </div>
         </div>
       </div>
@@ -64,45 +47,53 @@ export default function PropertyImage({
   }
 
   return (
-    <div className={className}>
-      <div className="space-y-3">
+    <div
+      className={[
+        "relative overflow-hidden border border-app bg-app-muted",
+        roundedClassName,
+        className,
+      ].join(" ")}
+    >
+      <div className="aspect-[16/10] w-full bg-app-muted">
         <img
-          src={main}
+          src={active || ""}
           alt="Property"
-          loading="lazy"
-          className={[
-            "block w-full h-[220px] object-cover border border-white/10 bg-white/[0.02]",
-            roundedClassName,
-          ].join(" ")}
+          className="h-full w-full object-cover"
         />
+      </div>
 
-        {list.length > 1 ? (
-          <div className="grid grid-cols-4 gap-2">
-            {list.slice(0, 8).map((src, idx) => {
-              const selected = idx === active;
-              return (
-                <button
-                  key={`${src}-${idx}`}
-                  type="button"
-                  onClick={() => setActive(idx)}
-                  className={[
-                    "relative overflow-hidden rounded-xl border cursor-pointer transition",
-                    selected
-                      ? "border-white/40 ring-1 ring-white/30"
-                      : "border-white/10 hover:border-white/20",
-                  ].join(" ")}
-                  title={`Photo ${idx + 1}`}
-                >
-                  <img
-                    src={src}
-                    alt={`Property thumbnail ${idx + 1}`}
-                    loading="lazy"
-                    className="block w-full h-16 object-cover bg-white/[0.02]"
-                  />
-                </button>
-              );
-            })}
-          </div>
+      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 bg-gradient-to-t from-black/65 via-black/15 to-transparent p-4">
+        <div className="flex items-center gap-2">
+          {usable.slice(0, 5).map((src, i) => (
+            <button
+              key={`${src}-${i}`}
+              type="button"
+              onClick={() => setIdx(i)}
+              className={[
+                "h-10 w-14 overflow-hidden rounded-xl border transition",
+                i === idx
+                  ? "border-white/60 ring-1 ring-white/40"
+                  : "border-white/20 opacity-90 hover:opacity-100",
+              ].join(" ")}
+            >
+              <img
+                src={src}
+                alt={`Property thumb ${i + 1}`}
+                className="h-full w-full object-cover"
+              />
+            </button>
+          ))}
+        </div>
+
+        {zillowUrl ? (
+          <a
+            href={zillowUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/30 px-3 py-2 text-xs font-semibold text-white hover:bg-black/45"
+          >
+            Zillow <ExternalLink className="h-3.5 w-3.5" />
+          </a>
         ) : null}
       </div>
     </div>

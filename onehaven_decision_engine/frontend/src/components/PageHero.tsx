@@ -8,6 +8,7 @@ export default function PageHero({
   right,
   actions,
   className,
+  tilt = false,
 }: {
   eyebrow?: string;
   title: string;
@@ -15,16 +16,19 @@ export default function PageHero({
   right?: React.ReactNode;
   actions?: React.ReactNode;
   className?: string;
+  tilt?: boolean;
 }) {
   return (
-    <section className={clsx("hero-shell", className)}>
-      <div className="hero-grid">
+    <section
+      className={clsx("oh-hero-shell", tilt && "oh-hero-tilt", className)}
+    >
+      <div className="oh-hero-grid">
         <div className="min-w-0">
-          {eyebrow ? <div className="hero-eyebrow">{eyebrow}</div> : null}
+          {eyebrow ? <div className="oh-hero-eyebrow">{eyebrow}</div> : null}
 
-          <h1 className="hero-title">{title}</h1>
+          <h1 className="oh-hero-title">{title}</h1>
 
-          {subtitle ? <p className="hero-subtitle">{subtitle}</p> : null}
+          {subtitle ? <p className="oh-hero-subtitle">{subtitle}</p> : null}
 
           {actions ? (
             <div className="mt-5 flex flex-wrap items-center gap-2.5">
@@ -34,14 +38,14 @@ export default function PageHero({
         </div>
 
         {right ? (
-          <div className="hero-aside">
-            <div className="hero-aside-surface">{right}</div>
+          <div className="oh-hero-aside">
+            <div className="oh-hero-aside-surface">{right}</div>
           </div>
         ) : null}
       </div>
 
-      <div className="hero-glow hero-glow-a" />
-      <div className="hero-glow hero-glow-b" />
+      <div className="oh-hero-glow oh-hero-glow-a" />
+      <div className="oh-hero-glow oh-hero-glow-b" />
     </section>
   );
 }

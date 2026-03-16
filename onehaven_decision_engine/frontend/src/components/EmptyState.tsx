@@ -17,9 +17,11 @@ export default function EmptyState({
 }) {
   return (
     <div
-      className={compact ? "empty-state empty-state-compact" : "empty-state"}
+      className={
+        compact ? "oh-empty-state oh-empty-state-compact" : "oh-empty-state"
+      }
     >
-      <div className="empty-state-icon">
+      <div className="oh-empty-state-icon">
         <Icon className="h-5 w-5" />
       </div>
 

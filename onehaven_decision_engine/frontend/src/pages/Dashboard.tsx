@@ -14,6 +14,9 @@ import { Link, useLocation } from "react-router-dom";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
 import GlobalFilters from "../components/GlobalFilters";
+import Surface from "../components/Surface";
+import KpiCard from "../components/KpiCard";
+import EmptyState from "../components/EmptyState";
 import { api } from "../lib/api";
 import { readFilters, toQueryString } from "../lib/filters";
 import Golem from "../components/Golem";
@@ -203,7 +206,7 @@ function MiniBars({
       : 1;
 
   if (!rows.length) {
-    return <div className="text-sm text-white/55">{emptyLabel}</div>;
+    return <EmptyState compact title={emptyLabel} />;
   }
 
   return (
@@ -218,16 +221,14 @@ function MiniBars({
         return (
           <div key={row.label} className="space-y-1">
             <div className="flex items-center justify-between gap-4 text-xs">
-              <span className="truncate text-white/70">{row.label}</span>
-              <span className="text-white/85 font-semibold">
+              <span className="truncate text-app-3">{row.label}</span>
+              <span className="text-app-1 font-semibold">
                 {valueKey === "count" ? raw : money(raw)}
               </span>
             </div>
-            <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+            <div className="h-2 rounded-full bg-app-muted overflow-hidden">
               <div
-                className={`h-full rounded-full ${
-                  isNegative ? "bg-red-400/70" : "bg-white/70"
-                }`}
+                className={`h-full rounded-full ${isNegative ? "bg-red-400/70" : "bg-white/70 dark:bg-white/70"}`}
                 style={{ width: `${width}%` }}
               />
             </div>
@@ -251,7 +252,7 @@ function Leaderboard({
 }) {
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) {
-    return <div className="text-sm text-white/55">{emptyLabel}</div>;
+    return <EmptyState compact title={emptyLabel} />;
   }
 
   return (
@@ -260,24 +261,24 @@ function Leaderboard({
         <Link
           key={row.id}
           to={`/properties/${row.id}`}
-          className="block rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.16] transition p-3"
+          className="block rounded-2xl border border-app bg-app-panel px-4 py-3 hover:border-app-strong hover:bg-app-muted transition"
         >
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-white truncate">
+              <div className="text-sm font-semibold text-app-0 truncate">
                 {row.address}
               </div>
-              <div className="text-xs text-white/55 mt-1 truncate">
+              <div className="text-xs text-app-4 mt-1 truncate">
                 {row.city}, {row.state}
                 {row.county ? ` · ${row.county}` : ""}
                 {row.stage ? ` · ${String(row.stage).replace(/_/g, " ")}` : ""}
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[11px] uppercase tracking-widest text-white/40">
+              <div className="text-[11px] uppercase tracking-widest text-app-4">
                 {metricLabel}
               </div>
-              <div className="text-sm font-semibold text-white">
+              <div className="text-sm font-semibold text-app-0">
                 {metricGetter(row)}
               </div>
             </div>
@@ -355,15 +356,19 @@ export default function Dashboard() {
             <>
               <button
                 onClick={() => refresh(false)}
-                className="oh-btn cursor-pointer"
+                className="oh-btn oh-btn-secondary cursor-pointer"
               >
                 sync
               </button>
-              <TonePill label="homes" value={totalHomes} />
-              <TonePill label="good deals" value={goodDeals} tone="good" />
-              <TonePill label="review" value={reviewDeals} tone="warn" />
-              <TonePill label="rejected" value={rejectedDeals} tone="bad" />
-              <div className="text-[11px] text-white/45 px-2 py-2">
+              <span className="oh-pill">homes {totalHomes}</span>
+              <span className="oh-pill oh-pill-good">
+                good deals {goodDeals}
+              </span>
+              <span className="oh-pill oh-pill-warn">review {reviewDeals}</span>
+              <span className="oh-pill oh-pill-bad">
+                rejected {rejectedDeals}
+              </span>
+              <div className="text-[11px] text-app-4 px-2 py-2">
                 {lastSync
                   ? `last sync: ${new Date(lastSync).toLocaleTimeString()}`
                   : ""}
@@ -372,77 +377,67 @@ export default function Dashboard() {
           }
         />
 
-        <div className="oh-panel p-4">
-          <GlobalFilters />
-        </div>
+        <GlobalFilters />
 
         {err ? (
-          <div className="oh-panel-solid p-4 border-red-900/60 bg-red-950/30 text-red-200">
-            {err}
-          </div>
+          <Surface tone="danger" padding="md">
+            <div className="text-sm text-red-300">{err}</div>
+          </Surface>
         ) : null}
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
-          <MetricCard
+          <KpiCard
             title="Trust / pipeline quality"
             value={goodDeals}
-            sub={`${reviewDeals} in review · ${rejectedDeals} rejected`}
-            icon={<ShieldCheck className="h-5 w-5" />}
-            to={`/drilldowns/trust${qs}`}
-            tone="good"
+            subtitle={`${reviewDeals} in review · ${rejectedDeals} rejected`}
+            icon={ShieldCheck}
+            tone="success"
           />
-
-          <MetricCard
+          <KpiCard
             title="Compliance exposure"
             value={Number(counts.rehab_tasks_open || 0)}
-            sub={`${Number(kpis.red_zone_count || 0)} red-zone homes in filtered set`}
-            icon={<ClipboardCheck className="h-5 w-5" />}
-            to={`/drilldowns/compliance${qs}`}
-            tone="warn"
+            subtitle={`${Number(kpis.red_zone_count || 0)} red-zone homes in filtered set`}
+            icon={ClipboardCheck}
+            tone="warning"
           />
-
-          <MetricCard
+          <KpiCard
             title="Rehab backlog"
             value={money(kpis.rehab_open_cost_estimate)}
-            sub={`${Number(counts.rehab_tasks_total || 0)} total rehab tasks`}
-            icon={<Hammer className="h-5 w-5" />}
-            to={`/drilldowns/rehab${qs}`}
-            tone="warn"
+            subtitle={`${Number(counts.rehab_tasks_total || 0)} total rehab tasks`}
+            icon={Hammer}
+            tone="warning"
           />
-
-          <MetricCard
+          <KpiCard
             title="Cashflow"
             value={money(kpis.net_cash_window)}
-            sub={`${Number(kpis.cashflow_positive_homes || 0)} homes positive in current window`}
-            icon={<Wallet className="h-5 w-5" />}
-            to={`/drilldowns/cashflow${qs}`}
-            tone={Number(kpis.net_cash_window || 0) >= 0 ? "good" : "bad"}
+            subtitle={`${Number(kpis.cashflow_positive_homes || 0)} homes positive in current window`}
+            icon={Wallet}
+            tone={Number(kpis.net_cash_window || 0) >= 0 ? "success" : "danger"}
           />
-
-          <MetricCard
+          <KpiCard
             title="Equity"
             value={money(kpis.total_estimated_equity)}
-            sub={`${Number(kpis.homes_with_valuation || 0)} homes with valuation`}
-            icon={<Landmark className="h-5 w-5" />}
-            to={`/drilldowns/equity${qs}`}
-            tone="good"
+            subtitle={`${Number(kpis.homes_with_valuation || 0)} homes with valuation`}
+            icon={Landmark}
+            tone="accent"
           />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-[1.4fr,1fr] gap-4">
-          <Panel
+          <Surface
             title="Pipeline distribution"
             subtitle="Every stage tile opens the filtered pipeline drilldown."
-            right={
-              <Link to={`/pipeline${qs}`} className="oh-btn">
+            actions={
+              <Link to={`/pipeline${qs}`} className="oh-btn oh-btn-secondary">
                 open pipeline
               </Link>
             }
           >
             {!stageEntries.length ? (
-              <div className="text-sm text-white/55">
-                {loading ? "Loading pipeline…" : "No stage data yet."}
-              </div>
+              <EmptyState
+                compact
+                title={loading ? "Loading pipeline…" : "No stage data yet."}
+              />
             ) : (
               <div className="space-y-3">
                 {stageEntries.map(([stage, count]) => {
@@ -457,24 +452,24 @@ export default function Dashboard() {
                     <Link
                       key={stage}
                       to={`/pipeline?${next.toString()}`}
-                      className="block rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/[0.16] transition p-4"
+                      className="block rounded-2xl border border-app bg-app-panel hover:bg-app-muted hover:border-app-strong transition p-4"
                     >
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <div className="text-[11px] uppercase tracking-widest text-white/45">
+                          <div className="text-[11px] uppercase tracking-widest text-app-4">
                             {stage.replace(/_/g, " ")}
                           </div>
-                          <div className="mt-1 text-lg font-semibold text-white">
+                          <div className="mt-1 text-lg font-semibold text-app-0">
                             {count}
                           </div>
                         </div>
-                        <div className="text-xs text-white/55">
+                        <div className="text-xs text-app-4">
                           {width.toFixed(0)}% of filtered homes
                         </div>
                       </div>
-                      <div className="mt-3 h-2 rounded-full bg-white/5 overflow-hidden">
+                      <div className="mt-3 h-2 rounded-full bg-app-muted overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-white/70"
+                          className="h-full rounded-full bg-[linear-gradient(90deg,var(--accent),var(--accent-2))]"
                           style={{ width: `${width}%` }}
                         />
                       </div>
@@ -483,11 +478,11 @@ export default function Dashboard() {
                 })}
               </div>
             )}
-          </Panel>
+          </Surface>
 
-          <Panel
+          <Surface
             title="Decision mix"
-            subtitle="Quick sanity check so the deal engine doesn’t become decorative pumpkin logic."
+            subtitle="Quick sanity check so the deal engine does not become decorative pumpkin logic."
           >
             <MiniBars
               items={data?.series?.decision_mix}
@@ -495,11 +490,11 @@ export default function Dashboard() {
                 loading ? "Loading decisions…" : "No decision data yet."
               }
             />
-          </Panel>
+          </Surface>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          <Panel
+          <Surface
             title="Best current opportunities"
             subtitle="Highest quality survivors in the filtered slice."
           >
@@ -513,9 +508,9 @@ export default function Dashboard() {
                 loading ? "Loading opportunities…" : "No opportunities yet."
               }
             />
-          </Panel>
+          </Surface>
 
-          <Panel
+          <Surface
             title="Cashflow leaders"
             subtitle="Top properties by current net cash in the selected window."
           >
@@ -527,9 +522,9 @@ export default function Dashboard() {
                 loading ? "Loading cashflow…" : "No cashflow rows yet."
               }
             />
-          </Panel>
+          </Surface>
 
-          <Panel
+          <Surface
             title="Equity leaders"
             subtitle="Fast view of who is already carrying balance-sheet weight."
           >
@@ -539,15 +534,18 @@ export default function Dashboard() {
               metricGetter={(row) => money(row.estimated_equity)}
               emptyLabel={loading ? "Loading equity…" : "No equity rows yet."}
             />
-          </Panel>
+          </Surface>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <Panel
+          <Surface
             title="Cash trend"
             subtitle="Monthly net view for the current filtered book."
-            right={
-              <Link to={`/drilldowns/cashflow${qs}`} className="oh-btn">
+            actions={
+              <Link
+                to={`/drilldowns/cashflow${qs}`}
+                className="oh-btn oh-btn-secondary"
+              >
                 cashflow detail
               </Link>
             }
@@ -559,9 +557,9 @@ export default function Dashboard() {
                 loading ? "Loading trend…" : "No transaction trend yet."
               }
             />
-          </Panel>
+          </Surface>
 
-          <Panel
+          <Surface
             title="County concentration"
             subtitle="Where your current filtered exposure is piling up."
           >
@@ -571,15 +569,18 @@ export default function Dashboard() {
                 loading ? "Loading county mix…" : "No county data yet."
               }
             />
-          </Panel>
+          </Surface>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <Panel
+          <Surface
             title="Rehab pressure"
             subtitle="Highest open rehab drag first."
-            right={
-              <Link to={`/drilldowns/rehab${qs}`} className="oh-btn">
+            actions={
+              <Link
+                to={`/drilldowns/rehab${qs}`}
+                className="oh-btn oh-btn-secondary"
+              >
                 rehab detail
               </Link>
             }
@@ -592,13 +593,16 @@ export default function Dashboard() {
                 loading ? "Loading rehab backlog…" : "No rehab backlog yet."
               }
             />
-          </Panel>
+          </Surface>
 
-          <Panel
+          <Surface
             title="Compliance attention"
             subtitle="Properties likely to want human eyeballs before they misbehave."
-            right={
-              <Link to={`/drilldowns/compliance${qs}`} className="oh-btn">
+            actions={
+              <Link
+                to={`/drilldowns/compliance${qs}`}
+                className="oh-btn oh-btn-secondary"
+              >
                 compliance detail
               </Link>
             }
@@ -613,135 +617,93 @@ export default function Dashboard() {
                   : "No compliance attention list yet."
               }
             />
-          </Panel>
+          </Surface>
         </div>
 
-        <div className="oh-panel p-5">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <div className="text-sm font-semibold text-white flex items-center gap-2">
-                <Building2 className="h-4 w-4" />
-                Portfolio snapshot
-              </div>
-              <div className="text-xs text-white/55 mt-1">
-                Current filtered totals you can glance at without diving into
-                every property card like a raccoon in a wiring closet.
-              </div>
-            </div>
-            <Link to={`/properties${qs}`} className="oh-btn">
+        <Surface
+          title="Portfolio snapshot"
+          subtitle="Current filtered totals you can glance at without diving into every property card."
+          actions={
+            <Link to={`/properties${qs}`} className="oh-btn oh-btn-secondary">
               open properties
             </Link>
+          }
+        >
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+            {[
+              ["homes", totalHomes],
+              ["deals", Number(counts.deals || 0)],
+              ["leases", Number(kpis.active_leases || 0)],
+              ["valuations", Number(counts.valuations || 0)],
+              ["value", money(kpis.total_estimated_value)],
+              ["debt", money(kpis.total_loan_balance)],
+              ["equity", money(kpis.total_estimated_equity)],
+              [
+                "avg crime",
+                kpis.avg_crime_score != null ? kpis.avg_crime_score : "—",
+              ],
+            ].map(([label, value]) => (
+              <div
+                key={String(label)}
+                className="rounded-2xl border border-app bg-app-panel p-4"
+              >
+                <div className="text-[11px] uppercase tracking-widest text-app-4">
+                  {label}
+                </div>
+                <div className="mt-2 text-2xl font-semibold text-app-0">
+                  {value as React.ReactNode}
+                </div>
+              </div>
+            ))}
           </div>
+        </Surface>
 
-          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-widest text-white/45">
-                homes
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {totalHomes}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-widest text-white/45">
-                deals
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {Number(counts.deals || 0)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-widest text-white/45">
-                leases
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {Number(kpis.active_leases || 0)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-widest text-white/45">
-                valuations
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {Number(counts.valuations || 0)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-widest text-white/45">
-                value
-              </div>
-              <div className="mt-2 text-xl font-semibold text-white">
-                {money(kpis.total_estimated_value)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-widest text-white/45">
-                debt
-              </div>
-              <div className="mt-2 text-xl font-semibold text-white">
-                {money(kpis.total_loan_balance)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-widest text-white/45">
-                equity
-              </div>
-              <div className="mt-2 text-xl font-semibold text-white">
-                {money(kpis.total_estimated_equity)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-widest text-white/45">
-                avg crime
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {kpis.avg_crime_score != null ? kpis.avg_crime_score : "—"}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="oh-panel p-5">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <div className="text-sm font-semibold text-white flex items-center gap-2">
-                <GitBranch className="h-4 w-4" />
-                Main navigation, now with fewer useless ornaments
-              </div>
-              <div className="text-xs text-white/55 mt-1">
-                Every serious panel now drills into a page with
-                investor-specific detail instead of just looking expensive.
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-3">
-            <Link to={`/drilldowns/trust${qs}`} className="oh-btn">
+        <Surface
+          title="Main navigation"
+          subtitle="Every serious panel drills into a page with investor-specific detail instead of just looking expensive."
+        >
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to={`/drilldowns/trust${qs}`}
+              className="oh-btn oh-btn-secondary"
+            >
               trust
             </Link>
-            <Link to={`/drilldowns/compliance${qs}`} className="oh-btn">
+            <Link
+              to={`/drilldowns/compliance${qs}`}
+              className="oh-btn oh-btn-secondary"
+            >
               compliance
             </Link>
-            <Link to={`/drilldowns/rehab${qs}`} className="oh-btn">
+            <Link
+              to={`/drilldowns/rehab${qs}`}
+              className="oh-btn oh-btn-secondary"
+            >
               rehab
             </Link>
-            <Link to={`/drilldowns/cashflow${qs}`} className="oh-btn">
+            <Link
+              to={`/drilldowns/cashflow${qs}`}
+              className="oh-btn oh-btn-secondary"
+            >
               cashflow
             </Link>
-            <Link to={`/drilldowns/equity${qs}`} className="oh-btn">
+            <Link
+              to={`/drilldowns/equity${qs}`}
+              className="oh-btn oh-btn-secondary"
+            >
               equity
             </Link>
-            <Link to={`/pipeline${qs}`} className="oh-btn">
+            <Link to={`/pipeline${qs}`} className="oh-btn oh-btn-secondary">
               pipeline
             </Link>
-            <Link to={`/properties${qs}`} className="oh-btn">
+            <Link to={`/properties${qs}`} className="oh-btn oh-btn-secondary">
               properties
             </Link>
-            <Link to="/agents" className="oh-btn">
+            <Link to="/agents" className="oh-btn oh-btn-secondary">
               agents
             </Link>
           </div>
-        </div>
+        </Surface>
       </div>
     </PageShell>
   );
