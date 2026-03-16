@@ -122,12 +122,16 @@ def list_runs(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    q = (
-        _history_filters_query(principal, agent_key=agent_key, property_id=property_id, status=status)
+    rows = db.scalars(
+        _history_filters_query(
+            principal,
+            agent_key=agent_key,
+            property_id=property_id,
+            status=status,
+        )
         .order_by(AgentRun.id.desc())
         .limit(int(limit))
-    )
-    rows = db.scalars(q).all()
+    ).all()
     return [_serialize_run_detail(db, r) for r in rows]
 
 
@@ -141,7 +145,12 @@ def runs_summary(
     principal=Depends(get_principal),
 ):
     rows = db.scalars(
-        _history_filters_query(principal, agent_key=agent_key, property_id=property_id, status=status)
+        _history_filters_query(
+            principal,
+            agent_key=agent_key,
+            property_id=property_id,
+            status=status,
+        )
         .order_by(AgentRun.id.desc())
         .limit(int(limit))
     ).all()
@@ -169,6 +178,7 @@ def runs_summary(
                 "blocked": 0,
                 "queued": 0,
                 "running": 0,
+                "timed_out": 0,
                 "last_run_id": 0,
                 "last_status": None,
                 "last_property_id": None,
@@ -249,7 +259,6 @@ def compare_runs(
         raise HTTPException(status_code=404, detail="Not enough runs found for compare")
 
     serialized = [_serialize_run_detail(db, r) for r in rows]
-
     agents = sorted({str(r["agent_key"]) for r in serialized})
     statuses = sorted({str(r["status"]) for r in serialized})
     properties = sorted({int(r["property_id"]) for r in serialized if r["property_id"] is not None})
@@ -313,7 +322,14 @@ def property_agent_cockpit(
 
     return {
         "property_id": int(property_id),
-        "summary": runs_summary(property_id=property_id, agent_key=None, status=None, limit=limit, db=db, principal=principal),
+        "summary": runs_summary(
+            property_id=property_id,
+            agent_key=None,
+            status=None,
+            limit=limit,
+            db=db,
+            principal=principal,
+        ),
         "latest_runs": list(latest_by_agent.values()),
         "slots": slot_rows,
     }
@@ -338,8 +354,8 @@ def list_deadletters(
             pass
 
     rows = db.scalars(q.limit(int(limit))).all()
-
     out: list[dict[str, Any]] = []
+
     for d in rows:
         out.append(
             {
@@ -365,29 +381,34 @@ def ack_deadletter(
 ):
     require_owner(principal)
 
-    d = db.scalar(select(AgentRunDeadletter).where(AgentRunDeadletter.id == int(dead_id), AgentRunDeadletter.org_id == principal.org_id))
-    if d is None:
+    dead = db.scalar(
+        select(AgentRunDeadletter).where(
+            AgentRunDeadletter.id == int(dead_id),
+            AgentRunDeadletter.org_id == principal.org_id,
+        )
+    )
+    if dead is None:
         raise HTTPException(status_code=404, detail="Deadletter not found")
 
     changed = False
     try:
-        if getattr(d, "acked_at", None) is None:
-            setattr(d, "acked_at", _utcnow())
+        if getattr(dead, "acked_at", None) is None:
+            setattr(dead, "acked_at", _utcnow())
             changed = True
     except Exception:
         pass
 
     try:
-        if getattr(d, "acked_by_user_id", None) is None:
-            setattr(d, "acked_by_user_id", int(principal.user_id))
+        if getattr(dead, "acked_by_user_id", None) is None:
+            setattr(dead, "acked_by_user_id", int(principal.user_id))
             changed = True
     except Exception:
         pass
 
     if changed:
-        db.add(d)
+        db.add(dead)
         db.commit()
-        db.refresh(d)
+        db.refresh(dead)
 
     return {"ok": True, "dead_id": int(dead_id)}
 
@@ -398,10 +419,15 @@ def get_run(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
-    if r is None:
+    run = db.scalar(
+        select(AgentRun).where(
+            AgentRun.id == int(run_id),
+            AgentRun.org_id == principal.org_id,
+        )
+    )
+    if run is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
-    return _serialize_run_detail(db, r)
+    return _serialize_run_detail(db, run)
 
 
 @router.get("/{run_id}/trace")
@@ -411,7 +437,12 @@ def get_run_trace(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    run = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
+    run = db.scalar(
+        select(AgentRun).where(
+            AgentRun.id == int(run_id),
+            AgentRun.org_id == principal.org_id,
+        )
+    )
     if run is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
 
@@ -432,7 +463,12 @@ def get_run_messages(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    run = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
+    run = db.scalar(
+        select(AgentRun).where(
+            AgentRun.id == int(run_id),
+            AgentRun.org_id == principal.org_id,
+        )
+    )
     if run is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
 
@@ -457,7 +493,7 @@ def get_run_messages(
                 "sender": getattr(m, "sender", None),
                 "recipient": getattr(m, "recipient", None),
                 "created_at": getattr(m, "created_at", None),
-                "event": _loads(m.message, {"type": "raw", "message": m.message}),
+                "event": _loads(getattr(m, "message", None), {"type": "raw", "message": getattr(m, "message", None)}),
             }
         )
 
@@ -473,7 +509,12 @@ def stream_run_messages(
 ):
     db0 = SessionLocal()
     try:
-        run = db0.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
+        run = db0.scalar(
+            select(AgentRun).where(
+                AgentRun.id == int(run_id),
+                AgentRun.org_id == principal.org_id,
+            )
+        )
         if run is None:
             raise HTTPException(status_code=404, detail="AgentRun not found")
     finally:
@@ -489,15 +530,16 @@ def stream_run_messages(
         while True:
             db = SessionLocal()
             try:
-                q = (
-                    select(AgentTraceEvent)
-                    .where(AgentTraceEvent.org_id == principal.org_id)
-                    .where(AgentTraceEvent.run_id == int(run_id))
-                    .where(AgentTraceEvent.id > int(last_id))
-                    .order_by(AgentTraceEvent.id.asc())
-                    .limit(500)
+                rows = list(
+                    db.scalars(
+                        select(AgentTraceEvent)
+                        .where(AgentTraceEvent.org_id == principal.org_id)
+                        .where(AgentTraceEvent.run_id == int(run_id))
+                        .where(AgentTraceEvent.id > int(last_id))
+                        .order_by(AgentTraceEvent.id.asc())
+                        .limit(500)
+                    ).all()
                 )
-                rows = list(db.scalars(q).all())
             finally:
                 db.close()
 
@@ -548,7 +590,7 @@ def enqueue_planned_runs(
 
     created: list[AgentRun] = []
     for p in plan:
-        r = create_run(
+        run = create_run(
             db,
             org_id=principal.org_id,
             actor_user_id=principal.user_id,
@@ -557,10 +599,10 @@ def enqueue_planned_runs(
             input_payload={},
             idempotency_key=p.idempotency_key,
         )
-        created.append(r)
+        created.append(run)
 
-        if dispatch and r.status == "queued":
-            execute_agent_run.delay(org_id=principal.org_id, run_id=int(r.id))
+        if dispatch and (getattr(run, "status", "") or "").lower() == "queued":
+            execute_agent_run.delay(org_id=principal.org_id, run_id=int(run.id))
 
     return {"planned": len(plan), "created": [_serialize_run_detail(db, r) for r in created]}
 
@@ -571,12 +613,17 @@ def dispatch_run(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
-    if r is None:
+    run = db.scalar(
+        select(AgentRun).where(
+            AgentRun.id == int(run_id),
+            AgentRun.org_id == principal.org_id,
+        )
+    )
+    if run is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
 
-    execute_agent_run.delay(org_id=principal.org_id, run_id=int(r.id))
-    return {"ok": True, "queued": True, "run_id": int(r.id)}
+    execute_agent_run.delay(org_id=principal.org_id, run_id=int(run.id))
+    return {"ok": True, "queued": True, "run_id": int(run.id)}
 
 
 @router.post("/{run_id}/retry")
@@ -588,40 +635,49 @@ def retry_run(
 ):
     require_owner(principal)
 
-    r = db.scalar(select(AgentRun).where(AgentRun.id == int(run_id), AgentRun.org_id == principal.org_id))
-    if r is None:
+    run = db.scalar(
+        select(AgentRun).where(
+            AgentRun.id == int(run_id),
+            AgentRun.org_id == principal.org_id,
+        )
+    )
+    if run is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
 
-    if (r.status or "").lower() not in TERMINAL:
-        raise HTTPException(status_code=409, detail={"code": "run_not_terminal", "status": r.status})
+    if (getattr(run, "status", "") or "").lower() not in TERMINAL:
+        raise HTTPException(status_code=409, detail={"code": "run_not_terminal", "status": run.status})
 
-    r.status = "queued"
-    r.started_at = None
-    r.finished_at = None
-    r.last_error = None
+    run.status = "queued"
+    run.started_at = None
+    run.finished_at = None
+    run.last_error = None
+    run.heartbeat_at = None
 
     try:
-        if getattr(r, "approval_status", None) in ("rejected", "approved"):
-            r.approval_status = "pending"
-            r.approved_at = None
+        if getattr(run, "approval_status", None) in ("rejected", "approved"):
+            run.approval_status = "pending"
+            run.approved_at = None
+            run.approved_by_user_id = None
     except Exception:
         pass
 
     try:
         ev = AgentTraceEvent(
             org_id=principal.org_id,
-            run_id=int(r.id),
-            property_id=getattr(r, "property_id", None),
-            agent_key=str(getattr(r, "agent_key", "")),
+            run_id=int(run.id),
+            property_id=getattr(run, "property_id", None),
+            agent_key=str(getattr(run, "agent_key", "")),
             event_type="retry_requested",
             payload_json=_dumps(
                 {
                     "type": "retry_requested",
                     "payload": {
-                        "run_id": int(r.id),
+                        "run_id": int(run.id),
                         "by_user_id": int(principal.user_id),
                         "ts": _utcnow().isoformat(),
                     },
+                    "level": "info",
+                    "ts": _utcnow().isoformat(),
                 }
             ),
             created_at=_utcnow(),
@@ -630,15 +686,15 @@ def retry_run(
     except Exception:
         pass
 
-    db.add(r)
+    db.add(run)
     db.commit()
-    db.refresh(r)
+    db.refresh(run)
 
     if dispatch:
-        execute_agent_run.delay(org_id=principal.org_id, run_id=int(r.id))
-        return {"ok": True, "run": _serialize_run_detail(db, r), "queued": True}
+        execute_agent_run.delay(org_id=principal.org_id, run_id=int(run.id))
+        return {"ok": True, "run": _serialize_run_detail(db, run), "queued": True}
 
-    return {"ok": True, "run": _serialize_run_detail(db, r), "queued": False}
+    return {"ok": True, "run": _serialize_run_detail(db, run), "queued": False}
 
 
 @router.post("/{run_id}/approve")
@@ -648,8 +704,13 @@ def approve_run(
     principal=Depends(get_principal),
 ):
     require_owner(principal)
-    r = mark_approved(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=int(run_id))
-    return {"ok": True, "run": _serialize_run_detail(db, r)}
+    run = mark_approved(
+        db,
+        org_id=principal.org_id,
+        actor_user_id=principal.user_id,
+        run_id=int(run_id),
+    )
+    return {"ok": True, "run": _serialize_run_detail(db, run)}
 
 
 @router.post("/{run_id}/reject")
@@ -660,8 +721,14 @@ def reject_run_route(
     principal=Depends(get_principal),
 ):
     require_owner(principal)
-    r = reject_run(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=int(run_id), reason=reason)
-    return {"ok": True, "run": _serialize_run_detail(db, r)}
+    run = reject_run(
+        db,
+        org_id=principal.org_id,
+        actor_user_id=principal.user_id,
+        run_id=int(run_id),
+        reason=reason,
+    )
+    return {"ok": True, "run": _serialize_run_detail(db, run)}
 
 
 @router.post("/{run_id}/apply")
@@ -671,4 +738,9 @@ def apply_run(
     principal=Depends(get_principal),
 ):
     require_owner(principal)
-    return apply_approved(db, org_id=principal.org_id, actor_user_id=principal.user_id, run_id=int(run_id))
+    return apply_approved(
+        db,
+        org_id=principal.org_id,
+        actor_user_id=principal.user_id,
+        run_id=int(run_id),
+    )

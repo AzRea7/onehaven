@@ -2,29 +2,285 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.models import Property, Deal, PropertyState, AgentRun
+from app.models import Deal, Property, PropertyState
 from app.policy_models import JurisdictionProfile
 from app.services.hud_fmr_service import get_or_fetch_fmr
 from app.domain.compliance.hqs_library import get_effective_hqs_items
 
+# Explicit specialist agents
+from app.domain.agents.impl.underwrite_agent import run_underwrite_agent
+from app.domain.agents.impl.rent_reasonableness_agent import run_rent_reasonableness_agent
+from app.domain.agents.impl.hqs_precheck_agent import run_hqs_precheck_agent
+from app.domain.agents.impl.packet_builder_agent import run_packet_builder_agent
+from app.domain.agents.impl.photo_rehab_agent import run_photo_rehab_agent
+from app.domain.agents.impl.next_actions_agent import run_next_actions_agent
+
+# Existing deterministic agents that are still useful
+from app.domain.agents.impl.deal_intake import run_deal_intake
+from app.domain.agents.impl.ops_judge import run_ops_judge
+from app.domain.agents.impl.timeline_nudger import run_timeline_nudger
+
+
+AgentFn = Callable[[Session, int, Optional[int], dict[str, Any]], dict[str, Any]]
+
 
 def _property_context(db: Session, org_id: int, property_id: Optional[int]) -> dict[str, Any]:
     if not property_id:
-        return {"property": None, "deal": None, "stage": None}
+        return {"property": None, "deal": None, "stage": None, "jurisdiction_profile": None}
 
-    p = db.scalar(select(Property).where(Property.org_id == org_id, Property.id == property_id))
-    d = db.scalar(
+    prop = db.scalar(select(Property).where(Property.org_id == int(org_id), Property.id == int(property_id)))
+    deal = db.scalar(
         select(Deal)
-        .where(Deal.org_id == org_id, Deal.property_id == property_id)
+        .where(Deal.org_id == int(org_id), Deal.property_id == int(property_id))
         .order_by(Deal.id.desc())
     )
-    s = db.scalar(select(PropertyState).where(PropertyState.org_id == org_id, PropertyState.property_id == property_id))
-    return {"property": p, "deal": d, "stage": (s.current_stage if s else None)}
+    state = db.scalar(
+        select(PropertyState).where(
+            PropertyState.org_id == int(org_id),
+            PropertyState.property_id == int(property_id),
+        )
+    )
+
+    jp = None
+    if prop is not None:
+        try:
+            jp = db.scalar(
+                select(JurisdictionProfile).where(
+                    JurisdictionProfile.org_id == int(org_id),
+                    JurisdictionProfile.state == getattr(prop, "state", None),
+                    JurisdictionProfile.city == getattr(prop, "city", None),
+                )
+            )
+        except Exception:
+            jp = None
+
+    return {
+        "property": prop,
+        "deal": deal,
+        "stage": (getattr(state, "current_stage", None) if state else None),
+        "jurisdiction_profile": jp,
+    }
+
+
+def _fallback_deal_intake(
+    db: Session,
+    org_id: int,
+    property_id: Optional[int],
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    ctx = _property_context(db, org_id, property_id)
+    prop = ctx["property"]
+    deal = ctx["deal"]
+
+    missing: list[str] = []
+    if prop is None:
+        missing.append("property")
+    else:
+        for field in ("address", "city", "state", "zip", "bedrooms"):
+            if not getattr(prop, field, None):
+                missing.append(f"property.{field}")
+
+    if deal is None:
+        missing.append("deal")
+    else:
+        if getattr(deal, "purchase_price", None) in (None, 0):
+            missing.append("deal.purchase_price")
+
+    recommendations: list[dict[str, Any]] = []
+    if missing:
+        recommendations.append(
+            {
+                "type": "missing_fields",
+                "property_id": property_id,
+                "missing": missing,
+                "reason": "Deal intake cannot complete until required fields exist.",
+                "priority": "high",
+            }
+        )
+
+    return {
+        "agent_key": "deal_intake",
+        "summary": "Deal intake validation + next required steps.",
+        "facts": {"property_id": property_id, "missing": missing, "stage": ctx["stage"]},
+        "actions": [],
+        "recommendations": recommendations,
+    }
+
+
+def _fallback_rent_reasonableness(
+    db: Session,
+    org_id: int,
+    property_id: Optional[int],
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    ctx = _property_context(db, org_id, property_id)
+    prop = ctx["property"]
+    if prop is None:
+        return {
+            "agent_key": "rent_reasonableness",
+            "summary": "No property found.",
+            "facts": {"property_id": property_id},
+            "actions": [],
+            "recommendations": [],
+        }
+
+    bedrooms = int(getattr(prop, "bedrooms", 0) or 0)
+    fmr = get_or_fetch_fmr(
+        db,
+        org_id=int(org_id),
+        area_name=(getattr(prop, "city", None) or "UNKNOWN"),
+        state=(getattr(prop, "state", None) or "MI"),
+        bedrooms=bedrooms,
+    )
+    fmr_val = float(getattr(fmr, "fmr", 0.0) or 0.0)
+    required_factors = [
+        "location",
+        "quality",
+        "size",
+        "unit_type",
+        "age",
+        "amenities",
+        "services",
+        "utilities",
+    ]
+    recommended = fmr_val * 1.10 if fmr_val else None
+
+    return {
+        "agent_key": "rent_reasonableness",
+        "summary": "Rent reasonableness baseline computed using HUD FMR cache anchor.",
+        "facts": {
+            "property_id": property_id,
+            "hud_fmr": {
+                "area_name": getattr(fmr, "area_name", None),
+                "state": getattr(fmr, "state", None),
+                "bedrooms": getattr(fmr, "bedrooms", None),
+                "fmr": fmr_val,
+            },
+            "required_comparability_factors": required_factors,
+            "recommended_gross_rent": recommended,
+        },
+        "actions": [],
+        "recommendations": [
+            {
+                "type": "rent_reasonableness_computed",
+                "property_id": property_id,
+                "recommended_gross_rent": recommended,
+                "factors": required_factors,
+                "fmr": fmr_val,
+                "reason": "Use this as a baseline and justify the contract rent with comps and utilities.",
+                "priority": "medium",
+            }
+        ],
+    }
+
+
+def _fallback_hqs_precheck(
+    db: Session,
+    org_id: int,
+    property_id: Optional[int],
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    ctx = _property_context(db, org_id, property_id)
+    prop = ctx["property"]
+    if prop is None:
+        return {
+            "agent_key": "hqs_precheck",
+            "summary": "No property found.",
+            "facts": {"property_id": property_id},
+            "actions": [],
+        }
+
+    lib = get_effective_hqs_items(db, org_id=int(org_id), prop=prop)
+    items = lib.get("items") or []
+    likely = [x for x in items if str(x.get("severity") or "").lower() == "fail"][:12]
+
+    actions: list[dict[str, Any]] = []
+    for item in likely[:6]:
+        actions.append(
+            {
+                "entity_type": "rehab_task",
+                "op": "create",
+                "data": {
+                    "property_id": int(prop.id),
+                    "title": f"HQS precheck: {item.get('code')}",
+                    "category": item.get("category") or "safety",
+                    "status": "todo",
+                    "cost_estimate": float(item.get("default_cost_estimate") or 0.0),
+                    "notes": item.get("suggested_fix") or "",
+                },
+                "reason": "Convert likely HQS failures into rehab tasks.",
+            }
+        )
+
+    return {
+        "agent_key": "hqs_precheck",
+        "summary": "HQS precheck generated from the canonical HQS baseline.",
+        "facts": {
+            "property_id": property_id,
+            "hqs_items_total": len(items),
+            "likely_fail_count": len(likely),
+        },
+        "actions": actions,
+    }
+
+
+def _fallback_packet_builder(
+    db: Session,
+    org_id: int,
+    property_id: Optional[int],
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    ctx = _property_context(db, org_id, property_id)
+    jp = ctx["jurisdiction_profile"]
+
+    checklist = None
+    if jp is not None:
+        checklist = (
+            getattr(jp, "packet_requirements_json", None)
+            or getattr(jp, "workflow_steps_json", None)
+            or []
+        )
+
+    return {
+        "agent_key": "packet_builder",
+        "summary": "Builds a jurisdiction-specific Section 8 packet checklist.",
+        "facts": {
+            "property_id": property_id,
+            "jurisdiction_profile_found": jp is not None,
+            "packet_checklist": checklist,
+        },
+        "actions": [],
+        "recommendations": [
+            {
+                "type": "packet_checklist_generated",
+                "property_id": property_id,
+                "packet_checklist": checklist or [],
+                "reason": "Use as the completion checklist for RFTA/HAP onboarding artifacts.",
+                "priority": "medium",
+            }
+        ],
+    }
+
+
+def _call_impl_or_fallback(
+    impl: Optional[AgentFn],
+    fallback: AgentFn,
+    db: Session,
+    org_id: int,
+    property_id: Optional[int],
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        if impl is not None:
+            return impl(db, int(org_id), property_id, input_payload or {})
+    except Exception:
+        pass
+    return fallback(db, int(org_id), property_id, input_payload or {})
 
 
 def agent_deal_intake(
@@ -34,50 +290,24 @@ def agent_deal_intake(
     property_id: Optional[int],
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    ctx = _property_context(db, org_id, property_id)
-    p = ctx["property"]
-    d = ctx["deal"]
+    return _call_impl_or_fallback(
+        run_deal_intake if callable(run_deal_intake) else None,
+        _fallback_deal_intake,
+        db,
+        org_id,
+        property_id,
+        input_payload,
+    )
 
-    missing = []
-    if p is None:
-        missing.append("property")
-    else:
-        if not getattr(p, "address", None):
-            missing.append("property.address")
-        if not getattr(p, "city", None):
-            missing.append("property.city")
-        if not getattr(p, "state", None):
-            missing.append("property.state")
-        if not getattr(p, "zip", None):
-            missing.append("property.zip")
-        if not getattr(p, "bedrooms", None):
-            missing.append("property.bedrooms")
 
-    if d is None:
-        missing.append("deal")
-    else:
-        if getattr(d, "purchase_price", None) in (None, 0):
-            missing.append("deal.purchase_price")
-
-    recommendations = []
-    if missing:
-        recommendations.append(
-            {
-                "type": "missing_fields",
-                "property_id": property_id,
-                "missing": missing,
-                "reason": "Intake cannot complete until required fields exist.",
-                "priority": "high",
-            }
-        )
-
-    return {
-        "agent_key": "deal_intake",
-        "summary": "Deal intake validation + next required steps.",
-        "facts": {"property_id": property_id, "missing": missing, "stage": ctx["stage"]},
-        "actions": [],  # ✅ recommend_only
-        "recommendations": recommendations,
-    }
+def agent_underwrite(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: Optional[int],
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    return run_underwrite_agent(db, int(org_id), property_id, input_payload or {})
 
 
 def agent_rent_reasonableness(
@@ -87,57 +317,14 @@ def agent_rent_reasonableness(
     property_id: Optional[int],
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    ctx = _property_context(db, org_id, property_id)
-    p = ctx["property"]
-    if p is None:
-        return {
-            "agent_key": "rent_reasonableness",
-            "summary": "No property found.",
-            "facts": {"property_id": property_id},
-            "actions": [],  # ✅ recommend_only
-            "recommendations": [],
-        }
-
-    bedrooms = int(getattr(p, "bedrooms", 0) or 0)
-    fmr = get_or_fetch_fmr(
+    return _call_impl_or_fallback(
+        run_rent_reasonableness_agent if callable(run_rent_reasonableness_agent) else None,
+        _fallback_rent_reasonableness,
         db,
-        org_id=org_id,
-        area_name=(p.city or "UNKNOWN"),
-        state=(p.state or "MI"),
-        bedrooms=bedrooms,
+        org_id,
+        property_id,
+        input_payload,
     )
-    fmr_val = float(getattr(fmr, "fmr", 0.0) or 0.0)
-
-    factors = ["location", "quality", "size", "unit_type", "age", "amenities", "services", "utilities"]
-    recommended = fmr_val * 1.10 if fmr_val else None
-
-    return {
-        "agent_key": "rent_reasonableness",
-        "summary": "Rent reasonableness baseline computed using HUD FMR cache anchor (deterministic).",
-        "facts": {
-            "property_id": property_id,
-            "hud_fmr": {
-                "area_name": getattr(fmr, "area_name", None),
-                "state": getattr(fmr, "state", None),
-                "bedrooms": getattr(fmr, "bedrooms", None),
-                "fmr": fmr_val,
-            },
-            "required_comparability_factors": factors,
-            "recommended_gross_rent": recommended,
-        },
-        "actions": [],  # ✅ recommend_only
-        "recommendations": [
-            {
-                "type": "rent_reasonableness_computed",
-                "property_id": property_id,
-                "recommended_gross_rent": recommended,
-                "factors": factors,
-                "fmr": fmr_val,
-                "reason": "Use as baseline; compare comps and utilities to justify contract rent.",
-                "priority": "medium",
-            }
-        ],
-    }
 
 
 def agent_hqs_precheck(
@@ -147,62 +334,14 @@ def agent_hqs_precheck(
     property_id: Optional[int],
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    ctx = _property_context(db, org_id, property_id)
-    p = ctx["property"]
-    if p is None:
-        return {
-            "agent_key": "hqs_precheck",
-            "summary": "No property found.",
-            "facts": {"property_id": property_id},
-            "actions": [],
-        }
-
-    lib = get_effective_hqs_items(db, org_id=org_id, prop=p)
-    items = lib.get("items") or []
-    likely = [x for x in items if str(x.get("severity") or "").lower() == "fail"][:12]
-
-    actions: list[dict[str, Any]] = []
-    for it in likely[:6]:
-        actions.append(
-            {
-                "entity_type": "rehab_task",
-                "op": "create",
-                "data": {
-                    "property_id": int(p.id),
-                    "title": f"HQS precheck: {it.get('code')}",
-                    "category": it.get("category") or "safety",
-                    "status": "todo",
-                    "cost_estimate": float(it.get("default_cost_estimate") or 0.0),
-                    "notes": it.get("suggested_fix") or "",
-                },
-                "reason": "Convert likely HQS failures into rehab tasks (approval required).",
-            }
-        )
-
-    if not actions:
-        actions.append(
-            {
-                "entity_type": "workflow_event",
-                "op": "create",
-                "data": {
-                    "property_id": int(p.id),
-                    "event_type": "hqs_precheck_no_findings",
-                    "payload": {"property_id": int(p.id)},
-                },
-                "reason": "No obvious HQS fail items found in baseline library.",
-            }
-        )
-
-    return {
-        "agent_key": "hqs_precheck",
-        "summary": "HQS precheck generated from canonical HQS baseline; proposes rehab tasks for likely fails.",
-        "facts": {
-            "property_id": property_id,
-            "hqs_items_total": len(items),
-            "likely_fail_count": len(likely),
-        },
-        "actions": actions,  # ✅ mutate_requires_approval contract compliant
-    }
+    return _call_impl_or_fallback(
+        run_hqs_precheck_agent if callable(run_hqs_precheck_agent) else None,
+        _fallback_hqs_precheck,
+        db,
+        org_id,
+        property_id,
+        input_payload,
+    )
 
 
 def agent_packet_builder(
@@ -212,48 +351,34 @@ def agent_packet_builder(
     property_id: Optional[int],
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    ctx = _property_context(db, org_id, property_id)
-    p = ctx["property"]
-    if p is None:
-        return {
-            "agent_key": "packet_builder",
-            "summary": "No property found.",
-            "facts": {"property_id": property_id},
-            "actions": [],  # ✅ recommend_only
-            "recommendations": [],
-        }
-
-    jp = db.scalar(
-        select(JurisdictionProfile).where(
-            JurisdictionProfile.org_id == org_id,
-            JurisdictionProfile.state == p.state,
-            JurisdictionProfile.city == p.city,
-        )
+    return _call_impl_or_fallback(
+        run_packet_builder_agent if callable(run_packet_builder_agent) else None,
+        _fallback_packet_builder,
+        db,
+        org_id,
+        property_id,
+        input_payload,
     )
 
-    checklist = None
-    if jp is not None:
-        checklist = getattr(jp, "packet_requirements_json", None)
 
-    return {
-        "agent_key": "packet_builder",
-        "summary": "Builds a jurisdiction-specific Section 8 packet checklist (RFTA/HAP onboarding artifacts).",
-        "facts": {
-            "property_id": property_id,
-            "jurisdiction_profile_found": jp is not None,
-            "packet_checklist": checklist,
-        },
-        "actions": [],  # ✅ recommend_only
-        "recommendations": [
-            {
-                "type": "packet_checklist_generated",
-                "property_id": property_id,
-                "packet_checklist": checklist or [],
-                "reason": "Use as your completion checklist for RFTA/HAP onboarding artifacts.",
-                "priority": "medium",
-            }
-        ],
-    }
+def agent_photo_rehab(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: Optional[int],
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    return run_photo_rehab_agent(db, int(org_id), property_id, input_payload or {})
+
+
+def agent_next_actions(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: Optional[int],
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    return run_next_actions_agent(db, int(org_id), property_id, input_payload or {})
 
 
 def agent_timeline_nudger(
@@ -263,20 +388,7 @@ def agent_timeline_nudger(
     property_id: Optional[int],
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
-        "agent_key": "timeline_nudger",
-        "summary": "Converts outstanding constraints into reminders and nudges (workflow continuity).",
-        "facts": {"property_id": property_id},
-        "actions": [],  # ✅ recommend_only
-        "recommendations": [
-            {
-                "type": "timeline_nudge",
-                "property_id": property_id,
-                "reason": "Keeps ops loop moving (no silent stalls).",
-                "priority": "medium",
-            }
-        ],
-    }
+    return run_timeline_nudger(db, int(org_id), property_id, input_payload or {})
 
 
 def agent_ops_judge(
@@ -286,86 +398,19 @@ def agent_ops_judge(
     property_id: Optional[int],
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Judge/Critic agent (recommend-only):
-      - looks at recent runs on this property
-      - outputs ranked recommendations and risk flags
-      - actions MUST be [] to satisfy recommend_only contract
-    """
-    if not property_id:
-        return {
-            "agent_key": "ops_judge",
-            "summary": "No property found (missing property_id).",
-            "facts": {"property_id": property_id},
-            "actions": [],
-            "recommendations": [],
-        }
-
-    runs = db.scalars(
-        select(AgentRun)
-        .where(AgentRun.org_id == org_id, AgentRun.property_id == int(property_id))
-        .order_by(AgentRun.id.desc())
-        .limit(20)
-    ).all()
-
-    usable = []
-    for r in runs:
-        out = getattr(r, "output_json", None)
-        if out:
-            usable.append({"run_id": int(r.id), "agent_key": str(r.agent_key), "status": str(r.status), "output": out})
-
-    pending = [r for r in runs if str(getattr(r, "approval_status", "")).lower() == "pending"]
-
-    recs: list[dict[str, Any]] = []
-    if pending:
-        recs.append(
-            {
-                "type": "approval_required",
-                "property_id": int(property_id),
-                "priority": "high",
-                "reason": f"{len(pending)} run(s) pending approval. Approve/apply to unblock workflow.",
-                "blocked_runs": [{"run_id": int(r.id), "agent_key": str(r.agent_key)} for r in pending[:10]],
-            }
-        )
-
-    # Light synthesis: if some agents mention missing fields or packet checklist, surface those
-    # (UI will already show detailed recommendations in each agent output_json)
-    recs.append(
-        {
-            "type": "review_agent_outputs",
-            "property_id": int(property_id),
-            "priority": "medium",
-            "reason": "Review latest agent outputs and resolve the highest priority blockers first.",
-        }
-    )
-
-    risks: list[str] = []
-    if not usable:
-        risks.append("No recent agent outputs found (or outputs were not persisted).")
-    if len(pending) > 3:
-        risks.append("High approval backlog; consider batching approvals or tightening mutation scope.")
-
-    return {
-        "agent_key": "ops_judge",
-        "summary": f"Ops Judge synthesized {len(usable)} recent run(s) into {len(recs)} next-step recommendation(s).",
-        "facts": {
-            "property_id": int(property_id),
-            "recent_runs": [{"run_id": x["run_id"], "agent_key": x["agent_key"], "status": x["status"]} for x in usable[:10]],
-            "pending_approvals": len(pending),
-            "risks": risks,
-        },
-        "actions": [],  # ✅ recommend_only
-        "recommendations": recs,
-    }
+    return run_ops_judge(db, int(org_id), property_id, input_payload or {})
 
 
-AGENTS: dict[str, Any] = {
+AGENTS: dict[str, AgentFn] = {
     "deal_intake": agent_deal_intake,
+    "underwrite": agent_underwrite,
     "rent_reasonableness": agent_rent_reasonableness,
     "hqs_precheck": agent_hqs_precheck,
     "packet_builder": agent_packet_builder,
+    "photo_rehab": agent_photo_rehab,
+    "next_actions": agent_next_actions,
     "timeline_nudger": agent_timeline_nudger,
-    "ops_judge": agent_ops_judge,  # ✅ NEW
+    "ops_judge": agent_ops_judge,
 }
 
 
@@ -380,14 +425,24 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
         "llm_capable": False,
         "default_payload_schema": {"property_id": "number"},
     },
+    "underwrite": {
+        "agent_key": "underwrite",
+        "title": "Deal Underwrite",
+        "description": "Compute DSCR/CoC assumptions and summarize underwriting risk.",
+        "category": "deal",
+        "needs_human": False,
+        "deterministic": True,
+        "llm_capable": True,
+        "default_payload_schema": {"property_id": "number"},
+    },
     "rent_reasonableness": {
         "agent_key": "rent_reasonableness",
         "title": "Rent Reasonableness",
-        "description": "Compute rent reasonableness baseline using HUD FMR cache + factors checklist.",
+        "description": "Compute rent reasonableness baseline using HUD FMR, caps, and comps context.",
         "category": "rent",
         "needs_human": False,
         "deterministic": True,
-        "llm_capable": False,
+        "llm_capable": True,
         "default_payload_schema": {"property_id": "number"},
     },
     "hqs_precheck": {
@@ -397,23 +452,43 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
         "category": "compliance",
         "needs_human": True,
         "deterministic": True,
-        "llm_capable": False,
+        "llm_capable": True,
         "default_payload_schema": {"property_id": "number"},
     },
     "packet_builder": {
         "agent_key": "packet_builder",
         "title": "Packet Builder",
-        "description": "Generate jurisdiction profile packet checklist (RFTA/HAP onboarding).",
+        "description": "Generate packet scaffolding and missing-doc checklist.",
         "category": "packet",
-        "needs_human": True,
+        "needs_human": False,
         "deterministic": True,
-        "llm_capable": False,
+        "llm_capable": True,
+        "default_payload_schema": {"property_id": "number"},
+    },
+    "photo_rehab": {
+        "agent_key": "photo_rehab",
+        "title": "Rehab From Photos",
+        "description": "Analyze property photos and propose rehab issues/tasks.",
+        "category": "rehab",
+        "needs_human": True,
+        "deterministic": False,
+        "llm_capable": True,
+        "default_payload_schema": {"property_id": "number"},
+    },
+    "next_actions": {
+        "agent_key": "next_actions",
+        "title": "Next Actions Planner",
+        "description": "Turn current property state and blockers into ranked next actions.",
+        "category": "ops",
+        "needs_human": False,
+        "deterministic": True,
+        "llm_capable": True,
         "default_payload_schema": {"property_id": "number"},
     },
     "timeline_nudger": {
         "agent_key": "timeline_nudger",
         "title": "Timeline Nudger",
-        "description": "Create workflow continuity events to prevent stalls.",
+        "description": "Create workflow continuity nudges to prevent stalls.",
         "category": "ops",
         "needs_human": False,
         "deterministic": True,
@@ -423,7 +498,7 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
     "ops_judge": {
         "agent_key": "ops_judge",
         "title": "Ops Judge",
-        "description": "Synthesizes multiple agent outputs into a ranked plan + risk flags. Recommend-only.",
+        "description": "Synthesize multiple agent outputs into a ranked plan and risk flags.",
         "category": "ops",
         "needs_human": False,
         "deterministic": True,
@@ -455,9 +530,18 @@ SLOTS = [
         default_status="idle",
     ),
     SlotSpec(
+        slot_key="underwrite",
+        title="Deal Underwrite",
+        description="Compute DSCR/CoC assumptions and summarize underwriting risk.",
+        default_agent_key="underwrite",
+        default_payload_schema={"property_id": "number"},
+        owner_type="agent",
+        default_status="idle",
+    ),
+    SlotSpec(
         slot_key="rent_reasonableness",
         title="Rent Reasonableness",
-        description="Compute rent reasonableness baseline from HUD FMR cache + factors checklist.",
+        description="Compute rent reasonableness baseline using HUD FMR and comps context.",
         default_agent_key="rent_reasonableness",
         default_payload_schema={"property_id": "number"},
         owner_type="agent",
@@ -475,10 +559,28 @@ SLOTS = [
     SlotSpec(
         slot_key="packet_builder",
         title="Packet Builder",
-        description="Generate jurisdiction profile packet checklist (RFTA/HAP onboarding).",
+        description="Generate jurisdiction packet checklist and missing artifact scaffold.",
         default_agent_key="packet_builder",
         default_payload_schema={"property_id": "number"},
+        owner_type="agent",
+        default_status="idle",
+    ),
+    SlotSpec(
+        slot_key="photo_rehab",
+        title="Rehab From Photos",
+        description="Analyze property photos and propose rehab issues/tasks.",
+        default_agent_key="photo_rehab",
+        default_payload_schema={"property_id": "number"},
         owner_type="human",
+        default_status="idle",
+    ),
+    SlotSpec(
+        slot_key="next_actions",
+        title="Next Actions Planner",
+        description="Turn state, blockers, and recent runs into ranked next actions.",
+        default_agent_key="next_actions",
+        default_payload_schema={"property_id": "number"},
+        owner_type="agent",
         default_status="idle",
     ),
     SlotSpec(
@@ -493,7 +595,7 @@ SLOTS = [
     SlotSpec(
         slot_key="ops_judge",
         title="Ops Judge",
-        description="Synthesize multiple agent outputs into a ranked plan + risk flags.",
+        description="Synthesize multiple agent outputs into a ranked plan and risk flags.",
         default_agent_key="ops_judge",
         default_payload_schema={"property_id": "number"},
         owner_type="agent",
