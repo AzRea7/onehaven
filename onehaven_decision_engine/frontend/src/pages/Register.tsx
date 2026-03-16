@@ -96,12 +96,15 @@ export default function Register() {
             <label className="block">
               <span className="oh-field-label">Org slug</span>
               <div className="relative">
-                <Building2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+                <Building2
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-4 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-app-4"
+                />
                 <input
                   value={orgSlug}
                   onChange={(e) => setOrgSlugState(e.target.value)}
                   placeholder="demo-org"
-                  className="oh-input pl-12"
+                  className="oh-input !h-12 !pl-14 !pr-4"
                 />
               </div>
             </label>
@@ -109,12 +112,15 @@ export default function Register() {
             <label className="block">
               <span className="oh-field-label">Org name</span>
               <div className="relative">
-                <Building2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+                <Building2
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-4 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-app-4"
+                />
                 <input
                   value={orgName}
                   onChange={(e) => setOrgName(e.target.value)}
                   placeholder="Demo Org"
-                  className="oh-input pl-12"
+                  className="oh-input !h-12 !pl-14 !pr-4"
                 />
               </div>
             </label>
@@ -122,13 +128,16 @@ export default function Register() {
             <label className="block">
               <span className="oh-field-label">Email</span>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+                <Mail
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-4 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-app-4"
+                />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className="oh-input pl-12"
+                  className="oh-input !h-12 !pl-14 !pr-4"
                 />
               </div>
             </label>
@@ -136,13 +145,16 @@ export default function Register() {
             <label className="block">
               <span className="oh-field-label">Password</span>
               <div className="relative">
-                <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+                <LockKeyhole
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-4 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-app-4"
+                />
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="oh-input pl-12"
+                  className="oh-input !h-12 !pl-14 !pr-4"
                 />
               </div>
             </label>

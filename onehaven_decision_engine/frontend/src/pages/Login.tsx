@@ -1,6 +1,12 @@
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Building2, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
+import {
+  Building2,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { getOrgSlug } from "../lib/api";
 import { finalizeAuth } from "../lib/authFlow";
@@ -44,21 +50,21 @@ export default function Login() {
       <div className="oh-auth-grid">
         <div className="oh-auth-side p-6 md:p-8">
           <div className="text-[11px] uppercase tracking-[0.2em] text-app-4">
-            Access OneHaven
+            Secure access
           </div>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight text-app-0">
-            Sign in
+            Login
           </h1>
           <p className="mt-3 max-w-xl text-sm leading-7 text-app-3">
-            Enter your org context first, then your credentials. No foggy glass,
-            no mystery meat UI, no password séance.
+            Use your org slug and credentials to access the operator workspace
+            without the UI looking like it lost a fight with transparency.
           </p>
 
           <div className="mt-6 grid gap-3">
             <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <ShieldCheck className="h-4 w-4 text-app-4" />
-                Cookie-based auth
+                <Sparkles className="h-4 w-4 text-app-4" />
+                Fast session restore
               </div>
               <div className="mt-2 text-sm text-app-3">
                 Login sets your auth cookie, then final org selection locks in
@@ -88,12 +94,15 @@ export default function Login() {
             <label className="block">
               <span className="oh-field-label">Org slug</span>
               <div className="relative">
-                <Building2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+                <Building2
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-4 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-app-4"
+                />
                 <input
                   value={orgSlug}
                   onChange={(e) => setOrgSlugState(e.target.value)}
                   placeholder="demo-org"
-                  className="oh-input pl-12"
+                  className="oh-input !h-12 !pl-14 !pr-4"
                 />
               </div>
             </label>
@@ -101,13 +110,16 @@ export default function Login() {
             <label className="block">
               <span className="oh-field-label">Email</span>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+                <Mail
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-4 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-app-4"
+                />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className="oh-input pl-12"
+                  className="oh-input !h-12 !pl-14 !pr-4"
                 />
               </div>
             </label>
@@ -115,13 +127,16 @@ export default function Login() {
             <label className="block">
               <span className="oh-field-label">Password</span>
               <div className="relative">
-                <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+                <LockKeyhole
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-4 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-app-4"
+                />
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="oh-input pl-12"
+                  className="oh-input !h-12 !pl-14 !pr-4"
                 />
               </div>
             </label>
