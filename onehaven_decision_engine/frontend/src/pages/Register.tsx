@@ -1,11 +1,17 @@
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
+import {
+  Building2,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+  UserPlus,
+} from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { getOrgSlug } from "../lib/api";
 import { finalizeAuth } from "../lib/authFlow";
-import GlassCard from "../components/GlassCard";
-import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
+import Surface from "../components/Surface";
 
 export default function Register() {
   const nav = useNavigate();
@@ -32,13 +38,8 @@ export default function Register() {
     }
 
     try {
-      // 1) Register (sets cookie)
       await register({ email, password, org_slug: slug, org_name: orgName });
-
-      // 2) Finalize (select org + /me)
       await finalizeAuth(slug);
-
-      // 3) Enter app
       nav("/dashboard");
     } catch (err: any) {
       setLocalError(String(err?.message || err));
@@ -46,87 +47,127 @@ export default function Register() {
   }
 
   return (
-    <PageShell>
-      <div className="space-y-6">
-        <PageHero
-          eyebrow="Create your org"
-          title="Register"
-          subtitle="Creates user + org + owner membership, then sets your auth cookie."
-        />
+    <PageShell className="oh-auth-wrap">
+      <div className="oh-auth-grid">
+        <div className="oh-auth-side p-6 md:p-8">
+          <div className="text-[11px] uppercase tracking-[0.2em] text-app-4">
+            Create your workspace
+          </div>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-app-0">
+            Register
+          </h1>
+          <p className="mt-3 max-w-xl text-sm leading-7 text-app-3">
+            This creates the user, the org, and the initial owner membership in
+            one move. Much cleaner than manually summoning them from the
+            database swamp.
+          </p>
 
-        <GlassCard>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="grid md:grid-cols-4 gap-3">
-              <label className="space-y-1 md:col-span-1">
-                <div className="text-xs text-white/60">Org slug</div>
+          <div className="mt-6 grid gap-3">
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                <UserPlus className="h-4 w-4 text-app-4" />
+                Owner bootstrap
+              </div>
+              <div className="mt-2 text-sm text-app-3">
+                Registration creates your org and your initial owner access in
+                the same flow.
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                <ShieldCheck className="h-4 w-4 text-app-4" />
+                Session finalized
+              </div>
+              <div className="mt-2 text-sm text-app-3">
+                After registration, the app finalizes org selection so protected
+                routes immediately work instead of wandering into auth limbo.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Surface
+          className="oh-auth-card"
+          title="Create account"
+          subtitle="Choose the org slug you want to operate under, then create your owner account."
+        >
+          <form className="space-y-4" onSubmit={onSubmit}>
+            <label className="block">
+              <span className="oh-field-label">Org slug</span>
+              <div className="relative">
+                <Building2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
                 <input
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
                   value={orgSlug}
                   onChange={(e) => setOrgSlugState(e.target.value)}
-                  placeholder="acme"
-                  autoComplete="organization"
+                  placeholder="demo-org"
+                  className="oh-input pl-12"
                 />
-              </label>
+              </div>
+            </label>
 
-              <label className="space-y-1 md:col-span-1">
-                <div className="text-xs text-white/60">Org name</div>
+            <label className="block">
+              <span className="oh-field-label">Org name</span>
+              <div className="relative">
+                <Building2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
                 <input
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
                   value={orgName}
                   onChange={(e) => setOrgName(e.target.value)}
-                  placeholder="Acme Holdings"
-                  autoComplete="organization-title"
+                  placeholder="Demo Org"
+                  className="oh-input pl-12"
                 />
-              </label>
+              </div>
+            </label>
 
-              <label className="space-y-1 md:col-span-1">
-                <div className="text-xs text-white/60">Email</div>
+            <label className="block">
+              <span className="oh-field-label">Email</span>
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
                 <input
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
+                  type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@domain.com"
-                  autoComplete="email"
+                  placeholder="you@example.com"
+                  className="oh-input pl-12"
                 />
-              </label>
+              </div>
+            </label>
 
-              <label className="space-y-1 md:col-span-1">
-                <div className="text-xs text-white/60">Password</div>
+            <label className="block">
+              <span className="oh-field-label">Password</span>
+              <div className="relative">
+                <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
                 <input
                   type="password"
-                  className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  autoComplete="new-password"
+                  className="oh-input pl-12"
                 />
-              </label>
-            </div>
+              </div>
+            </label>
 
-            {error || localError ? (
-              <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
+            {localError || error ? (
+              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
                 {localError || error}
               </div>
             ) : null}
 
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3 pt-2">
               <button
-                disabled={loading}
-                className="rounded-xl bg-white text-black px-4 py-2 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
                 type="submit"
+                className="oh-btn oh-btn-primary"
+                disabled={loading}
               >
-                {loading ? "Creating…" : "Create org + account"}
+                {loading ? "Creating…" : "Create account"}
               </button>
 
-              <Link
-                className="text-sm text-white/70 hover:text-white"
-                to="/login"
-              >
-                Already have an account? Log in →
+              <Link to="/login" className="oh-btn oh-btn-secondary">
+                Back to login
               </Link>
             </div>
           </form>
-        </GlassCard>
+        </Surface>
       </div>
     </PageShell>
   );

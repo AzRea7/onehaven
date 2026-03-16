@@ -10,7 +10,6 @@ import Golem from "../components/Golem";
 import {
   AlertTriangle,
   CheckCircle2,
-  Database,
   MapPinned,
   Search,
   ShieldCheck,
@@ -219,11 +218,7 @@ function ActionButton({
   tone?: "default" | "primary" | "danger";
 }) {
   const cls =
-    tone === "primary"
-      ? "oh-btn oh-btn-primary"
-      : tone === "danger"
-        ? "oh-btn oh-btn-secondary"
-        : "oh-btn oh-btn-secondary";
+    tone === "primary" ? "oh-btn oh-btn-primary" : "oh-btn oh-btn-secondary";
 
   return (
     <button onClick={onClick} disabled={busy} className={cls}>
@@ -592,7 +587,7 @@ export default function Jurisdictions() {
           subtitle="A few-click control plane for market repair, evidence inspection, and coverage verification."
           right={
             <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
-              <div className="h-[240px] w-[240px] md:h-[270px] md:w-[270px] translate-y-[-6px] opacity-95">
+              <div className="h-[180px] w-[180px] md:h-[200px] md:w-[200px] opacity-95">
                 <Golem className="h-full w-full" />
               </div>
             </div>
@@ -644,7 +639,7 @@ export default function Jurisdictions() {
           title="Search and focus"
           subtitle="Filter market rows by city, county, state, readiness, or confidence."
         >
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto]">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
               <input
@@ -687,12 +682,12 @@ export default function Jurisdictions() {
           ) : null}
         </Surface>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_1fr]">
+        <div className="oh-jur-layout">
           <Surface
             title="Markets"
             subtitle="Pick a market to inspect and repair."
           >
-            <div className="space-y-3">
+            <div className="oh-jur-list space-y-3">
               {filteredRows.length === 0 ? (
                 <EmptyState
                   compact
@@ -712,7 +707,7 @@ export default function Jurisdictions() {
             </div>
           </Surface>
 
-          <div className="space-y-4">
+          <div className="oh-jur-detail-stack">
             {!selectedRow ? (
               <Surface
                 title="Market detail"
@@ -870,121 +865,126 @@ export default function Jurisdictions() {
                   ) : null}
                 </Surface>
 
-                {showSourceList ? (
-                  <Surface
-                    title={`Source list (${selectedSources.length})`}
-                    subtitle="Tracked source records for this market."
-                    actions={
-                      <Badge>{selectedRow.source_count ?? 0} tracked</Badge>
-                    }
-                  >
-                    <div className="space-y-2">
-                      {selectedSources.length === 0 ? (
-                        <EmptyState compact title="No sources loaded yet" />
-                      ) : (
-                        selectedSources.map((s: any) => (
-                          <div
-                            key={s.id}
-                            className="rounded-2xl border border-app bg-app-panel p-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-medium text-app-0">
-                                  {s.title ||
-                                    s.publisher ||
-                                    s.url ||
-                                    `Source ${s.id}`}
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                  {showSourceList ? (
+                    <Surface
+                      title={`Source list (${selectedSources.length})`}
+                      subtitle="Tracked source records for this market."
+                      actions={
+                        <Badge>{selectedRow.source_count ?? 0} tracked</Badge>
+                      }
+                    >
+                      <div className="oh-jur-scroll space-y-2">
+                        {selectedSources.length === 0 ? (
+                          <EmptyState compact title="No sources loaded yet" />
+                        ) : (
+                          selectedSources.map((s: any) => (
+                            <div
+                              key={s.id}
+                              className="rounded-2xl border border-app bg-app-panel p-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium text-app-0">
+                                    {s.title ||
+                                      s.publisher ||
+                                      s.url ||
+                                      `Source ${s.id}`}
+                                  </div>
+                                  <div className="mt-1 text-xs text-app-4">
+                                    {s.publisher || "Unknown publisher"} • HTTP{" "}
+                                    {s.http_status ?? "—"}
+                                  </div>
                                 </div>
-                                <div className="mt-1 text-xs text-app-4">
-                                  {s.publisher || "Unknown publisher"} • HTTP{" "}
-                                  {s.http_status ?? "—"}
+                                <Badge>{s.id}</Badge>
+                              </div>
+                              <div className="mt-2 break-all text-xs text-app-4">
+                                {s.url || "No URL"}
+                              </div>
+                              {s.notes ? (
+                                <div className="mt-2 text-sm text-app-2">
+                                  {s.notes}
                                 </div>
-                              </div>
-                              <Badge>{s.id}</Badge>
+                              ) : null}
                             </div>
-                            <div className="mt-2 break-all text-xs text-app-4">
-                              {s.url || "No URL"}
-                            </div>
-                            {s.notes ? (
-                              <div className="mt-2 text-sm text-app-2">
-                                {s.notes}
-                              </div>
-                            ) : null}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </Surface>
-                ) : null}
+                          ))
+                        )}
+                      </div>
+                    </Surface>
+                  ) : null}
 
-                {showAssertionList ? (
-                  <Surface
-                    title={`Assertions list (${selectedAssertions.length})`}
-                    subtitle="Extracted and reviewed rule assertions."
-                    actions={
-                      <Badge>
-                        {selectedRow.verified_rule_count ?? 0} verified
-                      </Badge>
-                    }
-                  >
-                    <div className="space-y-2">
-                      {selectedAssertions.length === 0 ? (
-                        <EmptyState compact title="No assertions loaded yet" />
-                      ) : (
-                        selectedAssertions.map((a: any) => (
-                          <div
-                            key={a.id}
-                            className="rounded-2xl border border-app bg-app-panel p-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-medium text-app-0">
-                                  {a.rule_key}
+                  {showAssertionList ? (
+                    <Surface
+                      title={`Assertions list (${selectedAssertions.length})`}
+                      subtitle="Extracted and reviewed rule assertions."
+                      actions={
+                        <Badge>
+                          {selectedRow.verified_rule_count ?? 0} verified
+                        </Badge>
+                      }
+                    >
+                      <div className="oh-jur-scroll space-y-2">
+                        {selectedAssertions.length === 0 ? (
+                          <EmptyState
+                            compact
+                            title="No assertions loaded yet"
+                          />
+                        ) : (
+                          selectedAssertions.map((a: any) => (
+                            <div
+                              key={a.id}
+                              className="rounded-2xl border border-app bg-app-panel p-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium text-app-0">
+                                    {a.rule_key}
+                                  </div>
+                                  <div className="mt-1 text-xs text-app-4">
+                                    {a.rule_family || "unknown family"} •{" "}
+                                    {a.assertion_type || "unknown type"} •
+                                    source {a.source_id ?? "—"}
+                                  </div>
                                 </div>
-                                <div className="mt-1 text-xs text-app-4">
-                                  {a.rule_family || "unknown family"} •{" "}
-                                  {a.assertion_type || "unknown type"} • source{" "}
-                                  {a.source_id ?? "—"}
+                                <div className="flex flex-wrap gap-2">
+                                  <Badge
+                                    tone={
+                                      a.review_status === "verified"
+                                        ? "good"
+                                        : a.review_status === "superseded"
+                                          ? "warn"
+                                          : "neutral"
+                                    }
+                                  >
+                                    {a.review_status}
+                                  </Badge>
+                                  <Badge>
+                                    {Number(a.confidence ?? 0).toFixed(2)}
+                                  </Badge>
                                 </div>
                               </div>
-                              <div className="flex flex-wrap gap-2">
-                                <Badge
-                                  tone={
-                                    a.review_status === "verified"
-                                      ? "good"
-                                      : a.review_status === "superseded"
-                                        ? "warn"
-                                        : "neutral"
-                                  }
-                                >
-                                  {a.review_status}
-                                </Badge>
-                                <Badge>
-                                  {Number(a.confidence ?? 0).toFixed(2)}
-                                </Badge>
-                              </div>
+                              <pre className="oh-jur-code mt-3">
+                                {JSON.stringify(a.value ?? {}, null, 2)}
+                              </pre>
+                              {a.review_notes ? (
+                                <div className="mt-2 text-sm text-app-2">
+                                  {a.review_notes}
+                                </div>
+                              ) : null}
                             </div>
-                            <pre className="mt-3 overflow-auto rounded-2xl bg-app-muted p-3 text-xs text-app-1">
-                              {JSON.stringify(a.value ?? {}, null, 2)}
-                            </pre>
-                            {a.review_notes ? (
-                              <div className="mt-2 text-sm text-app-2">
-                                {a.review_notes}
-                              </div>
-                            ) : null}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </Surface>
-                ) : null}
+                          ))
+                        )}
+                      </div>
+                    </Surface>
+                  ) : null}
+                </div>
 
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                   <Surface
                     title="Required actions"
                     subtitle="Operator tasks surfaced by the brief."
                   >
-                    <div className="space-y-2">
+                    <div className="oh-jur-scroll space-y-2">
                       {(brief?.required_actions ?? []).length === 0 ? (
                         <EmptyState
                           compact
@@ -1023,7 +1023,7 @@ export default function Jurisdictions() {
                     title="Blocking items"
                     subtitle="These are still in the way."
                   >
-                    <div className="space-y-2">
+                    <div className="oh-jur-scroll space-y-2">
                       {(brief?.blocking_items ?? []).length === 0 ? (
                         <EmptyState compact title="No blockers returned" />
                       ) : (
@@ -1056,89 +1056,93 @@ export default function Jurisdictions() {
                   </Surface>
                 </div>
 
-                <Surface
-                  title="Resolved jurisdiction profiles"
-                  subtitle="Explicit matched profile rows."
-                >
-                  <div className="space-y-2">
-                    {selectedProfiles.length === 0 ? (
-                      <EmptyState
-                        compact
-                        title="No explicit jurisdiction profile rows matched this market"
-                      />
-                    ) : (
-                      selectedProfiles.map((p) => (
-                        <div
-                          key={p.id}
-                          className="rounded-2xl border border-app bg-app-panel p-3"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-medium text-app-0">
-                              Profile #{p.id}
-                            </div>
-                            <Badge tone={p.org_id ? "warn" : "neutral"}>
-                              {p.org_id ? "org override" : "global"}
-                            </Badge>
-                          </div>
-                          <div className="mt-2 text-xs text-app-4">
-                            friction: {p.friction_multiplier ?? "—"} • PHA:{" "}
-                            {p.pha_name || "—"}
-                          </div>
-                          {p.notes ? (
-                            <div className="mt-2 text-sm text-app-2">
-                              {p.notes}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </Surface>
-
-                <Surface
-                  title="Legacy jurisdiction rules"
-                  subtitle="Fallback-only legacy rule rows."
-                >
-                  <div className="space-y-2">
-                    {selectedLegacyRules.length === 0 ? (
-                      <EmptyState
-                        compact
-                        title="No legacy rule rows matched this market"
-                      />
-                    ) : (
-                      selectedLegacyRules.map((r) => {
-                        const failPoints = parseMaybeJsonArray(
-                          r.typical_fail_points_json ?? r.typical_fail_points,
-                        );
-
-                        return (
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                  <Surface
+                    title="Resolved jurisdiction profiles"
+                    subtitle="Explicit matched profile rows."
+                  >
+                    <div className="oh-jur-scroll space-y-2">
+                      {selectedProfiles.length === 0 ? (
+                        <EmptyState
+                          compact
+                          title="No explicit jurisdiction profile rows matched this market"
+                        />
+                      ) : (
+                        selectedProfiles.map((p) => (
                           <div
-                            key={r.id}
+                            key={p.id}
                             className="rounded-2xl border border-app bg-app-panel p-3"
                           >
                             <div className="flex items-center justify-between gap-3">
                               <div className="text-sm font-medium text-app-0">
-                                Legacy rule #{r.id}
+                                Profile #{p.id}
                               </div>
-                              <Badge tone={r.org_id ? "warn" : "neutral"}>
-                                {r.org_id ? "org override" : "global"}
+                              <Badge tone={p.org_id ? "warn" : "neutral"}>
+                                {p.org_id ? "org override" : "global"}
                               </Badge>
                             </div>
                             <div className="mt-2 text-xs text-app-4">
-                              license: {String(!!r.rental_license_required)} •
-                              authority: {r.inspection_authority || "—"} • freq:{" "}
-                              {r.inspection_frequency || "—"}
+                              friction: {p.friction_multiplier ?? "—"} • PHA:{" "}
+                              {p.pha_name || "—"}
                             </div>
-                            <div className="mt-2 text-sm text-app-2">
-                              fail points:{" "}
-                              {failPoints.length ? failPoints.join(", ") : "—"}
-                            </div>
+                            {p.notes ? (
+                              <div className="mt-2 text-sm text-app-2">
+                                {p.notes}
+                              </div>
+                            ) : null}
                           </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </Surface>
+                        ))
+                      )}
+                    </div>
+                  </Surface>
+
+                  <Surface
+                    title="Legacy jurisdiction rules"
+                    subtitle="Fallback-only legacy rule rows."
+                  >
+                    <div className="oh-jur-scroll space-y-2">
+                      {selectedLegacyRules.length === 0 ? (
+                        <EmptyState
+                          compact
+                          title="No legacy rule rows matched this market"
+                        />
+                      ) : (
+                        selectedLegacyRules.map((r) => {
+                          const failPoints = parseMaybeJsonArray(
+                            r.typical_fail_points_json ?? r.typical_fail_points,
+                          );
+
+                          return (
+                            <div
+                              key={r.id}
+                              className="rounded-2xl border border-app bg-app-panel p-3"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-sm font-medium text-app-0">
+                                  Legacy rule #{r.id}
+                                </div>
+                                <Badge tone={r.org_id ? "warn" : "neutral"}>
+                                  {r.org_id ? "org override" : "global"}
+                                </Badge>
+                              </div>
+                              <div className="mt-2 text-xs text-app-4">
+                                license: {String(!!r.rental_license_required)} •
+                                authority: {r.inspection_authority || "—"} •
+                                freq: {r.inspection_frequency || "—"}
+                              </div>
+                              <div className="mt-2 text-sm text-app-2">
+                                fail points:{" "}
+                                {failPoints.length
+                                  ? failPoints.join(", ")
+                                  : "—"}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </Surface>
+                </div>
               </>
             )}
           </div>

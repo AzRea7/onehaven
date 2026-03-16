@@ -31,6 +31,7 @@ body {
 
 * {
   box-sizing: border-box;
+  min-width: 0;
 }
 
 ::selection {
@@ -73,6 +74,17 @@ body {
   position: relative;
   z-index: 1;
   min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+  background: transparent;
+}
+
+:root[data-theme="light"] .oh-root,
+:root[data-theme="light"] .oh-main,
+:root[data-theme="light"] .oh-main-auth,
+:root[data-theme="light"] .oh-shell-main {
+  background: #ffffff;
 }
 
 .oh-shell-layout {
@@ -218,6 +230,10 @@ body {
   opacity: 0.28;
 }
 
+:root[data-theme="light"] .oh-bg {
+  display: none;
+}
+
 .oh-brand-mark {
   display: inline-flex;
   height: 2.25rem;
@@ -327,9 +343,10 @@ body {
 .oh-surface {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--bg-panel-strong) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-panel-strong) 92%, transparent);
   backdrop-filter: blur(18px);
   box-shadow: var(--shadow-glow);
+  overflow: hidden;
 }
 
 .oh-surface-accent {
@@ -426,103 +443,80 @@ body {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel-strong) 96%, transparent), color-mix(in srgb, var(--bg-panel) 92%, transparent)),
-    linear-gradient(135deg, var(--hero-from), transparent 42%, var(--hero-to));
-  padding: 1.4rem;
+  background: color-mix(in srgb, var(--bg-panel-strong) 96%, transparent);
+  padding: 1rem 1rem;
   box-shadow: var(--shadow-glow);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(14px);
 }
 
 :root[data-theme="light"] .oh-hero-shell {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.94)),
-    linear-gradient(135deg, var(--hero-from), transparent 42%, var(--hero-to));
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .oh-hero-grid {
   position: relative;
   z-index: 2;
   display: grid;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 @media (min-width: 1024px) {
   .oh-hero-grid {
-    grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.82fr);
+    grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.72fr);
     align-items: stretch;
   }
 }
 
 .oh-hero-eyebrow {
   color: var(--text-4);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.24em;
 }
 
 .oh-hero-title {
-  margin: 0.45rem 0 0;
+  margin: 0.35rem 0 0;
   text-wrap: balance;
-  font-size: clamp(1.75rem, 2.6vw, 3rem);
-  line-height: 1.05;
+  font-size: clamp(1.55rem, 2.1vw, 2.35rem);
+  line-height: 1.04;
   letter-spacing: -0.03em;
   color: var(--text-0);
 }
 
 .oh-hero-subtitle {
-  margin: 0.9rem 0 0;
-  max-width: 58rem;
+  margin: 0.7rem 0 0;
+  max-width: 52rem;
   color: var(--text-3);
-  font-size: 0.98rem;
-  line-height: 1.7;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 .oh-hero-aside {
   position: relative;
-  min-height: 240px;
+  min-height: 180px;
 }
 
 .oh-hero-aside-surface {
   position: relative;
   display: flex;
-  min-height: 240px;
+  min-height: 180px;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 85%, transparent);
 }
 
 :root[data-theme="light"] .oh-hero-aside-surface {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.98);
 }
 
-.oh-hero-glow {
-  position: absolute;
-  border-radius: 999px;
-  filter: blur(40px);
-  opacity: 0.8;
-}
-
-.oh-hero-glow-a {
-  right: -40px;
-  top: -20px;
-  width: 220px;
-  height: 220px;
-  background: radial-gradient(circle, rgba(124, 92, 255, 0.22), transparent 68%);
-  animation: ohHeroPulse 12s ease-in-out infinite;
-}
-
+.oh-hero-glow,
+.oh-hero-glow-a,
 .oh-hero-glow-b {
-  left: 25%;
-  bottom: -80px;
-  width: 260px;
-  height: 260px;
-  background: radial-gradient(circle, rgba(30, 200, 255, 0.16), transparent 70%);
-  animation: ohHeroPulse 16s ease-in-out infinite;
+  display: none !important;
 }
 
 .oh-field-label {
@@ -540,7 +534,7 @@ body {
   width: 100%;
   border-radius: 16px;
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
   color: var(--text-1);
   padding: 0.82rem 0.95rem;
   font-size: 0.95rem;
@@ -562,7 +556,7 @@ body {
 .oh-textarea:hover,
 .oh-textarea:focus {
   border-color: var(--border-strong);
-  background: color-mix(in srgb, var(--bg-panel-strong) 95%, transparent);
+  background: color-mix(in srgb, var(--bg-panel-strong) 98%, transparent);
 }
 
 .text-app-0 { color: var(--text-0); }
@@ -596,6 +590,99 @@ body {
   animation: ohShimmer 1.4s infinite;
 }
 
+.oh-auth-wrap {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.oh-auth-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+}
+
+@media (min-width: 980px) {
+  .oh-auth-grid {
+    grid-template-columns: minmax(320px, 0.9fr) minmax(380px, 0.7fr);
+    align-items: stretch;
+  }
+}
+
+.oh-auth-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--bg-panel-strong) 98%, transparent);
+  box-shadow: var(--shadow-soft-lg);
+  backdrop-filter: blur(10px);
+}
+
+:root[data-theme="light"] .oh-auth-card {
+  background: rgba(255, 255, 255, 0.99);
+}
+
+.oh-auth-side {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
+  box-shadow: var(--shadow-soft);
+}
+
+:root[data-theme="light"] .oh-auth-side {
+  background: rgba(255, 255, 255, 0.97);
+}
+
+.oh-jur-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 1280px) {
+  .oh-jur-layout {
+    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1024px) {
+  .oh-jur-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.oh-jur-list {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.oh-jur-detail-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.oh-jur-compact-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.oh-jur-scroll {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.oh-jur-code {
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-muted);
+  padding: 0.85rem;
+  font-size: 0.75rem;
+  color: var(--text-1);
+}
+
 @keyframes ohShimmer {
   to { transform: translateX(100%); }
 }
@@ -603,11 +690,6 @@ body {
 @keyframes ohFloatBlob {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
   50% { transform: translate3d(28px, -20px, 0) scale(1.06); }
-}
-
-@keyframes ohHeroPulse {
-  0%, 100% { transform: scale(1); opacity: 0.72; }
-  50% { transform: scale(1.08); opacity: 0.95; }
 }
 
 @media (max-width: 1100px) {

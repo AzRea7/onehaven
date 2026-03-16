@@ -31,7 +31,7 @@ export default function PageHero({
           {subtitle ? <p className="oh-hero-subtitle">{subtitle}</p> : null}
 
           {actions ? (
-            <div className="mt-5 flex flex-wrap items-center gap-2.5">
+            <div className="mt-4 flex flex-wrap items-center gap-2.5">
               {actions}
             </div>
           ) : null}
@@ -43,9 +43,6 @@ export default function PageHero({
           </div>
         ) : null}
       </div>
-
-      <div className="oh-hero-glow oh-hero-glow-a" />
-      <div className="oh-hero-glow oh-hero-glow-b" />
     </section>
   );
 }
