@@ -5,9 +5,14 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..models import IngestionSource
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
 
 
 def _has_rentcast_credentials(payload: dict | None = None) -> bool:
@@ -43,7 +48,7 @@ def compute_next_scheduled_at(source: IngestionSource) -> Optional[datetime]:
     if not source.is_enabled:
         return None
     mins = int(source.sync_interval_minutes or 60)
-    base = source.last_synced_at or datetime.utcnow()
+    base = source.last_synced_at or _utcnow()
     return base + timedelta(minutes=mins)
 
 
@@ -57,44 +62,73 @@ def _derive_status(*, provider: str, credentials_json: dict | None) -> str:
     return "connected" if credentials_json else "disconnected"
 
 
+def _get_source_by_identity(
+    db: Session,
+    *,
+    org_id: int,
+    provider: str,
+    slug: str,
+) -> Optional[IngestionSource]:
+    return db.scalar(
+        select(IngestionSource).where(
+            IngestionSource.org_id == int(org_id),
+            IngestionSource.provider == str(provider),
+            IngestionSource.slug == str(slug),
+        )
+    )
+
+
+def _build_default_source(org_id: int, row: dict) -> IngestionSource:
+    source = IngestionSource(
+        org_id=int(org_id),
+        provider=row["provider"],
+        slug=row["slug"],
+        display_name=row["display_name"],
+        source_type=row["source_type"],
+        status=_derive_status(provider=row["provider"], credentials_json={}),
+        is_enabled=True,
+        sync_interval_minutes=int(row["sync_interval_minutes"]),
+        config_json=dict(row.get("config_json") or {}),
+        credentials_json={},
+        cursor_json={},
+    )
+    source.next_scheduled_at = compute_next_scheduled_at(source)
+    return source
+
+
 def ensure_default_manual_sources(db: Session, *, org_id: int) -> list[IngestionSource]:
     out: list[IngestionSource] = []
 
     for row in DEFAULT_SOURCES:
-        existing = db.scalar(
-            select(IngestionSource).where(
-                IngestionSource.org_id == int(org_id),
-                IngestionSource.provider == row["provider"],
-                IngestionSource.slug == row["slug"],
-            )
+        existing = _get_source_by_identity(
+            db,
+            org_id=int(org_id),
+            provider=row["provider"],
+            slug=row["slug"],
         )
 
         desired_status = _derive_status(
             provider=row["provider"],
-            credentials_json={},
+            credentials_json=(existing.credentials_json if existing is not None else {}) or {},
         )
-
-        desired_config = row.get("config_json") or {}
+        desired_config = dict(row.get("config_json") or {})
 
         if existing is None:
-            existing = IngestionSource(
-                org_id=int(org_id),
-                provider=row["provider"],
-                slug=row["slug"],
-                display_name=row["display_name"],
-                source_type=row["source_type"],
-                status=desired_status,
-                is_enabled=True,
-                sync_interval_minutes=row["sync_interval_minutes"],
-                config_json=desired_config,
-                credentials_json={},
-                cursor_json={},
-                next_scheduled_at=datetime.utcnow() + timedelta(minutes=row["sync_interval_minutes"]),
-            )
+            existing = _build_default_source(int(org_id), row)
             db.add(existing)
-            db.flush()
+            try:
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                existing = _get_source_by_identity(
+                    db,
+                    org_id=int(org_id),
+                    provider=row["provider"],
+                    slug=row["slug"],
+                )
+                if existing is None:
+                    raise
         else:
-            # Keep old rows aligned with current product truth.
             changed = False
 
             if existing.display_name != row["display_name"]:
@@ -117,22 +151,37 @@ def ensure_default_manual_sources(db: Session, *, org_id: int) -> list[Ingestion
             if changed:
                 existing.config_json = merged_config
 
-            derived_status = _derive_status(
-                provider=existing.provider,
-                credentials_json=existing.credentials_json or {},
-            )
-            if existing.status != derived_status:
-                existing.status = derived_status
+            if existing.status != desired_status:
+                existing.status = desired_status
+                changed = True
+
+            next_scheduled_at = compute_next_scheduled_at(existing)
+            if existing.next_scheduled_at != next_scheduled_at:
+                existing.next_scheduled_at = next_scheduled_at
                 changed = True
 
             if changed:
-                existing.updated_at = datetime.utcnow()
-                existing.next_scheduled_at = compute_next_scheduled_at(existing)
+                existing.updated_at = _utcnow()
                 db.add(existing)
 
         out.append(existing)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        out = []
+        for row in DEFAULT_SOURCES:
+            existing = _get_source_by_identity(
+                db,
+                org_id=int(org_id),
+                provider=row["provider"],
+                slug=row["slug"],
+            )
+            if existing is None:
+                raise
+            out.append(existing)
+
     return out
 
 
@@ -156,6 +205,15 @@ def get_source(db: Session, *, org_id: int, source_id: int) -> Optional[Ingestio
 
 
 def create_source(db: Session, *, org_id: int, payload) -> IngestionSource:
+    existing = _get_source_by_identity(
+        db,
+        org_id=int(org_id),
+        provider=payload.provider,
+        slug=payload.slug,
+    )
+    if existing is not None:
+        return existing
+
     row = IngestionSource(
         org_id=int(org_id),
         provider=payload.provider,
@@ -175,8 +233,22 @@ def create_source(db: Session, *, org_id: int, payload) -> IngestionSource:
         cursor_json={},
     )
     row.next_scheduled_at = compute_next_scheduled_at(row)
+
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = _get_source_by_identity(
+            db,
+            org_id=int(org_id),
+            provider=payload.provider,
+            slug=payload.slug,
+        )
+        if existing is not None:
+            return existing
+        raise
+
     db.refresh(row)
     return row
 
@@ -195,7 +267,6 @@ def update_source(db: Session, *, row: IngestionSource, payload) -> IngestionSou
         if value is not None:
             setattr(row, field, value)
 
-    # If caller explicitly set status, honor it only temporarily, then normalize below.
     incoming_status = getattr(payload, "status", None)
     if incoming_status is not None:
         row.status = incoming_status
@@ -204,7 +275,7 @@ def update_source(db: Session, *, row: IngestionSource, payload) -> IngestionSou
         provider=row.provider,
         credentials_json=row.credentials_json or {},
     )
-    row.updated_at = datetime.utcnow()
+    row.updated_at = _utcnow()
     row.next_scheduled_at = compute_next_scheduled_at(row)
 
     db.add(row)

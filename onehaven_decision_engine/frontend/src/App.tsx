@@ -47,6 +47,33 @@ export default function App() {
         />
 
         <Route
+          path="/properties"
+          element={
+            <Protected>
+              <Property />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/properties/:id"
+          element={
+            <Protected>
+              <PropertyView />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/agents"
+          element={
+            <Protected>
+              <Agents />
+            </Protected>
+          }
+        />
+
+        <Route
           path="/deal-intake"
           element={
             <Protected>

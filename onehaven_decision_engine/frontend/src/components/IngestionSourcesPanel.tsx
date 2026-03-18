@@ -1,8 +1,12 @@
 import React from "react";
-import  GlassCard  from "./GlassCard";
-import  Spinner  from "./Spinner";
-import {
-  IngestionSource, api } from "../lib/api";
+import GlassCard from "./GlassCard";
+import Spinner from "./Spinner";
+import { ingestionClient, IngestionSource } from "../lib/ingestionClient";
+
+type Props = {
+  refreshKey?: number;
+  onChanged?: () => void;
+};
 
 function fmt(dt?: string | null) {
   if (!dt) return "—";
@@ -13,7 +17,20 @@ function fmt(dt?: string | null) {
   }
 }
 
-export default function IngestionSourcesPanel() {
+function regionLabel(row: IngestionSource) {
+  const cfg = row.config_json || {};
+  const parts = [
+    cfg.city || null,
+    cfg.county || null,
+    cfg.state || null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "No default market";
+}
+
+export default function IngestionSourcesPanel({
+  refreshKey,
+  onChanged,
+}: Props) {
   const [rows, setRows] = React.useState<IngestionSource[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busyId, setBusyId] = React.useState<number | null>(null);
@@ -21,7 +38,7 @@ export default function IngestionSourcesPanel() {
   async function load() {
     setLoading(true);
     try {
-      setRows(await api.listIngestionSources());
+      setRows(await ingestionClient.listSources());
     } finally {
       setLoading(false);
     }
@@ -29,23 +46,23 @@ export default function IngestionSourcesPanel() {
 
   React.useEffect(() => {
     load();
-  }, []);
+  }, [refreshKey]);
 
-  async function onSync(id: number) {
-    setBusyId(id);
-    try {
-      await api.syncIngestionSource(id);
-      await load();
-    } finally {
-      setBusyId(null);
-    }
-  }
+  React.useEffect(() => {
+    const id = window.setInterval(() => {
+      load().catch(() => undefined);
+    }, 10000);
+    return () => window.clearInterval(id);
+  }, [refreshKey]);
 
   async function onToggle(row: IngestionSource) {
     setBusyId(row.id);
     try {
-      await api.updateIngestionSource(row.id, { is_enabled: !row.is_enabled });
+      await ingestionClient.updateSource(row.id, {
+        is_enabled: !row.is_enabled,
+      });
       await load();
+      onChanged?.();
     } finally {
       setBusyId(null);
     }
@@ -61,11 +78,19 @@ export default function IngestionSourcesPanel() {
 
   return (
     <GlassCard className="p-4">
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Ingestion Sources</h3>
-        <span className="text-sm text-neutral-400">
-          {rows.length} configured
-        </span>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Ingestion source</h3>
+          <p className="mt-1 text-sm text-neutral-400">
+            Source health and defaults.
+          </p>
+        </div>
+        <button
+          onClick={() => load()}
+          className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white transition hover:bg-white/5"
+        >
+          Refresh
+        </button>
       </div>
 
       <div className="space-y-3">
@@ -74,36 +99,40 @@ export default function IngestionSourcesPanel() {
             key={row.id}
             className="rounded-2xl border border-white/10 bg-white/5 p-4"
           >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">{row.display_name}</div>
-                <div className="text-sm text-neutral-400">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-medium text-white">{row.display_name}</div>
+                <div className="mt-1 text-sm text-neutral-400">
                   {row.provider} · {row.source_type} · {row.slug}
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-neutral-300">
+                  <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">
+                    Default market: {regionLabel(row)}
+                  </span>
+                  <span
+                    className={[
+                      "rounded-full border px-3 py-1",
+                      row.status === "connected"
+                        ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
+                        : "border-amber-400/20 bg-amber-400/10 text-amber-100",
+                    ].join(" ")}
+                  >
+                    {row.status}
+                  </span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="rounded-full border border-white/10 px-2 py-1 text-xs">
-                  {row.status}
-                </span>
-                <button
-                  className="rounded-xl border border-white/10 px-3 py-2 text-sm"
-                  onClick={() => onToggle(row)}
-                  disabled={busyId === row.id}
-                >
-                  {row.is_enabled ? "Disable" : "Enable"}
-                </button>
-                <button
-                  className="rounded-xl bg-white/10 px-3 py-2 text-sm"
-                  onClick={() => onSync(row.id)}
-                  disabled={busyId === row.id}
-                >
-                  {busyId === row.id ? "Syncing..." : "Sync now"}
-                </button>
-              </div>
+              <button
+                className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white transition hover:bg-white/5"
+                onClick={() => onToggle(row)}
+                disabled={busyId === row.id}
+              >
+                {row.is_enabled ? "Disable" : "Enable"}
+              </button>
             </div>
 
-            <div className="mt-3 grid grid-cols-1 gap-3 text-sm text-neutral-300 md:grid-cols-4">
+            <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-neutral-300 md:grid-cols-4">
               <div>
                 <div className="text-neutral-500">Last sync</div>
                 <div>{fmt(row.last_synced_at)}</div>

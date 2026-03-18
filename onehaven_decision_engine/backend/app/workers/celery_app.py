@@ -26,7 +26,7 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
 
     # Timeouts
-    task_time_limit=int(getattr(settings, "agents_run_timeout_seconds", 120)),
+    task_time_limit=int(getattr(settings, "agents_run_timeout_seconds", 120) or 120),
 
     # Time
     timezone="UTC",
@@ -39,6 +39,6 @@ celery_app.conf.update(
     # Task discovery
     imports=(
         "app.workers.agent_tasks",
-        "app.tasks.policy_ingestion_tasks",
+        "app.tasks.ingestion_tasks",
     ),
 )

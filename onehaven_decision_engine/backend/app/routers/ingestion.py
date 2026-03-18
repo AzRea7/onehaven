@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
@@ -12,7 +15,6 @@ from ..schemas import (
     IngestionSourceCreate,
     IngestionSourceOut,
     IngestionSourceUpdate,
-    IngestionSyncRequest,
     IngestionWebhookIn,
 )
 from ..services.ingestion_run_execute import execute_source_sync
@@ -27,6 +29,35 @@ from ..services.ingestion_source_service import (
 from ..tasks.ingestion_tasks import sync_source_task
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
+
+
+class IngestionSyncLaunchRequest(BaseModel):
+    trigger_type: str = "manual"
+    state: str | None = "MI"
+    county: str | None = None
+    city: str | None = None
+    min_price: float | None = None
+    max_price: float | None = None
+    min_bedrooms: int | None = None
+    min_bathrooms: float | None = None
+    property_type: str | None = None
+    limit: int = Field(default=100, ge=1)
+
+    @model_validator(mode="after")
+    def validate_ranges(self):
+        if (
+            self.min_price is not None
+            and self.max_price is not None
+            and self.min_price > self.max_price
+        ):
+            raise ValueError("min_price cannot be greater than max_price")
+        return self
+
+    def runtime_config(self) -> dict[str, Any]:
+        payload = self.model_dump(exclude_none=True)
+        payload["limit"] = max(1, int(payload.get("limit") or 100))
+        payload["trigger_type"] = str(payload.get("trigger_type") or "manual")
+        return payload
 
 
 @router.get("/overview", response_model=IngestionOverviewOut)
@@ -74,7 +105,7 @@ def patch_ingestion_source(
 @router.post("/sources/{source_id}/sync", response_model=dict)
 def sync_now(
     source_id: int,
-    payload: IngestionSyncRequest,
+    payload: IngestionSyncLaunchRequest,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
     _op=Depends(require_operator),
@@ -83,13 +114,21 @@ def sync_now(
     if not row:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    async_enabled = True
-    if async_enabled:
-        job = sync_source_task.delay(p.org_id, row.id, payload.trigger_type or "manual")
-        return {"ok": True, "queued": True, "task_id": job.id, "source_id": row.id}
+    runtime_config = payload.runtime_config()
+    trigger_type = str(runtime_config.pop("trigger_type", "manual") or "manual")
 
-    run = execute_source_sync(db, org_id=p.org_id, source=row, trigger_type=payload.trigger_type or "manual")
-    return {"ok": True, "queued": False, "run_id": run.id, "status": run.status}
+    job = sync_source_task.delay(
+        p.org_id,
+        row.id,
+        trigger_type,
+        runtime_config,
+    )
+    return {
+        "ok": True,
+        "queued": True,
+        "task_id": job.id,
+        "source_id": row.id,
+    }
 
 
 @router.get("/runs", response_model=list[IngestionRunListItem])
@@ -143,9 +182,7 @@ async def webhook_ingest(
     x_webhook_secret: str | None = Header(default=None, alias="X-Webhook-Secret"),
     db: Session = Depends(get_db),
 ):
-    # Intentionally not using principal auth here because providers call this.
-    # In production, validate signature/HMAC. This is the seam.
-    rows = list_sources(db, org_id=1)  # replace with org lookup by route/secret in production
+    rows = list_sources(db, org_id=1)
     source = next((x for x in rows if x.provider == provider and x.slug == source_slug), None)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")

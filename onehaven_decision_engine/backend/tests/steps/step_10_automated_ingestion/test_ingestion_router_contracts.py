@@ -14,3 +14,10 @@ def test_ingestion_sources_list_contract(client_with_auth_headers):
     resp = client.get("/api/ingestion/sources", headers=headers)
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+def test_ingestion_runs_list_contract(client_with_auth_headers):
+    client, headers = client_with_auth_headers
+    resp = client.get("/api/ingestion/runs", headers=headers)
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
