@@ -16,6 +16,7 @@ def sync_source_task(org_id: int, source_id: int, trigger_type: str = "manual", 
         source = get_source(db, org_id=int(org_id), source_id=int(source_id))
         if source is None:
             return {"ok": False, "error": "source_not_found", "source_id": source_id}
+
         run = execute_source_sync(
             db,
             org_id=int(org_id),
@@ -23,7 +24,12 @@ def sync_source_task(org_id: int, source_id: int, trigger_type: str = "manual", 
             trigger_type=str(trigger_type or "manual"),
             runtime_config=runtime_config or {},
         )
-        return {"ok": True, "run_id": getattr(run, "id", None), "status": getattr(run, "status", None)}
+        return {
+            "ok": True,
+            "run_id": getattr(run, "id", None),
+            "status": getattr(run, "status", None),
+            "summary_json": getattr(run, "summary_json", None),
+        }
     finally:
         db.close()
 
@@ -77,6 +83,7 @@ celery_app.conf.beat_schedule.setdefault(
         "schedule": 60 * 60,
     },
 )
+
 celery_app.conf.beat_schedule.setdefault(
     "ingestion-daily-market-refresh",
     {

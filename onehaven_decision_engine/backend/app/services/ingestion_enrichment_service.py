@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+import os
+from typing import Any, Optional
+
+from sqlalchemy import desc, select
+from sqlalchemy.orm import Session
+
+from ..models import Property, RentAssumption
+from .rentcast_service import RentCastClient, persist_rentcast_comps_and_get_median
 
 
 def derive_photo_kind(url: str) -> str:
@@ -92,3 +99,140 @@ def build_post_import_actions() -> list[dict[str, str]]:
         {"key": "evaluate", "label": "Run underwriting"},
         {"key": "workflow", "label": "Refresh workflow gates"},
     ]
+
+
+def get_rentcast_api_key() -> Optional[str]:
+    key = (
+        os.getenv("RENTCAST_INGESTION_API_KEY")
+        or os.getenv("RENTCAST_API_KEY")
+        or ""
+    ).strip()
+    return key or None
+
+
+def get_google_maps_api_key() -> Optional[str]:
+    key = (
+        os.getenv("GOOGLE_MAPS_API_KEY")
+        or os.getenv("GOOGLE_GEOCODING_API_KEY")
+        or ""
+    ).strip()
+    return key or None
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def refresh_property_rent_assumptions(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    rentcast_api_key: Optional[str] = None,
+    replace_existing_comps: bool = True,
+) -> dict[str, Any]:
+    prop = db.scalar(
+        select(Property).where(
+            Property.org_id == int(org_id),
+            Property.id == int(property_id),
+        )
+    )
+    if prop is None:
+        return {"ok": False, "error": "property_not_found"}
+
+    address = str(getattr(prop, "address", "") or "").strip()
+    city = str(getattr(prop, "city", "") or "").strip()
+    state = str(getattr(prop, "state", "") or "").strip() or "MI"
+    zip_code = str(getattr(prop, "zip", "") or "").strip()
+    bedrooms = int(getattr(prop, "bedrooms", 0) or 0)
+    bathrooms = float(getattr(prop, "bathrooms", 0) or 0)
+    square_feet = getattr(prop, "square_feet", None)
+
+    if not address or not city or not state or not zip_code:
+        return {
+            "ok": False,
+            "error": "missing_address_fields",
+            "address": address,
+            "city": city,
+            "state": state,
+            "zip": zip_code,
+        }
+
+    api_key = (rentcast_api_key or get_rentcast_api_key() or "").strip()
+    if not api_key:
+        return {"ok": False, "error": "missing_rentcast_api_key"}
+
+    client = RentCastClient(api_key)
+    payload = client.rent_estimate(
+        address=address,
+        city=city,
+        state=state,
+        zip_code=zip_code,
+        bedrooms=bedrooms,
+        bathrooms=bathrooms,
+        square_feet=int(square_feet) if square_feet is not None else None,
+    )
+
+    market_rent_estimate = client.pick_estimated_rent(payload)
+    rent_reasonableness_comp = persist_rentcast_comps_and_get_median(
+        db,
+        property_id=int(property_id),
+        payload=payload,
+        replace_existing=replace_existing_comps,
+    )
+
+    existing = db.scalar(
+        select(RentAssumption).where(
+            RentAssumption.org_id == int(org_id),
+            RentAssumption.property_id == int(property_id),
+        ).order_by(desc(RentAssumption.id))
+    )
+
+    created = False
+    if existing is None:
+        existing = RentAssumption(
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+        created = True
+
+    if market_rent_estimate is not None:
+        existing.market_rent_estimate = float(market_rent_estimate)
+
+    if hasattr(existing, "rent_reasonableness_comp") and rent_reasonableness_comp is not None:
+        existing.rent_reasonableness_comp = float(rent_reasonableness_comp)
+
+    approved_existing = _safe_float(getattr(existing, "approved_rent_ceiling", None))
+    fmr_existing = _safe_float(getattr(existing, "section8_fmr", None))
+    rr_existing = _safe_float(getattr(existing, "rent_reasonableness_comp", None))
+
+    approved_candidates: list[float] = []
+    if rr_existing is not None and rr_existing > 0:
+        approved_candidates.append(rr_existing)
+    if fmr_existing is not None and fmr_existing > 0:
+        approved_candidates.append(fmr_existing)
+
+    computed_ceiling = min(approved_candidates) if approved_candidates else None
+    if approved_existing is None and computed_ceiling is not None:
+        existing.approved_rent_ceiling = float(computed_ceiling)
+
+    db.add(existing)
+    db.commit()
+    db.refresh(existing)
+
+    return {
+        "ok": True,
+        "created": created,
+        "property_id": int(property_id),
+        "market_rent_estimate": _safe_float(getattr(existing, "market_rent_estimate", None)),
+        "rent_reasonableness_comp": _safe_float(getattr(existing, "rent_reasonableness_comp", None))
+        if hasattr(existing, "rent_reasonableness_comp")
+        else rent_reasonableness_comp,
+        "approved_rent_ceiling": _safe_float(getattr(existing, "approved_rent_ceiling", None)),
+        "section8_fmr": _safe_float(getattr(existing, "section8_fmr", None)),
+    }

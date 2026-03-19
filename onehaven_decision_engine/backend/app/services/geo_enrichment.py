@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any, Optional, Tuple
@@ -25,10 +26,6 @@ def _load_geojson(path: Path) -> dict[str, Any]:
 
 
 def _point_in_ring(lng: float, lat: float, ring: list[list[float]]) -> bool:
-    """
-    Ray casting.
-    ring: [[lng, lat], ...]
-    """
     inside = False
     n = len(ring)
     if n < 3:
@@ -50,14 +47,6 @@ def _point_in_ring(lng: float, lat: float, ring: list[list[float]]) -> bool:
 
 
 def _point_in_polygon_geom(lng: float, lat: float, coords: list[Any]) -> bool:
-    """
-    Polygon coordinates:
-      [
-        [outer ring],
-        [hole1],
-        [hole2]
-      ]
-    """
     if not coords or not isinstance(coords, list):
         return False
 
@@ -65,7 +54,6 @@ def _point_in_polygon_geom(lng: float, lat: float, coords: list[Any]) -> bool:
     if not outer or not _point_in_ring(lng, lat, outer):
         return False
 
-    # If point is inside any hole, it is NOT inside polygon
     for hole in coords[1:]:
         if hole and _point_in_ring(lng, lat, hole):
             return False
@@ -160,7 +148,9 @@ def _address_for_property(prop: Property) -> str:
         (getattr(prop, "state", None) or "").strip(),
         (getattr(prop, "zip", None) or "").strip(),
     ]
-    return ", ".join([p for p in parts[:2] if p] + [" ".join([p for p in parts[2:] if p]).strip()]).strip(", ").strip()
+    return ", ".join(
+        [p for p in parts[:2] if p] + [" ".join([p for p in parts[2:] if p]).strip()]
+    ).strip(", ").strip()
 
 
 def _apply_risk_fields(prop: Property) -> dict[str, Any]:
@@ -184,21 +174,25 @@ def _apply_risk_fields(prop: Property) -> dict[str, Any]:
         prop.crime_score = risk.get("crime_score")
     if hasattr(prop, "offender_count"):
         prop.offender_count = risk.get("offender_count")
+    if hasattr(prop, "risk_score"):
+        prop.risk_score = risk.get("risk_score")
+    if hasattr(prop, "risk_band"):
+        prop.risk_band = risk.get("risk_band")
 
     return risk
 
 
-async def enrich_property_geo(
+async def enrich_property_geo_async(
     db: Session,
     *,
     org_id: int,
     property_id: int,
-    google_api_key: Optional[str],
+    google_api_key: Optional[str] = None,
     force: bool = False,
 ) -> dict[str, Any]:
     prop = db.scalar(
         select(Property).where(
-            Property.org_id == org_id,
+            Property.org_id == int(org_id),
             Property.id == int(property_id),
         )
     )
@@ -217,7 +211,6 @@ async def enrich_property_geo(
 
     address = _address_for_property(prop)
 
-    # Step 1: geocode if needed (or force)
     if force or current_lat is None or current_lng is None:
         if google_api_key:
             coords = await geocode_address_google(api_key=google_api_key, address=address)
@@ -230,11 +223,9 @@ async def enrich_property_geo(
         else:
             warnings.append("missing_google_maps_api_key")
 
-    # refresh locals after possible geocode
     current_lat = getattr(prop, "lat", None)
     current_lng = getattr(prop, "lng", None)
 
-    # Step 2: reverse geocode county if needed (or force)
     if current_lat is not None and current_lng is not None and (force or not current_county):
         if google_api_key:
             county = await reverse_geocode_county_google(
@@ -250,17 +241,14 @@ async def enrich_property_geo(
         else:
             warnings.append("missing_google_maps_api_key")
 
-    # refresh locals after possible reverse geocode
     current_lat = getattr(prop, "lat", None)
     current_lng = getattr(prop, "lng", None)
 
-    # Step 3: red-zone classification if we have coordinates
     if current_lat is not None and current_lng is not None:
         prop.is_red_zone = bool(is_in_redzone(lat=float(current_lat), lng=float(current_lng)))
     else:
         warnings.append("missing_coordinates_for_redzone_check")
 
-    # Step 4: crime + offender scoring if we have coordinates
     risk: dict[str, Any] = {
         "crime_density": None,
         "crime_score": None,
@@ -312,3 +300,25 @@ async def enrich_property_geo(
         "risk_computed": risk_computed,
         "warnings": warnings,
     }
+
+
+def enrich_property_geo(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    google_api_key: Optional[str] = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """
+    Sync-safe wrapper used by ingestion and other normal service code.
+    """
+    return asyncio.run(
+        enrich_property_geo_async(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+            google_api_key=google_api_key,
+            force=force,
+        )
+    )

@@ -50,16 +50,21 @@ export type IngestionRun = {
 };
 
 export type IngestionLaunchPayload = {
-  trigger_type?: string;
+  trigger_type?: "manual" | "scheduled" | "webhook" | "daily_refresh";
   state?: string;
   county?: string;
   city?: string;
+  zip_code?: string;
+  zip_codes?: string[];
   min_price?: number;
   max_price?: number;
   min_bedrooms?: number;
   min_bathrooms?: number;
   property_type?: string;
+  price_buckets?: number[][];
+  pages_per_shard?: number;
   limit?: number;
+  execute_inline?: boolean;
 };
 
 function readOrgSlug(): string {
@@ -129,23 +134,59 @@ export const ingestionClient = {
       run_id?: number;
       status?: string;
       source_id: number;
+      summary_json?: Record<string, any>;
     }>(`/ingestion/sources/${sourceId}/sync`, {
       method: "POST",
       body: JSON.stringify({
-        trigger_type: "manual",
-        ...payload,
+        trigger_type: payload.trigger_type ?? "manual",
+        state: payload.state ?? "MI",
+        county: payload.county ?? undefined,
+        city: payload.city ?? undefined,
+        zip_code: payload.zip_code ?? undefined,
+        zip_codes: payload.zip_codes ?? undefined,
+        min_price: payload.min_price ?? undefined,
+        max_price: payload.max_price ?? undefined,
+        min_bedrooms: payload.min_bedrooms ?? undefined,
+        min_bathrooms: payload.min_bathrooms ?? undefined,
+        property_type: payload.property_type ?? undefined,
+        price_buckets: payload.price_buckets ?? undefined,
+        pages_per_shard: payload.pages_per_shard ?? 1,
+        limit: payload.limit ?? 100,
+        execute_inline: payload.execute_inline ?? false,
       }),
     });
   },
 
-  syncDefaultSources() {
+  syncDefaultSources(payload: IngestionLaunchPayload = {}) {
     return request<{
       ok: boolean;
-      queued: number;
-      source_ids: number[];
+      queued?: number;
+      source_ids?: number[];
+      runs?: Array<{
+        source_id: number;
+        run_id?: number;
+        status?: string;
+        summary_json?: Record<string, any>;
+      }>;
     }>("/ingestion/sync-defaults", {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        trigger_type: payload.trigger_type ?? "manual",
+        state: payload.state ?? "MI",
+        county: payload.county ?? undefined,
+        city: payload.city ?? undefined,
+        zip_code: payload.zip_code ?? undefined,
+        zip_codes: payload.zip_codes ?? undefined,
+        min_price: payload.min_price ?? undefined,
+        max_price: payload.max_price ?? undefined,
+        min_bedrooms: payload.min_bedrooms ?? undefined,
+        min_bathrooms: payload.min_bathrooms ?? undefined,
+        property_type: payload.property_type ?? undefined,
+        price_buckets: payload.price_buckets ?? undefined,
+        pages_per_shard: payload.pages_per_shard ?? 1,
+        limit: payload.limit ?? 100,
+        execute_inline: payload.execute_inline ?? false,
+      }),
     });
   },
 

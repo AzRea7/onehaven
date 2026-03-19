@@ -2,7 +2,6 @@ import React from "react";
 import {
   Bath,
   BedDouble,
-  Building2,
   Calendar,
   Filter,
   MapPinned,
@@ -52,6 +51,12 @@ const COUNTY_TO_CITIES: Record<string, string[]> = {
   ],
 };
 
+const COUNTY_TO_DEFAULT_ZIPS: Record<string, string[]> = {
+  wayne: ["48228", "48224", "48219", "48235", "48227"],
+  oakland: ["48341", "48237", "48220", "48071", "48067"],
+  macomb: ["48089", "48091", "48088", "48093", "48066"],
+};
+
 const PROPERTY_TYPES = [
   { value: "", label: "Any type" },
   { value: "single_family", label: "Single-family" },
@@ -64,16 +69,73 @@ function normalizeLimitInput(value: string) {
   return value.replace(/[^\d]/g, "").slice(0, 4);
 }
 
+function normalizeSmallNumberInput(value: string) {
+  return value.replace(/[^\d]/g, "").slice(0, 1);
+}
+
 function parseLimit(value: string) {
   const parsed = Number(value || 100);
   if (!Number.isFinite(parsed) || parsed <= 0) return 100;
   return Math.round(parsed);
 }
 
+function parsePagesPerShard(value: string) {
+  const parsed = Number(value || 1);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
+  return Math.max(1, Math.min(3, Math.round(parsed)));
+}
+
 function toNumberOrUndefined(value: string) {
   if (!value.trim()) return undefined;
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
+}
+
+function parseZipCodes(value: string) {
+  return value
+    .split(",")
+    .map((z) => z.trim())
+    .filter(Boolean);
+}
+
+function buildPriceBuckets(minPrice?: number, maxPrice?: number) {
+  if (
+    minPrice === undefined ||
+    maxPrice === undefined ||
+    !Number.isFinite(minPrice) ||
+    !Number.isFinite(maxPrice) ||
+    minPrice <= 0 ||
+    maxPrice <= 0 ||
+    minPrice >= maxPrice
+  ) {
+    return undefined;
+  }
+
+  const span = maxPrice - minPrice;
+
+  if (span <= 25_000) {
+    return [[minPrice, maxPrice]];
+  }
+
+  if (span <= 50_000) {
+    const mid = Math.floor((minPrice + maxPrice) / 2);
+    return [
+      [minPrice, mid],
+      [mid + 1, maxPrice],
+    ];
+  }
+
+  const step = Math.floor(span / 3);
+  const a = minPrice;
+  const b = minPrice + step;
+  const c = minPrice + step * 2;
+  const d = maxPrice;
+
+  return [
+    [a, b],
+    [b + 1, c],
+    [c + 1, d],
+  ];
 }
 
 function findBestSource(
@@ -135,11 +197,15 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
   const [state, setState] = React.useState("MI");
   const [county, setCounty] = React.useState("wayne");
   const [city, setCity] = React.useState("Detroit");
+  const [zipCodes, setZipCodes] = React.useState(
+    COUNTY_TO_DEFAULT_ZIPS.wayne.join(","),
+  );
   const [minPrice, setMinPrice] = React.useState("");
   const [maxPrice, setMaxPrice] = React.useState("");
   const [minBedrooms, setMinBedrooms] = React.useState("");
   const [minBathrooms, setMinBathrooms] = React.useState("");
   const [propertyType, setPropertyType] = React.useState("");
+  const [pagesPerShard, setPagesPerShard] = React.useState("1");
   const [limit, setLimit] = React.useState("100");
 
   async function loadSources() {
@@ -164,7 +230,8 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
     if (cityOptions.length > 0 && !cityOptions.includes(city)) {
       setCity(cityOptions[0] || "");
     }
-  }, [county, city]);
+    setZipCodes((COUNTY_TO_DEFAULT_ZIPS[county.toLowerCase()] || []).join(","));
+  }, [county]);
 
   const cityOptions = COUNTY_TO_CITIES[county.toLowerCase()] || [];
   const selectedSource = React.useMemo(
@@ -183,16 +250,22 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
         throw new Error("No intake source is ready for this market yet.");
       }
 
+      const parsedMinPrice = toNumberOrUndefined(minPrice);
+      const parsedMaxPrice = toNumberOrUndefined(maxPrice);
+      const parsedZipCodes = parseZipCodes(zipCodes);
       const payload = {
-        trigger_type: "manual",
+        trigger_type: "manual" as const,
         state: state.trim() || "MI",
         county: county.trim() || undefined,
         city: city.trim() || undefined,
-        min_price: toNumberOrUndefined(minPrice),
-        max_price: toNumberOrUndefined(maxPrice),
+        zip_codes: parsedZipCodes.length ? parsedZipCodes : undefined,
+        min_price: parsedMinPrice,
+        max_price: parsedMaxPrice,
         min_bedrooms: toNumberOrUndefined(minBedrooms),
         min_bathrooms: toNumberOrUndefined(minBathrooms),
         property_type: propertyType || undefined,
+        price_buckets: buildPriceBuckets(parsedMinPrice, parsedMaxPrice),
+        pages_per_shard: parsePagesPerShard(pagesPerShard),
         limit: parseLimit(limit),
       };
 
@@ -201,7 +274,9 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
       setMessage(
         `Queued intake for ${[payload.city, payload.county, payload.state]
           .filter(Boolean)
-          .join(", ")}.`,
+          .join(
+            ", ",
+          )} using ${parsedZipCodes.length || "city-wide"} targeted search zones.`,
       );
       onQueued?.();
     } catch (err: any) {
@@ -295,13 +370,31 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                   />
                 )}
               </label>
+
+              <label className="block md:col-span-2">
+                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
+                  Target ZIP codes
+                </div>
+                <textarea
+                  value={zipCodes}
+                  onChange={(e) => setZipCodes(e.target.value)}
+                  disabled={submitting || dailyRefreshing}
+                  rows={2}
+                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
+                  placeholder="48228,48224,48219,48235,48227"
+                />
+                <div className="mt-1 text-xs text-neutral-500">
+                  Comma-separated ZIPs searched first so intake avoids wasting
+                  time on weak city-wide pages.
+                </div>
+              </label>
             </div>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
               <Filter className="h-4 w-4 text-neutral-300" />
-              Light listing filters
+              Smart listing filters
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -387,6 +480,28 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
 
               <label className="block">
                 <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
+                  Pages per shard
+                </div>
+                <input
+                  value={pagesPerShard}
+                  onChange={(e) =>
+                    setPagesPerShard(normalizeSmallNumberInput(e.target.value))
+                  }
+                  onBlur={() =>
+                    setPagesPerShard(String(parsePagesPerShard(pagesPerShard)))
+                  }
+                  inputMode="numeric"
+                  disabled={submitting || dailyRefreshing}
+                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
+                  placeholder="1"
+                />
+                <div className="mt-1 text-xs text-neutral-500">
+                  Lower is faster. Start with 1.
+                </div>
+              </label>
+
+              <label className="block md:col-span-2">
+                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
                   Results target
                 </div>
                 <input
@@ -438,8 +553,8 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
           <div className="flex items-center gap-2 text-sm text-neutral-400">
             <SearchCheck className="h-4 w-4" />
-            New listings only. Existing external matches are skipped
-            automatically.
+            Uses ZIP-targeted shards and price buckets first before wider
+            filtering.
           </div>
 
           <div className="flex flex-wrap items-center gap-3">

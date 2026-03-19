@@ -163,6 +163,24 @@ export type IngestionOverview = {
   properties_updated_7d?: number;
 };
 
+export type IngestionSyncLaunchPayload = {
+  trigger_type?: "manual" | "scheduled" | "webhook" | "daily_refresh";
+  state?: string;
+  county?: string;
+  city?: string;
+  zip_code?: string;
+  zip_codes?: string[];
+  min_price?: number;
+  max_price?: number;
+  min_bedrooms?: number;
+  min_bathrooms?: number;
+  property_type?: string;
+  price_buckets?: number[][];
+  pages_per_shard?: number;
+  limit?: number;
+  execute_inline?: boolean;
+};
+
 export function getOrgSlug(): string {
   const env = (import.meta as any).env || {};
   const envOrg = (env.VITE_ORG_SLUG as string | undefined)?.trim();
@@ -1977,18 +1995,7 @@ export const api = {
 
   syncIngestionSource: (
     sourceId: number,
-    payload?: {
-      trigger_type?: "manual" | "scheduled" | "webhook" | "daily_refresh";
-      state?: string;
-      county?: string;
-      city?: string;
-      min_price?: number;
-      max_price?: number;
-      min_bedrooms?: number;
-      min_bathrooms?: number;
-      property_type?: string;
-      limit?: number;
-    },
+    payload?: IngestionSyncLaunchPayload,
   ) =>
     request<{
       ok: boolean;
@@ -1997,6 +2004,7 @@ export const api = {
       run_id?: number;
       status?: string;
       source_id?: number;
+      summary_json?: Record<string, any>;
     }>(`/ingestion/sources/${sourceId}/sync`, {
       method: "POST",
       body: JSON.stringify({
@@ -2004,12 +2012,17 @@ export const api = {
         state: payload?.state ?? "MI",
         county: payload?.county ?? undefined,
         city: payload?.city ?? undefined,
+        zip_code: payload?.zip_code ?? undefined,
+        zip_codes: payload?.zip_codes ?? undefined,
         min_price: payload?.min_price ?? undefined,
         max_price: payload?.max_price ?? undefined,
         min_bedrooms: payload?.min_bedrooms ?? undefined,
         min_bathrooms: payload?.min_bathrooms ?? undefined,
         property_type: payload?.property_type ?? undefined,
+        price_buckets: payload?.price_buckets ?? undefined,
+        pages_per_shard: payload?.pages_per_shard ?? 1,
         limit: payload?.limit ?? 100,
+        execute_inline: payload?.execute_inline ?? false,
       }),
     }),
 

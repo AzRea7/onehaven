@@ -1,8 +1,7 @@
-# backend/app/routers/evaluate.py
 from __future__ import annotations
 
 import json
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, desc
@@ -23,13 +22,8 @@ from .rent import explain_rent
 router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 
 
-# --- Policy knobs ----------------------------------------------------
-# “Strong” underwriting: can survive friction/cap risk and becomes REVIEW instead of REJECT.
-# You can later move these into config.py if you want.
 _STRONG_DSCR = 1.30
 _STRONG_CASHFLOW = 400.0
-
-# Money tolerance when comparing ceiling values
 _MONEY_TOL = 2.0
 
 
@@ -67,15 +61,6 @@ def _ceiling_and_reason(
     ra: Optional[RentAssumption],
     payment_standard_pct: float,
 ) -> tuple[Optional[float], str, Optional[float]]:
-    """
-    Returns (ceiling, cap_reason, fmr_adjusted)
-
-    cap_reason is one of:
-      - "override"  (true manual override)
-      - "fmr"       (payment standard cap)
-      - "comps"     (rent reasonableness cap)
-      - "none"
-    """
     if ra is None:
         return None, "none", None
 
@@ -98,11 +83,9 @@ def _ceiling_and_reason(
     if approved is None:
         return computed_ceiling, computed_reason, fmr_adjusted
 
-    # If approved matches computed within tolerance, treat as computed (NOT manual override)
     if computed_ceiling is not None and _almost_equal(approved, computed_ceiling):
         return float(computed_ceiling), computed_reason, fmr_adjusted
 
-    # Otherwise it’s a true override
     return float(approved), "override", fmr_adjusted
 
 
@@ -130,7 +113,6 @@ def _rent_used_for_underwriting(
         notes.append("Market strategy: missing market_rent_estimate; fell back to rent_rule_min_pct heuristic.")
         return float(est), True, notes, computed_ceiling, "none", fmr_adjusted
 
-    # section8
     if market is None and computed_ceiling is None:
         asking = float(getattr(d, "asking_price", 0.0) or 0.0)
         est = asking * float(settings.rent_rule_min_pct)
@@ -186,11 +168,6 @@ def _convert_reject_to_review_when_strong(
     dscr: float,
     cash_flow: float,
 ) -> str:
-    """
-    Product rule:
-      If underwriting is strong, and the “badness” is operational/compliance/cap related,
-      downgrade REJECT -> REVIEW instead of losing the deal.
-    """
     if decision != "REJECT":
         return decision
 
@@ -208,6 +185,248 @@ def _convert_reject_to_review_when_strong(
         return "REVIEW"
 
     return decision
+
+
+def _result_to_schema_payload(r: UnderwritingResult, p: Optional[Property] = None) -> dict[str, Any]:
+    return {
+        "id": r.id,
+        "deal_id": r.deal_id,
+        "org_id": r.org_id,
+        "decision": r.decision,
+        "score": r.score,
+        "dscr": r.dscr,
+        "cash_flow": r.cash_flow,
+        "gross_rent_used": r.gross_rent_used,
+        "mortgage_payment": r.mortgage_payment,
+        "operating_expenses": r.operating_expenses,
+        "noi": r.noi,
+        "cash_on_cash": r.cash_on_cash,
+        "break_even_rent": r.break_even_rent,
+        "min_rent_for_target_roi": r.min_rent_for_target_roi,
+        "decision_version": r.decision_version,
+        "payment_standard_pct_used": r.payment_standard_pct_used,
+        "jurisdiction_multiplier": r.jurisdiction_multiplier,
+        "jurisdiction_reasons_json": r.jurisdiction_reasons_json,
+        "rent_cap_reason": r.rent_cap_reason,
+        "fmr_adjusted": r.fmr_adjusted,
+        "reasons_json": r.reasons_json,
+        "bedrooms": getattr(p, "bedrooms", None) if p is not None else None,
+        "bathrooms": getattr(p, "bathrooms", None) if p is not None else None,
+        "rent_explain_run_id": getattr(r, "rent_explain_run_id", None),
+    }
+
+
+def evaluate_property_core(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    strategy: Optional[str] = None,
+    payment_standard_pct: float | None = None,
+    actor_user_id: Optional[int] = None,
+    emit_events: bool = True,
+    commit: bool = True,
+) -> dict[str, Any]:
+    prop = db.scalar(
+        select(Property).where(
+            Property.id == int(property_id),
+            Property.org_id == int(org_id),
+        )
+    )
+    if prop is None:
+        return {"ok": False, "detail": "Property not found"}
+
+    deal = db.scalar(
+        select(Deal)
+        .where(Deal.property_id == int(property_id), Deal.org_id == int(org_id))
+        .order_by(desc(Deal.id))
+    )
+    if deal is None:
+        return {"ok": False, "detail": "Deal not found for property"}
+
+    ra = db.scalar(
+        select(RentAssumption)
+        .where(RentAssumption.property_id == int(property_id), RentAssumption.org_id == int(org_id))
+        .order_by(desc(RentAssumption.id))
+    )
+
+    ps_default = getattr(settings, "default_payment_standard_pct", None)
+    if ps_default is None:
+        ps_default = getattr(settings, "payment_standard_pct", 1.0)
+    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(ps_default)
+
+    deal_strategy = _norm_strategy(strategy or getattr(deal, "strategy", None) or "section8")
+
+    rent_used, fallback_used, notes, computed_ceiling, cap_reason, fmr_adjusted = _rent_used_for_underwriting(
+        strategy=deal_strategy,
+        d=deal,
+        ra=ra,
+        payment_standard_pct=pct,
+    )
+
+    if ra is not None:
+        ra.rent_used = float(rent_used)
+        approved = _to_pos_float(getattr(ra, "approved_rent_ceiling", None))
+        if approved is None and computed_ceiling is not None:
+            ra.approved_rent_ceiling = float(computed_ceiling)
+        db.add(ra)
+
+    purchase_price = float(
+        getattr(deal, "estimated_purchase_price", None) or getattr(deal, "asking_price", 0.0) or 0.0
+    )
+    if purchase_price <= 0:
+        return {"ok": False, "detail": "invalid_purchase_price"}
+
+    uw = underwrite(
+        purchase_price=purchase_price,
+        rehab_estimate=float(getattr(deal, "rehab_estimate", 0.0) or 0.0),
+        down_payment_pct=float(getattr(deal, "down_payment_pct", 0.20) or 0.20),
+        interest_rate=float(getattr(deal, "interest_rate", 0.075) or 0.075),
+        term_years=int(getattr(deal, "term_years", 30) or 30),
+        gross_rent=float(rent_used or 0.0),
+    )
+
+    decision, score, reasons = score_and_decide(
+        property=prop,
+        deal=deal,
+        rent_assumption=ra,
+        underwriting=uw,
+        strategy=deal_strategy,
+    )
+    reasons.extend(notes)
+
+    if fallback_used and decision == "PASS":
+        decision = "REVIEW"
+        reasons.append("Rent was heuristic-estimated; verify comps/FMR/ceiling before PASS.")
+
+    jr = db.scalar(
+        select(JurisdictionRule).where(
+            JurisdictionRule.org_id == int(org_id),
+            JurisdictionRule.city == prop.city,
+            JurisdictionRule.state == prop.state,
+        )
+    )
+    if jr is None:
+        jr = db.scalar(
+            select(JurisdictionRule).where(
+                JurisdictionRule.org_id.is_(None),
+                JurisdictionRule.city == prop.city,
+                JurisdictionRule.state == prop.state,
+            )
+        )
+
+    friction = compute_friction(jr)
+    fr_reasons = list(getattr(friction, "reasons", []) or [])
+    fr_mult = float(getattr(friction, "multiplier", 1.0) or 1.0)
+
+    if fr_reasons:
+        reasons.extend([f"[Jurisdiction] {r}" for r in fr_reasons])
+
+    if jr is None and decision == "PASS":
+        decision = "REVIEW"
+        reasons.append("No jurisdiction row → cannot PASS without compliance friction data.")
+
+    score = int(round(float(score) * fr_mult))
+    score = max(0, min(100, score))
+
+    decision = _convert_reject_to_review_when_strong(
+        decision=decision,
+        reasons=reasons,
+        fr_reasons=fr_reasons,
+        fr_mult=fr_mult,
+        dscr=float(uw.dscr),
+        cash_flow=float(uw.cash_flow),
+    )
+
+    existing = db.scalar(
+        select(UnderwritingResult)
+        .where(UnderwritingResult.deal_id == int(deal.id))
+        .where(UnderwritingResult.org_id == int(org_id))
+    )
+    created = False
+    if not existing:
+        existing = UnderwritingResult(
+            org_id=int(org_id),
+            deal_id=int(deal.id),
+            decision="REVIEW",
+            score=0,
+            reasons_json="[]",
+            gross_rent_used=0.0,
+            mortgage_payment=0.0,
+            operating_expenses=0.0,
+            noi=0.0,
+            cash_flow=0.0,
+            dscr=0.0,
+            cash_on_cash=0.0,
+            break_even_rent=0.0,
+            min_rent_for_target_roi=0.0,
+            decision_version=str(settings.decision_version),
+        )
+        db.add(existing)
+        created = True
+
+    existing.decision = decision
+    existing.score = int(score)
+    existing.reasons_json = json.dumps(reasons)
+
+    existing.gross_rent_used = float(rent_used)
+    existing.mortgage_payment = float(uw.mortgage_payment)
+    existing.operating_expenses = float(uw.operating_expenses)
+    existing.noi = float(uw.noi)
+    existing.cash_flow = float(uw.cash_flow)
+    existing.dscr = float(uw.dscr)
+    existing.cash_on_cash = float(uw.cash_on_cash)
+    existing.break_even_rent = float(uw.break_even_rent)
+    existing.min_rent_for_target_roi = float(uw.min_rent_for_target_roi)
+
+    existing.decision_version = str(settings.decision_version)
+    existing.payment_standard_pct_used = float(pct)
+    existing.jurisdiction_multiplier = float(fr_mult)
+    existing.jurisdiction_reasons_json = json.dumps(fr_reasons)
+    existing.rent_cap_reason = str(cap_reason or "none")
+    existing.fmr_adjusted = float(fmr_adjusted) if fmr_adjusted is not None else None
+
+    db.add(existing)
+
+    if emit_events:
+        try:
+            emit_workflow_event(
+                db,
+                org_id=int(org_id),
+                actor_user_id=actor_user_id,
+                event_type="underwriting_completed",
+                property_id=int(property_id),
+                payload={
+                    "deal_id": int(deal.id),
+                    "property_id": int(property_id),
+                    "decision": decision,
+                    "score": int(score),
+                    "jurisdiction_multiplier": float(fr_mult),
+                },
+            )
+        except Exception:
+            pass
+
+    if commit:
+        db.commit()
+        db.refresh(existing)
+    else:
+        db.flush()
+
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "deal_id": int(deal.id),
+        "decision": decision,
+        "score": int(score),
+        "fallback_used": fallback_used,
+        "computed_ceiling": computed_ceiling,
+        "cap_reason": cap_reason,
+        "fmr_adjusted": fmr_adjusted,
+        "created": created,
+        "result_row": existing,
+        "result": _result_to_schema_payload(existing, prop),
+    }
 
 
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
@@ -249,7 +468,6 @@ def evaluate_snapshot(
 
             deal_strategy = _norm_strategy(strategy or getattr(d, "strategy", None) or "section8")
 
-            # Force explain artifact creation (RentExplainRun) + persist rent_used/ceiling
             _ = explain_rent(
                 property_id=int(p.id),
                 strategy=deal_strategy,
@@ -259,181 +477,23 @@ def evaluate_snapshot(
                 p=principal,
             )
 
-            # Re-fetch RA after explain (explain may create/update it)
-            ra = db.scalar(
-                select(RentAssumption)
-                .where(RentAssumption.property_id == p.id)
-                .where(RentAssumption.org_id == principal.org_id)
-            )
-
-            rent_explain_run_id = db.scalar(
-                select(RentExplainRun.id)
-                .where(
-                    RentExplainRun.org_id == principal.org_id,
-                    RentExplainRun.property_id == int(p.id),
-                    RentExplainRun.strategy == deal_strategy,
-                )
-                .order_by(desc(RentExplainRun.id))
-                .limit(1)
-            )
-
-            gross_rent, estimated, rent_notes, computed_ceiling, cap_reason, fmr_adjusted = _rent_used_for_underwriting(
+            res = evaluate_property_core(
+                db,
+                org_id=int(principal.org_id),
+                property_id=int(p.id),
                 strategy=deal_strategy,
-                d=d,
-                ra=ra,
-                payment_standard_pct=ps,
+                payment_standard_pct=float(ps),
+                actor_user_id=getattr(principal, "user_id", None),
+                emit_events=True,
+                commit=True,
             )
-
-            if ra is not None:
-                ra.rent_used = float(gross_rent)
-                manual = _to_pos_float(getattr(ra, "approved_rent_ceiling", None))
-                if manual is None and computed_ceiling is not None:
-                    ra.approved_rent_ceiling = float(computed_ceiling)
-                db.add(ra)
-
-            purchase_price = float(
-                getattr(d, "estimated_purchase_price", None) or getattr(d, "asking_price", 0.0) or 0.0
-            )
-            if purchase_price <= 0:
-                errors.append(f"deal_id={d.id}: invalid purchase_price={purchase_price}")
-                db.rollback()
+            if not res.get("ok"):
+                errors.append(f"deal_id={d.id}: {res.get('detail')}")
                 continue
 
-            uw = underwrite(
-                purchase_price=purchase_price,
-                gross_rent=float(gross_rent),
-                interest_rate=float(d.interest_rate),
-                term_years=int(d.term_years),
-                down_payment_pct=float(d.down_payment_pct),
-                rehab_estimate=float(getattr(d, "rehab_estimate", 0.0) or 0.0),
-            )
-
-            decision, score, reasons = score_and_decide(
-                property=p,
-                deal=d,
-                rent_assumption=ra,
-                underwriting=uw,
-                strategy=deal_strategy,
-            )
-
-            reasons.extend(rent_notes)
-
-            if estimated and decision == "PASS":
-                decision = "REVIEW"
-                reasons.append("Rent was heuristic-estimated; verify comps/FMR/ceiling before PASS.")
-
-            jr = db.scalar(
-                select(JurisdictionRule).where(
-                    JurisdictionRule.org_id == principal.org_id,
-                    JurisdictionRule.city == p.city,
-                    JurisdictionRule.state == p.state,
-                )
-            )
-            if jr is None:
-                jr = db.scalar(
-                    select(JurisdictionRule).where(
-                        JurisdictionRule.org_id.is_(None),
-                        JurisdictionRule.city == p.city,
-                        JurisdictionRule.state == p.state,
-                    )
-                )
-
-            friction = compute_friction(jr)
-            fr_reasons = list(getattr(friction, "reasons", []) or [])
-            fr_mult = float(getattr(friction, "multiplier", 1.0) or 1.0)
-
-            if fr_reasons:
-                reasons.extend([f"[Jurisdiction] {r}" for r in fr_reasons])
-
-            if jr is None and decision == "PASS":
-                decision = "REVIEW"
-                reasons.append("No jurisdiction row → cannot PASS without compliance friction data.")
-
-            score = int(round(float(score) * fr_mult))
-            score = max(0, min(100, score))
-
-            decision = _convert_reject_to_review_when_strong(
-                decision=decision,
-                reasons=reasons,
-                fr_reasons=fr_reasons,
-                fr_mult=fr_mult,
-                dscr=float(uw.dscr),
-                cash_flow=float(uw.cash_flow),
-            )
-
-            existing = db.scalar(
-                select(UnderwritingResult)
-                .where(UnderwritingResult.deal_id == d.id)
-                .where(UnderwritingResult.org_id == principal.org_id)
-            )
-            if not existing:
-                existing = UnderwritingResult(
-                    org_id=principal.org_id,
-                    deal_id=d.id,
-                    decision="REVIEW",
-                    score=0,
-                    reasons_json="[]",
-                    gross_rent_used=0.0,
-                    mortgage_payment=0.0,
-                    operating_expenses=0.0,
-                    noi=0.0,
-                    cash_flow=0.0,
-                    dscr=0.0,
-                    cash_on_cash=0.0,
-                    break_even_rent=0.0,
-                    min_rent_for_target_roi=0.0,
-                    decision_version=str(settings.decision_version),
-                )
-                db.add(existing)
-
-            existing.decision = decision
-            existing.score = int(score)
-            existing.reasons_json = json.dumps(reasons)
-
-            existing.gross_rent_used = float(gross_rent)
-            existing.mortgage_payment = float(uw.mortgage_payment)
-            existing.operating_expenses = float(uw.operating_expenses)
-            existing.noi = float(uw.noi)
-            existing.cash_flow = float(uw.cash_flow)
-            existing.dscr = float(uw.dscr)
-            existing.cash_on_cash = float(uw.cash_on_cash)
-            existing.break_even_rent = float(uw.break_even_rent)
-            existing.min_rent_for_target_roi = float(uw.min_rent_for_target_roi)
-
-            existing.decision_version = str(settings.decision_version)
-            existing.payment_standard_pct_used = float(ps)
-
-            existing.jurisdiction_multiplier = float(fr_mult)
-            existing.jurisdiction_reasons_json = json.dumps(fr_reasons)
-
-            existing.rent_cap_reason = str(cap_reason or "none")
-            existing.fmr_adjusted = float(fmr_adjusted) if fmr_adjusted is not None else None
-
-            # ✅ schema now has the column, always set it
-            if rent_explain_run_id is not None:
-                existing.rent_explain_run_id = int(rent_explain_run_id)
-
-            emit_workflow_event(
-                db,
-                org_id=principal.org_id,
-                actor_user_id=principal.user_id,
-                event_type="deal_evaluated",
-                property_id=int(d.property_id),
-                payload={
-                    "deal_id": int(d.id),
-                    "property_id": int(d.property_id),
-                    "decision": decision,
-                    "score": int(score),
-                    "rent_explain_run_id": int(rent_explain_run_id) if rent_explain_run_id is not None else None,
-                    "jurisdiction_multiplier": float(fr_mult),
-                },
-            )
-
-            db.commit()
-
-            if decision == "PASS":
+            if res["decision"] == "PASS":
                 pass_count += 1
-            elif decision == "REVIEW":
+            elif res["decision"] == "REVIEW":
                 review_count += 1
             else:
                 reject_count += 1
@@ -510,39 +570,9 @@ def evaluate_results(
 
     out: list[UnderwritingResultOut] = []
     for r, d, p in rows:
-        payload = {
-            "id": r.id,
-            "deal_id": r.deal_id,
-            "org_id": r.org_id,
-            "decision": r.decision,
-            "score": r.score,
-            "dscr": r.dscr,
-            "cash_flow": r.cash_flow,
-            "gross_rent_used": r.gross_rent_used,
-            "mortgage_payment": r.mortgage_payment,
-            "operating_expenses": r.operating_expenses,
-            "noi": r.noi,
-            "cash_on_cash": r.cash_on_cash,
-            "break_even_rent": r.break_even_rent,
-            "min_rent_for_target_roi": r.min_rent_for_target_roi,
-            "decision_version": r.decision_version,
-            "payment_standard_pct_used": r.payment_standard_pct_used,
-            "jurisdiction_multiplier": r.jurisdiction_multiplier,
-            "jurisdiction_reasons_json": r.jurisdiction_reasons_json,
-            "rent_cap_reason": r.rent_cap_reason,
-            "fmr_adjusted": r.fmr_adjusted,
-            "reasons_json": r.reasons_json,
-            "bedrooms": getattr(p, "bedrooms", None),
-            "bathrooms": getattr(p, "bathrooms", None),
-            # ✅ always include now
-            "rent_explain_run_id": r.rent_explain_run_id,
-        }
-        out.append(UnderwritingResultOut.model_validate(payload))
+        out.append(UnderwritingResultOut.model_validate(_result_to_schema_payload(r, p)))
 
     return out
-
-
-
 
 
 @router.post("/property/{property_id}", response_model=dict)
@@ -553,78 +583,28 @@ def evaluate_property(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    prop = db.scalar(select(Property).where(Property.id == int(property_id), Property.org_id == int(principal.org_id)))
-    if prop is None:
-        return {"ok": False, "detail": "Property not found"}
-
-    deal = db.scalar(
-        select(Deal)
-        .where(Deal.property_id == int(property_id), Deal.org_id == int(principal.org_id))
-        .order_by(desc(Deal.id))
-    )
-    if deal is None:
-        return {"ok": False, "detail": "Deal not found for property"}
-
-    ra = db.scalar(
-        select(RentAssumption)
-        .where(RentAssumption.property_id == int(property_id), RentAssumption.org_id == int(principal.org_id))
-        .order_by(desc(RentAssumption.id))
-    )
-    pct = float(payment_standard_pct or getattr(settings, "payment_standard_pct", 1.0))
-    rent_used, fallback_used, notes, computed_ceiling, cap_reason, fmr_adjusted = _rent_used_for_underwriting(
-        strategy=_norm_strategy(strategy or getattr(deal, "strategy", None)),
-        d=deal,
-        ra=ra,
-        payment_standard_pct=pct,
-    )
-    uw = underwrite(
-        purchase_price=float(getattr(deal, "asking_price", 0.0) or 0.0),
-        rehab_estimate=float(getattr(deal, "rehab_estimate", 0.0) or 0.0),
-        down_payment_pct=float(getattr(deal, "down_payment_pct", 0.20) or 0.20),
-        interest_rate=float(getattr(deal, "interest_rate", 0.075) or 0.075),
-        term_years=int(getattr(deal, "term_years", 30) or 30),
-        gross_rent=float(rent_used or 0.0),
-    )
-    decision = "GOOD_DEAL"
-    if uw.dscr < 1.0 or uw.cash_flow < 0:
-        decision = "REJECT"
-    elif uw.dscr < 1.2 or uw.cash_flow < 250:
-        decision = "REVIEW"
-
-    row = UnderwritingResult(
+    res = evaluate_property_core(
+        db,
         org_id=int(principal.org_id),
-        deal_id=int(deal.id),
-        decision=decision,
-        score=max(1, min(100, int(round(uw.dscr * 40 + max(uw.cash_flow, 0) / 25)))),
-        reasons_json=notes + [f"Auto/property evaluation: DSCR {uw.dscr:.2f}, cash flow ${uw.cash_flow:.0f}."],
-        dscr=uw.dscr,
-        cash_flow=uw.cash_flow,
-        gross_rent_used=float(rent_used or 0.0),
-        asking_price=float(getattr(deal, "asking_price", 0.0) or 0.0),
+        property_id=int(property_id),
+        strategy=strategy,
+        payment_standard_pct=payment_standard_pct,
+        actor_user_id=getattr(principal, "user_id", None),
+        emit_events=True,
+        commit=True,
     )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    try:
-        emit_workflow_event(
-            db,
-            org_id=int(principal.org_id),
-            property_id=int(property_id),
-            event_type="underwriting_completed",
-            event_value={"decision": decision},
-        )
-        db.commit()
-    except Exception:
-        db.rollback()
+    if not res.get("ok"):
+        return res
 
     return {
         "ok": True,
-        "property_id": property_id,
-        "deal_id": deal.id,
-        "decision": decision,
-        "fallback_used": fallback_used,
-        "computed_ceiling": computed_ceiling,
-        "cap_reason": cap_reason,
-        "fmr_adjusted": fmr_adjusted,
-        "result": UnderwritingResultOut.model_validate(row, from_attributes=True),
+        "property_id": int(property_id),
+        "deal_id": res["deal_id"],
+        "decision": res["decision"],
+        "fallback_used": res["fallback_used"],
+        "computed_ceiling": res["computed_ceiling"],
+        "cap_reason": res["cap_reason"],
+        "fmr_adjusted": res["fmr_adjusted"],
+        "created": res["created"],
+        "result": UnderwritingResultOut.model_validate(res["result"]),
     }
