@@ -7,6 +7,32 @@ from ..services.ingestion_source_service import ensure_default_manual_sources, l
 from ..workers.agent_worker import celery_app
 
 
+def _pipeline_outcome(summary_json: dict | None) -> dict:
+    summary = dict(summary_json or {})
+    return {
+        "records_seen": int(summary.get("records_seen", 0) or 0),
+        "records_imported": int(summary.get("records_imported", 0) or 0),
+        "properties_created": int(summary.get("properties_created", 0) or 0),
+        "properties_updated": int(summary.get("properties_updated", 0) or 0),
+        "deals_created": int(summary.get("deals_created", 0) or 0),
+        "deals_updated": int(summary.get("deals_updated", 0) or 0),
+        "rent_rows_upserted": int(summary.get("rent_rows_upserted", 0) or 0),
+        "photos_upserted": int(summary.get("photos_upserted", 0) or 0),
+        "duplicates_skipped": int(summary.get("duplicates_skipped", 0) or 0),
+        "invalid_rows": int(summary.get("invalid_rows", 0) or 0),
+        "filtered_out": int(summary.get("filtered_out", 0) or 0),
+        "geo_enriched": int(summary.get("geo_enriched", 0) or 0),
+        "rent_refreshed": int(summary.get("rent_refreshed", 0) or 0),
+        "evaluated": int(summary.get("evaluated", 0) or 0),
+        "state_synced": int(summary.get("state_synced", 0) or 0),
+        "workflow_synced": int(summary.get("workflow_synced", 0) or 0),
+        "next_actions_seeded": int(summary.get("next_actions_seeded", 0) or 0),
+        "post_import_failures": int(summary.get("post_import_failures", 0) or 0),
+        "post_import_partials": int(summary.get("post_import_partials", 0) or 0),
+        "post_import_errors": list(summary.get("post_import_errors") or []),
+    }
+
+
 @celery_app.task(name="ingestion.sync_source")
 def sync_source_task(org_id: int, source_id: int, trigger_type: str = "manual", runtime_config: dict | None = None):
     db = SessionLocal()
@@ -24,11 +50,13 @@ def sync_source_task(org_id: int, source_id: int, trigger_type: str = "manual", 
             trigger_type=str(trigger_type or "manual"),
             runtime_config=runtime_config or {},
         )
+        summary = dict(getattr(run, "summary_json", None) or {})
         return {
             "ok": True,
             "run_id": getattr(run, "id", None),
             "status": getattr(run, "status", None),
-            "summary_json": getattr(run, "summary_json", None),
+            "summary_json": summary,
+            "pipeline_outcome": _pipeline_outcome(summary),
         }
     finally:
         db.close()

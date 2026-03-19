@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import List, Optional, Any
+from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,37 +13,42 @@ from ..auth import get_principal
 from ..config import settings
 from ..db import get_db
 from ..models import (
-    Deal,
+    AuditEvent,
     Property,
     RentAssumption,
-    RentComp,
-    RentObservation,
     RentCalibration,
-    AuditEvent,
+    RentComp,
     RentExplainRun,
+    RentObservation,
 )
 from ..schemas import (
     RentAssumptionOut,
     RentAssumptionUpsert,
-    RentCompsBatchIn,
+    RentCalibrationOut,
     RentCompOut,
+    RentCompsBatchIn,
     RentCompsSummaryOut,
+    RentExplainOut,
     RentObservationCreate,
     RentObservationOut,
-    RentCalibrationOut,
     RentRecomputeOut,
-    RentExplainOut,
-    RentExplainBatchOut,
-)
-from ..domain.rent_learning import (
-    get_or_create_rent_assumption,
-    summarize_comps,
-    update_calibration_from_observation,
-    recompute_rent_fields,
 )
 from ..domain.events import emit_workflow_event
+from ..domain.rent_learning import (
+    get_or_create_rent_assumption,
+    recompute_rent_fields,
+    summarize_comps,
+    update_calibration_from_observation,
+)
 
 router = APIRouter(prefix="/rent", tags=["rent"])
+
+
+class RentExplainPropertiesIn(BaseModel):
+    property_ids: list[int] = Field(default_factory=list)
+    strategy: str = "section8"
+    payment_standard_pct: float | None = Field(default=None, ge=0.5, le=1.5)
+    persist: bool = True
 
 
 def _norm_strategy(strategy: Optional[str]) -> str:
@@ -362,61 +368,60 @@ def recompute(
     )
 
 
-@router.get("/explain/batch", response_model=RentExplainBatchOut)
-def explain_rent_batch(
-    snapshot_id: int = Query(...),
-    strategy: str = Query(default="section8"),
-    payment_standard_pct: float | None = Query(default=None, ge=0.5, le=1.5),
-    limit: int = Query(default=50, ge=1, le=500),
-    persist: bool = Query(default=True),
+@router.post("/explain/properties", response_model=dict)
+def explain_rent_properties(
+    payload: RentExplainPropertiesIn = Body(...),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    strategy = _norm_strategy(strategy)
-    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
+    strategy = _norm_strategy(payload.strategy)
+    pct = float(payload.payment_standard_pct) if payload.payment_standard_pct is not None else float(settings.default_payment_standard_pct)
 
-    deals = db.scalars(
-        select(Deal)
-        .where(Deal.snapshot_id == snapshot_id, Deal.org_id == p.org_id)
-        .limit(limit)
-    ).all()
+    seen: set[int] = set()
+    property_ids: list[int] = []
+    for pid in payload.property_ids:
+        if int(pid) in seen:
+            continue
+        seen.add(int(pid))
+        property_ids.append(int(pid))
 
-    attempted = len(deals)
+    attempted = len(property_ids)
     explained = 0
-    errors: list[dict] = []
+    errors: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
-    for d in deals:
+    for pid in property_ids:
         try:
-            pid = int(d.property_id)
-            prop = db.get(Property, pid)
-            if not prop or prop.org_id != p.org_id:
-                continue
-
-            _ = explain_rent(
-                property_id=pid,
+            out = explain_rent(
+                property_id=int(pid),
                 strategy=strategy,
                 payment_standard_pct=pct,
-                persist=persist,
+                persist=payload.persist,
                 db=db,
                 p=p,
             )
             explained += 1
-        except Exception as e:
-            errors.append(
+            results.append(
                 {
-                    "deal_id": getattr(d, "id", None),
-                    "property_id": getattr(d, "property_id", None),
-                    "error": f"{type(e).__name__}: {e}",
+                    "property_id": int(pid),
+                    "run_id": int(out.run_id),
+                    "rent_used": out.rent_used,
+                    "approved_rent_ceiling": out.approved_rent_ceiling,
+                    "cap_reason": out.cap_reason,
                 }
             )
+        except Exception as e:
+            errors.append({"property_id": int(pid), "error": f"{type(e).__name__}: {e}"})
 
-    return RentExplainBatchOut(
-        snapshot_id=snapshot_id,
-        strategy=strategy,
-        attempted=attempted,
-        explained=explained,
-        errors=errors,
-    )
+    return {
+        "ok": True,
+        "strategy": strategy,
+        "attempted": attempted,
+        "explained": explained,
+        "property_ids": property_ids,
+        "results": results,
+        "errors": errors,
+    }
 
 
 @router.get("/explain/{property_id}", response_model=RentExplainOut)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import re
 from typing import Any
 
@@ -277,10 +279,6 @@ def _filter_reason(payload: dict[str, Any], runtime_config: dict[str, Any]) -> s
     if state and _norm_text(payload.get("state")) != _norm_text(state):
         return "state"
 
-    # County is optional:
-    # - if caller didn't provide county -> ignore
-    # - if caller provided county but provider row has no county -> ignore
-    # - only enforce when BOTH exist
     payload_county = payload.get("county")
     if county and payload_county:
         if _normalize_county_text(payload_county) != _normalize_county_text(county):
@@ -454,6 +452,39 @@ def _collect_matching_rows(
     }
 
 
+def _run_maybe_async(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        try:
+            return asyncio.run(value)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(value)
+            finally:
+                loop.close()
+    return value
+
+
+def _seed_next_actions_if_available(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    candidates: list[tuple[str, str]] = [
+        ("..services.next_actions_service", "seed_property_next_actions"),
+        ("..services.next_actions_service", "generate_property_next_actions"),
+        ("..services.next_actions_service", "recompute_property_next_actions"),
+    ]
+
+    for module_name, fn_name in candidates:
+        try:
+            module = __import__(module_name, globals(), locals(), [fn_name], 1)
+            fn = getattr(module, fn_name, None)
+            if callable(fn):
+                out = fn(db, org_id=int(org_id), property_id=int(property_id))
+                return {"ok": True, "handler": fn_name, "result": out}
+        except Exception:
+            continue
+
+    return {"ok": False, "skipped": True, "reason": "next_actions_service_unavailable"}
+
+
 def _run_post_import_pipeline(
     db: Session,
     *,
@@ -466,19 +497,24 @@ def _run_post_import_pipeline(
         "evaluate_ok": False,
         "state_ok": False,
         "workflow_ok": False,
+        "next_actions_ok": False,
+        "partial": False,
         "errors": [],
     }
 
     try:
         from ..services.geo_enrichment import enrich_property_geo
 
-        geo_res = enrich_property_geo(
-            db,
-            org_id=int(org_id),
-            property_id=int(property_id),
-            google_api_key=get_google_maps_api_key(),
-            force=False,
+        geo_res = _run_maybe_async(
+            enrich_property_geo(
+                db,
+                org_id=int(org_id),
+                property_id=int(property_id),
+                google_api_key=get_google_maps_api_key(),
+                force=False,
+            )
         )
+        geo_res = geo_res if isinstance(geo_res, dict) else {"ok": bool(geo_res)}
         result["geo_ok"] = bool(geo_res.get("ok"))
         result["geo"] = geo_res
     except Exception as e:
@@ -497,6 +533,24 @@ def _run_post_import_pipeline(
 
     try:
         from ..routers.evaluate import evaluate_property_core
+        from ..routers.rent import explain_rent
+
+        principal_shim = type("PrincipalShim", (), {"org_id": int(org_id), "user_id": None})()
+
+        explain_res = explain_rent(
+            property_id=int(property_id),
+            strategy="section8",
+            payment_standard_pct=None,
+            persist=True,
+            db=db,
+            p=principal_shim,
+        )
+        result["rent_explain"] = {
+            "run_id": getattr(explain_res, "run_id", None),
+            "rent_used": getattr(explain_res, "rent_used", None),
+            "approved_rent_ceiling": getattr(explain_res, "approved_rent_ceiling", None),
+            "cap_reason": getattr(explain_res, "cap_reason", None),
+        }
 
         eval_res = evaluate_property_core(
             db,
@@ -526,6 +580,25 @@ def _run_post_import_pipeline(
     except Exception as e:
         result["errors"].append(f"workflow:{type(e).__name__}:{e}")
 
+    try:
+        next_actions_res = _seed_next_actions_if_available(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+        result["next_actions_ok"] = bool(next_actions_res.get("ok"))
+        result["next_actions"] = next_actions_res
+    except Exception as e:
+        result["errors"].append(f"next_actions:{type(e).__name__}:{e}")
+
+    oks = [
+        bool(result.get("geo_ok")),
+        bool(result.get("rent_ok")),
+        bool(result.get("evaluate_ok")),
+        bool(result.get("state_ok")),
+        bool(result.get("workflow_ok")),
+    ]
+    result["partial"] = any(oks) and not all(oks)
     return result
 
 
@@ -542,6 +615,10 @@ def _apply_pipeline_summary(summary: dict[str, Any], pipeline_res: dict[str, Any
         summary["state_synced"] += 1
     if pipeline_res.get("workflow_ok"):
         summary["workflow_synced"] += 1
+    if pipeline_res.get("next_actions_ok"):
+        summary["next_actions_seeded"] += 1
+    if pipeline_res.get("partial"):
+        summary["post_import_partials"] += 1
 
     errors = list(pipeline_res.get("errors") or [])
     if errors:
@@ -585,7 +662,9 @@ def execute_source_sync(
         "evaluated": 0,
         "state_synced": 0,
         "workflow_synced": 0,
+        "next_actions_seeded": 0,
         "post_import_failures": 0,
+        "post_import_partials": 0,
         "post_import_errors": [],
         "filter_reason_counts": {},
         "provider_pages_scanned": 0,

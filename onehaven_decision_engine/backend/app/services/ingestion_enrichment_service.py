@@ -98,6 +98,7 @@ def build_post_import_actions() -> list[dict[str, str]]:
         {"key": "rent", "label": "Refresh rent assumptions"},
         {"key": "evaluate", "label": "Run underwriting"},
         {"key": "workflow", "label": "Refresh workflow gates"},
+        {"key": "next_actions", "label": "Seed next actions"},
     ]
 
 
@@ -126,6 +127,28 @@ def _safe_float(value: Any) -> Optional[float]:
         return float(value)
     except Exception:
         return None
+
+
+def _compute_approved_ceiling(
+    *,
+    section8_fmr: Any,
+    rent_reasonableness_comp: Any,
+    approved_rent_ceiling: Any,
+) -> Optional[float]:
+    approved_existing = _safe_float(approved_rent_ceiling)
+    if approved_existing is not None and approved_existing > 0:
+        return approved_existing
+
+    fmr_existing = _safe_float(section8_fmr)
+    rr_existing = _safe_float(rent_reasonableness_comp)
+
+    approved_candidates: list[float] = []
+    if rr_existing is not None and rr_existing > 0:
+        approved_candidates.append(rr_existing)
+    if fmr_existing is not None and fmr_existing > 0:
+        approved_candidates.append(fmr_existing)
+
+    return min(approved_candidates) if approved_candidates else None
 
 
 def refresh_property_rent_assumptions(
@@ -201,25 +224,24 @@ def refresh_property_rent_assumptions(
         )
         created = True
 
+    updated_fields: list[str] = []
+
     if market_rent_estimate is not None:
         existing.market_rent_estimate = float(market_rent_estimate)
+        updated_fields.append("market_rent_estimate")
 
     if hasattr(existing, "rent_reasonableness_comp") and rent_reasonableness_comp is not None:
         existing.rent_reasonableness_comp = float(rent_reasonableness_comp)
+        updated_fields.append("rent_reasonableness_comp")
 
-    approved_existing = _safe_float(getattr(existing, "approved_rent_ceiling", None))
-    fmr_existing = _safe_float(getattr(existing, "section8_fmr", None))
-    rr_existing = _safe_float(getattr(existing, "rent_reasonableness_comp", None))
-
-    approved_candidates: list[float] = []
-    if rr_existing is not None and rr_existing > 0:
-        approved_candidates.append(rr_existing)
-    if fmr_existing is not None and fmr_existing > 0:
-        approved_candidates.append(fmr_existing)
-
-    computed_ceiling = min(approved_candidates) if approved_candidates else None
-    if approved_existing is None and computed_ceiling is not None:
+    computed_ceiling = _compute_approved_ceiling(
+        section8_fmr=getattr(existing, "section8_fmr", None),
+        rent_reasonableness_comp=getattr(existing, "rent_reasonableness_comp", None),
+        approved_rent_ceiling=getattr(existing, "approved_rent_ceiling", None),
+    )
+    if _safe_float(getattr(existing, "approved_rent_ceiling", None)) is None and computed_ceiling is not None:
         existing.approved_rent_ceiling = float(computed_ceiling)
+        updated_fields.append("approved_rent_ceiling")
 
     db.add(existing)
     db.commit()
@@ -229,6 +251,7 @@ def refresh_property_rent_assumptions(
         "ok": True,
         "created": created,
         "property_id": int(property_id),
+        "updated_fields": updated_fields,
         "market_rent_estimate": _safe_float(getattr(existing, "market_rent_estimate", None)),
         "rent_reasonableness_comp": _safe_float(getattr(existing, "rent_reasonableness_comp", None))
         if hasattr(existing, "rent_reasonableness_comp")

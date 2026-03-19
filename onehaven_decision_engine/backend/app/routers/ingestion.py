@@ -81,57 +81,6 @@ def _normalize_price_buckets(value: Any) -> list[list[float]] | None:
         except Exception:
             continue
 
-        pair: list[float] = []
-        if lo is None or hi is None:
-            continue
-        if lo > hi:
-            raise ValueError("Each price bucket must have min <= max")
-        pair = [lo, hi]
-        out.append(pair)
-
-    return out or None
-
-
-def _normalize_zip_codes(value: Any) -> list[str] | None:
-    if value is None:
-        return None
-
-    raw_list: list[str] = []
-
-    if isinstance(value, str):
-        raw_list = [x.strip() for x in value.split(",") if x.strip()]
-    elif isinstance(value, list):
-        for item in value:
-            s = str(item or "").strip()
-            if s:
-                raw_list.append(s)
-
-    out: list[str] = []
-    seen: set[str] = set()
-    for z in raw_list:
-        if z not in seen:
-            out.append(z)
-            seen.add(z)
-
-    return out or None
-
-
-def _normalize_price_buckets(value: Any) -> list[list[float]] | None:
-    if value is None:
-        return None
-    if not isinstance(value, list):
-        return None
-
-    out: list[list[float]] = []
-    for item in value:
-        if not isinstance(item, (list, tuple)) or len(item) != 2:
-            continue
-        try:
-            lo = float(item[0]) if item[0] is not None else None
-            hi = float(item[1]) if item[1] is not None else None
-        except Exception:
-            continue
-
         if lo is None or hi is None:
             continue
         if lo > hi:
@@ -140,6 +89,50 @@ def _normalize_price_buckets(value: Any) -> list[list[float]] | None:
         out.append([lo, hi])
 
     return out or None
+
+
+def _pipeline_outcome(summary_json: dict[str, Any] | None) -> dict[str, Any]:
+    summary = dict(summary_json or {})
+    return {
+        "records_seen": int(summary.get("records_seen", 0) or 0),
+        "records_imported": int(summary.get("records_imported", 0) or 0),
+        "properties_created": int(summary.get("properties_created", 0) or 0),
+        "properties_updated": int(summary.get("properties_updated", 0) or 0),
+        "deals_created": int(summary.get("deals_created", 0) or 0),
+        "deals_updated": int(summary.get("deals_updated", 0) or 0),
+        "rent_rows_upserted": int(summary.get("rent_rows_upserted", 0) or 0),
+        "photos_upserted": int(summary.get("photos_upserted", 0) or 0),
+        "duplicates_skipped": int(summary.get("duplicates_skipped", 0) or 0),
+        "invalid_rows": int(summary.get("invalid_rows", 0) or 0),
+        "filtered_out": int(summary.get("filtered_out", 0) or 0),
+        "enrichments_completed": {
+            "geo": int(summary.get("geo_enriched", 0) or 0),
+            "rent": int(summary.get("rent_refreshed", 0) or 0),
+        },
+        "evaluations_completed": int(summary.get("evaluated", 0) or 0),
+        "workflow": {
+            "state_synced": int(summary.get("state_synced", 0) or 0),
+            "workflow_synced": int(summary.get("workflow_synced", 0) or 0),
+            "next_actions_seeded": int(summary.get("next_actions_seeded", 0) or 0),
+        },
+        "failures": int(summary.get("post_import_failures", 0) or 0),
+        "partials": int(summary.get("post_import_partials", 0) or 0),
+        "errors": list(summary.get("post_import_errors") or []),
+        "filter_reason_counts": dict(summary.get("filter_reason_counts") or {}),
+    }
+
+
+def _run_response(row: IngestionRun) -> dict[str, Any]:
+    summary = dict(getattr(row, "summary_json", None) or {})
+    return {
+        "ok": True,
+        "run_id": getattr(row, "id", None),
+        "status": getattr(row, "status", None),
+        "source_id": getattr(row, "source_id", None),
+        "trigger_type": getattr(row, "trigger_type", None),
+        "summary_json": summary,
+        "pipeline_outcome": _pipeline_outcome(summary),
+    }
 
 
 class IngestionSyncLaunchRequest(BaseModel):
@@ -272,17 +265,18 @@ def sync_now(
             trigger_type=trigger_type,
             runtime_config=runtime_config,
         )
-        return {
-            "ok": True,
-            "queued": False,
-            "run_id": getattr(run, "id", None),
-            "status": getattr(run, "status", None),
-            "summary_json": getattr(run, "summary_json", None),
-            "source_id": row.id,
-        }
+        out = _run_response(run)
+        out["queued"] = False
+        return out
 
     job = sync_source_task.delay(p.org_id, row.id, trigger_type, runtime_config)
-    return {"ok": True, "queued": True, "task_id": job.id, "source_id": row.id}
+    return {
+        "ok": True,
+        "queued": True,
+        "task_id": job.id,
+        "source_id": row.id,
+        "runtime_config": runtime_config,
+    }
 
 
 @router.post("/sync-defaults", response_model=dict)
@@ -309,21 +303,14 @@ def sync_default_sources_now(
                 trigger_type="manual",
                 runtime_config=runtime,
             )
-            runs.append(
-                {
-                    "source_id": int(row.id),
-                    "run_id": getattr(run, "id", None),
-                    "status": getattr(run, "status", None),
-                    "summary_json": getattr(run, "summary_json", None),
-                }
-            )
+            runs.append(_run_response(run))
         return {"ok": True, "queued": False, "runs": runs}
 
     queued: list[int] = []
     for row in rows:
         sync_source_task.delay(int(p.org_id), int(row.id), "manual", runtime)
         queued.append(int(row.id))
-    return {"ok": True, "queued": len(queued), "source_ids": queued}
+    return {"ok": True, "queued": len(queued), "source_ids": queued, "runtime_config": runtime}
 
 
 @router.post("/sync-due", response_model=dict)
@@ -349,6 +336,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db), p=Depends(get_princip
     if not row or int(row.org_id) != int(p.org_id):
         raise HTTPException(status_code=404, detail="Run not found")
 
+    summary = dict(row.summary_json or {})
     return {
         "id": row.id,
         "source_id": row.source_id,
@@ -369,7 +357,8 @@ def run_detail(run_id: int, db: Session = Depends(get_db), p=Depends(get_princip
         "retry_count": row.retry_count,
         "error_summary": row.error_summary,
         "error_json": row.error_json,
-        "summary_json": row.summary_json,
+        "summary_json": summary,
+        "pipeline_outcome": _pipeline_outcome(summary),
     }
 
 
@@ -397,9 +386,5 @@ async def webhook_ingest(
     db.refresh(source)
 
     run = execute_source_sync(db, org_id=int(source.org_id), source=source, trigger_type="webhook")
-    return {
-        "ok": True,
-        "run_id": run.id,
-        "status": run.status,
-        "summary_json": getattr(run, "summary_json", None),
-    }
+    out = _run_response(run)
+    return out

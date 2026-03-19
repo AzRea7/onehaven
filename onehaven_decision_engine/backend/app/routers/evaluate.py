@@ -3,19 +3,20 @@ from __future__ import annotations
 import json
 from typing import Optional, Tuple, List, Any
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, desc
+from fastapi import APIRouter, Body, Depends, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule, RentExplainRun
-from ..schemas import BatchEvalOut, UnderwritingResultOut
-from ..domain.decision_engine import score_and_decide
-from ..domain.underwriting import underwrite
-from ..domain.jurisdiction_scoring import compute_friction
-from ..domain.events import emit_workflow_event
 from ..config import settings
+from ..db import get_db
+from ..domain.decision_engine import score_and_decide
+from ..domain.events import emit_workflow_event
+from ..domain.jurisdiction_scoring import compute_friction
+from ..domain.underwriting import underwrite
+from ..models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule
+from ..schemas import BatchEvalOut, UnderwritingResultOut
 
 from .rent import explain_rent
 
@@ -25,6 +26,13 @@ router = APIRouter(prefix="/evaluate", tags=["evaluate"])
 _STRONG_DSCR = 1.30
 _STRONG_CASHFLOW = 400.0
 _MONEY_TOL = 2.0
+
+
+class EvaluatePropertiesIn(BaseModel):
+    property_ids: list[int] = Field(default_factory=list)
+    strategy: Optional[str] = None
+    payment_standard_pct: float | None = None
+    explain_rent_first: bool = True
 
 
 def _to_pos_float(v: object) -> Optional[float]:
@@ -101,7 +109,8 @@ def _rent_used_for_underwriting(
 
     market = _to_pos_float(getattr(ra, "market_rent_estimate", None)) if ra is not None else None
     computed_ceiling, cap_reason, fmr_adjusted = _ceiling_and_reason(
-        ra, payment_standard_pct=float(payment_standard_pct)
+        ra,
+        payment_standard_pct=float(payment_standard_pct),
     )
 
     if strategy == "market":
@@ -429,6 +438,102 @@ def evaluate_property_core(
     }
 
 
+@router.post("/properties", response_model=dict)
+def evaluate_properties(
+    payload: EvaluatePropertiesIn = Body(...),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    seen: set[int] = set()
+    property_ids: list[int] = []
+    for pid in payload.property_ids:
+        if int(pid) in seen:
+            continue
+        seen.add(int(pid))
+        property_ids.append(int(pid))
+
+    ps_default = getattr(settings, "default_payment_standard_pct", None)
+    if ps_default is None:
+        ps_default = getattr(settings, "payment_standard_pct", 1.0)
+    pct = float(payload.payment_standard_pct) if payload.payment_standard_pct is not None else float(ps_default)
+
+    pass_count = 0
+    review_count = 0
+    reject_count = 0
+    errors: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+
+    for pid in property_ids:
+        try:
+            deal = db.scalar(
+                select(Deal)
+                .where(Deal.property_id == int(pid), Deal.org_id == principal.org_id)
+                .order_by(desc(Deal.id))
+            )
+            if deal is None:
+                errors.append({"property_id": int(pid), "error": "deal_not_found"})
+                continue
+
+            deal_strategy = _norm_strategy(payload.strategy or getattr(deal, "strategy", None) or "section8")
+
+            if payload.explain_rent_first:
+                explain_rent(
+                    property_id=int(pid),
+                    strategy=deal_strategy,
+                    payment_standard_pct=float(pct),
+                    persist=True,
+                    db=db,
+                    p=principal,
+                )
+
+            res = evaluate_property_core(
+                db,
+                org_id=int(principal.org_id),
+                property_id=int(pid),
+                strategy=deal_strategy,
+                payment_standard_pct=float(pct),
+                actor_user_id=getattr(principal, "user_id", None),
+                emit_events=True,
+                commit=True,
+            )
+            if not res.get("ok"):
+                errors.append({"property_id": int(pid), "error": res.get("detail")})
+                continue
+
+            if res["decision"] == "PASS":
+                pass_count += 1
+            elif res["decision"] == "REVIEW":
+                review_count += 1
+            else:
+                reject_count += 1
+
+            results.append(
+                {
+                    "property_id": int(pid),
+                    "deal_id": res["deal_id"],
+                    "decision": res["decision"],
+                    "score": res["score"],
+                    "result": UnderwritingResultOut.model_validate(res["result"]),
+                }
+            )
+        except Exception as e:
+            db.rollback()
+            errors.append({"property_id": int(pid), "error": f"{type(e).__name__}: {e}"})
+
+    return {
+        "ok": True,
+        "attempted": len(property_ids),
+        "evaluated": len(results),
+        "property_ids": property_ids,
+        "pass_count": pass_count,
+        "review_count": review_count,
+        "reject_count": reject_count,
+        "results": results,
+        "errors": errors,
+    }
+
+
+# Legacy compatibility route.
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
 def evaluate_snapshot(
     snapshot_id: int,
@@ -449,81 +554,51 @@ def evaluate_snapshot(
         .order_by(desc(Deal.id))
     ).all()
 
-    pass_count = 0
-    review_count = 0
-    reject_count = 0
-    errors: list[str] = []
-
+    property_ids: list[int] = []
+    seen: set[int] = set()
     for d in deals:
-        try:
-            p = db.scalar(
-                select(Property)
-                .where(Property.id == d.property_id)
-                .where(Property.org_id == principal.org_id)
-            )
-            if not p:
-                errors.append(f"deal_id={d.id}: missing/unauthorized property_id={d.property_id}")
-                db.rollback()
-                continue
+        pid = int(d.property_id)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        property_ids.append(pid)
 
-            deal_strategy = _norm_strategy(strategy or getattr(d, "strategy", None) or "section8")
-
-            _ = explain_rent(
-                property_id=int(p.id),
-                strategy=deal_strategy,
-                payment_standard_pct=float(ps),
-                persist=True,
-                db=db,
-                p=principal,
-            )
-
-            res = evaluate_property_core(
-                db,
-                org_id=int(principal.org_id),
-                property_id=int(p.id),
-                strategy=deal_strategy,
-                payment_standard_pct=float(ps),
-                actor_user_id=getattr(principal, "user_id", None),
-                emit_events=True,
-                commit=True,
-            )
-            if not res.get("ok"):
-                errors.append(f"deal_id={d.id}: {res.get('detail')}")
-                continue
-
-            if res["decision"] == "PASS":
-                pass_count += 1
-            elif res["decision"] == "REVIEW":
-                review_count += 1
-            else:
-                reject_count += 1
-
-        except Exception as e:
-            db.rollback()
-            errors.append(f"deal_id={getattr(d, 'id', '?')}: {type(e).__name__}: {e}")
-
-    emit_workflow_event(
-        db,
-        org_id=principal.org_id,
-        actor_user_id=principal.user_id,
-        event_type="snapshot_evaluated",
-        payload={
-            "snapshot_id": snapshot_id,
-            "total": len(deals),
-            "pass": pass_count,
-            "review": review_count,
-            "reject": reject_count,
-        },
+    res = evaluate_properties(
+        payload=EvaluatePropertiesIn(
+            property_ids=property_ids,
+            strategy=strategy,
+            payment_standard_pct=ps,
+            explain_rent_first=True,
+        ),
+        db=db,
+        principal=principal,
     )
-    db.commit()
+
+    try:
+        emit_workflow_event(
+            db,
+            org_id=principal.org_id,
+            actor_user_id=principal.user_id,
+            event_type="snapshot_evaluated",
+            payload={
+                "snapshot_id": snapshot_id,
+                "total": len(deals),
+                "pass": int(res.get("pass_count", 0) or 0),
+                "review": int(res.get("review_count", 0) or 0),
+                "reject": int(res.get("reject_count", 0) or 0),
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
 
     return BatchEvalOut(
         snapshot_id=snapshot_id,
         total_deals=len(deals),
-        pass_count=pass_count,
-        review_count=review_count,
-        reject_count=reject_count,
-        errors=errors,
+        pass_count=int(res.get("pass_count", 0) or 0),
+        review_count=int(res.get("review_count", 0) or 0),
+        reject_count=int(res.get("reject_count", 0) or 0),
+        errors=[str(x) for x in list(res.get("errors") or [])],
     )
 
 
@@ -547,7 +622,8 @@ def evaluate_run(
 @router.get("/results", response_model=List[UnderwritingResultOut])
 def evaluate_results(
     decision: Optional[str] = Query(None, description="PASS|REVIEW|REJECT"),
-    snapshot_id: Optional[int] = Query(None),
+    property_ids: Optional[str] = Query(None, description="Comma-separated property ids"),
+    snapshot_id: Optional[int] = Query(None, description="Legacy filter"),
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
@@ -563,6 +639,20 @@ def evaluate_results(
 
     if snapshot_id is not None:
         q = q.where(Deal.snapshot_id == snapshot_id)
+
+    if property_ids:
+        ids: list[int] = []
+        for x in property_ids.split(","):
+            s = str(x or "").strip()
+            if not s:
+                continue
+            try:
+                ids.append(int(s))
+            except Exception:
+                continue
+        if ids:
+            q = q.where(Property.id.in_(ids))
+
     if decision is not None:
         q = q.where(UnderwritingResult.decision == decision)
 
@@ -580,15 +670,41 @@ def evaluate_property(
     property_id: int,
     strategy: Optional[str] = Query(default=None, description="section8|market (optional override)"),
     payment_standard_pct: float | None = Query(default=None, description="Override. Default from config."),
+    explain_rent_first: bool = Query(default=True),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
+    deal = db.scalar(
+        select(Deal)
+        .where(Deal.property_id == int(property_id), Deal.org_id == int(principal.org_id))
+        .order_by(desc(Deal.id))
+    )
+    if deal is None:
+        return {"ok": False, "detail": "Deal not found for property"}
+
+    ps_default = getattr(settings, "default_payment_standard_pct", None)
+    if ps_default is None:
+        ps_default = getattr(settings, "payment_standard_pct", 1.0)
+    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(ps_default)
+
+    deal_strategy = _norm_strategy(strategy or getattr(deal, "strategy", None) or "section8")
+
+    if explain_rent_first:
+        explain_rent(
+            property_id=int(property_id),
+            strategy=deal_strategy,
+            payment_standard_pct=float(pct),
+            persist=True,
+            db=db,
+            p=principal,
+        )
+
     res = evaluate_property_core(
         db,
         org_id=int(principal.org_id),
         property_id=int(property_id),
-        strategy=strategy,
-        payment_standard_pct=payment_standard_pct,
+        strategy=deal_strategy,
+        payment_standard_pct=float(pct),
         actor_user_id=getattr(principal, "user_id", None),
         emit_events=True,
         commit=True,
@@ -601,6 +717,7 @@ def evaluate_property(
         "property_id": int(property_id),
         "deal_id": res["deal_id"],
         "decision": res["decision"],
+        "score": res["score"],
         "fallback_used": res["fallback_used"],
         "computed_ceiling": res["computed_ceiling"],
         "cap_reason": res["cap_reason"],

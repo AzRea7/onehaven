@@ -22,13 +22,13 @@ from ..domain.operating_truth import (
     enforce_deal_truth,
     enforce_property_truth,
 )
-from ..models import Deal, ImportSnapshot, Property, RentAssumption
+from ..models import Deal, ImportSnapshot, IngestionRun, Property, RentAssumption
 from ..schemas import ImportErrorRow, ImportResultOut, IngestionOverviewOut
 from ..services.geo_enrichment import enrich_property_geo
+from ..services.ingestion_run_service import get_ingestion_overview
+from ..services.ingestion_source_service import ensure_default_manual_sources
 from ..services.property_photo_service import upsert_zillow_photos
 from ..services.zillow_photo_source import extract_zillow_photo_urls
-from ..services.ingestion_source_service import ensure_default_manual_sources
-from ..services.ingestion_run_service import get_ingestion_overview
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -75,7 +75,6 @@ def _maybe_geo_enrich_property(
             )
         )
     except RuntimeError:
-        # Event loop weirdness during import should not nuke the entire import.
         pass
     except Exception:
         pass
@@ -404,6 +403,47 @@ def _import_rows(
         errors=errors,
     )
 
+
+def _build_run_status(run: IngestionRun) -> dict:
+    summary = dict(run.summary_json or {})
+    return {
+        "mode": "ingestion_run",
+        "run_id": int(run.id),
+        "exists": True,
+        "org_id": run.org_id,
+        "source_id": run.source_id,
+        "trigger_type": run.trigger_type,
+        "status": run.status,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "records_seen": int(getattr(run, "records_seen", 0) or 0),
+        "records_imported": int(getattr(run, "records_imported", 0) or 0),
+        "properties_created": int(getattr(run, "properties_created", 0) or 0),
+        "properties_updated": int(getattr(run, "properties_updated", 0) or 0),
+        "deals_created": int(getattr(run, "deals_created", 0) or 0),
+        "deals_updated": int(getattr(run, "deals_updated", 0) or 0),
+        "rent_rows_upserted": int(getattr(run, "rent_rows_upserted", 0) or 0),
+        "photos_upserted": int(getattr(run, "photos_upserted", 0) or 0),
+        "duplicates_skipped": int(getattr(run, "duplicates_skipped", 0) or 0),
+        "invalid_rows": int(getattr(run, "invalid_rows", 0) or 0),
+        "pipeline": {
+            "attempted": int(summary.get("post_import_pipeline_attempted", 0) or 0),
+            "geo_enriched": int(summary.get("geo_enriched", 0) or 0),
+            "rent_refreshed": int(summary.get("rent_refreshed", 0) or 0),
+            "evaluated": int(summary.get("evaluated", 0) or 0),
+            "state_synced": int(summary.get("state_synced", 0) or 0),
+            "workflow_synced": int(summary.get("workflow_synced", 0) or 0),
+            "next_actions_seeded": int(summary.get("next_actions_seeded", 0) or 0),
+            "failures": int(summary.get("post_import_failures", 0) or 0),
+            "partials": int(summary.get("post_import_partials", 0) or 0),
+            "errors": list(summary.get("post_import_errors") or []),
+        },
+        "summary_json": summary,
+        "error_summary": run.error_summary,
+        "error_json": run.error_json,
+    }
+
+
 @router.get("/overview", response_model=IngestionOverviewOut)
 def imports_overview(
     db: Session = Depends(get_db),
@@ -424,6 +464,7 @@ def bootstrap_import_sources(
         "count": len(rows),
         "sources": [{"id": r.id, "provider": r.provider, "slug": r.slug} for r in rows],
     }
+
 
 @router.post("/zillow", response_model=ImportResultOut)
 def import_zillow(
@@ -449,39 +490,57 @@ def import_investorlift(
 
 @router.get("/status")
 def import_status(
-    snapshot_id: int = Query(...),
+    run_id: int | None = Query(default=None),
+    snapshot_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    snap = db.scalar(
-        select(ImportSnapshot)
-        .where(ImportSnapshot.id == snapshot_id)
-        .where(ImportSnapshot.org_id == principal.org_id)
-    )
-    if snap is None:
-        return {"snapshot_id": snapshot_id, "exists": False}
+    if run_id is not None:
+        run = db.scalar(
+            select(IngestionRun)
+            .where(IngestionRun.id == int(run_id))
+            .where(IngestionRun.org_id == principal.org_id)
+        )
+        if run is None:
+            return {"mode": "ingestion_run", "run_id": int(run_id), "exists": False}
+        return _build_run_status(run)
 
-    deal_count = db.scalar(
-        select(func.count())
-        .select_from(Deal)
-        .where(Deal.snapshot_id == snapshot_id)
-        .where(Deal.org_id == principal.org_id)
-    ) or 0
+    if snapshot_id is not None:
+        snap = db.scalar(
+            select(ImportSnapshot)
+            .where(ImportSnapshot.id == snapshot_id)
+            .where(ImportSnapshot.org_id == principal.org_id)
+        )
+        if snap is None:
+            return {"mode": "legacy_snapshot", "snapshot_id": snapshot_id, "exists": False}
 
-    distinct_props = db.scalar(
-        select(func.count(func.distinct(Deal.property_id)))
-        .select_from(Deal)
-        .where(Deal.snapshot_id == snapshot_id)
-        .where(Deal.org_id == principal.org_id)
-    ) or 0
+        deal_count = db.scalar(
+            select(func.count())
+            .select_from(Deal)
+            .where(Deal.snapshot_id == snapshot_id)
+            .where(Deal.org_id == principal.org_id)
+        ) or 0
+
+        distinct_props = db.scalar(
+            select(func.count(func.distinct(Deal.property_id)))
+            .select_from(Deal)
+            .where(Deal.snapshot_id == snapshot_id)
+            .where(Deal.org_id == principal.org_id)
+        ) or 0
+
+        return {
+            "mode": "legacy_snapshot",
+            "snapshot_id": snapshot_id,
+            "exists": True,
+            "org_id": snap.org_id,
+            "source": snap.source,
+            "notes": snap.notes,
+            "created_at": snap.created_at,
+            "deal_count": int(deal_count),
+            "distinct_property_count": int(distinct_props),
+        }
 
     return {
-      "snapshot_id": snapshot_id,
-      "exists": True,
-      "org_id": snap.org_id,
-      "source": snap.source,
-      "notes": snap.notes,
-      "created_at": snap.created_at,
-      "deal_count": int(deal_count),
-      "distinct_property_count": int(distinct_props),
+        "exists": False,
+        "detail": "Provide run_id for ingestion-run status or snapshot_id for legacy manual CSV import status.",
     }
