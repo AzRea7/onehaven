@@ -1,5 +1,12 @@
 import React from "react";
-import { Bath, BedDouble, Building2, Filter, Play } from "lucide-react";
+import {
+  Bath,
+  BedDouble,
+  Building2,
+  Calendar,
+  Filter,
+  Play,
+} from "lucide-react";
 import GlassCard from "./GlassCard";
 import { ingestionClient, IngestionSource } from "../lib/ingestionClient";
 
@@ -67,17 +74,54 @@ function toNumberOrUndefined(value: string) {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function findBestSource(
+  rows: IngestionSource[],
+  county: string,
+  city: string,
+): IngestionSource | undefined {
+  const enabled = rows.filter((r) => r.is_enabled);
+
+  const normalizedCounty = county.trim().toLowerCase();
+  const normalizedCity = city.trim().toLowerCase();
+
+  if (normalizedCounty) {
+    const byCounty = enabled.find((row) => {
+      const cfg = row.config_json || {};
+      return (
+        String(cfg.county || "")
+          .trim()
+          .toLowerCase() === normalizedCounty
+      );
+    });
+    if (byCounty) return byCounty;
+  }
+
+  if (normalizedCity) {
+    const byCity = enabled.find((row) => {
+      const cfg = row.config_json || {};
+      return (
+        String(cfg.city || "")
+          .trim()
+          .toLowerCase() === normalizedCity
+      );
+    });
+    if (byCity) return byCity;
+  }
+
+  return enabled[0] || rows[0];
+}
+
 export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
   const [sources, setSources] = React.useState<IngestionSource[]>([]);
   const [loadingSources, setLoadingSources] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
+  const [dailyRefreshing, setDailyRefreshing] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  const [sourceId, setSourceId] = React.useState<number | "">("");
   const [state, setState] = React.useState("MI");
-  const [county, setCounty] = React.useState("");
-  const [city, setCity] = React.useState("");
+  const [county, setCounty] = React.useState("wayne");
+  const [city, setCity] = React.useState("Detroit");
   const [minPrice, setMinPrice] = React.useState("");
   const [maxPrice, setMaxPrice] = React.useState("");
   const [minBedrooms, setMinBedrooms] = React.useState("");
@@ -90,14 +134,9 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
     try {
       const rows = await ingestionClient.listSources();
       setSources(rows);
-
-      setSourceId((prev) => {
-        if (prev !== "") return prev;
-        const connected = rows.find((row) => row.is_enabled);
-        return connected?.id ?? rows[0]?.id ?? "";
-      });
+      setError(null);
     } catch (err: any) {
-      setError(err?.message || "Could not load ingestion sources");
+      setError(err?.message || "Could not load intake sources");
     } finally {
       setLoadingSources(false);
     }
@@ -109,13 +148,16 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
 
   React.useEffect(() => {
     const cityOptions = COUNTY_TO_CITIES[county.toLowerCase()] || [];
-    if (city && cityOptions.length > 0 && !cityOptions.includes(city)) {
-      setCity("");
+    if (cityOptions.length > 0 && !cityOptions.includes(city)) {
+      setCity(cityOptions[0] || "");
     }
   }, [county, city]);
 
-  const selectedSource = sources.find((row) => row.id === sourceId);
   const cityOptions = COUNTY_TO_CITIES[county.toLowerCase()] || [];
+  const selectedSource = React.useMemo(
+    () => findBestSource(sources, county, city),
+    [sources, county, city],
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -124,12 +166,8 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
     setMessage(null);
 
     try {
-      if (!sourceId) {
-        throw new Error("Choose an ingestion source first.");
-      }
-
-      if (!city) {
-        throw new Error("Choose a city before launching intake.");
+      if (!selectedSource?.id) {
+        throw new Error("No intake source is ready for this market yet.");
       }
 
       const payload = {
@@ -145,7 +183,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
         limit: parseLimit(limit),
       };
 
-      await ingestionClient.syncSource(Number(sourceId), payload);
+      await ingestionClient.syncSource(Number(selectedSource.id), payload);
 
       setMessage(
         `Queued intake for ${[payload.city, payload.county, payload.state]
@@ -154,16 +192,32 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
       );
       onQueued?.();
     } catch (err: any) {
-      setError(err?.message || "Failed to queue ingestion run");
+      setError(err?.message || "Failed to queue intake run");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDailyRefresh() {
+    setDailyRefreshing(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      await ingestionClient.queueDailyRefresh();
+      setMessage("Queued a full daily market refresh.");
+      onQueued?.();
+    } catch (err: any) {
+      setError(err?.message || "Failed to queue daily refresh");
+    } finally {
+      setDailyRefreshing(false);
     }
   }
 
   return (
     <GlassCard className="p-4">
       <form onSubmit={handleSubmit} className="space-y-5">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_1fr]">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <div className="mb-3 text-sm font-medium text-white">
               Intake region
@@ -172,34 +226,13 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <label className="block">
                 <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  Source
-                </div>
-                <select
-                  value={sourceId}
-                  onChange={(e) =>
-                    setSourceId(e.target.value ? Number(e.target.value) : "")
-                  }
-                  disabled={loadingSources || submitting}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                >
-                  <option value="">Choose a source</option>
-                  {sources.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.display_name} · {row.status}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
                   State
                 </div>
                 <input
                   value={state}
                   onChange={(e) => setState(e.target.value.toUpperCase())}
                   maxLength={2}
-                  disabled={submitting}
+                  disabled={submitting || dailyRefreshing}
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
                   placeholder="MI"
                 />
@@ -212,17 +245,16 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                 <select
                   value={county}
                   onChange={(e) => setCounty(e.target.value)}
-                  disabled={submitting}
+                  disabled={submitting || dailyRefreshing}
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
                 >
-                  <option value="">Any county</option>
                   <option value="wayne">Wayne County</option>
                   <option value="oakland">Oakland County</option>
                   <option value="macomb">Macomb County</option>
                 </select>
               </label>
 
-              <label className="block">
+              <label className="block md:col-span-2">
                 <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
                   City
                 </div>
@@ -230,10 +262,9 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                   <select
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    disabled={submitting}
+                    disabled={submitting || dailyRefreshing}
                     className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
                   >
-                    <option value="">Choose city</option>
                     {cityOptions.map((item) => (
                       <option key={item} value={item}>
                         {item}
@@ -244,7 +275,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                   <input
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    disabled={submitting}
+                    disabled={submitting || dailyRefreshing}
                     className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
                     placeholder="Detroit"
                   />
@@ -256,7 +287,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
               <Filter className="h-4 w-4 text-neutral-300" />
-              Listing filters
+              Light listing filters
             </div>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -268,7 +299,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                   value={minPrice}
                   onChange={(e) => setMinPrice(e.target.value)}
                   inputMode="numeric"
-                  disabled={submitting}
+                  disabled={submitting || dailyRefreshing}
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
                   placeholder="60000"
                 />
@@ -282,7 +313,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                   value={maxPrice}
                   onChange={(e) => setMaxPrice(e.target.value)}
                   inputMode="numeric"
-                  disabled={submitting}
+                  disabled={submitting || dailyRefreshing}
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
                   placeholder="150000"
                 />
@@ -298,7 +329,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                     value={minBedrooms}
                     onChange={(e) => setMinBedrooms(e.target.value)}
                     inputMode="numeric"
-                    disabled={submitting}
+                    disabled={submitting || dailyRefreshing}
                     className="w-full rounded-xl border border-white/10 bg-black/20 py-2.5 pl-10 pr-3 text-sm text-white outline-none transition focus:border-white/20"
                     placeholder="2"
                   />
@@ -315,7 +346,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                     value={minBathrooms}
                     onChange={(e) => setMinBathrooms(e.target.value)}
                     inputMode="decimal"
-                    disabled={submitting}
+                    disabled={submitting || dailyRefreshing}
                     className="w-full rounded-xl border border-white/10 bg-black/20 py-2.5 pl-10 pr-3 text-sm text-white outline-none transition focus:border-white/20"
                     placeholder="1"
                   />
@@ -329,7 +360,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                 <select
                   value={propertyType}
                   onChange={(e) => setPropertyType(e.target.value)}
-                  disabled={submitting}
+                  disabled={submitting || dailyRefreshing}
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
                 >
                   {PROPERTY_TYPES.map((item) => (
@@ -351,7 +382,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
                   }
                   onBlur={() => setLimit(String(parseLimit(limit)))}
                   inputMode="numeric"
-                  disabled={submitting}
+                  disabled={submitting || dailyRefreshing}
                   className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
                   placeholder="100"
                 />
@@ -363,7 +394,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
         {selectedSource ? (
           <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-300">
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              Source: {selectedSource.display_name}
+              Market source: {selectedSource.display_name}
             </span>
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
               Provider: {selectedSource.provider}
@@ -396,17 +427,30 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
           <div className="flex items-center gap-2 text-sm text-neutral-400">
             <Building2 className="h-4 w-4" />
-            New listings only. Existing external matches are skipped.
+            New listings only. Existing external matches are skipped
+            automatically.
           </div>
 
-          <button
-            type="submit"
-            disabled={submitting || loadingSources || !sourceId}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/15 px-5 text-sm font-semibold text-emerald-50 shadow-lg shadow-emerald-900/20 transition hover:border-emerald-400/40 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Play className="h-4 w-4" />
-            {submitting ? "Queueing intake..." : "Run intake"}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleDailyRefresh}
+              disabled={dailyRefreshing || submitting || loadingSources}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Calendar className="h-4 w-4" />
+              {dailyRefreshing ? "Queueing refresh..." : "Daily refresh"}
+            </button>
+
+            <button
+              type="submit"
+              disabled={submitting || loadingSources || !selectedSource?.id}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/15 px-5 text-sm font-semibold text-emerald-50 shadow-lg shadow-emerald-900/20 transition hover:border-emerald-400/40 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Play className="h-4 w-4" />
+              {submitting ? "Queueing intake..." : "Run intake"}
+            </button>
+          </div>
         </div>
       </form>
     </GlassCard>

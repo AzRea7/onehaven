@@ -29,14 +29,56 @@ def _has_rentcast_credentials(payload: dict | None = None) -> bool:
 DEFAULT_SOURCES = [
     {
         "provider": "rentcast",
-        "slug": "rentcast-sale-listings",
-        "display_name": "RentCast Sale Listings",
+        "slug": "rentcast-detroit-sale-listings",
+        "display_name": "RentCast Detroit Sale Listings",
         "source_type": "api",
-        "sync_interval_minutes": 60,
+        "sync_interval_minutes": 1440,
         "config_json": {
             "state": "MI",
             "city": "Detroit",
-            "limit": 50,
+            "property_type": None,
+            "photo_mode": "placeholder_until_connected",
+            "image_backfill_status": "pending",
+        },
+    },
+    {
+        "provider": "rentcast",
+        "slug": "rentcast-wayne-county-sale-listings",
+        "display_name": "RentCast Wayne County Sale Listings",
+        "source_type": "api",
+        "sync_interval_minutes": 1440,
+        "config_json": {
+            "state": "MI",
+            "county": "Wayne",
+            "property_type": None,
+            "photo_mode": "placeholder_until_connected",
+            "image_backfill_status": "pending",
+        },
+    },
+    {
+        "provider": "rentcast",
+        "slug": "rentcast-oakland-county-sale-listings",
+        "display_name": "RentCast Oakland County Sale Listings",
+        "source_type": "api",
+        "sync_interval_minutes": 1440,
+        "config_json": {
+            "state": "MI",
+            "county": "Oakland",
+            "property_type": None,
+            "photo_mode": "placeholder_until_connected",
+            "image_backfill_status": "pending",
+        },
+    },
+    {
+        "provider": "rentcast",
+        "slug": "rentcast-macomb-county-sale-listings",
+        "display_name": "RentCast Macomb County Sale Listings",
+        "source_type": "api",
+        "sync_interval_minutes": 1440,
+        "config_json": {
+            "state": "MI",
+            "county": "Macomb",
+            "property_type": None,
             "photo_mode": "placeholder_until_connected",
             "image_backfill_status": "pending",
         },
@@ -47,7 +89,7 @@ DEFAULT_SOURCES = [
 def compute_next_scheduled_at(source: IngestionSource) -> Optional[datetime]:
     if not source.is_enabled:
         return None
-    mins = int(source.sync_interval_minutes or 60)
+    mins = int(source.sync_interval_minutes or 1440)
     base = source.last_synced_at or _utcnow()
     return base + timedelta(minutes=mins)
 
@@ -150,6 +192,11 @@ def ensure_default_manual_sources(db: Session, *, org_id: int) -> list[Ingestion
                     changed = True
             if changed:
                 existing.config_json = merged_config
+
+            desired_enabled = True
+            if bool(existing.is_enabled) != desired_enabled:
+                existing.is_enabled = desired_enabled
+                changed = True
 
             if existing.status != desired_status:
                 existing.status = desired_status

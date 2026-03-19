@@ -48,6 +48,7 @@ def _safe_int(value: Any) -> int | None:
 def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str, Any]:
     payload = dict(runtime_config or {})
 
+    # keep manual intake simple and avoid over-filtering
     limit = _safe_int(payload.get("limit")) or 100
     payload["limit"] = max(1, limit)
 
@@ -58,7 +59,7 @@ def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str
     for key in ["min_price", "max_price", "min_bedrooms", "min_bathrooms"]:
         payload[key] = _safe_float(payload.get(key))
 
-    # ZIP and address intentionally removed from manual intake flow.
+    # ZIP and address intentionally removed from manual intake flow
     payload.pop("zip_code", None)
     payload.pop("address", None)
 
@@ -157,7 +158,14 @@ def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
     return existing, created
 
 
-def _upsert_deal(db: Session, *, org_id: int, property_id: int, snapshot_id: int | None, payload: dict[str, Any]):
+def _upsert_deal(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    snapshot_id: int | None,
+    payload: dict[str, Any],
+):
     existing = db.scalar(
         select(Deal)
         .where(Deal.org_id == int(org_id), Deal.property_id == int(property_id))
@@ -256,7 +264,7 @@ def _upsert_photos(db: Session, *, org_id: int, property_id: int, provider: str,
 
 
 def _starting_cursor(source, trigger_type: str) -> dict[str, Any]:
-    if trigger_type == "manual":
+    if trigger_type in {"manual", "daily_refresh"}:
         return {"page": 1}
     return dict(source.cursor_json or {})
 
@@ -271,8 +279,8 @@ def _load_rows(
 
     sample_rows = merged_config.get("sample_rows")
     if isinstance(sample_rows, list):
-      rows = [x for x in sample_rows if isinstance(x, dict)]
-      return rows, {"page": 1}
+        rows = [x for x in sample_rows if isinstance(x, dict)]
+        return rows, {"page": 1}
 
     adapter = PROVIDER_ADAPTERS.get(source.provider)
     if adapter is None:
@@ -301,10 +309,16 @@ def _matches_runtime_filters(payload: dict[str, Any], runtime_config: dict[str, 
         return True
 
     state = str(runtime_config.get("state") or "").strip()
+    county = str(runtime_config.get("county") or "").strip()
     city = str(runtime_config.get("city") or "").strip()
     property_type = str(runtime_config.get("property_type") or "").strip()
 
     if state and _norm_text(payload.get("state")) != _norm_text(state):
+        return False
+
+    # county is optional because not every listing row will normalize to county
+    payload_county = _norm_text(payload.get("county"))
+    if county and payload_county and payload_county != _norm_text(county):
         return False
 
     if city and _norm_text(payload.get("city")) != _norm_text(city):
@@ -337,6 +351,38 @@ def _matches_runtime_filters(payload: dict[str, Any], runtime_config: dict[str, 
     return True
 
 
+def _run_post_import_hooks(db: Session, *, org_id: int, property_id: int, deal_id: int | None) -> None:
+    """
+    Tries to advance the imported property automatically through the early
+    pipeline so users do not need to manually click enrich/evaluate actions.
+    This is intentionally best-effort and does not fail the ingestion run.
+    """
+    # geo / enrichment hooks
+    try:
+        from ..services.geo_enrichment import enrich_property_geo
+
+        enrich_property_geo(db, property_id=int(property_id))
+    except Exception:
+        pass
+
+    # property state / stage hooks
+    try:
+        from ..services.property_state_machine import compute_and_persist_stage
+
+        compute_and_persist_stage(db, int(property_id), int(org_id))
+    except Exception:
+        pass
+
+    # underwriting hooks when a service exists and can operate from a deal id
+    if deal_id is not None:
+        try:
+            from ..services.underwriting_service import run_underwriting_for_deal
+
+            run_underwriting_for_deal(db, org_id=int(org_id), deal_id=int(deal_id))
+        except Exception:
+            pass
+
+
 def execute_source_sync(
     db: Session,
     *,
@@ -362,6 +408,7 @@ def execute_source_sync(
         "filtered_out": 0,
         "matched_before_limit": 0,
         "launch": normalized_runtime,
+        "post_import_hooks_attempted": 0,
     }
 
     try:
@@ -374,13 +421,36 @@ def execute_source_sync(
             db.refresh(source)
 
         matched_rows: list[dict[str, Any]] = []
+        seen_external_ids: set[str] = set()
+        seen_fingerprints: set[str] = set()
+
         for raw_row in rows:
             summary["records_seen"] += 1
             payload = canonical_listing_payload(raw_row)
-            if _matches_runtime_filters(payload, normalized_runtime):
-                matched_rows.append(raw_row)
-            else:
+
+            if not _matches_runtime_filters(payload, normalized_runtime):
                 summary["filtered_out"] += 1
+                continue
+
+            if not _is_valid_payload(payload):
+                summary["invalid_rows"] += 1
+                continue
+
+            ext_id = str(payload["external_record_id"])
+            fingerprint = build_property_fingerprint(
+                address=payload["address"],
+                city=payload["city"],
+                state=payload["state"],
+                zip_code=payload["zip"],
+            )
+
+            if ext_id in seen_external_ids or fingerprint in seen_fingerprints:
+                summary["duplicates_skipped"] += 1
+                continue
+
+            seen_external_ids.add(ext_id)
+            seen_fingerprints.add(fingerprint)
+            matched_rows.append(raw_row)
 
         summary["matched_before_limit"] = len(matched_rows)
         capped_rows = matched_rows[: int(normalized_runtime.get("limit") or len(matched_rows) or 100)]
@@ -388,10 +458,6 @@ def execute_source_sync(
         for raw_row in capped_rows:
             payload = canonical_listing_payload(raw_row)
             payload["source"] = source.provider
-
-            if not _is_valid_payload(payload):
-                summary["invalid_rows"] += 1
-                continue
 
             ext_id = payload["external_record_id"]
             existing_link = find_existing_by_external_id(
@@ -454,6 +520,14 @@ def execute_source_sync(
             summary["deals_updated"] += 0 if deal_created else 1
             summary["rent_rows_upserted"] += 1
             summary["photos_upserted"] += photo_count
+
+            _run_post_import_hooks(
+                db,
+                org_id=int(org_id),
+                property_id=int(prop.id),
+                deal_id=int(deal.id) if deal else None,
+            )
+            summary["post_import_hooks_attempted"] += 1
 
         db.commit()
         return finish_run(db, row=run, status="success", summary=summary)

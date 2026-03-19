@@ -8,6 +8,9 @@ export type IngestionOverview = {
   failed_runs_24h: number;
   records_imported_24h: number;
   duplicates_skipped_24h: number;
+  total_sources?: number;
+  properties_created_7d?: number;
+  properties_updated_7d?: number;
 };
 
 export type IngestionSource = {
@@ -39,6 +42,8 @@ export type IngestionRun = {
   finished_at?: string | null;
   records_seen: number;
   records_imported: number;
+  properties_created?: number;
+  properties_updated?: number;
   duplicates_skipped: number;
   invalid_rows: number;
   error_summary?: string | null;
@@ -49,8 +54,6 @@ export type IngestionLaunchPayload = {
   state?: string;
   county?: string;
   city?: string;
-  zip_code?: string;
-  address?: string;
   min_price?: number;
   max_price?: number;
   min_bedrooms?: number;
@@ -132,6 +135,28 @@ export const ingestionClient = {
         trigger_type: "manual",
         ...payload,
       }),
+    });
+  },
+
+  syncDefaultSources() {
+    return request<{
+      ok: boolean;
+      queued: number;
+      source_ids: number[];
+    }>("/ingestion/sync-defaults", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  queueDailyRefresh() {
+    return request<{
+      ok: boolean;
+      queued: boolean;
+      task_id?: string;
+    }>("/ingestion/daily-refresh", {
+      method: "POST",
+      body: JSON.stringify({}),
     });
   },
 

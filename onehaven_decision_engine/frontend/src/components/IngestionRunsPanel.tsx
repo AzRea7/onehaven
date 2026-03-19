@@ -38,7 +38,7 @@ export default function IngestionRunsPanel({ refreshKey, onSelectRun }: Props) {
   async function load() {
     setLoading(true);
     try {
-      setRows(await ingestionClient.listRuns(30));
+      setRows(await ingestionClient.listRuns(40));
     } finally {
       setLoading(false);
     }
@@ -46,13 +46,6 @@ export default function IngestionRunsPanel({ refreshKey, onSelectRun }: Props) {
 
   React.useEffect(() => {
     load();
-  }, [refreshKey]);
-
-  React.useEffect(() => {
-    const id = window.setInterval(() => {
-      load().catch(() => undefined);
-    }, 5000);
-    return () => window.clearInterval(id);
   }, [refreshKey]);
 
   if (loading) {
@@ -71,7 +64,7 @@ export default function IngestionRunsPanel({ refreshKey, onSelectRun }: Props) {
             Recent intake runs
           </h3>
           <p className="mt-1 text-sm text-neutral-400">
-            Auto-refreshes every few seconds.
+            Manual refresh only, so the page stays stable while you work.
           </p>
         </div>
         <button
@@ -82,7 +75,7 @@ export default function IngestionRunsPanel({ refreshKey, onSelectRun }: Props) {
         </button>
       </div>
 
-      <div className="max-h-[720px] space-y-3 overflow-y-auto pr-1">
+      <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
         {rows.map((row) => (
           <button
             key={row.id}
@@ -106,7 +99,7 @@ export default function IngestionRunsPanel({ refreshKey, onSelectRun }: Props) {
               </span>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-neutral-300 md:grid-cols-5">
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-neutral-300 md:grid-cols-6">
               <div>
                 <div className="text-neutral-500">Started</div>
                 <div>{fmt(row.started_at)}</div>
@@ -116,8 +109,12 @@ export default function IngestionRunsPanel({ refreshKey, onSelectRun }: Props) {
                 <div>{row.records_imported}</div>
               </div>
               <div>
-                <div className="text-neutral-500">Seen</div>
-                <div>{row.records_seen}</div>
+                <div className="text-neutral-500">Created</div>
+                <div>{row.properties_created ?? "—"}</div>
+              </div>
+              <div>
+                <div className="text-neutral-500">Updated</div>
+                <div>{row.properties_updated ?? "—"}</div>
               </div>
               <div>
                 <div className="text-neutral-500">Duplicates</div>

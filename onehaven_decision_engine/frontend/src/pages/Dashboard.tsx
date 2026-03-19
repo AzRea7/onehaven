@@ -1,21 +1,23 @@
 import React from "react";
 import {
   ArrowRight,
+  BriefcaseBusiness,
   ClipboardCheck,
   Hammer,
   Landmark,
+  PieChart,
   ShieldCheck,
+  Users,
   Wallet,
+  Home,
 } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
-import GlobalFilters from "../components/GlobalFilters";
 import Surface from "../components/Surface";
 import KpiCard from "../components/KpiCard";
 import EmptyState from "../components/EmptyState";
 import { api } from "../lib/api";
-import { readFilters, toQueryString } from "../lib/filters";
 import Golem from "../components/Golem";
 
 type RollupPayload = {
@@ -35,6 +37,8 @@ type RollupPayload = {
     rehab_open_cost_estimate?: number;
     net_cash_window?: number;
     avg_crime_score?: number | null;
+    avg_dscr?: number | null;
+    avg_cashflow_estimate?: number | null;
   };
   counts?: {
     deals?: number;
@@ -42,8 +46,8 @@ type RollupPayload = {
     rehab_tasks_open?: number;
     transactions_window?: number;
     valuations?: number;
+    properties?: number;
   };
-  stage_counts?: Record<string, number>;
   series?: {
     cash_by_month?: Array<{
       label: string;
@@ -53,7 +57,7 @@ type RollupPayload = {
       net?: number;
     }>;
     decision_mix?: Array<{ key: string; label: string; count: number }>;
-    stage_mix?: Array<{ key: string; label: string; count: number }>;
+    workflow_mix?: Array<{ key: string; label: string; count: number }>;
     county_mix?: Array<{ key: string; label: string; count: number }>;
   };
   leaderboards?: {
@@ -74,114 +78,13 @@ function money(v?: number | null) {
   });
 }
 
-function pct(n: number, total: number) {
-  if (!total) return 0;
-  return Math.max(0, Math.min(100, (n / total) * 100));
+function num(v?: number | null, digits = 2) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(digits);
 }
 
-function TonePill({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: React.ReactNode;
-  tone?: "default" | "good" | "warn" | "bad";
-}) {
-  const cls =
-    tone === "good"
-      ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-200"
-      : tone === "warn"
-        ? "border-yellow-300/25 bg-yellow-300/10 text-yellow-100"
-        : tone === "bad"
-          ? "border-red-400/25 bg-red-400/10 text-red-200"
-          : "border-white/10 bg-white/5 text-white/75";
-
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-3 py-1 text-xs ${cls}`}
-    >
-      <span className="mr-2 opacity-70">{label}</span>
-      <span className="font-semibold">{value}</span>
-    </span>
-  );
-}
-
-function Panel({
-  title,
-  subtitle,
-  right,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="oh-panel p-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <div className="text-sm font-semibold text-white">{title}</div>
-          {subtitle ? (
-            <div className="text-xs text-white/55 mt-1">{subtitle}</div>
-          ) : null}
-        </div>
-        {right}
-      </div>
-      <div className="mt-4">{children}</div>
-    </div>
-  );
-}
-
-function MetricCard({
-  title,
-  value,
-  sub,
-  icon,
-  to,
-  tone = "default",
-}: {
-  title: string;
-  value: React.ReactNode;
-  sub: string;
-  icon: React.ReactNode;
-  to: string;
-  tone?: "default" | "good" | "warn" | "bad";
-}) {
-  const borderTone =
-    tone === "good"
-      ? "border-emerald-400/20 hover:border-emerald-400/35"
-      : tone === "warn"
-        ? "border-yellow-300/20 hover:border-yellow-300/35"
-        : tone === "bad"
-          ? "border-red-400/20 hover:border-red-400/35"
-          : "border-white/10 hover:border-white/20";
-
-  return (
-    <Link
-      to={to}
-      className={`group block rounded-2xl border ${borderTone} bg-white/[0.03] hover:bg-white/[0.05] transition p-5`}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="rounded-xl border border-white/10 bg-black/30 p-2 text-white/85">
-          {icon}
-        </div>
-        <ArrowRight className="h-4 w-4 text-white/35 group-hover:text-white/70 transition" />
-      </div>
-
-      <div className="mt-5 text-xs uppercase tracking-widest text-white/45">
-        {title}
-      </div>
-      <div className="mt-2 text-3xl font-semibold tracking-tight text-white">
-        {value}
-      </div>
-      <div className="mt-2 text-sm text-white/55">{sub}</div>
-    </Link>
-  );
-}
-
-function MiniBars({
+function GraphBars({
   items,
   emptyLabel,
   valueKey = "count",
@@ -209,20 +112,22 @@ function MiniBars({
         const raw = Number(
           valueKey === "count" ? row.count || 0 : row.net || 0,
         );
-        const width = Math.max(6, (Math.abs(raw) / max) * 100);
+        const width = Math.max(8, (Math.abs(raw) / max) * 100);
         const isNegative = raw < 0;
 
         return (
           <div key={row.label} className="space-y-1">
             <div className="flex items-center justify-between gap-4 text-xs">
               <span className="truncate text-app-3">{row.label}</span>
-              <span className="text-app-1 font-semibold">
+              <span className="font-semibold text-app-1">
                 {valueKey === "count" ? raw : money(raw)}
               </span>
             </div>
             <div className="h-2 rounded-full bg-app-muted overflow-hidden">
               <div
-                className={`h-full rounded-full ${isNegative ? "bg-red-400/70" : "bg-white/70 dark:bg-white/70"}`}
+                className={`h-full rounded-full ${
+                  isNegative ? "bg-red-400/70" : "bg-[var(--accent)]"
+                }`}
                 style={{ width: `${width}%` }}
               />
             </div>
@@ -257,13 +162,12 @@ function Leaderboard({
         >
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-app-0 truncate">
+              <div className="truncate text-sm font-semibold text-app-0">
                 {row.address}
               </div>
-              <div className="text-xs text-app-4 mt-1 truncate">
+              <div className="mt-1 truncate text-xs text-app-4">
                 {row.city}, {row.state}
-                {row.county ? ` · ${row.county}` : ""}
-                {row.stage ? ` · ${String(row.stage).replace(/_/g, " ")}` : ""}
+                {row.stage_label ? ` · ${row.stage_label}` : ""}
               </div>
             </div>
             <div className="text-right">
@@ -281,85 +185,94 @@ function Leaderboard({
   );
 }
 
-export default function Dashboard() {
-  const location = useLocation();
-  const filters = React.useMemo(
-    () => readFilters(new URLSearchParams(location.search)),
-    [location.search],
+function SectionCard({
+  title,
+  subtitle,
+  icon,
+  value,
+  tone = "default",
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  value: React.ReactNode;
+  tone?: "default" | "good" | "warn" | "bad";
+}) {
+  const toneCls =
+    tone === "good"
+      ? "border-emerald-400/20"
+      : tone === "warn"
+        ? "border-yellow-300/20"
+        : tone === "bad"
+          ? "border-red-400/20"
+          : "border-app";
+
+  return (
+    <div className={`rounded-3xl border ${toneCls} bg-app-panel p-5`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="rounded-2xl border border-app bg-app-muted p-2 text-app-1">
+          {icon}
+        </div>
+        <div className="text-right">
+          <div className="text-2xl font-semibold text-app-0">{value}</div>
+        </div>
+      </div>
+      <div className="mt-4 text-sm font-semibold text-app-0">{title}</div>
+      <div className="mt-1 text-xs text-app-4">{subtitle}</div>
+    </div>
   );
+}
 
-  const qs = React.useMemo(() => toQueryString(filters), [filters]);
-
+export default function Dashboard() {
   const [data, setData] = React.useState<RollupPayload | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [lastSync, setLastSync] = React.useState<number | null>(null);
 
-  const refresh = React.useCallback(
-    async (background = false) => {
-      try {
-        if (!background) setLoading(true);
-        const out = await api.get<RollupPayload>(`/ops/control-plane${qs}`);
-        setData(out);
-        setErr(null);
-        setLastSync(Date.now());
-      } catch (e: any) {
-        setErr(String(e?.message || e));
-      } finally {
-        if (!background) setLoading(false);
-      }
-    },
-    [qs],
-  );
+  const refresh = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      const out = await api.get<RollupPayload>("/ops/control-plane");
+      setData(out);
+      setErr(null);
+      setLastSync(Date.now());
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   React.useEffect(() => {
-    refresh(false);
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") refresh(true);
-    }, 60000);
-    return () => window.clearInterval(id);
+    refresh();
   }, [refresh]);
 
   const kpis = data?.kpis || {};
   const counts = data?.counts || {};
-  const stageCounts = data?.stage_counts || {};
-  const stageEntries = Object.entries(stageCounts).sort((a, b) => b[1] - a[1]);
   const totalHomes = Number(kpis.total_homes || 0);
-
-  const goodDeals = Number(kpis.good_deals || 0);
-  const reviewDeals = Number(kpis.review_deals || 0);
-  const rejectedDeals = Number(kpis.rejected_deals || 0);
 
   return (
     <PageShell>
       <div className="space-y-6">
         <PageHero
           eyebrow="OneHaven"
-          title="Cockpit view"
-          subtitle="Decisions first. Next actions second. Details live inside each property."
+          title="Investment dashboard"
+          subtitle="A cleaner investor view focused on pipeline movement, portfolio performance, and the fastest path from acquisition to tenant-occupied cashflow."
           right={
             <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
-              <div className="h-[240px] w-[240px] md:h-[270px] md:w-[270px] translate-y-[-6px] opacity-95">
+              <div className="h-[220px] w-[220px] md:h-[250px] md:w-[250px] translate-y-[-8px] opacity-95">
                 <Golem className="h-full w-full" />
               </div>
             </div>
           }
           actions={
             <>
-              <button
-                onClick={() => refresh(false)}
-                className="oh-btn oh-btn-secondary cursor-pointer"
-              >
-                sync
+              <button onClick={refresh} className="oh-btn oh-btn-secondary">
+                Sync dashboard
               </button>
-              <span className="oh-pill">homes {totalHomes}</span>
-              <span className="oh-pill oh-pill-good">
-                good deals {goodDeals}
-              </span>
-              <span className="oh-pill oh-pill-warn">review {reviewDeals}</span>
-              <span className="oh-pill oh-pill-bad">
-                rejected {rejectedDeals}
-              </span>
+              <Link to="/properties" className="oh-btn oh-btn-secondary">
+                Open properties
+              </Link>
               <div className="text-[11px] text-app-4 px-2 py-2">
                 {lastSync
                   ? `last sync: ${new Date(lastSync).toLocaleTimeString()}`
@@ -369,132 +282,174 @@ export default function Dashboard() {
           }
         />
 
-        <GlobalFilters />
-
         {err ? (
           <Surface tone="danger">
             <div className="text-sm text-red-300">{err}</div>
           </Surface>
         ) : null}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
-          <KpiCard
-            title="Trust / pipeline quality"
-            value={goodDeals}
-            subtitle={`${reviewDeals} in review · ${rejectedDeals} rejected`}
-            icon={ShieldCheck}
-            tone="success"
-          />
-          <KpiCard
-            title="Compliance exposure"
-            value={Number(counts.rehab_tasks_open || 0)}
-            subtitle={`${Number(kpis.red_zone_count || 0)} red-zone homes in filtered set`}
-            icon={ClipboardCheck}
-            tone="warning"
-          />
-          <KpiCard
-            title="Rehab backlog"
-            value={money(kpis.rehab_open_cost_estimate)}
-            subtitle={`${Number(counts.rehab_tasks_total || 0)} total rehab tasks`}
-            icon={Hammer}
-            tone="warning"
-          />
-          <KpiCard
-            title="Cashflow"
-            value={money(kpis.net_cash_window)}
-            subtitle={`${Number(kpis.cashflow_positive_homes || 0)} homes positive in current window`}
-            icon={Wallet}
-            tone={Number(kpis.net_cash_window || 0) >= 0 ? "success" : "danger"}
-          />
-          <KpiCard
-            title="Equity"
-            value={money(kpis.total_estimated_equity)}
-            subtitle={`${Number(kpis.homes_with_valuation || 0)} homes with valuation`}
-            icon={Landmark}
-            tone="accent"
-          />
-        </div>
+        <Surface
+          title="Portfolio snapshot"
+          subtitle="High-signal metrics first so the dashboard feels like a control plane instead of a pile of modules."
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <KpiCard
+              title="Homes"
+              value={totalHomes}
+              subtitle={`${Number(counts.deals || 0)} tracked deals`}
+              icon={Home}
+              tone="accent"
+            />
+            <KpiCard
+              title="Good deals"
+              value={Number(kpis.good_deals || 0)}
+              subtitle={`${Number(kpis.review_deals || 0)} review · ${Number(
+                kpis.rejected_deals || 0,
+              )} reject`}
+              icon={ShieldCheck}
+              tone="success"
+            />
+            <KpiCard
+              title="Cashflow"
+              value={money(kpis.net_cash_window)}
+              subtitle={`${Number(kpis.cashflow_positive_homes || 0)} positive homes`}
+              icon={Wallet}
+              tone={
+                Number(kpis.net_cash_window || 0) >= 0 ? "success" : "danger"
+              }
+            />
+            <KpiCard
+              title="Equity"
+              value={money(kpis.total_estimated_equity)}
+              subtitle={`${Number(kpis.homes_with_valuation || 0)} valued homes`}
+              icon={Landmark}
+              tone="accent"
+            />
+            <KpiCard
+              title="Rehab backlog"
+              value={money(kpis.rehab_open_cost_estimate)}
+              subtitle={`${Number(counts.rehab_tasks_open || 0)} open rehab tasks`}
+              icon={Hammer}
+              tone="warning"
+            />
+          </div>
+        </Surface>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr,1fr] gap-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
           <Surface
-            title="Pipeline distribution"
-            subtitle="Every stage tile opens the filtered pipeline drilldown."
+            title="Decision mix"
+            subtitle="The simplified three-way classification for investors."
             actions={
-              <Link to={`/pipeline${qs}`} className="oh-btn oh-btn-secondary">
-                open pipeline
+              <Link to="/properties" className="oh-btn oh-btn-secondary">
+                Review inventory
               </Link>
             }
           >
-            {!stageEntries.length ? (
-              <EmptyState
-                compact
-                title={loading ? "Loading pipeline…" : "No stage data yet."}
-              />
-            ) : (
-              <div className="space-y-3">
-                {stageEntries.map(([stage, count]) => {
-                  const width = pct(
-                    Number(count || 0),
-                    Math.max(totalHomes, 1),
-                  );
-                  const next = new URLSearchParams(location.search);
-                  next.set("stage", stage);
-
-                  return (
-                    <Link
-                      key={stage}
-                      to={`/pipeline?${next.toString()}`}
-                      className="block rounded-2xl border border-app bg-app-panel hover:bg-app-muted hover:border-app-strong transition p-4"
-                    >
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-widest text-app-4">
-                            {stage.replace(/_/g, " ")}
-                          </div>
-                          <div className="mt-1 text-lg font-semibold text-app-0">
-                            {count}
-                          </div>
-                        </div>
-                        <div className="text-xs text-app-4">
-                          {width.toFixed(0)}% of filtered homes
-                        </div>
-                      </div>
-                      <div className="mt-3 h-2 rounded-full bg-app-muted overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-[linear-gradient(90deg,var(--accent),var(--accent-2))]"
-                          style={{ width: `${width}%` }}
-                        />
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </Surface>
-
-          <Surface
-            title="Decision mix"
-            subtitle="Quick sanity check so the deal engine doesn’t become decorative pumpkin logic."
-          >
-            <MiniBars
+            <GraphBars
               items={data?.series?.decision_mix}
               emptyLabel={
                 loading ? "Loading decisions…" : "No decision data yet."
               }
             />
           </Surface>
+
+          <Surface
+            title="Workflow stages"
+            subtitle="Properties grouped by the real business workflow."
+          >
+            <GraphBars
+              items={data?.series?.workflow_mix}
+              emptyLabel={
+                loading ? "Loading workflow…" : "No workflow data yet."
+              }
+            />
+          </Surface>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <Surface
+          title="Section 8 workflow control"
+          subtitle="These categories match the operating flow from potential property to occupied cashflow asset."
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
+            <SectionCard
+              title="Deal / Procurement"
+              subtitle="Source, ingest, classify, and decide"
+              icon={<BriefcaseBusiness className="h-5 w-5" />}
+              value={Number(
+                data?.series?.workflow_mix?.find((x) => x.key === "deal")
+                  ?.count || 0,
+              )}
+            />
+            <SectionCard
+              title="Rehab"
+              subtitle="Scope, tasks, budget, execution"
+              icon={<Hammer className="h-5 w-5" />}
+              value={Number(
+                data?.series?.workflow_mix?.find((x) => x.key === "rehab")
+                  ?.count || 0,
+              )}
+              tone="warn"
+            />
+            <SectionCard
+              title="Compliance"
+              subtitle="Inspection, licensing, readiness"
+              icon={<ClipboardCheck className="h-5 w-5" />}
+              value={Number(
+                data?.series?.workflow_mix?.find((x) => x.key === "compliance")
+                  ?.count || 0,
+              )}
+              tone="warn"
+            />
+            <SectionCard
+              title="Tenant"
+              subtitle="Placement and voucher readiness"
+              icon={<Users className="h-5 w-5" />}
+              value={Number(
+                data?.series?.workflow_mix?.find((x) => x.key === "tenant")
+                  ?.count || 0,
+              )}
+            />
+            <SectionCard
+              title="Lease / Management"
+              subtitle="Occupancy activation and operations"
+              icon={<PieChart className="h-5 w-5" />}
+              value={
+                Number(
+                  data?.series?.workflow_mix?.find((x) => x.key === "lease")
+                    ?.count || 0,
+                ) +
+                Number(
+                  data?.series?.workflow_mix?.find(
+                    (x) => x.key === "management",
+                  )?.count || 0,
+                )
+              }
+            />
+            <SectionCard
+              title="Cashflow / Equity"
+              subtitle="Income and long-term value"
+              icon={<Wallet className="h-5 w-5" />}
+              value={Number(
+                data?.series?.workflow_mix?.find((x) => x.key === "cash_equity")
+                  ?.count || 0,
+              )}
+              tone="good"
+            />
+          </div>
+        </Surface>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <Surface
-            title="Best current opportunities"
-            subtitle="Highest quality survivors in the filtered slice."
+            title="Best opportunities"
+            subtitle="Highest-quality surviving deals right now."
           >
             <Leaderboard
               rows={data?.leaderboards?.good_deals}
-              metricLabel="decision"
+              metricLabel="class"
               metricGetter={(row) =>
-                `${row.latest_decision || "—"}${row.score != null ? ` · ${row.score}` : ""}`
+                `${row.classification || row.latest_decision || "—"}${
+                  row.dscr != null ? ` · ${num(row.dscr)}` : ""
+                }`
               }
               emptyLabel={
                 loading ? "Loading opportunities…" : "No opportunities yet."
@@ -504,12 +459,14 @@ export default function Dashboard() {
 
           <Surface
             title="Cashflow leaders"
-            subtitle="Top properties by current net cash in the selected window."
+            subtitle="Highest estimated monthly contribution."
           >
             <Leaderboard
               rows={data?.leaderboards?.cashflow}
-              metricLabel="net"
-              metricGetter={(row) => money(row.property_net_cash_window)}
+              metricLabel="cashflow"
+              metricGetter={(row) =>
+                money(row.cashflow_estimate ?? row.property_net_cash_window)
+              }
               emptyLabel={
                 loading ? "Loading cashflow…" : "No cashflow rows yet."
               }
@@ -518,7 +475,7 @@ export default function Dashboard() {
 
           <Surface
             title="Equity leaders"
-            subtitle="Fast view of who is already carrying balance-sheet weight."
+            subtitle="Properties carrying the strongest balance-sheet value."
           >
             <Leaderboard
               rows={data?.leaderboards?.equity}
@@ -529,20 +486,12 @@ export default function Dashboard() {
           </Surface>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <Surface
             title="Cash trend"
-            subtitle="Monthly net view for the current filtered book."
-            actions={
-              <Link
-                to={`/drilldowns/cashflow${qs}`}
-                className="oh-btn oh-btn-secondary"
-              >
-                cashflow detail
-              </Link>
-            }
+            subtitle="Monthly net trend for the current portfolio slice."
           >
-            <MiniBars
+            <GraphBars
               items={data?.series?.cash_by_month}
               valueKey="net"
               emptyLabel={
@@ -553,9 +502,9 @@ export default function Dashboard() {
 
           <Surface
             title="County concentration"
-            subtitle="Where your current filtered exposure is piling up."
+            subtitle="Where current inventory is clustering."
           >
-            <MiniBars
+            <GraphBars
               items={data?.series?.county_mix}
               emptyLabel={
                 loading ? "Loading county mix…" : "No county data yet."
@@ -564,91 +513,45 @@ export default function Dashboard() {
           </Surface>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <Surface
-            title="Rehab pressure"
-            subtitle="Highest open rehab drag first."
-            actions={
-              <Link
-                to={`/drilldowns/rehab${qs}`}
-                className="oh-btn oh-btn-secondary"
-              >
-                rehab detail
-              </Link>
-            }
-          >
-            <Leaderboard
-              rows={data?.leaderboards?.rehab_backlog}
-              metricLabel="open cost"
-              metricGetter={(row) => money(row.rehab_open_cost)}
-              emptyLabel={
-                loading ? "Loading rehab backlog…" : "No rehab backlog yet."
-              }
-            />
-          </Surface>
-
-          <Surface
-            title="Compliance attention"
-            subtitle="Properties likely to want human eyeballs before they misbehave."
-            actions={
-              <Link
-                to={`/drilldowns/compliance${qs}`}
-                className="oh-btn oh-btn-secondary"
-              >
-                compliance detail
-              </Link>
-            }
-          >
-            <Leaderboard
-              rows={data?.leaderboards?.compliance_attention}
-              metricLabel="open tasks"
-              metricGetter={(row) => row.rehab_open ?? 0}
-              emptyLabel={
-                loading
-                  ? "Loading compliance attention…"
-                  : "No compliance attention list yet."
-              }
-            />
-          </Surface>
-        </div>
-
-        <Surface
-          title="Portfolio snapshot"
-          subtitle="Current filtered totals you can glance at without diving into every property card."
-          actions={
-            <Link to={`/properties${qs}`} className="oh-btn oh-btn-secondary">
-              open properties
-            </Link>
-          }
-        >
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-            {[
-              ["homes", totalHomes],
-              ["deals", Number(counts.deals || 0)],
-              ["leases", Number(kpis.active_leases || 0)],
-              ["valuations", Number(counts.valuations || 0)],
-              ["value", money(kpis.total_estimated_value)],
-              ["debt", money(kpis.total_loan_balance)],
-              ["equity", money(kpis.total_estimated_equity)],
-              [
-                "avg crime",
-                kpis.avg_crime_score != null ? kpis.avg_crime_score : "—",
-              ],
-            ].map(([label, value]) => (
-              <div
-                key={String(label)}
-                className="rounded-2xl border border-app bg-app-panel p-4"
-              >
-                <div className="text-[11px] uppercase tracking-widest text-app-4">
-                  {label}
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-app-0">
-                  {value as React.ReactNode}
-                </div>
-              </div>
-            ))}
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+          <div className="rounded-3xl border border-app bg-app-panel p-5">
+            <div className="text-[11px] uppercase tracking-widest text-app-4">
+              Active leases
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-app-0">
+              {Number(kpis.active_leases || 0)}
+            </div>
           </div>
-        </Surface>
+
+          <div className="rounded-3xl border border-app bg-app-panel p-5">
+            <div className="text-[11px] uppercase tracking-widest text-app-4">
+              Avg DSCR
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-app-0">
+              {num(kpis.avg_dscr)}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-app bg-app-panel p-5">
+            <div className="text-[11px] uppercase tracking-widest text-app-4">
+              Avg cashflow est.
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-app-0">
+              {money(kpis.avg_cashflow_estimate)}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-app bg-app-panel p-5">
+            <div className="text-[11px] uppercase tracking-widest text-app-4">
+              Avg crime score
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-app-0">
+              {kpis.avg_crime_score != null
+                ? num(kpis.avg_crime_score, 1)
+                : "—"}
+            </div>
+          </div>
+        </div>
       </div>
     </PageShell>
   );

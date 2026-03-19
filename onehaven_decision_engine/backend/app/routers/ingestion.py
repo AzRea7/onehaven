@@ -26,7 +26,7 @@ from ..services.ingestion_source_service import (
     list_sources,
     update_source,
 )
-from ..tasks.ingestion_tasks import sync_source_task
+from ..tasks.ingestion_tasks import daily_market_refresh_task, sync_due_sources_task, sync_source_task
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
@@ -129,6 +129,45 @@ def sync_now(
         "task_id": job.id,
         "source_id": row.id,
     }
+
+
+@router.post("/sync-defaults", response_model=dict)
+def sync_default_sources_now(
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    """
+    Convenience endpoint for the cleaner ingestion UI:
+    queue syncs for all default warm-market sources at once.
+    """
+    ensure_default_manual_sources(db, org_id=p.org_id)
+    rows = list_sources(db, org_id=p.org_id)
+
+    queued: list[int] = []
+    for row in rows:
+        if not bool(row.is_enabled):
+            continue
+        sync_source_task.delay(int(p.org_id), int(row.id), "manual", {})
+        queued.append(int(row.id))
+
+    return {"ok": True, "queued": len(queued), "source_ids": queued}
+
+
+@router.post("/sync-due", response_model=dict)
+def queue_due_sources(
+    _op=Depends(require_operator),
+):
+    job = sync_due_sources_task.delay()
+    return {"ok": True, "queued": True, "task_id": job.id}
+
+
+@router.post("/daily-refresh", response_model=dict)
+def queue_daily_market_refresh(
+    _op=Depends(require_operator),
+):
+    job = daily_market_refresh_task.delay()
+    return {"ok": True, "queued": True, "task_id": job.id}
 
 
 @router.get("/runs", response_model=list[IngestionRunListItem])

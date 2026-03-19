@@ -1,28 +1,100 @@
 import React from "react";
-import { ArrowRight, Lock } from "lucide-react";
+import { ArrowRight, CheckCircle2, Lock } from "lucide-react";
 import Surface from "./Surface";
 
 const ORDER = [
-  "import",
   "deal",
-  "decision",
-  "acquisition",
-  "rehab_plan",
-  "rehab_exec",
+  "rehab",
   "compliance",
   "tenant",
   "lease",
-  "cash",
-  "equity",
-];
+  "cash_equity",
+] as const;
+
+function normalizeStage(stage?: string | null) {
+  const x = String(stage || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    [
+      "import",
+      "intake",
+      "deal",
+      "decision",
+      "acquisition",
+      "procurement",
+      "underwriting",
+    ].includes(x)
+  ) {
+    return "deal";
+  }
+
+  if (
+    [
+      "rehab",
+      "rehab_plan",
+      "rehab_exec",
+      "renovation",
+      "construction",
+    ].includes(x)
+  ) {
+    return "rehab";
+  }
+
+  if (["compliance", "inspection", "licensing"].includes(x)) {
+    return "compliance";
+  }
+
+  if (["tenant", "voucher"].includes(x)) {
+    return "tenant";
+  }
+
+  if (["lease", "leasing", "management", "ops"].includes(x)) {
+    return "lease";
+  }
+
+  if (["cash", "cashflow", "equity", "portfolio", "cash_equity"].includes(x)) {
+    return "cash_equity";
+  }
+
+  return "deal";
+}
 
 function labelize(stage: string) {
-  return stage.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+  const s = normalizeStage(stage);
+  if (s === "deal") return "Deal / Procurement";
+  if (s === "rehab") return "Rehab";
+  if (s === "compliance") return "Compliance";
+  if (s === "tenant") return "Tenant Placement";
+  if (s === "lease") return "Lease / Management";
+  return "Cashflow / Equity";
 }
 
 function stageIndex(stage?: string | null) {
-  const idx = ORDER.indexOf(String(stage || "").toLowerCase());
+  const idx = ORDER.indexOf(normalizeStage(stage) as (typeof ORDER)[number]);
   return idx >= 0 ? idx : 0;
+}
+
+function getStageHelp(stage: string) {
+  const s = normalizeStage(stage);
+
+  if (s === "deal") {
+    return "Create the deal, confirm underwriting, and decide whether this property deserves more time and money.";
+  }
+  if (s === "rehab") {
+    return "Define scope, generate tasks, estimate cost, and move the property toward physical readiness.";
+  }
+  if (s === "compliance") {
+    return "Complete checklist items, inspections, and jurisdiction requirements before tenant placement.";
+  }
+  if (s === "tenant") {
+    return "Move from compliance-ready unit to approved tenant and placement readiness.";
+  }
+  if (s === "lease") {
+    return "Activate lease execution, lease start, and management handoff.";
+  }
+  return "Track live cashflow, operating performance, and long-term equity once the property is functioning as an income asset.";
 }
 
 export default function StageProgress({
@@ -38,17 +110,22 @@ export default function StageProgress({
   onAdvance?: () => void | Promise<void>;
   busy?: boolean;
 }) {
-  const current = String(
+  const current = normalizeStage(
     currentStage || workflow?.current_stage || "deal",
-  ).toLowerCase();
+  );
   const idx = stageIndex(current);
   const primaryAction = workflow?.primary_action || null;
   const gate = workflow?.transition_gate || null;
 
+  const normalizedCurrentLabel =
+    currentStageLabel && String(currentStageLabel).trim()
+      ? String(currentStageLabel)
+      : labelize(current);
+
   return (
     <Surface
       title="Workflow progress"
-      subtitle={`Current stage: ${currentStageLabel || labelize(current)}`}
+      subtitle={`Current stage: ${normalizedCurrentLabel}`}
       actions={
         primaryAction?.kind === "advance" && onAdvance ? (
           <button
@@ -62,7 +139,7 @@ export default function StageProgress({
         ) : null
       }
     >
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {ORDER.map((stage, i) => {
           const done = i < idx;
           const active = i === idx;
@@ -72,41 +149,64 @@ export default function StageProgress({
             <div
               key={stage}
               className={[
-                "rounded-2xl border px-4 py-3",
+                "rounded-2xl border px-4 py-4",
                 active
-                  ? "border-app-strong bg-app-panel"
+                  ? "border-app-strong bg-app-panel shadow-soft"
                   : done
                     ? "border-app bg-app-muted"
-                    : "border-app bg-transparent opacity-75",
+                    : "border-app bg-transparent opacity-80",
               ].join(" ")}
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                  {i + 1}
+                  Step {i + 1}
                 </div>
-                {locked ? <Lock className="h-3.5 w-3.5 text-app-4" /> : null}
+
+                {done ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : locked ? (
+                  <Lock className="h-3.5 w-3.5 text-app-4" />
+                ) : null}
               </div>
+
               <div className="mt-2 text-sm font-semibold text-app-0">
                 {labelize(stage)}
               </div>
-              <div className="mt-1 text-xs text-app-4">
-                {active ? "Current" : done ? "Completed / passed" : "Locked"}
+
+              <div className="mt-2 text-xs text-app-4 leading-relaxed">
+                {getStageHelp(stage)}
+              </div>
+
+              <div className="mt-3 text-xs">
+                {active ? (
+                  <span className="oh-pill oh-pill-accent">Current</span>
+                ) : done ? (
+                  <span className="oh-pill oh-pill-good">Completed</span>
+                ) : (
+                  <span className="oh-pill">Locked</span>
+                )}
               </div>
             </div>
           );
         })}
       </div>
 
-      {gate ? (
-        <div className="mt-4 rounded-2xl border border-app bg-app-muted p-4">
-          <div className="text-xs text-app-4">Transition gate</div>
-          <div className="mt-2 text-sm text-app-2">
-            {gate?.ok
-              ? `Ready to move into ${gate?.allowed_next_stage_label || gate?.allowed_next_stage || "next stage"}.`
-              : gate?.blocked_reason || "Not ready yet."}
-          </div>
+      <div className="mt-4 rounded-2xl border border-app bg-app-muted p-4">
+        <div className="text-xs text-app-4">Transition gate</div>
+        <div className="mt-2 text-sm text-app-2">
+          {gate
+            ? gate?.ok
+              ? `Ready to move into ${labelize(
+                  gate?.allowed_next_stage_label ||
+                    gate?.allowed_next_stage ||
+                    "next stage",
+                )}.`
+              : gate?.blocked_reason || "Not ready yet."
+            : `This property is currently gated at ${labelize(
+                current,
+              )}. Complete the required work in this stage before moving forward.`}
         </div>
-      ) : null}
+      </div>
     </Surface>
   );
 }

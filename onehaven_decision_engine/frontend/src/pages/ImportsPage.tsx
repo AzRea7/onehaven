@@ -1,11 +1,11 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import PageShell from "../components/PageShell";
 import PageHero from "../components/PageHero";
 import StatCard from "../components/StatCard";
-import IngestionSourcesPanel from "../components/IngestionSourcesPanel";
 import IngestionRunsPanel from "../components/IngestionRunsPanel";
 import IngestionErrorsDrawer from "../components/IngestionErrorsDrawer";
-import IngestionLaunchCard from "../components/IngestionLaunchCard";
+import Surface from "../components/Surface";
 import { ingestionClient, IngestionOverview } from "../lib/ingestionClient";
 
 export default function ImportsPage() {
@@ -33,47 +33,63 @@ export default function ImportsPage() {
 
   return (
     <PageShell>
-      <PageHero
-        eyebrow="Operator control"
-        title="Property intake"
-        subtitle="Launch focused property ingestion runs by region, keep them capped and filterable, and monitor the resulting source health and run history from one clean workflow."
-      />
+      <div className="space-y-6">
+        <PageHero
+          eyebrow="Operator control"
+          title="Intake monitor"
+          subtitle="Property intake now lives inside the Properties page. This screen is just a lightweight monitor for recent runs and sync health."
+          actions={
+            <>
+              <Link to="/properties" className="oh-btn oh-btn-secondary">
+                Open properties intake
+              </Link>
+              <button onClick={refreshAll} className="oh-btn oh-btn-secondary">
+                Refresh
+              </button>
+            </>
+          }
+        />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        <StatCard
-          title="Connected Sources"
-          value={overview?.sources_connected ?? 0}
-        />
-        <StatCard
-          title="Enabled Sources"
-          value={overview?.sources_enabled ?? 0}
-        />
-        <StatCard
-          title="Imported (24h)"
-          value={overview?.records_imported_24h ?? 0}
-        />
-        <StatCard
-          title="Duplicates Skipped (24h)"
-          value={overview?.duplicates_skipped_24h ?? 0}
-        />
-      </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <StatCard
+            title="Sources"
+            value={overview?.total_sources ?? overview?.sources_enabled ?? 0}
+          />
+          <StatCard
+            title="Imported (24h)"
+            value={overview?.records_imported_24h ?? 0}
+          />
+          <StatCard
+            title="Created (7d)"
+            value={overview?.properties_created_7d ?? 0}
+          />
+          <StatCard
+            title="Updated (7d)"
+            value={overview?.properties_updated_7d ?? 0}
+          />
+        </div>
 
-      <div className="mt-6">
-        <IngestionLaunchCard refreshKey={refreshKey} onQueued={refreshAll} />
-      </div>
+        <Surface
+          title="Why this page is smaller now"
+          subtitle="The intake experience was consolidated so the investor workflow starts from Properties instead of bouncing between duplicate control modules."
+        >
+          <div className="text-sm text-app-3">
+            Use the Properties page to launch intake, review new properties, and
+            move them through the workflow. This page remains as a slim
+            monitoring view for operators.
+          </div>
+        </Surface>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_1fr]">
-        <IngestionSourcesPanel refreshKey={refreshKey} onChanged={refreshAll} />
         <IngestionRunsPanel
           refreshKey={refreshKey}
           onSelectRun={setSelectedRunId}
         />
-      </div>
 
-      <IngestionErrorsDrawer
-        runId={selectedRunId}
-        onClose={() => setSelectedRunId(null)}
-      />
+        <IngestionErrorsDrawer
+          runId={selectedRunId}
+          onClose={() => setSelectedRunId(null)}
+        />
+      </div>
     </PageShell>
   );
 }

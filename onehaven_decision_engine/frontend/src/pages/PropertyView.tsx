@@ -10,7 +10,6 @@ import PropertyImage from "../components/PropertyImage";
 import PropertyCompliancePanel from "../components/PropertyCompliancePanel";
 import RiskBadges from "../components/RiskBadges";
 import StageProgress from "../components/StageProgress";
-import { getFinancingType } from "../lib/dealRules";
 import PageShell from "../components/PageShell";
 import PhotoUploader from "../components/PhotoUploader";
 import PhotoGallery from "../components/PhotoGallery";
@@ -26,19 +25,19 @@ const tabs = [
   "Rehab",
   "Compliance",
   "Tenant",
-  "Cash",
-  "Equity",
+  "Lease",
+  "Cash / Equity",
 ] as const;
 
 type Tab = (typeof tabs)[number];
 
 const TAB_TO_STAGE: Record<Tab, string> = {
   Deal: "deal",
-  Rehab: "rehab_plan",
+  Rehab: "rehab",
   Compliance: "compliance",
   Tenant: "tenant",
-  Cash: "cash",
-  Equity: "equity",
+  Lease: "lease",
+  "Cash / Equity": "cash_equity",
 };
 
 function money(v: any) {
@@ -58,21 +57,79 @@ function pct(v: any, digits = 1) {
   return `${n.toFixed(digits)}%`;
 }
 
+function numberOrNull(v: any) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeDecision(raw?: string) {
+  const x = String(raw || "")
+    .trim()
+    .toUpperCase();
+  if (["PASS", "GOOD_DEAL", "GOOD", "APPROVED", "APPROVE"].includes(x)) {
+    return "GOOD_DEAL";
+  }
+  if (["REJECT", "FAIL", "FAILED", "NO_GO"].includes(x)) {
+    return "REJECT";
+  }
+  return "REVIEW";
+}
+
+function normalizeStage(raw?: string) {
+  const x = String(raw || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    [
+      "import",
+      "intake",
+      "deal",
+      "decision",
+      "acquisition",
+      "procurement",
+      "underwriting",
+    ].includes(x)
+  ) {
+    return "deal";
+  }
+  if (
+    [
+      "rehab",
+      "rehab_plan",
+      "rehab_exec",
+      "renovation",
+      "construction",
+    ].includes(x)
+  ) {
+    return "rehab";
+  }
+  if (["compliance", "inspection", "licensing"].includes(x)) {
+    return "compliance";
+  }
+  if (["tenant", "voucher"].includes(x)) {
+    return "tenant";
+  }
+  if (["lease", "leasing", "management", "ops"].includes(x)) {
+    return "lease";
+  }
+  if (["cash", "equity", "cashflow", "portfolio", "cash_equity"].includes(x)) {
+    return "cash_equity";
+  }
+
+  return "deal";
+}
+
 function stageRank(stage: string | null | undefined) {
   const order = [
-    "import",
     "deal",
-    "decision",
-    "acquisition",
-    "rehab_plan",
-    "rehab_exec",
+    "rehab",
     "compliance",
     "tenant",
     "lease",
-    "cash",
-    "equity",
+    "cash_equity",
   ];
-  const idx = order.indexOf(String(stage || "").toLowerCase());
+  const idx = order.indexOf(normalizeStage(stage || ""));
   return idx >= 0 ? idx : 0;
 }
 
@@ -82,8 +139,19 @@ function isTabUnlocked(tab: Tab, currentStage: string | null | undefined) {
 }
 
 function prettyStage(stage: string | null | undefined) {
-  const s = String(stage || "").toLowerCase();
-  return s.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+  const s = normalizeStage(stage || "");
+  if (s === "deal") return "Deal / Procurement";
+  if (s === "rehab") return "Rehab";
+  if (s === "compliance") return "Compliance";
+  if (s === "tenant") return "Tenant Placement";
+  if (s === "lease") return "Lease / Management";
+  return "Cashflow / Equity";
+}
+
+function classificationTone(classification: string) {
+  if (classification === "GOOD_DEAL") return "good";
+  if (classification === "REVIEW") return "warn";
+  return "bad";
 }
 
 const Badge = React.memo(function Badge({
@@ -121,27 +189,15 @@ const ProgressBar = React.memo(function ProgressBar({
 }: {
   value: number;
 }) {
-  const pct = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+  const p = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
   return (
     <div className="h-2 rounded-full bg-app-muted overflow-hidden">
       <div
         className="h-2 rounded-full bg-[linear-gradient(90deg,var(--accent),var(--accent-2))]"
-        style={{ width: `${pct * 100}%` }}
+        style={{ width: `${p * 100}%` }}
       />
     </div>
   );
-});
-
-const TrustPill = React.memo(function TrustPill({
-  score,
-}: {
-  score: number | null;
-}) {
-  const s =
-    score == null ? null : Math.max(0, Math.min(100, Math.round(score)));
-  const tone =
-    s == null ? "neutral" : s >= 80 ? "good" : s >= 55 ? "warn" : "bad";
-  return <Badge tone={tone as any}>{s == null ? "—" : `Trust ${s}`}</Badge>;
 });
 
 function ChecklistItemCard({
@@ -317,9 +373,6 @@ export default function PropertyView() {
   const [ops, setOps] = React.useState<any | null>(null);
   const [workflow, setWorkflow] = React.useState<any | null>(null);
 
-  const [trust, setTrust] = React.useState<any | null>(null);
-  const [trustErr, setTrustErr] = React.useState<string | null>(null);
-
   const [err, setErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
 
@@ -397,7 +450,6 @@ export default function PropertyView() {
         out,
         opsOut,
         workflowOut,
-        trustOut,
         complianceBriefOut,
         complianceStatusOut,
         complianceRunSummaryOut,
@@ -406,16 +458,6 @@ export default function PropertyView() {
         api.propertyBundle(propertyId, ac.signal),
         api.opsPropertySummary(propertyId, 90, ac.signal).catch(() => null),
         api.opsPropertyWorkflow(propertyId, ac.signal).catch(() => null),
-        api
-          .trustGet("property", propertyId, ac.signal)
-          .then((x) => {
-            setTrustErr(null);
-            return x;
-          })
-          .catch((e) => {
-            setTrustErr(String(e?.message || e));
-            return null;
-          }),
         api.compliancePropertyBrief(propertyId, ac.signal).catch(() => null),
         api.complianceStatus(propertyId, ac.signal).catch(() => null),
         api.complianceRunSummary(propertyId, ac.signal).catch(() => null),
@@ -427,7 +469,6 @@ export default function PropertyView() {
       setBundle(out);
       setOps(opsOut);
       setWorkflow(workflowOut ?? opsOut?.workflow ?? null);
-      setTrust(trustOut);
 
       setComplianceBrief(complianceBriefOut);
       setComplianceStatus(complianceStatusOut);
@@ -458,7 +499,6 @@ export default function PropertyView() {
       setBundle(null);
       setOps(null);
       setWorkflow(null);
-      setTrust(null);
       setComplianceBrief(null);
       setComplianceStatus(null);
       setComplianceRunSummary(null);
@@ -480,8 +520,8 @@ export default function PropertyView() {
   React.useEffect(() => {
     const currentStage = workflow?.current_stage || ops?.stage || "deal";
     if (!isTabUnlocked(tab, currentStage)) {
-      if (isTabUnlocked("Equity", currentStage)) setTab("Equity");
-      else if (isTabUnlocked("Cash", currentStage)) setTab("Cash");
+      if (isTabUnlocked("Cash / Equity", currentStage)) setTab("Cash / Equity");
+      else if (isTabUnlocked("Lease", currentStage)) setTab("Lease");
       else if (isTabUnlocked("Tenant", currentStage)) setTab("Tenant");
       else if (isTabUnlocked("Compliance", currentStage)) setTab("Compliance");
       else if (isTabUnlocked("Rehab", currentStage)) setTab("Rehab");
@@ -554,43 +594,6 @@ export default function PropertyView() {
     });
   }, [doAction, propertyId]);
 
-  const enrich = React.useCallback(async () => {
-    await doAction("Enriching rent…", () =>
-      api.enrichProperty(propertyId, d?.strategy || "section8"),
-    );
-  }, [doAction, propertyId, d?.strategy]);
-
-  const explain = React.useCallback(async () => {
-    await doAction("Explaining rent…", () =>
-      api.explainProperty(propertyId, d?.strategy || "section8", true),
-    );
-  }, [doAction, propertyId, d?.strategy]);
-
-  const evaluate = React.useCallback(async () => {
-    await doAction("Evaluating…", async () => {
-      const strategy = d?.strategy || "section8";
-      const maybeEvalProperty = (api as any).evaluateProperty;
-
-      if (typeof maybeEvalProperty === "function") {
-        return await maybeEvalProperty(propertyId, strategy);
-      }
-
-      const snapshotId =
-        (bundle as any)?.snapshot_id ??
-        (bundle as any)?.view?.snapshot_id ??
-        (bundle as any)?.view?.latest_snapshot_id ??
-        null;
-
-      if (snapshotId != null) {
-        return await api.evaluateRun(Number(snapshotId), strategy);
-      }
-
-      throw new Error(
-        "No evaluation method available. api.evaluateProperty is missing and no snapshot_id was found in the bundle/view.",
-      );
-    });
-  }, [doAction, propertyId, d?.strategy, bundle]);
-
   const generateChecklist = React.useCallback(async () => {
     await doAction("Generating checklist…", async () => {
       await api.generateChecklist(propertyId, {
@@ -603,12 +606,6 @@ export default function PropertyView() {
   const generateRehabFromGaps = React.useCallback(async () => {
     await doAction("Generating rehab tasks from gaps…", async () => {
       await api.opsGenerateRehabTasks(propertyId);
-    });
-  }, [doAction, propertyId]);
-
-  const refreshGeo = React.useCallback(async () => {
-    await doAction("Refreshing geo…", async () => {
-      await api.geoEnrichProperty(propertyId, true);
     });
   }, [doAction, propertyId]);
 
@@ -664,25 +661,19 @@ export default function PropertyView() {
   const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
   const zillowUrl = p ? buildZillowUrl(p) : null;
 
-  const decision = (r?.decision ?? "—") as string;
-  const decisionTone =
-    String(decision).toLowerCase().includes("pass") ||
-    String(decision).toLowerCase().includes("surviv")
-      ? "good"
-      : String(decision).toLowerCase().includes("fail") ||
-          String(decision).toLowerCase().includes("reject")
-        ? "bad"
-        : "neutral";
-
-  const financing = getFinancingType(d?.asking_price);
-  const financingTone = financing === "CASH DEAL" ? "warn" : "neutral";
+  const classification = normalizeDecision(
+    r?.decision ?? v?.classification ?? ops?.classification ?? "REVIEW",
+  );
+  const classificationToneValue = classificationTone(classification);
 
   const heroSub =
     `${p?.city ?? "—"}, ${p?.state ?? "—"} ${p?.zip ?? ""}`.trim();
 
-  const stage = workflow?.current_stage || ops?.stage || "deal";
-  const stageLabel =
-    workflow?.current_stage_label || ops?.stage_label || prettyStage(stage);
+  const stage = normalizeStage(workflow?.current_stage || ops?.stage || "deal");
+  const stageLabel = prettyStage(
+    workflow?.current_stage_label || ops?.stage_label || stage,
+  );
+
   const cp = ops?.checklist_progress || {};
   const insp = ops?.inspection || {};
   const cash30 = ops?.cash?.last_30_days || {};
@@ -690,32 +681,11 @@ export default function PropertyView() {
     ops?.cash?.last_90_days || ops?.cash?.last_90 || ops?.cash?.window_90 || {};
   const equity = ops?.equity || null;
   const tenantSummary = ops?.tenant || {};
+
   const nextActions: string[] = Array.isArray(ops?.next_actions)
     ? ops.next_actions
     : Array.isArray(workflow?.next_actions)
       ? workflow.next_actions
-      : [];
-
-  const trustScore =
-    trust?.score != null
-      ? Number(trust.score)
-      : trust?.trust_score != null
-        ? Number(trust.trust_score)
-        : null;
-
-  const trustConfidence =
-    trust?.confidence ?? trust?.confidence_label ?? trust?.band ?? null;
-
-  const positives: any[] = Array.isArray(trust?.top_positive)
-    ? trust.top_positive
-    : Array.isArray(trust?.positives)
-      ? trust.positives
-      : [];
-
-  const negatives: any[] = Array.isArray(trust?.top_negative)
-    ? trust.top_negative
-    : Array.isArray(trust?.negatives)
-      ? trust.negatives
       : [];
 
   const primaryActionTitle =
@@ -730,6 +700,13 @@ export default function PropertyView() {
     photos.length > 0
       ? photos.map((x) => x?.url).filter(Boolean)
       : fallbackPhotoUrls;
+
+  const dscr = numberOrNull(r?.dscr ?? ops?.dscr);
+  const askingPrice = numberOrNull(d?.asking_price ?? ops?.asking_price);
+  const cashflowEstimate = numberOrNull(
+    r?.cash_flow ?? ops?.cashflow_estimate ?? cash90?.net,
+  );
+  const crimeScore = numberOrNull(geo?.crime_score ?? p?.crime_score);
 
   return (
     <PageShell className="relative space-y-6">
@@ -759,38 +736,6 @@ export default function PropertyView() {
               disabled={!!busy}
             >
               sync
-            </button>
-
-            <button
-              onClick={refreshGeo}
-              className="oh-btn oh-btn-secondary cursor-pointer"
-              disabled={!!busy}
-            >
-              geo
-            </button>
-
-            <button
-              onClick={evaluate}
-              className="oh-btn oh-btn-primary cursor-pointer"
-              disabled={!!busy || !d}
-            >
-              evaluate
-            </button>
-
-            <button
-              onClick={enrich}
-              className="oh-btn oh-btn-secondary cursor-pointer"
-              disabled={!!busy || !d}
-            >
-              enrich
-            </button>
-
-            <button
-              onClick={explain}
-              className="oh-btn oh-btn-secondary cursor-pointer"
-              disabled={!!busy || !d}
-            >
-              explain
             </button>
 
             <button
@@ -848,10 +793,12 @@ export default function PropertyView() {
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <Badge tone={decisionTone as any}>Decision: {decision}</Badge>
+            <Badge tone={classificationToneValue as any}>
+              {classification.replace("_", " ")}
+            </Badge>
+            <Badge>{stageLabel}</Badge>
             <Badge>Score: {r?.score ?? "—"}</Badge>
-            <Badge>DSCR: {r?.dscr?.toFixed?.(2) ?? "—"}</Badge>
-            <Badge tone={financingTone as any}>{financing}</Badge>
+            <Badge>DSCR: {dscr != null ? dscr.toFixed(2) : "—"}</Badge>
             {tenantSummary?.occupancy_status ? (
               <Badge
                 tone={
@@ -878,23 +825,16 @@ export default function PropertyView() {
             />
           </div>
 
-          <div className="mt-3 text-xs text-app-4">
-            Strategy:{" "}
-            <span className="text-app-1 font-semibold">
-              {String(d?.strategy || "section8").toUpperCase()}
-            </span>
-            {" · "}Stage:{" "}
-            <span className="text-app-1 font-semibold">
-              {String(stageLabel).toUpperCase()}
-            </span>
-          </div>
-
           <div className="mt-4 rounded-2xl border border-app bg-app-muted p-3">
             <div className="text-[11px] uppercase tracking-wider text-app-4">
               Required next move
             </div>
             <div className="mt-2 text-sm font-semibold text-app-0">
               {primaryActionTitle}
+            </div>
+            <div className="mt-1 text-xs text-app-4">
+              This property stays gated by workflow stage until the next step is
+              completed.
             </div>
           </div>
         </Surface>
@@ -1013,99 +953,32 @@ export default function PropertyView() {
           </Surface>
 
           <NextActionsPanel actions={nextActions} />
-
-          <Surface title="Trust" actions={<TrustPill score={trustScore} />}>
-            {trust == null ? (
-              <div className="text-sm text-app-4">
-                Trust is not available yet.
-                {trustErr ? (
-                  <div className="mt-2 text-xs text-app-4">{trustErr}</div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <Row
-                  k="Score"
-                  v={trustScore != null ? `${Math.round(trustScore)}/100` : "—"}
-                />
-                <Row k="Confidence" v={trustConfidence ?? "—"} />
-
-                <div className="grid grid-cols-1 gap-2">
-                  <div className="rounded-xl border border-app bg-app-muted p-3">
-                    <div className="text-[11px] text-app-4 mb-2">
-                      Top positives
-                    </div>
-                    {positives.length ? (
-                      <div className="space-y-1">
-                        {positives.slice(0, 2).map((x: any, i: number) => (
-                          <div key={i} className="text-sm text-app-2">
-                            •{" "}
-                            {x.signal_key ||
-                              x.key ||
-                              x.name ||
-                              JSON.stringify(x)}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-app-4">—</div>
-                    )}
-                  </div>
-
-                  <div className="rounded-xl border border-app bg-app-muted p-3">
-                    <div className="text-[11px] text-app-4 mb-2">
-                      Top negatives
-                    </div>
-                    {negatives.length ? (
-                      <div className="space-y-1">
-                        {negatives.slice(0, 2).map((x: any, i: number) => (
-                          <div key={i} className="text-sm text-app-2">
-                            •{" "}
-                            {x.signal_key ||
-                              x.key ||
-                              x.name ||
-                              JSON.stringify(x)}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-app-4">—</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="text-xs text-app-4">
-                  Trust reflects completeness + consistency of the pipeline.
-                </div>
-              </div>
-            )}
-          </Surface>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Asking price"
-          value={d?.asking_price != null ? money(d.asking_price) : "—"}
+          value={askingPrice != null ? money(askingPrice) : "—"}
           subtitle="Acquisition target"
         />
         <KpiCard
-          title="Cash flow"
-          value={r?.cash_flow != null ? money(r.cash_flow) : "—"}
-          subtitle="Current underwriting view"
+          title="Cash flow est."
+          value={cashflowEstimate != null ? money(cashflowEstimate) : "—"}
+          subtitle="Current projected view"
           tone="success"
         />
         <KpiCard
-          title="Open rehab"
-          value={rehab.length}
-          subtitle="Tracked task load"
-          tone="warning"
+          title="DSCR"
+          value={dscr != null ? dscr.toFixed(2) : "—"}
+          subtitle="Debt coverage"
+          tone="accent"
         />
         <KpiCard
-          title="Lease count"
-          value={leases.length}
-          subtitle="Tenant-side activity"
-          tone="accent"
+          title="Crime"
+          value={crimeScore != null ? crimeScore.toFixed(1) : "—"}
+          subtitle="Area risk signal"
+          tone="warning"
         />
       </div>
 
@@ -1119,7 +992,7 @@ export default function PropertyView() {
         <Surface tone="danger">
           <div className="text-red-300">
             {noDeal
-              ? 'No deal exists for this property yet. Click "+ deal" to create one, then run enrich/explain/evaluate.'
+              ? 'No deal exists for this property yet. Click "+ deal" to create one.'
               : err}
           </div>
         </Surface>
@@ -1166,6 +1039,7 @@ export default function PropertyView() {
           <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
             <Surface title="Underwriting">
               <div className="space-y-2">
+                <Row k="Classification" v={classification.replace("_", " ")} />
                 <Row
                   k="Gross rent used"
                   v={
@@ -1290,11 +1164,11 @@ export default function PropertyView() {
             </Surface>
           </div>
 
-          <Surface title="Guidance">
+          <Surface title="Workflow gate">
             <div className="text-sm text-app-3 leading-relaxed">
-              Start here. Deal is the first real decision gate in the pipeline.
-              Run enrich, explain, and evaluate before trying to move the
-              property deeper into the workflow.
+              This property stays in the acquisition stage until the deal case
+              is strong enough to move forward. Once the economics and readiness
+              are acceptable, advance it into rehab.
             </div>
           </Surface>
         </div>
@@ -1414,8 +1288,8 @@ export default function PropertyView() {
           >
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="text-sm text-app-3">
-                Update status, proof, and notes. Compliance must be genuinely
-                complete before tenant placement unlocks.
+                Compliance must be genuinely complete before tenant placement
+                unlocks.
               </div>
               <div className="flex gap-2">
                 <button
@@ -1471,7 +1345,6 @@ export default function PropertyView() {
                         const [
                           opsOut,
                           workflowOut,
-                          trustOut,
                           complianceStatusOut,
                           complianceRunSummaryOut,
                           inspectionReadinessOut,
@@ -1480,9 +1353,6 @@ export default function PropertyView() {
                             .opsPropertySummary(propertyId, 90)
                             .catch(() => null),
                           api.opsPropertyWorkflow(propertyId).catch(() => null),
-                          api
-                            .trustGet("property", propertyId)
-                            .catch(() => null),
                           api.complianceStatus(propertyId).catch(() => null),
                           api
                             .complianceRunSummary(propertyId)
@@ -1493,7 +1363,6 @@ export default function PropertyView() {
                         ]);
                         setOps(opsOut);
                         setWorkflow(workflowOut ?? opsOut?.workflow ?? null);
-                        setTrust(trustOut);
                         setComplianceStatus(complianceStatusOut);
                         setComplianceRunSummary(complianceRunSummaryOut);
                         setInspectionReadiness(inspectionReadinessOut);
@@ -1517,6 +1386,17 @@ export default function PropertyView() {
             opsTenant={tenantSummary}
           />
 
+          <Surface title="Tenant workflow gate">
+            <div className="text-sm text-app-3 leading-relaxed">
+              Tenant placement only comes after compliance readiness. Use this
+              stage to move from ready unit to approved occupant.
+            </div>
+          </Surface>
+        </div>
+      )}
+
+      {tab === "Lease" && (
+        <div className="space-y-4">
           <Surface title="Lease Ledger">
             {leases.length === 0 ? (
               <EmptyState compact title="No leases yet." />
@@ -1555,7 +1435,7 @@ export default function PropertyView() {
         </div>
       )}
 
-      {tab === "Cash" && (
+      {tab === "Cash / Equity" && (
         <div className="space-y-4">
           <Surface title="Cash Snapshot">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -1612,11 +1492,7 @@ export default function PropertyView() {
               </div>
             )}
           </Surface>
-        </div>
-      )}
 
-      {tab === "Equity" && (
-        <div className="space-y-4">
           <Surface title="Equity Snapshot">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <KpiCard

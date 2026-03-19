@@ -41,4 +41,16 @@ celery_app.conf.update(
         "app.workers.agent_tasks",
         "app.tasks.ingestion_tasks",
     ),
+
+    # Beat schedule
+    beat_schedule={
+        "ingestion-sync-due-sources-every-15-minutes": {
+            "task": "ingestion.sync_due_sources",
+            "schedule": 15 * 60.0,
+        },
+        "ingestion-daily-market-refresh": {
+            "task": "ingestion.daily_market_refresh",
+            "schedule": 24 * 60 * 60.0,
+        },
+    },
 )

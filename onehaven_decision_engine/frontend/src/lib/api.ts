@@ -120,6 +120,8 @@ export type IngestionRun = {
   finished_at?: string | null;
   records_seen: number;
   records_imported: number;
+  properties_created?: number;
+  properties_updated?: number;
   duplicates_skipped: number;
   invalid_rows: number;
   error_summary?: string | null;
@@ -156,6 +158,9 @@ export type IngestionOverview = {
   failed_runs_24h: number;
   records_imported_24h: number;
   duplicates_skipped_24h: number;
+  total_sources?: number;
+  properties_created_7d?: number;
+  properties_updated_7d?: number;
 };
 
 export function getOrgSlug(): string {
@@ -532,10 +537,10 @@ export const api = {
     }),
 
   propertyView: (id: number, signal?: AbortSignal) =>
-    request<any>(`/properties/${id}/view`, { cacheTtlMs: 2_000, signal }),
+    request<any>(`/properties/${id}/view`, { cacheTtlMs: 1_000, signal }),
 
   propertyBundle: (id: number, signal?: AbortSignal) =>
-    request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 2_000, signal }),
+    request<any>(`/properties/${id}/bundle`, { cacheTtlMs: 1_000, signal }),
 
   propertyCockpit: (id: number, signal?: AbortSignal) =>
     request<any>(`/properties/${id}/cockpit`, { cacheTtlMs: 1_000, signal }),
@@ -586,6 +591,13 @@ export const api = {
 
   opsRollups: (params?: Record<string, any>, signal?: AbortSignal) =>
     request<any>(`/ops/rollups${qs(params || {})}`, {
+      method: "GET",
+      cacheTtlMs: 800,
+      signal,
+    }),
+
+  opsControlPlane: (params?: Record<string, any>, signal?: AbortSignal) =>
+    request<any>(`/ops/control-plane${qs(params || {})}`, {
       method: "GET",
       cacheTtlMs: 800,
       signal,
@@ -1965,7 +1977,18 @@ export const api = {
 
   syncIngestionSource: (
     sourceId: number,
-    payload?: { trigger_type?: "manual" | "scheduled" | "webhook" },
+    payload?: {
+      trigger_type?: "manual" | "scheduled" | "webhook" | "daily_refresh";
+      state?: string;
+      county?: string;
+      city?: string;
+      min_price?: number;
+      max_price?: number;
+      min_bedrooms?: number;
+      min_bathrooms?: number;
+      property_type?: string;
+      limit?: number;
+    },
   ) =>
     request<{
       ok: boolean;
@@ -1973,12 +1996,49 @@ export const api = {
       task_id?: string;
       run_id?: number;
       status?: string;
+      source_id?: number;
     }>(`/ingestion/sources/${sourceId}/sync`, {
       method: "POST",
       body: JSON.stringify({
         trigger_type: payload?.trigger_type ?? "manual",
+        state: payload?.state ?? "MI",
+        county: payload?.county ?? undefined,
+        city: payload?.city ?? undefined,
+        min_price: payload?.min_price ?? undefined,
+        max_price: payload?.max_price ?? undefined,
+        min_bedrooms: payload?.min_bedrooms ?? undefined,
+        min_bathrooms: payload?.min_bathrooms ?? undefined,
+        property_type: payload?.property_type ?? undefined,
+        limit: payload?.limit ?? 100,
       }),
     }),
+
+  syncIngestionDefaults: () =>
+    request<{ ok: boolean; queued: number; source_ids: number[] }>(
+      `/ingestion/sync-defaults`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
+  queueIngestionDailyRefresh: () =>
+    request<{ ok: boolean; queued: boolean; task_id?: string }>(
+      `/ingestion/daily-refresh`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
+
+  queueIngestionDueSources: () =>
+    request<{ ok: boolean; queued: boolean; task_id?: string }>(
+      `/ingestion/sync-due`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    ),
 
   listIngestionRuns: (params?: { limit?: number }, signal?: AbortSignal) =>
     requestArray<IngestionRun>(

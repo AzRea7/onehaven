@@ -13,6 +13,7 @@ from app.models import (
     Property,
     PropertyState,
     RehabTask,
+    RentAssumption,
     Transaction,
     UnderwritingResult,
     Valuation,
@@ -109,6 +110,58 @@ def _lease_is_active(lease: Lease, now: datetime) -> bool:
         return parsed_end >= now
     except Exception:
         return True
+
+
+def _normalize_decision(raw: Any) -> str:
+    value = _safe_str(raw).strip().upper()
+    if value in {"PASS", "GOOD_DEAL", "GOOD", "APPROVE", "APPROVED"}:
+        return "GOOD_DEAL"
+    if value in {"REJECT", "FAIL", "FAILED", "NO_GO"}:
+        return "REJECT"
+    return "REVIEW"
+
+
+def _normalize_stage(raw: Any) -> str:
+    value = _safe_str(raw).strip().lower()
+
+    mapping = {
+        "deal": "deal",
+        "intake": "deal",
+        "sourcing": "deal",
+        "procurement": "deal",
+        "underwriting": "deal",
+        "rehab": "rehab",
+        "renovation": "rehab",
+        "construction": "rehab",
+        "compliance": "compliance",
+        "inspection": "compliance",
+        "licensing": "compliance",
+        "voucher": "tenant",
+        "tenant": "tenant",
+        "lease": "lease",
+        "leasing": "lease",
+        "management": "management",
+        "ops": "management",
+        "cash": "cash_equity",
+        "cashflow": "cash_equity",
+        "equity": "cash_equity",
+        "portfolio": "cash_equity",
+    }
+
+    return mapping.get(value, "deal")
+
+
+def _workflow_label(stage_key: str) -> str:
+    labels = {
+        "deal": "Deal / Procurement",
+        "rehab": "Rehab",
+        "compliance": "Compliance",
+        "tenant": "Tenant Placement",
+        "lease": "Lease Activation",
+        "management": "Management",
+        "cash_equity": "Cashflow / Equity",
+    }
+    return labels.get(stage_key, "Deal / Procurement")
 
 
 def _apply_property_filters(
@@ -250,6 +303,8 @@ def compute_rollups(
                 "rehab_open_cost_estimate": 0.0,
                 "net_cash_window": 0.0,
                 "avg_crime_score": None,
+                "avg_dscr": None,
+                "avg_cashflow_estimate": None,
             },
             "counts": {
                 "properties": 0,
@@ -264,7 +319,7 @@ def compute_rollups(
             "series": {
                 "cash_by_month": [],
                 "decision_mix": [],
-                "stage_mix": [],
+                "workflow_mix": [],
                 "county_mix": [],
             },
             "leaderboards": {
@@ -277,17 +332,19 @@ def compute_rollups(
             "properties": [],
         }
 
-    # --- states / stages ---
     stage_rows = db.execute(
         select(PropertyState.property_id, PropertyState.current_stage).where(
             PropertyState.org_id == org_id,
             PropertyState.property_id.in_(prop_ids),
         )
     ).all()
-    stage_map: dict[int, str] = {int(pid): _safe_str(st).lower() for pid, st in stage_rows}
+    stage_map: dict[int, str] = {
+        int(pid): _normalize_stage(st) for pid, st in stage_rows
+    }
 
     if stage:
-        props = [p for p in props if stage_map.get(int(p.id), "") == stage.lower()]
+        wanted_stage = _normalize_stage(stage)
+        props = [p for p in props if stage_map.get(int(p.id), "deal") == wanted_stage]
         prop_ids = [int(p.id) for p in props]
 
     if not prop_ids:
@@ -324,6 +381,8 @@ def compute_rollups(
                 "rehab_open_cost_estimate": 0.0,
                 "net_cash_window": 0.0,
                 "avg_crime_score": None,
+                "avg_dscr": None,
+                "avg_cashflow_estimate": None,
             },
             "counts": {
                 "properties": 0,
@@ -338,7 +397,7 @@ def compute_rollups(
             "series": {
                 "cash_by_month": [],
                 "decision_mix": [],
-                "stage_mix": [],
+                "workflow_mix": [],
                 "county_mix": [],
             },
             "leaderboards": {
@@ -351,7 +410,6 @@ def compute_rollups(
             "properties": [],
         }
 
-    # --- related rows ---
     deals = db.scalars(
         select(Deal).where(Deal.org_id == org_id, Deal.property_id.in_(prop_ids))
     ).all()
@@ -359,6 +417,16 @@ def compute_rollups(
     deal_by_property: dict[int, list[Deal]] = defaultdict(list)
     for d in deals:
         deal_by_property[int(d.property_id)].append(d)
+
+    latest_deal_by_property: dict[int, Deal] = {}
+    for d in sorted(
+        deals,
+        key=lambda x: (getattr(x, "id", 0),),
+        reverse=True,
+    ):
+        pid = int(d.property_id)
+        if pid not in latest_deal_by_property:
+            latest_deal_by_property[pid] = d
 
     underwriting_rows: list[UnderwritingResult] = []
     if deal_ids:
@@ -368,12 +436,8 @@ def compute_rollups(
             .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
         ).all()
 
-    latest_underwriting_by_property: dict[int, UnderwritingResult] = {}
-    for uw in underwriting_rows:
-        prop_id = None
-        for d in deal_by_property.values():
-            pass
     deal_id_to_property = {int(d.id): int(d.property_id) for d in deals}
+    latest_underwriting_by_property: dict[int, UnderwritingResult] = {}
     for uw in underwriting_rows:
         pid = deal_id_to_property.get(int(uw.deal_id))
         if pid is None:
@@ -428,7 +492,22 @@ def compute_rollups(
         if _lease_is_active(lease, now):
             active_lease_by_property[pid] = lease
 
-    # --- stage / decision buckets ---
+    rent_rows = db.scalars(
+        select(RentAssumption).where(
+            RentAssumption.org_id == org_id,
+            RentAssumption.property_id.in_(prop_ids),
+        )
+    ).all()
+    latest_rent_by_property: dict[int, RentAssumption] = {}
+    for rr in sorted(
+        rent_rows,
+        key=lambda x: (getattr(x, "id", 0),),
+        reverse=True,
+    ):
+        pid = int(rr.property_id)
+        if pid not in latest_rent_by_property:
+            latest_rent_by_property[pid] = rr
+
     stage_counts: dict[str, int] = defaultdict(int)
     decision_buckets: dict[str, int] = defaultdict(int)
     county_buckets: dict[str, int] = defaultdict(int)
@@ -455,25 +534,28 @@ def compute_rollups(
     homes_with_valuation = 0
     red_zone_count = 0
     crime_scores: list[float] = []
+    dscr_values: list[float] = []
+    cashflow_estimates: list[float] = []
 
     for p in props:
         pid = int(p.id)
 
-        stage_value = stage_map.get(pid, "deal") or "deal"
+        stage_value = stage_map.get(pid, "deal")
         stage_counts[stage_value] += 1
 
         county_key = _safe_str(getattr(p, "county", None) or "unknown").strip() or "unknown"
         county_buckets[county_key] += 1
 
         uw = latest_underwriting_by_property.get(pid)
-        latest_decision = _safe_str(getattr(uw, "decision", None)).upper() or "UNKNOWN"
-        decision_buckets[latest_decision] += 1
+        raw_decision = _safe_str(getattr(uw, "decision", None))
+        classification = _normalize_decision(raw_decision)
+        decision_buckets[classification] += 1
 
-        if latest_decision == "PASS":
+        if classification == "GOOD_DEAL":
             good_deals += 1
-        elif latest_decision == "REVIEW":
+        elif classification == "REVIEW":
             review_deals += 1
-        elif latest_decision in {"REJECT", "FAIL"}:
+        else:
             rejected_deals += 1
 
         val = latest_valuation_by_property.get(pid)
@@ -531,7 +613,6 @@ def compute_rollups(
             elif txn_type == "capex":
                 property_capex += amount
             else:
-                # keep earlier repo behavior tolerant of mixed signs
                 property_other += amount
 
             mb = _month_bucket(getattr(t, "txn_date", None))
@@ -555,6 +636,21 @@ def compute_rollups(
         if active_lease is not None:
             active_leases_count += 1
 
+        latest_deal = latest_deal_by_property.get(pid)
+        latest_rent = latest_rent_by_property.get(pid)
+
+        asking_price = _num(getattr(latest_deal, "asking_price", None))
+        market_rent_estimate = _num(getattr(latest_rent, "market_rent_estimate", None))
+        dscr = _num(getattr(uw, "dscr", None)) if uw is not None else None
+        if dscr is not None and dscr > 0:
+            dscr_values.append(float(dscr))
+
+        # lightweight investor-facing estimate for list/dashboard display
+        monthly_rehab_holdback = rehab_open_cost / 12.0 if rehab_open_cost > 0 else 0.0
+        monthly_cashflow_estimate = market_rent_estimate - monthly_rehab_holdback
+        if market_rent_estimate > 0:
+            cashflow_estimates.append(monthly_cashflow_estimate)
+
         property_rows.append(
             {
                 "id": pid,
@@ -568,9 +664,15 @@ def compute_rollups(
                 "square_feet": getattr(p, "square_feet", None),
                 "year_built": getattr(p, "year_built", None),
                 "stage": stage_value,
-                "latest_decision": latest_decision,
+                "stage_label": _workflow_label(stage_value),
+                "classification": classification,
+                "latest_decision": classification,
+                "raw_decision": raw_decision or None,
                 "score": _num(getattr(uw, "score", None)) if uw is not None else None,
-                "dscr": _num(getattr(uw, "dscr", None)) if uw is not None else None,
+                "dscr": float(dscr) if dscr is not None else None,
+                "asking_price": asking_price if asking_price > 0 else None,
+                "cashflow_estimate": round(monthly_cashflow_estimate, 2) if market_rent_estimate > 0 else None,
+                "market_rent_estimate": market_rent_estimate if market_rent_estimate > 0 else None,
                 "is_red_zone": bool(getattr(p, "is_red_zone", False)),
                 "crime_score": getattr(p, "crime_score", None),
                 "offender_count": getattr(p, "offender_count", None),
@@ -593,19 +695,19 @@ def compute_rollups(
         )
 
     if decision:
-        wanted = decision.strip().upper()
-        property_rows = [r for r in property_rows if _safe_str(r.get("latest_decision")).upper() == wanted]
+        wanted = _normalize_decision(decision)
+        property_rows = [r for r in property_rows if _safe_str(r.get("classification")) == wanted]
 
     property_rows.sort(
         key=lambda r: (
-            0 if r.get("latest_decision") == "PASS" else 1 if r.get("latest_decision") == "REVIEW" else 2,
+            0 if r.get("classification") == "GOOD_DEAL" else 1 if r.get("classification") == "REVIEW" else 2,
             -_num(r.get("score")),
             -_num(r.get("estimated_equity")),
-            -_num(r.get("property_net_cash_window")),
+            -_num(r.get("cashflow_estimate")),
+            -_num(r.get("asking_price")),
         )
     )
 
-    # finalize monthly net
     for bucket in cash_month_map.values():
         bucket["net"] = (
             _num(bucket["income"]) - _num(bucket["expense"]) - _num(bucket["capex"]) + _num(bucket["net"])
@@ -618,16 +720,16 @@ def compute_rollups(
     txn_count = len(txns)
     valuation_count = len(valuations)
 
-    avg_crime_score = None
-    if crime_scores:
-        avg_crime_score = round(sum(crime_scores) / len(crime_scores), 2)
+    avg_crime_score = round(sum(crime_scores) / len(crime_scores), 2) if crime_scores else None
+    avg_dscr = round(sum(dscr_values) / len(dscr_values), 2) if dscr_values else None
+    avg_cashflow_estimate = round(sum(cashflow_estimates) / len(cashflow_estimates), 2) if cashflow_estimates else None
 
     decision_mix = [
-        {"key": k, "label": k, "count": int(v)}
+        {"key": k, "label": k.replace("_", " ").title(), "count": int(v)}
         for k, v in sorted(decision_buckets.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
-    stage_mix = [
-        {"key": k, "label": k.replace("_", " "), "count": int(v)}
+    workflow_mix = [
+        {"key": k, "label": _workflow_label(k), "count": int(v)}
         for k, v in sorted(stage_counts.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
     county_mix = [
@@ -635,9 +737,7 @@ def compute_rollups(
         for k, v in sorted(county_buckets.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
     ]
 
-    latest_valuation = None
-    if valuations:
-        latest_valuation = valuations[0]
+    latest_valuation = valuations[0] if valuations else None
     latest_valuation_out = None
     if latest_valuation is not None:
         latest_valuation_out = {
@@ -681,6 +781,8 @@ def compute_rollups(
             "rehab_open_cost_estimate": round(rehab_open_cost_estimate, 2),
             "net_cash_window": round(net_cash_window, 2),
             "avg_crime_score": avg_crime_score,
+            "avg_dscr": avg_dscr,
+            "avg_cashflow_estimate": avg_cashflow_estimate,
         },
         "counts": {
             "properties": property_count,
@@ -707,21 +809,21 @@ def compute_rollups(
         "series": {
             "cash_by_month": [cash_month_map[m] for m in cash_month_labels],
             "decision_mix": decision_mix,
-            "stage_mix": stage_mix,
+            "workflow_mix": workflow_mix,
             "county_mix": county_mix,
         },
         "leaderboards": {
             "good_deals": sorted(
                 property_rows,
                 key=lambda r: (
-                    0 if r.get("latest_decision") == "PASS" else 1 if r.get("latest_decision") == "REVIEW" else 2,
+                    0 if r.get("classification") == "GOOD_DEAL" else 1 if r.get("classification") == "REVIEW" else 2,
                     -_num(r.get("score")),
                     -_num(r.get("dscr")),
                 ),
             )[:10],
             "cashflow": sorted(
                 property_rows,
-                key=lambda r: -_num(r.get("property_net_cash_window")),
+                key=lambda r: -_num(r.get("cashflow_estimate")),
             )[:10],
             "equity": sorted(
                 property_rows,
