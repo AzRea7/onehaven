@@ -262,8 +262,8 @@ export default function Properties() {
           title="Properties"
           subtitle="Ingest, review, and move properties through a cleaner workflow from deal to cash-generating occupancy."
           right={
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
-              <div className="h-[220px] w-[220px] md:h-[250px] md:w-[250px] translate-y-[-8px] opacity-95">
+            <div className="absolute inset-0 flex items-center justify-center overflow-visible pointer-events-auto">
+              <div className="h-[220px] w-[220px] translate-y-[-8px] opacity-95 md:h-[250px] md:w-[250px]">
                 <Golem className="h-full w-full" />
               </div>
             </div>
@@ -337,7 +337,9 @@ export default function Properties() {
 
             <Surface
               title="Property list"
-              subtitle={`${filtered.length} visible ${filtered.length === 1 ? "property" : "properties"}`}
+              subtitle={`${filtered.length} visible ${
+                filtered.length === 1 ? "property" : "properties"
+              }`}
             >
               <div className="mb-4 rounded-3xl border border-app bg-app-panel px-4 py-4">
                 <div className="grid gap-3 lg:grid-cols-[1.3fr_0.7fr_0.7fr_auto]">

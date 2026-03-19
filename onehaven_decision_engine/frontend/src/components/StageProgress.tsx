@@ -122,6 +122,10 @@ export default function StageProgress({
       ? String(currentStageLabel)
       : labelize(current);
 
+  const nextStageLabel = labelize(
+    gate?.allowed_next_stage || gate?.allowed_next_stage_label || "rehab",
+  );
+
   return (
     <Surface
       title="Workflow progress"
@@ -173,7 +177,7 @@ export default function StageProgress({
                 {labelize(stage)}
               </div>
 
-              <div className="mt-2 text-xs text-app-4 leading-relaxed">
+              <div className="mt-2 text-xs leading-relaxed text-app-4">
                 {getStageHelp(stage)}
               </div>
 
@@ -196,11 +200,7 @@ export default function StageProgress({
         <div className="mt-2 text-sm text-app-2">
           {gate
             ? gate?.ok
-              ? `Ready to move into ${labelize(
-                  gate?.allowed_next_stage_label ||
-                    gate?.allowed_next_stage ||
-                    "next stage",
-                )}.`
+              ? `Ready to move into ${nextStageLabel}.`
               : gate?.blocked_reason || "Not ready yet."
             : `This property is currently gated at ${labelize(
                 current,

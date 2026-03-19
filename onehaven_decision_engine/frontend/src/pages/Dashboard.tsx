@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  ArrowRight,
   BriefcaseBusiness,
   ClipboardCheck,
   Hammer,
@@ -123,7 +122,7 @@ function GraphBars({
                 {valueKey === "count" ? raw : money(raw)}
               </span>
             </div>
-            <div className="h-2 rounded-full bg-app-muted overflow-hidden">
+            <div className="h-2 overflow-hidden rounded-full bg-app-muted">
               <div
                 className={`h-full rounded-full ${
                   isNegative ? "bg-red-400/70" : "bg-[var(--accent)]"
@@ -158,7 +157,7 @@ function Leaderboard({
         <Link
           key={row.id}
           to={`/properties/${row.id}`}
-          className="block rounded-2xl border border-app bg-app-panel px-4 py-3 hover:border-app-strong hover:bg-app-muted transition"
+          className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
         >
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
@@ -259,8 +258,8 @@ export default function Dashboard() {
           title="Investment dashboard"
           subtitle="A cleaner investor view focused on pipeline movement, portfolio performance, and the fastest path from acquisition to tenant-occupied cashflow."
           right={
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
-              <div className="h-[220px] w-[220px] md:h-[250px] md:w-[250px] translate-y-[-8px] opacity-95">
+            <div className="absolute inset-0 flex items-center justify-center overflow-visible pointer-events-auto">
+              <div className="h-[220px] w-[220px] translate-y-[-8px] opacity-95 md:h-[250px] md:w-[250px]">
                 <Golem className="h-full w-full" />
               </div>
             </div>
@@ -273,7 +272,7 @@ export default function Dashboard() {
               <Link to="/properties" className="oh-btn oh-btn-secondary">
                 Open properties
               </Link>
-              <div className="text-[11px] text-app-4 px-2 py-2">
+              <div className="px-2 py-2 text-[11px] text-app-4">
                 {lastSync
                   ? `last sync: ${new Date(lastSync).toLocaleTimeString()}`
                   : ""}

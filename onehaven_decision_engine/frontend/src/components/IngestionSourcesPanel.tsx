@@ -1,4 +1,11 @@
 import React from "react";
+import {
+  CalendarClock,
+  Database,
+  RefreshCcw,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
 import GlassCard from "./GlassCard";
 import Spinner from "./Spinner";
 import { ingestionClient, IngestionSource } from "../lib/ingestionClient";
@@ -25,6 +32,28 @@ function regionLabel(row: IngestionSource) {
     cfg.state || null,
   ].filter(Boolean);
   return parts.length ? parts.join(", ") : "Default market";
+}
+
+function cadenceLabel(minutes?: number | null) {
+  if (!minutes || !Number.isFinite(Number(minutes))) return "—";
+  const n = Number(minutes);
+  if (n < 60) return `Every ${n} min`;
+  if (n % 60 === 0) return `Every ${n / 60} hr`;
+  return `Every ${n} min`;
+}
+
+function statusTone(status?: string) {
+  const v = String(status || "").toLowerCase();
+  if (v === "connected" || v === "healthy" || v === "ready") {
+    return "border-emerald-400/20 bg-emerald-400/10 text-emerald-100";
+  }
+  if (v === "error" || v === "failed") {
+    return "border-red-400/20 bg-red-400/10 text-red-100";
+  }
+  if (v === "paused" || v === "warning") {
+    return "border-amber-400/20 bg-amber-400/10 text-amber-100";
+  }
+  return "border-white/10 bg-white/5 text-neutral-200";
 }
 
 export default function IngestionSourcesPanel({ refreshKey }: Props) {
@@ -60,72 +89,109 @@ export default function IngestionSourcesPanel({ refreshKey }: Props) {
             Daily sync coverage
           </h3>
           <p className="mt-1 text-sm text-neutral-400">
-            Default warm markets that keep your property database current.
+            Warm markets that keep the property database fresh without
+            cluttering the intake workflow.
           </p>
         </div>
         <button
           onClick={() => load()}
-          className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white transition hover:bg-white/5"
+          className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-white transition hover:bg-white/5"
         >
+          <RefreshCcw className="h-4 w-4" />
           Refresh
         </button>
       </div>
 
-      <div className="space-y-3">
-        {rows.map((row) => (
-          <div
-            key={row.id}
-            className="rounded-2xl border border-white/10 bg-white/5 p-4"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-medium text-white">{row.display_name}</div>
-                <div className="mt-1 text-sm text-neutral-400">
-                  {regionLabel(row)}
+      {!rows.length ? (
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-sm text-neutral-300">
+          No ingestion sources are configured yet.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rows.map((row) => (
+            <div
+              key={row.id}
+              className="rounded-2xl border border-white/10 bg-white/5 p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="font-medium text-white">
+                      {row.display_name}
+                    </div>
+                    <span
+                      className={`rounded-full border px-3 py-1 text-xs ${statusTone(
+                        row.status,
+                      )}`}
+                    >
+                      {row.status}
+                    </span>
+                    {row.is_enabled ? (
+                      <span className="rounded-full border border-sky-400/20 bg-sky-400/10 px-3 py-1 text-xs text-sky-100">
+                        enabled
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-neutral-300">
+                        disabled
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-1 text-sm text-neutral-400">
+                    {regionLabel(row)}
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 px-2.5 py-1">
+                      <Database className="h-3.5 w-3.5" />
+                      {row.provider}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 px-2.5 py-1">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      {row.source_type}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              <span
-                className={[
-                  "rounded-full border px-3 py-1 text-xs",
-                  row.status === "connected"
-                    ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
-                    : row.status === "error"
-                      ? "border-red-400/20 bg-red-400/10 text-red-100"
-                      : "border-amber-400/20 bg-amber-400/10 text-amber-100",
-                ].join(" ")}
-              >
-                {row.status}
-              </span>
-            </div>
+              <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-neutral-300 md:grid-cols-3">
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <div className="flex items-center gap-2 text-neutral-500">
+                    <RefreshCcw className="h-3.5 w-3.5" />
+                    Last sync
+                  </div>
+                  <div className="mt-1">{fmt(row.last_synced_at)}</div>
+                </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-neutral-300 md:grid-cols-3">
-              <div>
-                <div className="text-neutral-500">Last sync</div>
-                <div>{fmt(row.last_synced_at)}</div>
-              </div>
-              <div>
-                <div className="text-neutral-500">Next scheduled run</div>
-                <div>{fmt(row.next_scheduled_at)}</div>
-              </div>
-              <div>
-                <div className="text-neutral-500">Sync cadence</div>
-                <div>
-                  {row.sync_interval_minutes
-                    ? `Every ${row.sync_interval_minutes} min`
-                    : "—"}
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <div className="flex items-center gap-2 text-neutral-500">
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    Next scheduled run
+                  </div>
+                  <div className="mt-1">{fmt(row.next_scheduled_at)}</div>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <div className="text-neutral-500">Sync cadence</div>
+                  <div className="mt-1">
+                    {cadenceLabel(row.sync_interval_minutes)}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {row.last_error_summary ? (
-              <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
-                {row.last_error_summary}
-              </div>
-            ) : null}
-          </div>
-        ))}
-      </div>
+              {row.last_error_summary ? (
+                <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">
+                  <div className="mb-1 flex items-center gap-2 font-medium">
+                    <TriangleAlert className="h-4 w-4" />
+                    Last error
+                  </div>
+                  <div>{row.last_error_summary}</div>
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
     </GlassCard>
   );
 }

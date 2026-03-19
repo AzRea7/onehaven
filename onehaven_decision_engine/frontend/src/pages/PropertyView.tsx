@@ -682,14 +682,144 @@ export default function PropertyView() {
   const equity = ops?.equity || null;
   const tenantSummary = ops?.tenant || {};
 
-  const nextActions: string[] = Array.isArray(ops?.next_actions)
-    ? ops.next_actions
-    : Array.isArray(workflow?.next_actions)
-      ? workflow.next_actions
-      : [];
+  const nextActions = React.useMemo(() => {
+    const rows: Array<
+      | string
+      | {
+          title?: string;
+          detail?: string;
+          kind?: string;
+          priority?: string;
+          due_at?: string | null;
+          href?: string | null;
+        }
+    > = [];
+
+    if (!d) {
+      rows.push({
+        title: "Create initial deal record",
+        detail:
+          "This property cannot move cleanly through underwriting and workflow gates until the deal record exists.",
+        kind: "deal",
+        priority: "high",
+      });
+    }
+
+    if (workflow?.primary_action?.title) {
+      rows.push({
+        title: workflow.primary_action.title,
+        detail:
+          workflow?.transition_gate?.blocked_reason ||
+          "This is the next workflow action currently expected for this property.",
+        kind: workflow?.primary_action?.kind || "workflow",
+        priority: workflow?.transition_gate?.ok ? "high" : "medium",
+      });
+    }
+
+    if (stage === "compliance" && checklistItems.length === 0) {
+      rows.push({
+        title: "Generate compliance checklist",
+        detail:
+          "Compliance should be tracked with checklist items before tenant placement is allowed.",
+        kind: "compliance",
+        priority: "high",
+      });
+    }
+
+    if (stage === "rehab" && rehab.length === 0) {
+      rows.push({
+        title: "Create rehab tasks from current gaps",
+        detail:
+          "Convert open checklist gaps and unresolved inspection issues into rehab tasks.",
+        kind: "rehab",
+        priority: "medium",
+      });
+    }
+
+    if (
+      stage === "tenant" &&
+      !tenantSummary?.occupancy_status &&
+      leases.length === 0
+    ) {
+      rows.push({
+        title: "Start tenant placement",
+        detail:
+          "This asset is in tenant placement stage but does not yet show an active placement or lease.",
+        kind: "tenant",
+        priority: "medium",
+      });
+    }
+
+    if (
+      stage === "cash_equity" &&
+      txns.length === 0 &&
+      vals.length === 0 &&
+      equity == null
+    ) {
+      rows.push({
+        title: "Begin operating history capture",
+        detail:
+          "Cashflow and equity stage is unlocked, but there is not enough operating history showing yet.",
+        kind: "cashflow",
+        priority: "low",
+      });
+    }
+
+    if (Array.isArray(ops?.next_actions) && ops.next_actions.length > 0) {
+      for (const item of ops.next_actions.slice(0, 3)) {
+        if (typeof item === "string") {
+          rows.push(item);
+        } else if (item && typeof item === "object") {
+          rows.push({
+            title: item.title || item.label || "Next action",
+            detail: item.detail || item.description || "",
+            kind: item.kind || "manual",
+            priority: item.priority || "normal",
+            due_at: item.due_at || null,
+            href: item.href || null,
+          });
+        }
+      }
+    } else if (
+      Array.isArray(workflow?.next_actions) &&
+      workflow.next_actions.length > 0
+    ) {
+      for (const item of workflow.next_actions.slice(0, 3)) {
+        if (typeof item === "string") rows.push(item);
+      }
+    }
+
+    if (rows.length === 0) {
+      rows.push({
+        title: "Refresh property state",
+        detail:
+          "No clear next action is currently surfaced. Refresh this property and verify stage blockers, checklist state, and underwriting outputs.",
+        kind: "sync",
+        priority: "low",
+      });
+    }
+
+    return rows;
+  }, [
+    d,
+    workflow,
+    checklistItems.length,
+    stage,
+    rehab.length,
+    tenantSummary,
+    leases.length,
+    txns.length,
+    vals.length,
+    equity,
+    ops?.next_actions,
+  ]);
 
   const primaryActionTitle =
-    workflow?.primary_action?.title || nextActions[0] || "No immediate action";
+    workflow?.primary_action?.title ||
+    (typeof nextActions[0] === "string"
+      ? nextActions[0]
+      : nextActions[0]?.title) ||
+    "No immediate action";
 
   const geo = bundle?.geo || {};
   const photoGallery = bundle?.photo_gallery || {};

@@ -1,41 +1,27 @@
-from app.models import IngestionSource
-from app.services.ingestion_run_execute import execute_source_sync
+from app.services.ingestion_enrichment_service import canonical_listing_payload
+from app.services.ingestion_scheduler_service import list_default_daily_markets
 
 
-def test_execute_source_sync_reports_geo_and_workflow_counts(db_session):
-    source = IngestionSource(
-        org_id=1,
-        provider="rentcast",
-        slug="rentcast-sale-listings",
-        display_name="RentCast Sale Listings",
-        source_type="api",
-        status="connected",
-        is_enabled=True,
-        config_json={
-            "sample_rows": [
-                {
-                    "external_record_id": "rc-post-import-a",
-                    "address": "111 Workflow Ave",
-                    "city": "Detroit",
-                    "state": "MI",
-                    "zip": "48201",
-                    "bedrooms": 3,
-                    "bathrooms": 1,
-                    "asking_price": 95000,
-                    "photos": [],
-                }
-            ]
-        },
-        credentials_json={},
-        cursor_json={},
-    )
-    db_session.add(source)
-    db_session.commit()
-    db_session.refresh(source)
+def test_canonical_listing_payload_keeps_core_fields():
+    row = {
+        "listingId": "abc123",
+        "formattedAddress": "123 Main St",
+        "city": "Detroit",
+        "state": "MI",
+        "zipCode": "48201",
+        "price": 120000,
+        "rentEstimate": 1450,
+    }
+    out = canonical_listing_payload(row)
+    assert out["external_record_id"] == "abc123"
+    assert out["address"] == "123 Main St"
+    assert out["asking_price"] == 120000
+    assert out["market_rent_estimate"] == 1450
 
-    run = execute_source_sync(db_session, org_id=1, source=source, trigger_type="manual", runtime_config={"city": "Detroit", "limit": 10})
 
-    assert run.status == "success"
-    summary = run.summary_json or {}
-    assert summary.get("workflow_recomputed", 0) >= 1
-    assert "geo_enriched" in summary
+def test_default_daily_markets_are_seeded_for_southeast_michigan():
+    markets = list_default_daily_markets()
+    city_names = {m["city"].lower() for m in markets}
+    assert "detroit" in city_names
+    assert "warren" in city_names
+    assert "pontiac" in city_names

@@ -19,6 +19,7 @@ from ..schemas import (
 )
 from ..services.ingestion_run_execute import execute_source_sync
 from ..services.ingestion_run_service import get_ingestion_overview, list_runs
+from ..services.ingestion_scheduler_service import list_default_daily_markets
 from ..services.ingestion_source_service import (
     create_source,
     ensure_default_manual_sources,
@@ -41,15 +42,11 @@ class IngestionSyncLaunchRequest(BaseModel):
     min_bedrooms: int | None = None
     min_bathrooms: float | None = None
     property_type: str | None = None
-    limit: int = Field(default=100, ge=1)
+    limit: int = Field(default=100, ge=1, le=500)
 
     @model_validator(mode="after")
     def validate_ranges(self):
-        if (
-            self.min_price is not None
-            and self.max_price is not None
-            and self.min_price > self.max_price
-        ):
+        if self.min_price is not None and self.max_price is not None and self.min_price > self.max_price:
             raise ValueError("min_price cannot be greater than max_price")
         return self
 
@@ -61,21 +58,19 @@ class IngestionSyncLaunchRequest(BaseModel):
 
 
 @router.get("/overview", response_model=IngestionOverviewOut)
-def overview(
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
+def overview(db: Session = Depends(get_db), p=Depends(get_principal)):
     ensure_default_manual_sources(db, org_id=p.org_id)
-    return get_ingestion_overview(db, org_id=p.org_id)
+    payload = get_ingestion_overview(db, org_id=p.org_id)
+    payload["daily_markets"] = list_default_daily_markets()
+    payload["ui_mode"] = "consolidated"
+    return payload
 
 
 @router.get("/sources", response_model=list[IngestionSourceOut])
-def sources(
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
+def sources(db: Session = Depends(get_db), p=Depends(get_principal)):
     ensure_default_manual_sources(db, org_id=p.org_id)
-    return list_sources(db, org_id=p.org_id)
+    rows = list_sources(db, org_id=p.org_id)
+    return rows
 
 
 @router.post("/sources", response_model=IngestionSourceOut)
@@ -116,75 +111,48 @@ def sync_now(
 
     runtime_config = payload.runtime_config()
     trigger_type = str(runtime_config.pop("trigger_type", "manual") or "manual")
-
-    job = sync_source_task.delay(
-        p.org_id,
-        row.id,
-        trigger_type,
-        runtime_config,
-    )
-    return {
-        "ok": True,
-        "queued": True,
-        "task_id": job.id,
-        "source_id": row.id,
-    }
+    job = sync_source_task.delay(p.org_id, row.id, trigger_type, runtime_config)
+    return {"ok": True, "queued": True, "task_id": job.id, "source_id": row.id}
 
 
 @router.post("/sync-defaults", response_model=dict)
 def sync_default_sources_now(
+    payload: IngestionSyncLaunchRequest | None = None,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ):
-    """
-    Convenience endpoint for the cleaner ingestion UI:
-    queue syncs for all default warm-market sources at once.
-    """
     ensure_default_manual_sources(db, org_id=p.org_id)
-    rows = list_sources(db, org_id=p.org_id)
+    rows = [x for x in list_sources(db, org_id=p.org_id) if bool(x.is_enabled)]
+    runtime = (payload or IngestionSyncLaunchRequest()).runtime_config()
+    runtime.pop("trigger_type", None)
 
     queued: list[int] = []
     for row in rows:
-        if not bool(row.is_enabled):
-            continue
-        sync_source_task.delay(int(p.org_id), int(row.id), "manual", {})
+        sync_source_task.delay(int(p.org_id), int(row.id), "manual", runtime)
         queued.append(int(row.id))
-
     return {"ok": True, "queued": len(queued), "source_ids": queued}
 
 
 @router.post("/sync-due", response_model=dict)
-def queue_due_sources(
-    _op=Depends(require_operator),
-):
+def queue_due_sources(_op=Depends(require_operator)):
     job = sync_due_sources_task.delay()
     return {"ok": True, "queued": True, "task_id": job.id}
 
 
 @router.post("/daily-refresh", response_model=dict)
-def queue_daily_market_refresh(
-    _op=Depends(require_operator),
-):
+def queue_daily_market_refresh(_op=Depends(require_operator)):
     job = daily_market_refresh_task.delay()
-    return {"ok": True, "queued": True, "task_id": job.id}
+    return {"ok": True, "queued": True, "task_id": job.id, "markets": list_default_daily_markets()}
 
 
 @router.get("/runs", response_model=list[IngestionRunListItem])
-def runs(
-    limit: int = 50,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
+def runs(limit: int = 50, db: Session = Depends(get_db), p=Depends(get_principal)):
     return list_runs(db, org_id=p.org_id, limit=limit)
 
 
 @router.get("/runs/{run_id}", response_model=dict)
-def run_detail(
-    run_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
+def run_detail(run_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
     row = db.get(IngestionRun, int(run_id))
     if not row or int(row.org_id) != int(p.org_id):
         raise HTTPException(status_code=404, detail="Run not found")

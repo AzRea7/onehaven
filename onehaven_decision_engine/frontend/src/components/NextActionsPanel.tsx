@@ -1,5 +1,11 @@
 import React from "react";
-import { ArrowRight, CheckCircle2, Clock3 } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  ExternalLink,
+  PlayCircle,
+} from "lucide-react";
 import Surface from "./Surface";
 import EmptyState from "./EmptyState";
 
@@ -14,6 +20,9 @@ type ActionLike =
       priority?: string;
       due_at?: string | null;
       href?: string | null;
+      cta_label?: string | null;
+      disabled?: boolean;
+      onClick?: (() => void | Promise<void>) | null;
     };
 
 function normalizeAction(action: ActionLike) {
@@ -25,6 +34,9 @@ function normalizeAction(action: ActionLike) {
       priority: "normal",
       due_at: null as string | null,
       href: null as string | null,
+      cta_label: null as string | null,
+      disabled: false,
+      onClick: null as (() => void | Promise<void>) | null,
     };
   }
 
@@ -35,15 +47,28 @@ function normalizeAction(action: ActionLike) {
     priority: action?.priority || "normal",
     due_at: action?.due_at || null,
     href: action?.href || null,
+    cta_label: action?.cta_label || null,
+    disabled: Boolean(action?.disabled),
+    onClick: action?.onClick || null,
   };
 }
 
 function priorityTone(priority?: string) {
   const p = String(priority || "").toLowerCase();
-  if (p === "high" || p === "urgent" || p === "critical")
+  if (p === "high" || p === "urgent" || p === "critical") {
     return "oh-pill oh-pill-bad";
+  }
   if (p === "medium") return "oh-pill oh-pill-warn";
   if (p === "low") return "oh-pill oh-pill-good";
+  return "oh-pill";
+}
+
+function kindTone(kind?: string) {
+  const k = String(kind || "").toLowerCase();
+  if (["advance", "workflow", "gate"].includes(k))
+    return "oh-pill oh-pill-accent";
+  if (["compliance", "inspection"].includes(k)) return "oh-pill oh-pill-warn";
+  if (["deal", "cashflow", "equity"].includes(k)) return "oh-pill oh-pill-good";
   return "oh-pill";
 }
 
@@ -57,7 +82,7 @@ export default function NextActionsPanel({
   return (
     <Surface
       title="Next actions"
-      subtitle="The smallest useful list of things that actually move the property forward."
+      subtitle="The smallest useful list of actions that actually move the property toward the next gate."
     >
       {!rows.length ? (
         <EmptyState
@@ -68,59 +93,70 @@ export default function NextActionsPanel({
       ) : (
         <div className="space-y-3">
           {rows.map((action, i) => {
-            const content = (
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="text-sm font-semibold text-app-0">
-                      {action.title}
-                    </div>
-                    <span className={priorityTone(action.priority)}>
-                      {action.priority}
-                    </span>
-                    <span className="oh-pill">{action.kind}</span>
-                  </div>
-
-                  {action.detail ? (
-                    <div className="mt-2 text-sm leading-6 text-app-3">
-                      {action.detail}
-                    </div>
-                  ) : null}
-
-                  {action.due_at ? (
-                    <div className="mt-2 flex items-center gap-2 text-xs text-app-4">
-                      <Clock3 className="h-3.5 w-3.5" />
-                      due {new Date(action.due_at).toLocaleString()}
-                    </div>
-                  ) : null}
-                </div>
-
+            const interactiveButton =
+              action.onClick || action.href ? (
+                action.href ? (
+                  <a
+                    href={action.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="oh-btn oh-btn-secondary shrink-0"
+                  >
+                    {action.cta_label || "open"}
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => action.onClick?.()}
+                    disabled={action.disabled}
+                    className="oh-btn oh-btn-primary shrink-0 disabled:opacity-60"
+                  >
+                    {action.cta_label || "run"}
+                    <PlayCircle className="h-4 w-4" />
+                  </button>
+                )
+              ) : (
                 <div className="shrink-0 text-app-4">
                   <ArrowRight className="h-4 w-4" />
                 </div>
-              </div>
-            );
-
-            if (action.href) {
-              return (
-                <a
-                  key={`${action.title}-${i}`}
-                  href={action.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block rounded-2xl border border-app bg-app-panel px-4 py-4 hover:border-app-strong hover:bg-app-muted"
-                >
-                  {content}
-                </a>
               );
-            }
 
             return (
               <div
                 key={`${action.title}-${i}`}
                 className="rounded-2xl border border-app bg-app-panel px-4 py-4"
               >
-                {content}
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-sm font-semibold text-app-0">
+                        {action.title}
+                      </div>
+                      <span className={priorityTone(action.priority)}>
+                        {action.priority}
+                      </span>
+                      <span className={kindTone(action.kind)}>
+                        {action.kind}
+                      </span>
+                    </div>
+
+                    {action.detail ? (
+                      <div className="mt-2 text-sm leading-6 text-app-3">
+                        {action.detail}
+                      </div>
+                    ) : null}
+
+                    {action.due_at ? (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-app-4">
+                        <Clock3 className="h-3.5 w-3.5" />
+                        due {new Date(action.due_at).toLocaleString()}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {interactiveButton}
+                </div>
               </div>
             );
           })}

@@ -540,3 +540,91 @@ def evaluate_results(
         out.append(UnderwritingResultOut.model_validate(payload))
 
     return out
+
+
+
+
+
+@router.post("/property/{property_id}", response_model=dict)
+def evaluate_property(
+    property_id: int,
+    strategy: Optional[str] = Query(default=None, description="section8|market (optional override)"),
+    payment_standard_pct: float | None = Query(default=None, description="Override. Default from config."),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    prop = db.scalar(select(Property).where(Property.id == int(property_id), Property.org_id == int(principal.org_id)))
+    if prop is None:
+        return {"ok": False, "detail": "Property not found"}
+
+    deal = db.scalar(
+        select(Deal)
+        .where(Deal.property_id == int(property_id), Deal.org_id == int(principal.org_id))
+        .order_by(desc(Deal.id))
+    )
+    if deal is None:
+        return {"ok": False, "detail": "Deal not found for property"}
+
+    ra = db.scalar(
+        select(RentAssumption)
+        .where(RentAssumption.property_id == int(property_id), RentAssumption.org_id == int(principal.org_id))
+        .order_by(desc(RentAssumption.id))
+    )
+    pct = float(payment_standard_pct or getattr(settings, "payment_standard_pct", 1.0))
+    rent_used, fallback_used, notes, computed_ceiling, cap_reason, fmr_adjusted = _rent_used_for_underwriting(
+        strategy=_norm_strategy(strategy or getattr(deal, "strategy", None)),
+        d=deal,
+        ra=ra,
+        payment_standard_pct=pct,
+    )
+    uw = underwrite(
+        purchase_price=float(getattr(deal, "asking_price", 0.0) or 0.0),
+        rehab_estimate=float(getattr(deal, "rehab_estimate", 0.0) or 0.0),
+        down_payment_pct=float(getattr(deal, "down_payment_pct", 0.20) or 0.20),
+        interest_rate=float(getattr(deal, "interest_rate", 0.075) or 0.075),
+        term_years=int(getattr(deal, "term_years", 30) or 30),
+        gross_rent=float(rent_used or 0.0),
+    )
+    decision = "GOOD_DEAL"
+    if uw.dscr < 1.0 or uw.cash_flow < 0:
+        decision = "REJECT"
+    elif uw.dscr < 1.2 or uw.cash_flow < 250:
+        decision = "REVIEW"
+
+    row = UnderwritingResult(
+        org_id=int(principal.org_id),
+        deal_id=int(deal.id),
+        decision=decision,
+        score=max(1, min(100, int(round(uw.dscr * 40 + max(uw.cash_flow, 0) / 25)))),
+        reasons_json=notes + [f"Auto/property evaluation: DSCR {uw.dscr:.2f}, cash flow ${uw.cash_flow:.0f}."],
+        dscr=uw.dscr,
+        cash_flow=uw.cash_flow,
+        gross_rent_used=float(rent_used or 0.0),
+        asking_price=float(getattr(deal, "asking_price", 0.0) or 0.0),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    try:
+        emit_workflow_event(
+            db,
+            org_id=int(principal.org_id),
+            property_id=int(property_id),
+            event_type="underwriting_completed",
+            event_value={"decision": decision},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return {
+        "ok": True,
+        "property_id": property_id,
+        "deal_id": deal.id,
+        "decision": decision,
+        "fallback_used": fallback_used,
+        "computed_ceiling": computed_ceiling,
+        "cap_reason": cap_reason,
+        "fmr_adjusted": fmr_adjusted,
+        "result": UnderwritingResultOut.model_validate(row, from_attributes=True),
+    }

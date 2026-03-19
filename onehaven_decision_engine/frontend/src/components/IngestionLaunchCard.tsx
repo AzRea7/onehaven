@@ -5,7 +5,9 @@ import {
   Building2,
   Calendar,
   Filter,
+  MapPinned,
   Play,
+  SearchCheck,
 } from "lucide-react";
 import GlassCard from "./GlassCard";
 import { ingestionClient, IngestionSource } from "../lib/ingestionClient";
@@ -109,6 +111,17 @@ function findBestSource(
   }
 
   return enabled[0] || rows[0];
+}
+
+function statusTone(status?: string) {
+  const v = String(status || "").toLowerCase();
+  if (v === "connected" || v === "healthy" || v === "ready") {
+    return "border-emerald-400/20 bg-emerald-400/10 text-emerald-100";
+  }
+  if (v === "error" || v === "failed") {
+    return "border-red-400/20 bg-red-400/10 text-red-100";
+  }
+  return "border-amber-400/20 bg-amber-400/10 text-amber-100";
 }
 
 export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
@@ -219,7 +232,8 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="mb-3 text-sm font-medium text-white">
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
+              <MapPinned className="h-4 w-4 text-neutral-300" />
               Intake region
             </div>
 
@@ -400,12 +414,9 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
               Provider: {selectedSource.provider}
             </span>
             <span
-              className={[
-                "rounded-full px-3 py-1 border",
-                selectedSource.status === "connected"
-                  ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-100"
-                  : "border-amber-400/20 bg-amber-400/10 text-amber-100",
-              ].join(" ")}
+              className={`rounded-full border px-3 py-1 ${statusTone(
+                selectedSource.status,
+              )}`}
             >
               {selectedSource.status}
             </span>
@@ -426,7 +437,7 @@ export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
           <div className="flex items-center gap-2 text-sm text-neutral-400">
-            <Building2 className="h-4 w-4" />
+            <SearchCheck className="h-4 w-4" />
             New listings only. Existing external matches are skipped
             automatically.
           </div>
