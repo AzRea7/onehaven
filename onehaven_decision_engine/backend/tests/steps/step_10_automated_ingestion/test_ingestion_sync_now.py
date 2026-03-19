@@ -4,13 +4,15 @@ from app.routers import ingestion as router_mod
 
 def test_sync_now_endpoint_queues_task_with_runtime_filters(
     client_with_auth_headers,
+    auth_context,
     db_session,
     monkeypatch,
 ):
     client, headers = client_with_auth_headers
+    org_id = auth_context["org"].id
 
     source = IngestionSource(
-        org_id=1,
+        org_id=org_id,
         provider="rentcast",
         slug="rentcast-sale-listings",
         display_name="RentCast Sale Listings",
@@ -53,17 +55,17 @@ def test_sync_now_endpoint_queues_task_with_runtime_filters(
         },
     )
     assert resp.status_code == 200, resp.text
+
     body = resp.json()
     assert body["ok"] is True
     assert body["queued"] is True
     assert body["task_id"] == "task-123"
 
-    assert captured["org_id"] == 1
+    assert captured["org_id"] == org_id
     assert captured["source_id"] == source.id
     assert captured["trigger_type"] == "manual"
     assert captured["runtime_config"]["city"] == "Detroit"
     assert captured["runtime_config"]["county"] == "wayne"
     assert captured["runtime_config"]["max_price"] == 125000
     assert captured["runtime_config"]["min_bedrooms"] == 3
-    assert captured["runtime_config"]["limit"] == 50
-    
+    assert captured["runtime_config"]["limit"] == 75
