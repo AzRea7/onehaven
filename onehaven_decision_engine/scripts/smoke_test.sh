@@ -1,10 +1,10 @@
+# scripts/smoke_test.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="${BASE:-http://localhost:8000}"
+BASE="${BASE:-http://localhost:8000/api}"
 STATE="${STATE:-MI}"
 
-# ---- multitenant identity (defaults match your demo org/user) ----
 ORG_SLUG="${ORG_SLUG:-demo}"
 USER_EMAIL="${USER_EMAIL:-austin@demo.local}"
 USER_ROLE="${USER_ROLE:-owner}"
@@ -22,105 +22,85 @@ require() {
 require curl
 require jq
 
-echo "== Smoke test: create property -> enrich -> assert rent_assumption + comps + api usage =="
+CITY="${CITY:-Detroit}"
+COUNTY="${COUNTY:-wayne}"
+LIMIT="${LIMIT:-25}"
+
+echo "== Smoke test: property-first ingestion sync -> property metrics -> dashboard contract =="
 echo "ORG_SLUG=${ORG_SLUG} USER_EMAIL=${USER_EMAIL} USER_ROLE=${USER_ROLE}"
 
-CITY="${CITY:-Detroit}"
-ZIP="${ZIP:-48201}"
+echo "-- Health..."
+curl -sS "${BASE}/health" | jq .
 
-ADDR="SMOKE TEST $(date +%s) MAIN ST"
-BED=3
-BATH=1.0
-SQFT=1100
-YEAR=1950
-HAS_GARAGE=false
-PROP_TYPE="single_family"
+echo "-- Ensure ingestion overview..."
+curl -sS "${BASE}/ingestion/overview" "${H_AUTH[@]}" | jq '{normal_path, legacy_snapshot_flow_enabled, ui_mode}'
 
-echo "-- Creating property..."
-PID="$(
-  curl -sS -X POST "$BASE/properties" \
-    "${H_AUTH[@]}" \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"address\": \"${ADDR}\",
-      \"city\": \"${CITY}\",
-      \"state\": \"${STATE}\",
-      \"zip\": \"${ZIP}\",
-      \"bedrooms\": ${BED},
-      \"bathrooms\": ${BATH},
-      \"square_feet\": ${SQFT},
-      \"year_built\": ${YEAR},
-      \"has_garage\": ${HAS_GARAGE},
-      \"property_type\": \"${PROP_TYPE}\"
-    }" | jq -r '.id'
+SOURCE_ID="$(
+  curl -sS "${BASE}/ingestion/sources" "${H_AUTH[@]}" \
+    | jq -r '.[] | select(.provider=="rentcast") | .id' \
+    | head -n 1
 )"
 
-if [[ -z "${PID}" || "${PID}" == "null" ]]; then
-  echo "FAILED: property id missing"
+if [[ -z "${SOURCE_ID}" || "${SOURCE_ID}" == "null" ]]; then
+  echo "FAILED: could not resolve an enabled ingestion source"
   exit 1
 fi
-echo "Created property_id=${PID}"
 
-echo "-- Capture budget before (rentcast)..."
-BEFORE_USED="$(
-  curl -sS "$BASE/rent/enrich/budget?provider=rentcast" \
-    "${H_AUTH[@]}" \
-    | jq -r '.used'
-)"
-
-echo "-- Enrich rent (section8)..."
-curl -sS -X POST "$BASE/rent/enrich/${PID}?strategy=section8" \
+echo "-- Execute inline ingestion sync..."
+curl -sS -X POST "${BASE}/ingestion/sources/${SOURCE_ID}/sync" \
   "${H_AUTH[@]}" \
-  | jq '.' >/tmp/smoke_enrich.json
+  -H "Content-Type: application/json" \
+  -d "{
+    \"trigger_type\": \"manual\",
+    \"execute_inline\": true,
+    \"state\": \"${STATE}\",
+    \"county\": \"${COUNTY}\",
+    \"city\": \"${CITY}\",
+    \"limit\": ${LIMIT}
+  }" | tee /tmp/onehaven_step4_sync.json | jq '{
+    ok,
+    queued,
+    run_id,
+    status,
+    normal_path,
+    pipeline_outcome
+  }'
 
-echo "-- Fetch property..."
-curl -sS "$BASE/properties/${PID}" \
+SYNC_OK="$(jq -r '.ok' /tmp/onehaven_step4_sync.json)"
+[[ "${SYNC_OK}" == "true" ]] || { echo "FAILED: sync response not ok"; exit 1; }
+
+RUN_STATUS="$(jq -r '.status' /tmp/onehaven_step4_sync.json)"
+[[ "${RUN_STATUS}" == "success" ]] || { echo "FAILED: sync did not finish successfully"; exit 1; }
+
+echo "-- Property list contract..."
+curl -sS "${BASE}/properties?city=${CITY}&limit=5" \
   "${H_AUTH[@]}" \
-  | jq '.' >/tmp/smoke_property.json
+  | tee /tmp/onehaven_step4_properties.json \
+  | jq '.[0] // {}'
 
-echo "-- Assertions..."
-
-# rent_assumption exists
-RA_EXISTS="$(jq -r '.rent_assumption != null' /tmp/smoke_property.json)"
-[[ "${RA_EXISTS}" == "true" ]] || { echo "FAILED: rent_assumption missing"; exit 1; }
-
-# comps count > 0
-COMPS_COUNT="$(jq -r '.rent_comps | length' /tmp/smoke_property.json)"
-if ! [[ "${COMPS_COUNT}" =~ ^[0-9]+$ ]]; then
-  echo "FAILED: comps count not numeric: ${COMPS_COUNT}"
-  exit 1
-fi
-(( COMPS_COUNT > 0 )) || { echo "FAILED: comps count is 0"; exit 1; }
-
-# required fields non-null
-MEDIAN="$(jq -r '.rent_assumption.rent_reasonableness_comp' /tmp/smoke_property.json)"
-MARKET="$(jq -r '.rent_assumption.market_rent_estimate' /tmp/smoke_property.json)"
-FMR="$(jq -r '.rent_assumption.section8_fmr' /tmp/smoke_property.json)"
-CEIL="$(jq -r '.rent_assumption.approved_rent_ceiling' /tmp/smoke_property.json)"
-
-[[ "${MEDIAN}" != "null" ]] || { echo "FAILED: rent_reasonableness_comp is null"; exit 1; }
-[[ "${MARKET}" != "null" ]] || { echo "FAILED: market_rent_estimate is null"; exit 1; }
-[[ "${FMR}" != "null" ]] || { echo "FAILED: section8_fmr is null"; exit 1; }
-[[ "${CEIL}" != "null" ]] || { echo "FAILED: approved_rent_ceiling is null"; exit 1; }
-
-echo "-- Capture budget after (rentcast)..."
-AFTER_USED="$(
-  curl -sS "$BASE/rent/enrich/budget?provider=rentcast" \
-    "${H_AUTH[@]}" \
-    | jq -r '.used'
-)"
-
-if ! [[ "${BEFORE_USED}" =~ ^[0-9]+$ && "${AFTER_USED}" =~ ^[0-9]+$ ]]; then
-  echo "FAILED: api usage used not numeric (before=${BEFORE_USED}, after=${AFTER_USED})"
+PROP_COUNT="$(jq 'length' /tmp/onehaven_step4_properties.json)"
+if ! [[ "${PROP_COUNT}" =~ ^[0-9]+$ ]]; then
+  echo "FAILED: property list length is not numeric"
   exit 1
 fi
 
-(( AFTER_USED > BEFORE_USED )) || {
-  echo "FAILED: expected api usage to increment (before=${BEFORE_USED}, after=${AFTER_USED})"
-  exit 1
-}
+if (( PROP_COUNT > 0 )); then
+  jq -e '.[0] | has("asking_price") and has("projected_monthly_cashflow") and has("dscr") and has("crime_score") and has("normalized_decision") and has("current_workflow_stage")' \
+    /tmp/onehaven_step4_properties.json >/dev/null \
+    || { echo "FAILED: property list row missing required workflow/metrics fields"; exit 1; }
+fi
+
+echo "-- Dashboard rollups contract..."
+curl -sS "${BASE}/dashboard/rollups?city=${CITY}" \
+  "${H_AUTH[@]}" \
+  | tee /tmp/onehaven_step4_rollups.json \
+  | jq '{kpis, decision_counts, stage_counts}'
+
+jq -e '
+  (.decision_counts | keys | all(. == "GOOD" or . == "REVIEW" or . == "REJECT"))
+' /tmp/onehaven_step4_rollups.json >/dev/null \
+  || { echo "FAILED: dashboard rollups exposed non-normalized decision group"; exit 1; }
 
 echo "✅ PASS"
-echo "property_id=${PID}"
-echo "comps_count=${COMPS_COUNT}"
-echo "before_used=${BEFORE_USED} after_used=${AFTER_USED}"
+echo "source_id=${SOURCE_ID}"
+echo "saved=/tmp/onehaven_step4_sync.json /tmp/onehaven_step4_properties.json /tmp/onehaven_step4_rollups.json"

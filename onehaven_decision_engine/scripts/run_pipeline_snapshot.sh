@@ -1,16 +1,13 @@
+# scripts/run_pipeline_snapshot.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="${BASE:-http://localhost:8000}"
-CSV_PATH="${1:-}"
-STRATEGY="${STRATEGY:-section8}"
+BASE="${BASE:-http://localhost:8000/api}"
+STATE="${STATE:-MI}"
+COUNTY="${COUNTY:-wayne}"
+CITY="${CITY:-Detroit}"
 LIMIT="${LIMIT:-50}"
 
-MIN_DSCR="${MIN_DSCR:-1.20}"
-MIN_CASHFLOW="${MIN_CASHFLOW:-400}"
-SURVIVOR_LIMIT="${SURVIVOR_LIMIT:-25}"
-
-# ---- multitenant identity (defaults match your demo org/user) ----
 ORG_SLUG="${ORG_SLUG:-demo}"
 USER_EMAIL="${USER_EMAIL:-austin@demo.local}"
 USER_ROLE="${USER_ROLE:-owner}"
@@ -25,21 +22,8 @@ require() { command -v "$1" >/dev/null 2>&1 || { echo "Missing required command:
 require curl
 require jq
 
-if [[ -z "${CSV_PATH}" ]]; then
-  echo "Usage: $0 path/to/zillow.csv"
-  echo "Example (Git Bash): $0 \"/c/Users/austin/Downloads/zillow.csv\""
-  exit 1
-fi
-
-if [[ ! -f "${CSV_PATH}" ]]; then
-  echo "FAILED: CSV file not found at: ${CSV_PATH}"
-  exit 1
-fi
-
 echo "BASE=${BASE}"
-echo "CSV_PATH=${CSV_PATH}"
-echo "STRATEGY=${STRATEGY}"
-echo "LIMIT=${LIMIT}"
+echo "STATE=${STATE} COUNTY=${COUNTY} CITY=${CITY} LIMIT=${LIMIT}"
 echo "ORG_SLUG=${ORG_SLUG} USER_EMAIL=${USER_EMAIL} USER_ROLE=${USER_ROLE}"
 echo
 
@@ -47,78 +31,94 @@ echo "== 0) Health check =="
 curl -sS "${BASE}/health" | jq
 echo
 
-echo "== 1) Who am I? =="
-curl -sS "${BASE}/auth/me" "${H_AUTH[@]}" | jq
+echo "== 1) Ingestion overview =="
+curl -sS "${BASE}/ingestion/overview" "${H_AUTH[@]}" | jq '{
+  normal_path,
+  legacy_snapshot_flow_enabled,
+  ui_mode,
+  daily_markets
+}'
 echo
 
-echo "== 2) Import Zillow CSV -> snapshot =="
-
-IMPORT_RESP="$(mktemp)"
-curl -sS -X POST "${BASE}/import/zillow" \
-  "${H_AUTH[@]}" \
-  -F "file=@${CSV_PATH}" \
-  | tee "${IMPORT_RESP}" \
-  | jq .
-
-SNAP="$(
-  jq -r '
-    .snapshot_id //
-    .data.snapshot_id //
-    .result.snapshot_id //
-    .id //
-    empty
-  ' "${IMPORT_RESP}"
+echo "== 2) Resolve source =="
+SOURCE_ID="$(
+  curl -sS "${BASE}/ingestion/sources" "${H_AUTH[@]}" \
+    | jq -r '.[] | select(.provider=="rentcast") | .id' \
+    | head -n 1
 )"
 
-if [[ -z "${SNAP}" || "${SNAP}" == "null" ]]; then
-  echo "FAILED: snapshot_id missing from /import/zillow response"
-  echo "Raw response:"
-  cat "${IMPORT_RESP}"
+if [[ -z "${SOURCE_ID}" || "${SOURCE_ID}" == "null" ]]; then
+  echo "FAILED: source_id missing from /ingestion/sources"
   exit 1
 fi
 
-echo "snapshot_id=${SNAP}"
+echo "source_id=${SOURCE_ID}"
 echo
 
-echo "== 3) Enrich rent batch (snapshot=${SNAP}, limit=${LIMIT}, strategy=${STRATEGY}) =="
-curl -sS -X POST "${BASE}/rent/enrich/batch?snapshot_id=${SNAP}&limit=${LIMIT}&strategy=${STRATEGY}" \
+echo "== 3) Run inline property-first sync =="
+curl -sS -X POST "${BASE}/ingestion/sources/${SOURCE_ID}/sync" \
   "${H_AUTH[@]}" \
-  | tee /tmp/enrich_resp.json \
-  | jq '{snapshot_id, attempted, enriched, stopped_early, stop_reason, errors_count:(.errors|length)}'
+  -H "Content-Type: application/json" \
+  -d "{
+    \"trigger_type\": \"manual\",
+    \"execute_inline\": true,
+    \"state\": \"${STATE}\",
+    \"county\": \"${COUNTY}\",
+    \"city\": \"${CITY}\",
+    \"limit\": ${LIMIT}
+  }" \
+  | tee /tmp/onehaven_pipeline_sync.json \
+  | jq '{
+    ok,
+    queued,
+    run_id,
+    status,
+    source_id,
+    trigger_type,
+    pipeline_outcome
+  }'
 echo
 
-echo "== 4) Rent explain batch (persist=true) =="
-curl -sS "${BASE}/rent/explain/batch?snapshot_id=${SNAP}&strategy=${STRATEGY}&limit=${LIMIT}&persist=true" \
+echo "== 4) Recent properties =="
+curl -sS "${BASE}/properties?city=${CITY}&limit=10" \
   "${H_AUTH[@]}" \
-  | tee /tmp/rent_explain_batch.json \
-  | jq '{snapshot_id, strategy, attempted, explained, errors_count:(.errors|length)}'
+  | tee /tmp/onehaven_pipeline_properties.json \
+  | jq 'map({
+      id,
+      address,
+      city,
+      asking_price,
+      projected_monthly_cashflow,
+      dscr,
+      crime_score,
+      normalized_decision,
+      current_workflow_stage
+    })'
 echo
 
-echo "== 5) Evaluate snapshot =="
-curl -sS -X POST "${BASE}/evaluate/snapshot/${SNAP}?strategy=${STRATEGY}" \
+echo "== 5) Dashboard rollups =="
+curl -sS "${BASE}/dashboard/rollups?city=${CITY}" \
   "${H_AUTH[@]}" \
-  | tee /tmp/eval_resp.json \
-  | jq '{snapshot_id, total_deals, pass_count, review_count, reject_count, errors}'
+  | tee /tmp/onehaven_pipeline_rollups.json \
+  | jq '{
+    kpis,
+    decision_counts,
+    stage_counts,
+    sample_rows: (.rows[:5] | map({
+      property_id,
+      address,
+      asking_price,
+      projected_monthly_cashflow,
+      dscr,
+      crime_score,
+      decision,
+      stage
+    }))
+  }'
 echo
 
-echo "== 6) Top results =="
-curl -sS "${BASE}/evaluate/results?snapshot_id=${SNAP}&limit=25" \
-  "${H_AUTH[@]}" \
-  | tee /tmp/results_resp.json \
-  | jq 'map({id, deal_id, decision, score, dscr, cash_flow, gross_rent_used, rent_cap_reason})'
-echo
-
-echo "== 7) Survivors (operator list) =="
-curl -sS "${BASE}/deals/survivors?snapshot_id=${SNAP}&decision=PASS&min_dscr=${MIN_DSCR}&min_cashflow=${MIN_CASHFLOW}&limit=${SURVIVOR_LIMIT}" \
-  "${H_AUTH[@]}" \
-  | tee /tmp/survivors_resp.json \
-  | jq '(.[:10] | map({deal_id, property_id, address, city, zip, score, dscr, cash_flow, gross_rent_used}))'
-echo
-
-echo "✅ DONE snapshot_id=${SNAP}"
+echo "✅ DONE"
 echo "Saved:"
-echo "  /tmp/enrich_resp.json"
-echo "  /tmp/rent_explain_batch.json"
-echo "  /tmp/eval_resp.json"
-echo "  /tmp/results_resp.json"
-echo "  /tmp/survivors_resp.json"
+echo "  /tmp/onehaven_pipeline_sync.json"
+echo "  /tmp/onehaven_pipeline_properties.json"
+echo "  /tmp/onehaven_pipeline_rollups.json"
