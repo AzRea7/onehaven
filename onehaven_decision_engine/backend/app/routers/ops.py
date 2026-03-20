@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -26,7 +26,10 @@ from ..models import (
     WorkflowEvent,
 )
 from ..services.dashboard_rollups import compute_rollups
-from ..services.property_state_machine import compute_and_persist_stage, get_state_payload
+from ..services.property_state_machine import (
+    compute_and_persist_stage,
+    get_state_payload,
+)
 from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/ops", tags=["ops"])
@@ -167,9 +170,16 @@ def _active_lease(db: Session, *, org_id: int, property_id: int) -> Optional[Lea
     ).all()
 
     for row in rows:
-        if row.start_date and row.start_date > now:
+        start = getattr(row, "start_date", None)
+        end = getattr(row, "end_date", None)
+
+        if start and isinstance(start, datetime) and start > now:
             continue
-        if row.end_date and row.end_date < now:
+        if start and isinstance(start, date) and start > now.date():
+            continue
+        if end and isinstance(end, datetime) and end < now:
+            continue
+        if end and isinstance(end, date) and end < now.date():
             continue
         return row
     return None
@@ -227,9 +237,13 @@ def _tenant_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, 
     upcoming = []
     ended = []
     for l in leases:
-        if l.start_date and l.start_date > now:
+        if l.start_date and isinstance(l.start_date, datetime) and l.start_date > now:
             upcoming.append(l)
-        elif l.end_date and l.end_date < now:
+        elif l.start_date and isinstance(l.start_date, date) and l.start_date > now.date():
+            upcoming.append(l)
+        elif l.end_date and isinstance(l.end_date, datetime) and l.end_date < now:
+            ended.append(l)
+        elif l.end_date and isinstance(l.end_date, date) and l.end_date < now.date():
             ended.append(l)
         else:
             active.append(l)
@@ -304,14 +318,14 @@ def _decision_health(
 
     if underwriting:
         score += 20
-        decision = str(underwriting.get("decision") or "").lower()
-        if decision in {"buy", "proceed", "pass"}:
+        decision = str(underwriting.get("decision") or "").upper()
+        if decision == "GOOD":
             score += 10
             flags.append("underwriting_positive")
-        elif decision in {"reject", "fail"}:
+        elif decision == "REJECT":
             warnings.append("underwriting_negative")
         else:
-            warnings.append("underwriting_unclear")
+            warnings.append("underwriting_review")
     else:
         warnings.append("missing_underwriting")
 
@@ -408,11 +422,12 @@ def property_ops_summary(
     if uw:
         underwriting = {
             "id": uw.id,
-            "decision": uw.decision,
+            "decision": state_payload.get("normalized_decision"),
+            "raw_decision": uw.decision,
             "score": uw.score,
             "dscr": uw.dscr,
             "cash_flow": uw.cash_flow,
-            "gross_rent_used": uw.gross_rent_used,
+            "gross_rent_used": getattr(uw, "gross_rent_used", None),
             "opex_used": getattr(uw, "opex_used", None),
             "reason_json": _loads(getattr(uw, "reason_json", None), {}),
             "created_at": uw.created_at.isoformat() if uw.created_at else None,
@@ -473,6 +488,10 @@ def property_ops_summary(
         },
         "stage": stage,
         "stage_label": workflow.get("current_stage_label"),
+        "normalized_decision": state_payload.get("normalized_decision"),
+        "gate_status": state_payload.get("gate_status"),
+        "gate": state_payload.get("gate"),
+        "stage_completion_summary": state_payload.get("stage_completion_summary"),
         "stage_updated_at": stage_row.updated_at.isoformat() if stage_row.updated_at else None,
         "checklist_progress": {
             "total": checklist.total,

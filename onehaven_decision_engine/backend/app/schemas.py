@@ -663,15 +663,10 @@ class JurisdictionProfileResolveOut(BaseModel):
 # Workflow State (NEW)
 # --------------------
 WorkflowStage = Literal[
-    "import",
     "deal",
-    "decision",
-    "acquisition",
-    "rehab_plan",
-    "rehab_exec",
+    "rehab",
     "compliance",
     "tenant",
-    "lease",
     "cash",
     "equity",
 ]
@@ -681,28 +676,20 @@ class WorkflowStateOut(BaseModel):
     property_id: int
     current_stage: WorkflowStage
     suggested_stage: WorkflowStage
+    current_stage_label: str
+
+    normalized_decision: Literal["GOOD", "REVIEW", "REJECT"]
+    gate_status: Literal["OPEN", "BLOCKED"]
+    gate: Dict[str, Any] = Field(default_factory=dict)
 
     constraints: Dict[str, Any] = Field(default_factory=dict)
     outstanding_tasks: Dict[str, Any] = Field(default_factory=dict)
     next_actions: List[str] = Field(default_factory=list)
+    stage_completion_summary: Dict[str, Any] = Field(default_factory=dict)
 
     updated_at: Optional[str] = None
     last_transitioned_at: Optional[str] = None
-    stage_order: List[str] = Field(
-        default_factory=lambda: [
-            "import",
-            "deal",
-            "decision",
-            "acquisition",
-            "rehab_plan",
-            "rehab_exec",
-            "compliance",
-            "tenant",
-            "lease",
-            "cash",
-            "equity",
-        ]
-    )
+    stage_order: List[str] = Field(default_factory=lambda: ["deal", "rehab", "compliance", "tenant", "cash", "equity"])
 
 
 class WorkflowDecisionIn(BaseModel):

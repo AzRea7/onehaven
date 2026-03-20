@@ -7,22 +7,26 @@ from app.routers import compliance as router_mod
 
 class DummyScalarResult:
     def __init__(self, rows):
-        self._rows = rows
+        self._rows = list(rows)
 
     def all(self):
-        return self._rows
+        return list(self._rows)
 
 
 class DummyDB:
     def __init__(self, checklist_rows, inspection_row):
-        self._checklist_rows = checklist_rows
-        self._inspection_row = inspection_row
+        self.checklist_rows = checklist_rows
+        self.inspection_row = inspection_row
+        self.scalar_calls = 0
 
-    def scalars(self, stmt):
-        return DummyScalarResult(self._checklist_rows)
+    def scalar(self, *args, **kwargs):
+        self.scalar_calls += 1
+        if self.scalar_calls == 1:
+            return self.inspection_row
+        return None
 
-    def scalar(self, stmt):
-        return self._inspection_row
+    def scalars(self, *args, **kwargs):
+        return DummyScalarResult(self.checklist_rows)
 
 
 def test_compliance_status_exposes_jurisdiction_counts(monkeypatch):
@@ -48,27 +52,49 @@ def test_compliance_status_exposes_jurisdiction_counts(monkeypatch):
     monkeypatch.setattr(router_mod, "require_stage", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         router_mod,
-        "resolve_operational_policy",
-        lambda db, org_id, city, county, state: {
-            "profile_id": 501,
-            "scope": "org",
-            "match_level": "city",
-            "blocking_items": [{"code": "NO_PO_BOX"}],
-            "required_actions": [{"code": "CITY_DEBT_CLEARANCE"}],
-        },
-    )
-    monkeypatch.setattr(
-        router_mod,
         "build_workflow_summary",
         lambda db, org_id, property_id, recompute=True: {"current_stage": "compliance"},
+    )
+
+    monkeypatch.setattr(
+        router_mod,
+        "build_property_inspection_readiness",
+        lambda db, org_id, property_id: {
+            "ok": True,
+            "property_id": property_id,
+            "overall_status": "not_ready",
+            "score_pct": 62,
+            "readiness": {
+                "hqs_ready": False,
+                "local_ready": False,
+                "voucher_ready": True,
+                "lease_up_ready": True,
+            },
+            "counts": {
+                "blocking_count": 1,
+                "warning_count": 1,
+                "recommended_action_count": 1,
+            },
+            "blocking_items": [{"code": "NO_PO_BOX"}],
+            "warning_items": [{"code": "INSPECTION_NOT_PASSED"}],
+            "recommended_actions": [{"code": "CITY_DEBT_CLEARANCE"}],
+            "coverage": {
+                "profile_id": 501,
+                "scope": "org",
+                "match_level": "city",
+            },
+        },
     )
 
     out = router_mod.compliance_status(property_id=55, db=db, p=fake_principal)
 
     assert out["property_id"] == 55
-    assert out["jurisdiction_profile_id"] == 501
-    assert out["jurisdiction_scope"] == "org"
-    assert out["jurisdiction_match_level"] == "city"
-    assert out["blocking_item_count"] == 1
-    assert out["required_action_count"] == 1
     assert out["passed"] is False
+    assert out["overall_status"] == "not_ready"
+    assert out["score_pct"] == 62
+    assert out["readiness"]["hqs_ready"] is False
+    assert out["counts"]["blocking_count"] == 1
+    assert out["blocking_items"][0]["code"] == "NO_PO_BOX"
+    assert out["recommended_actions"][0]["code"] == "CITY_DEBT_CLEARANCE"
+    assert out["coverage"]["profile_id"] == 501
+    

@@ -32,7 +32,10 @@ def _must_get_property(db: Session, *, org_id: int, property_id: int) -> Propert
 
 @router.get("/catalog", response_model=dict)
 def workflow_catalog():
-    return {"stages": stage_catalog()}
+    return {
+        "stages": stage_catalog(),
+        "decision_states": ["GOOD", "REVIEW", "REJECT"],
+    }
 
 
 @router.post("/events", response_model=WorkflowEventOut)
@@ -78,11 +81,6 @@ def upsert_state(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    current_stage is canonical and data-derived.
-    This endpoint is only for enriching constraints/task metadata and for
-    limited manual correction that cannot jump ahead of computed truth.
-    """
     _must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
 
     row = ensure_state_row(db, org_id=p.org_id, property_id=payload.property_id)
@@ -168,11 +166,6 @@ def advance(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Validates whether the next stage is unlocked.
-    current_stage itself is always computed from data truth, so this endpoint
-    acts mainly as a gate/diagnostic and resync trigger.
-    """
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
 
     tx = get_transition_payload(db, org_id=p.org_id, property_id=property_id)

@@ -20,21 +20,26 @@ def _seed_checklist_item(
     org_id: int,
     property_id: int,
     item_code: str,
-    category: str = "safety",
+    status: str,
     description: str | None = None,
-    status: str = "todo",
     is_completed: bool | None = None,
+    category: str = "safety",
 ):
     row = PropertyChecklistItem(
         org_id=org_id,
         property_id=property_id,
+        checklist_id=None,
         item_code=item_code,
         category=category,
         description=description or item_code.replace("_", " ").title(),
-        severity=3,
+        severity=2,
         common_fail=True,
+        applies_if_json=None,
         status=status,
-        is_completed=is_completed,
+        marked_by_user_id=None,
+        marked_at=None,
+        proof_url=None,
+        notes=None,
     )
     db.add(row)
     db.commit()

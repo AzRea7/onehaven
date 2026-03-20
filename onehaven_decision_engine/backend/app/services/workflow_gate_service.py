@@ -38,38 +38,42 @@ def build_workflow_summary(
     nxt = next_stage(cur)
     gate = tx.get("gate") or {}
     next_actions = state.get("next_actions") or []
+    stage_completion_summary = state.get("stage_completion_summary") or {}
 
     rows: list[dict[str, Any]] = []
-    for s in STAGES:
-        rank = stage_rank(s)
+    completed_lookup = {
+        str(item.get("stage")): bool(item.get("is_complete"))
+        for item in (stage_completion_summary.get("by_stage") or [])
+        if isinstance(item, dict)
+    }
+
+    for stage in STAGES:
+        rank = stage_rank(stage)
+        meta = stage_meta(stage)
         rows.append(
             {
-                "key": s,
+                "key": stage,
                 "rank": rank,
-                "label": stage_label(s),
-                "description": stage_meta(s).get("description", ""),
-                "primary_action": stage_meta(s).get("primary_action", ""),
+                "label": meta["label"],
+                "description": meta["description"],
+                "primary_action": meta["primary_action"],
                 "status": (
                     "completed"
-                    if rank < cur_rank
+                    if completed_lookup.get(stage, False) and rank < cur_rank
                     else "current"
                     if rank == cur_rank
                     else "next"
-                    if nxt == s
+                    if nxt == stage
                     else "locked"
                 ),
-                "is_completed": rank < cur_rank,
+                "is_completed": bool(completed_lookup.get(stage, False)),
                 "is_current": rank == cur_rank,
-                "is_next": nxt == s,
-                "is_locked": rank > cur_rank and nxt != s,
+                "is_next": nxt == stage,
+                "is_locked": rank > cur_rank and nxt != stage,
             }
         )
 
-    completed_count = cur_rank
-    total_count = len(STAGES)
-    pct_complete = round(completed_count / total_count, 4) if total_count else 0.0
-
-    primary_action = None
+    primary_action: dict[str, Any]
     if next_actions:
         primary_action = {
             "stage": cur,
@@ -89,8 +93,8 @@ def build_workflow_summary(
         primary_action = {
             "stage": cur,
             "stage_label": stage_label(cur),
-            "title": "Workflow complete",
-            "kind": "complete",
+            "title": "Workflow blocked",
+            "kind": "blocked",
         }
 
     return {
@@ -100,16 +104,14 @@ def build_workflow_summary(
         "current_stage_rank": cur_rank,
         "next_stage": nxt,
         "next_stage_label": stage_label(nxt) if nxt else None,
-        "progress": {
-            "completed_count": completed_count,
-            "total_count": total_count,
-            "pct_complete": pct_complete,
-        },
+        "normalized_decision": state.get("normalized_decision"),
         "gate": gate,
+        "gate_status": state.get("gate_status"),
         "primary_action": primary_action,
         "next_actions": next_actions,
         "constraints": state.get("constraints") or {},
         "outstanding_tasks": state.get("outstanding_tasks") or {},
+        "stage_completion_summary": stage_completion_summary,
         "stages": rows,
         "catalog": stage_catalog(),
         "updated_at": state.get("updated_at"),

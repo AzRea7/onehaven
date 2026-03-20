@@ -46,10 +46,44 @@ from ..schemas import (
     ValuationOut,
 )
 from ..services.geo_enrichment import enrich_property_geo
-from ..services.property_state_machine import compute_and_persist_stage, get_state_payload
+from ..services.property_state_machine import (
+    compute_and_persist_stage,
+    get_state_payload,
+    normalize_decision_bucket,
+)
 from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/properties", tags=["properties"])
+
+
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+
+def _crime_label(score: Any) -> str:
+    if score is None:
+        return "UNKNOWN"
+    value = _safe_float(score, 0.0)
+    if value >= 80:
+        return "HIGH"
+    if value >= 45:
+        return "MODERATE"
+    return "LOW"
+
+
+def _asking_price(prop: Property, deal: Deal | None) -> float | None:
+    for attr in ("asking_price", "list_price", "price", "offer_price", "purchase_price"):
+        if deal is not None and getattr(deal, attr, None) is not None:
+            return _safe_float(getattr(deal, attr, None), 0.0)
+    for attr in ("asking_price", "list_price", "price"):
+        if getattr(prop, attr, None) is not None:
+            return _safe_float(getattr(prop, attr, None), 0.0)
+    return None
 
 
 def _norm_city(s: str) -> str:
@@ -98,6 +132,25 @@ def _pick_jurisdiction_rule(db: Session, org_id: int, city: str, state: str) -> 
             JurisdictionRule.city == city,
             JurisdictionRule.state == state,
         )
+    )
+
+
+def _latest_deal(db: Session, *, org_id: int, property_id: int) -> Deal | None:
+    return db.scalar(
+        select(Deal)
+        .where(Deal.org_id == org_id, Deal.property_id == property_id)
+        .order_by(desc(Deal.updated_at), desc(Deal.id))
+        .limit(1)
+    )
+
+
+def _latest_underwriting(db: Session, *, org_id: int, property_id: int) -> UnderwritingResult | None:
+    return db.scalar(
+        select(UnderwritingResult)
+        .join(Deal, Deal.id == UnderwritingResult.deal_id)
+        .where(UnderwritingResult.org_id == org_id, Deal.property_id == property_id)
+        .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
+        .limit(1)
     )
 
 
@@ -169,20 +222,20 @@ def _merge_checklist_state(db: Session, org_id: int, property_id: int, items: li
     user_ids = {r.marked_by_user_id for r in state_rows if r.marked_by_user_id}
     users_by_id: dict[int, str] = {}
     if user_ids:
-        for u in db.scalars(select(AppUser).where(AppUser.id.in_(list(user_ids)))).all():
-            users_by_id[u.id] = u.email
+        for user in db.scalars(select(AppUser).where(AppUser.id.in_(list(user_ids)))).all():
+            users_by_id[user.id] = user.email
 
     out: list[ChecklistItemOut] = []
-    for i in items:
-        s = by_code.get(i.item_code)
-        if s:
-            i.status = s.status
-            i.marked_at = s.marked_at
-            i.proof_url = s.proof_url
-            i.notes = s.notes
-            if s.marked_by_user_id:
-                i.marked_by = users_by_id.get(s.marked_by_user_id)
-        out.append(i)
+    for item in items:
+        state_row = by_code.get(item.item_code)
+        if state_row:
+            item.status = state_row.status
+            item.marked_at = state_row.marked_at
+            item.proof_url = state_row.proof_url
+            item.notes = state_row.notes
+            if state_row.marked_by_user_id:
+                item.marked_by = users_by_id.get(state_row.marked_by_user_id)
+        out.append(item)
     return out
 
 
@@ -213,7 +266,7 @@ def _extract_urls_from_any(value: Any, out: list[str]) -> None:
         return
 
     if isinstance(value, dict):
-        for _, v in value.items():
+        for v in value.values():
             _extract_urls_from_any(v, out)
         return
 
@@ -225,13 +278,13 @@ def _extract_urls_from_any(value: Any, out: list[str]) -> None:
 
 def _dedupe_keep_order(items: list[str]) -> list[str]:
     seen = set()
-    out = []
-    for x in items:
-        y = x.strip()
-        if not y or y in seen:
+    out: list[str] = []
+    for item in items:
+        value = item.strip()
+        if not value or value in seen:
             continue
-        seen.add(y)
-        out.append(y)
+        seen.add(value)
+        out.append(value)
     return out
 
 
@@ -248,10 +301,10 @@ def _extract_zillow_photo_urls(source_raw_json: Optional[str]) -> list[str]:
     _extract_urls_from_any(raw, urls)
 
     cleaned = []
-    for u in _dedupe_keep_order(urls):
-        lo = u.lower()
+    for url in _dedupe_keep_order(urls):
+        lo = url.lower()
         if any(tok in lo for tok in [".jpg", ".jpeg", ".png", ".webp", "zillowstatic", "photos.zillowstatic"]):
-            cleaned.append(u)
+            cleaned.append(url)
 
     return cleaned[:50]
 
@@ -280,6 +333,35 @@ def _photo_gallery_for_property(db: Session, *, org_id: int, property_id: int) -
     }
 
 
+def _build_property_list_item(db: Session, *, org_id: int, prop: Property) -> dict[str, Any]:
+    deal = _latest_deal(db, org_id=org_id, property_id=int(prop.id))
+    uw = _latest_underwriting(db, org_id=org_id, property_id=int(prop.id))
+    state_payload = get_state_payload(db, org_id=org_id, property_id=int(prop.id), recompute=True)
+    workflow = build_workflow_summary(db, org_id=org_id, property_id=int(prop.id), recompute=False)
+
+    prop_payload = PropertyOut.model_validate(prop, from_attributes=True).model_dump()
+
+    prop_payload.update(
+        {
+            "asking_price": _asking_price(prop, deal),
+            "projected_monthly_cashflow": _safe_float(getattr(uw, "cash_flow", None), 0.0) if uw else None,
+            "dscr": _safe_float(getattr(uw, "dscr", None), 0.0) if uw else None,
+            "crime_score": getattr(prop, "crime_score", None),
+            "crime_label": _crime_label(getattr(prop, "crime_score", None)),
+            "normalized_decision": state_payload.get("normalized_decision")
+            or normalize_decision_bucket(getattr(uw, "decision", None) if uw else None),
+            "current_workflow_stage": state_payload.get("current_stage"),
+            "current_workflow_stage_label": state_payload.get("current_stage_label"),
+            "gate_status": state_payload.get("gate_status"),
+            "gate": state_payload.get("gate"),
+            "stage_completion_summary": state_payload.get("stage_completion_summary"),
+            "next_actions": state_payload.get("next_actions") or [],
+            "workflow": workflow,
+        }
+    )
+    return prop_payload
+
+
 @router.post("", response_model=PropertyOut)
 def create_property(payload: PropertyCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     row = Property(**payload.model_dump())
@@ -295,7 +377,7 @@ def create_property(payload: PropertyCreate, db: Session = Depends(get_db), p=De
     return row
 
 
-@router.get("", response_model=list[PropertyOut])
+@router.get("", response_model=list[dict])
 def list_properties(
     state: Optional[str] = Query(default=None),
     city: Optional[str] = Query(default=None),
@@ -364,24 +446,6 @@ def list_properties(
         stmt = stmt.where(Property.offender_count.is_not(None))
         stmt = stmt.where(Property.offender_count <= int(max_offender_count))
 
-    if stage:
-        stmt = stmt.join(
-            PropertyState,
-            (PropertyState.property_id == Property.id)
-            & (PropertyState.org_id == Property.org_id),
-        ).where(PropertyState.current_stage == stage)
-
-    if decision:
-        stmt = stmt.join(
-            Deal,
-            (Deal.property_id == Property.id)
-            & (Deal.org_id == Property.org_id),
-        ).join(
-            UnderwritingResult,
-            (UnderwritingResult.deal_id == Deal.id)
-            & (UnderwritingResult.org_id == Deal.org_id),
-        ).where(UnderwritingResult.decision == decision)
-
     if sort == "oldest":
         stmt = stmt.order_by(asc(Property.id))
     elif sort == "address_asc":
@@ -399,10 +463,23 @@ def list_properties(
     else:
         stmt = stmt.order_by(desc(Property.id))
 
-    stmt = stmt.limit(limit)
+    rows = db.scalars(stmt.limit(limit)).unique().all()
 
-    rows = db.scalars(stmt).unique().all()
-    return [PropertyOut.model_validate(x, from_attributes=True) for x in rows]
+    wanted_stage = (stage or "").strip().lower() or None
+    wanted_decision = normalize_decision_bucket(decision) if decision else None
+
+    out: list[dict] = []
+    for prop in rows:
+        item = _build_property_list_item(db, org_id=p.org_id, prop=prop)
+
+        if wanted_stage and str(item.get("current_workflow_stage") or "").lower() != wanted_stage:
+            continue
+        if wanted_decision and str(item.get("normalized_decision") or "").upper() != wanted_decision:
+            continue
+
+        out.append(item)
+
+    return out
 
 
 @router.get("/{property_id}", response_model=PropertyOut)
@@ -450,28 +527,16 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    d = db.scalar(
-        select(Deal)
-        .where(Deal.property_id == prop.id)
-        .where(Deal.org_id == p.org_id)
-        .order_by(desc(Deal.id))
-        .limit(1)
-    )
-    if not d:
+    deal = _latest_deal(db, org_id=p.org_id, property_id=int(prop.id))
+    if not deal:
         raise HTTPException(status_code=404, detail="No deal found for property")
 
     jr = _pick_jurisdiction_rule(db, org_id=p.org_id, city=prop.city, state=prop.state)
     friction = compute_friction(jr)
 
-    r = db.scalar(
-        select(UnderwritingResult)
-        .where(UnderwritingResult.deal_id == d.id)
-        .where(UnderwritingResult.org_id == p.org_id)
-        .order_by(desc(UnderwritingResult.id))
-        .limit(1)
-    )
+    uw = _latest_underwriting(db, org_id=p.org_id, property_id=int(prop.id))
 
-    chk = db.scalar(
+    checklist_row = db.scalar(
         select(PropertyChecklist)
         .where(PropertyChecklist.org_id == p.org_id, PropertyChecklist.property_id == prop.id)
         .order_by(desc(PropertyChecklist.id))
@@ -479,9 +544,9 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
     )
 
     checklist_out: ChecklistOut | None = None
-    if chk:
+    if checklist_row:
         try:
-            parsed = json.loads(chk.items_json or "[]")
+            parsed = json.loads(checklist_row.items_json or "[]")
         except Exception:
             parsed = []
 
@@ -489,18 +554,18 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
         items = _merge_checklist_state(db, org_id=p.org_id, property_id=prop.id, items=items)
         checklist_out = ChecklistOut(property_id=prop.id, city=prop.city, state=prop.state, items=items)
 
-    rent_explain = _rent_explain_for_view(db, org_id=p.org_id, property_id=prop.id, strategy=d.strategy)
+    rent_explain = _rent_explain_for_view(db, org_id=p.org_id, property_id=prop.id, strategy=deal.strategy)
 
     return PropertyViewOut(
         property=PropertyOut.model_validate(prop, from_attributes=True),
-        deal=DealOut.model_validate(d, from_attributes=True),
+        deal=DealOut.model_validate(deal, from_attributes=True),
         rent_explain=rent_explain,
         jurisdiction_rule=JurisdictionRuleOut.model_validate(jr, from_attributes=True) if jr else None,
         jurisdiction_friction={
             "multiplier": getattr(friction, "multiplier", 1.0),
             "reasons": getattr(friction, "reasons", []),
         },
-        last_underwriting_result=UnderwritingResultOut.model_validate(r) if r else None,
+        last_underwriting_result=UnderwritingResultOut.model_validate(uw) if uw else None,
         checklist=checklist_out,
     )
 
@@ -576,8 +641,13 @@ def property_cockpit(property_id: int, db: Session = Depends(get_db), p=Depends(
         "workflow": workflow,
         "state": {
             "current_stage": state_payload.get("current_stage"),
+            "current_stage_label": state_payload.get("current_stage_label"),
+            "normalized_decision": state_payload.get("normalized_decision"),
+            "gate_status": state_payload.get("gate_status"),
+            "gate": state_payload.get("gate"),
             "constraints": state_payload.get("constraints", {}),
             "outstanding_tasks": state_payload.get("outstanding_tasks", {}),
             "next_actions": state_payload.get("next_actions", []),
+            "stage_completion_summary": state_payload.get("stage_completion_summary"),
         },
     }

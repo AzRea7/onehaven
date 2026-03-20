@@ -1,93 +1,107 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
-# Canonical ordered stages (single source of truth)
+# Canonical investor-facing workflow used everywhere in Step 2.
+# We keep only the 6 business stages the user actually cares about.
 STAGES: list[str] = [
-    "import",
     "deal",
-    "decision",
-    "acquisition",
-    "rehab_plan",
-    "rehab_exec",
+    "rehab",
     "compliance",
     "tenant",
-    "lease",
     "cash",
     "equity",
 ]
 
-_RANK: dict[str, int] = {s: i for i, s in enumerate(STAGES)}
+_RANK: dict[str, int] = {stage: idx for idx, stage in enumerate(STAGES)}
+
+# Backward-compatible aliases so older DB rows / route inputs still normalize
+# into the new 6-stage workflow instead of breaking.
+_ALIASES: dict[str, str] = {
+    "import": "deal",
+    "intake": "deal",
+    "deal": "deal",
+    "decision": "deal",
+    "acquisition": "deal",
+    "procurement": "deal",
+    "sourcing": "deal",
+    "rehab": "rehab",
+    "rehab_plan": "rehab",
+    "rehab_exec": "rehab",
+    "renovation": "rehab",
+    "construction": "rehab",
+    "compliance": "compliance",
+    "inspection": "compliance",
+    "licensing": "compliance",
+    "tenant": "tenant",
+    "lease": "tenant",
+    "leasing": "tenant",
+    "cash": "cash",
+    "cashflow": "cash",
+    "management": "cash",
+    "operations": "cash",
+    "equity": "equity",
+    "portfolio": "equity",
+}
 
 _STAGE_META: dict[str, dict[str, str]] = {
-    "import": {
-        "label": "Import",
-        "description": "Property exists in the system and is ready for deal setup.",
-        "primary_action": "Create deal",
-    },
     "deal": {
-        "label": "Deal Analysis",
-        "description": "Create and analyze the deal with underwriting inputs.",
+        "label": "Deal",
+        "description": "Underwriting, rent logic, and the normalized GOOD / REVIEW / REJECT deal decision.",
         "primary_action": "Run underwriting",
     },
-    "decision": {
-        "label": "Decision",
-        "description": "Make a buy / watch / pass decision from underwriting results.",
-        "primary_action": "Finalize decision",
-    },
-    "acquisition": {
-        "label": "Acquisition",
-        "description": "Record acquisition facts such as purchase price and closing date.",
-        "primary_action": "Add acquisition details",
-    },
-    "rehab_plan": {
-        "label": "Rehab Planning",
-        "description": "Define the rehab scope, tasks, and expected work plan.",
-        "primary_action": "Create rehab plan",
-    },
-    "rehab_exec": {
-        "label": "Rehab Execution",
-        "description": "Execute rehab work and clear all open or blocked tasks.",
+    "rehab": {
+        "label": "Rehab",
+        "description": "Build the rehab scope, complete the rehab work, and clear all rehab blockers.",
         "primary_action": "Complete rehab tasks",
     },
     "compliance": {
-        "label": "Compliance / Inspection",
-        "description": "Generate HQS/compliance checklist, pass inspection, and clear failures.",
-        "primary_action": "Pass compliance",
+        "label": "Compliance",
+        "description": "Complete inspection and compliance readiness before tenant placement.",
+        "primary_action": "Pass inspection",
     },
     "tenant": {
-        "label": "Tenant Placement",
-        "description": "Prepare the property for occupancy by selecting or creating a tenant.",
-        "primary_action": "Create tenant and lease",
-    },
-    "lease": {
-        "label": "Lease Active",
-        "description": "Make sure an active lease exists for the property.",
-        "primary_action": "Activate lease",
+        "label": "Tenant",
+        "description": "Place the tenant and make the lease active.",
+        "primary_action": "Create tenant + lease",
     },
     "cash": {
-        "label": "Cashflow Tracking",
-        "description": "Track transactions and reconcile rent and expenses.",
-        "primary_action": "Add transactions",
+        "label": "Cash",
+        "description": "Track actual income and expenses for the occupied asset.",
+        "primary_action": "Record transactions",
     },
     "equity": {
-        "label": "Equity Monitoring",
-        "description": "Track valuation snapshots and portfolio equity over time.",
+        "label": "Equity",
+        "description": "Track valuation and monitor the property as an occupied cashflow asset.",
         "primary_action": "Add valuation",
     },
 }
 
 
 def clamp_stage(stage: Optional[str]) -> str:
-    s = (stage or "").strip().lower()
-    if s in _RANK:
-        return s
-    return "import"
+    raw = (stage or "").strip().lower()
+    if raw in _RANK:
+        return raw
+    if raw in _ALIASES:
+        return _ALIASES[raw]
+    return "deal"
+
+
+def distinct_stages(values: list[str] | tuple[str, ...]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        stage = clamp_stage(value)
+        if stage in seen:
+            continue
+        seen.add(stage)
+        out.append(stage)
+    return out
 
 
 def stage_rank(stage: Optional[str]) -> int:
-    return _RANK.get(clamp_stage(stage), _RANK["import"])
+    return _RANK[clamp_stage(stage)]
 
 
 def stage_gte(a: Optional[str], b: str) -> bool:
@@ -99,32 +113,30 @@ def stage_lte(a: Optional[str], b: str) -> bool:
 
 
 def next_stage(stage: Optional[str]) -> Optional[str]:
-    s = clamp_stage(stage)
-    i = stage_rank(s)
-    if i >= len(STAGES) - 1:
+    idx = stage_rank(stage)
+    if idx >= len(STAGES) - 1:
         return None
-    return STAGES[i + 1]
+    return STAGES[idx + 1]
 
 
 def prev_stage(stage: Optional[str]) -> Optional[str]:
-    s = clamp_stage(stage)
-    i = stage_rank(s)
-    if i <= 0:
+    idx = stage_rank(stage)
+    if idx <= 0:
         return None
-    return STAGES[i - 1]
+    return STAGES[idx - 1]
 
 
 def stage_label(stage: Optional[str]) -> str:
-    s = clamp_stage(stage)
-    return _STAGE_META.get(s, {}).get("label", s.replace("_", " ").title())
+    key = clamp_stage(stage)
+    return _STAGE_META.get(key, {}).get("label", key.title())
 
 
 def stage_meta(stage: Optional[str]) -> dict[str, str]:
-    s = clamp_stage(stage)
-    meta = _STAGE_META.get(s, {})
+    key = clamp_stage(stage)
+    meta = _STAGE_META.get(key, {})
     return {
-        "key": s,
-        "label": meta.get("label", s.replace("_", " ").title()),
+        "key": key,
+        "label": meta.get("label", key.title()),
         "description": meta.get("description", ""),
         "primary_action": meta.get("primary_action", ""),
     }
@@ -132,11 +144,11 @@ def stage_meta(stage: Optional[str]) -> dict[str, str]:
 
 def stage_catalog() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for idx, s in enumerate(STAGES):
-        meta = stage_meta(s)
+    for idx, stage in enumerate(STAGES):
+        meta = stage_meta(stage)
         out.append(
             {
-                "key": s,
+                "key": stage,
                 "rank": idx,
                 "label": meta["label"],
                 "description": meta["description"],
@@ -151,136 +163,89 @@ class GateResult:
     ok: bool
     blocked_reason: Optional[str] = None
     allowed_next_stage: Optional[str] = None
+    blockers: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "blocked_reason": self.blocked_reason,
+            "allowed_next_stage": self.allowed_next_stage,
+            "blockers": list(self.blockers),
+        }
 
 
 def gate_for_next_stage(
     *,
     current_stage: str,
-    has_property: bool,
-    has_deal: bool,
-    has_underwriting: bool,
-    decision_is_buy: bool,
-    has_acquisition_fields: bool,
-    has_rehab_plan_tasks: bool,
-    rehab_blockers_open: bool,
-    rehab_open_tasks: bool,
-    compliance_passed: bool,
-    tenant_selected: bool,
-    lease_active: bool,
-    has_cash_txns: bool,
-    has_valuation: bool,
+    decision_bucket: str,
+    deal_complete: bool,
+    rehab_complete: bool,
+    compliance_complete: bool,
+    tenant_complete: bool,
+    cash_complete: bool,
+    equity_complete: bool,
 ) -> GateResult:
-    """
-    Canonical one-step transition gate.
-    Used by /workflow/advance and stage guard helpers.
-    """
-
     cur = clamp_stage(current_stage)
-    nxt = next_stage(cur)
+    decision = (decision_bucket or "REVIEW").strip().upper()
 
-    if not nxt:
-        return GateResult(ok=False, blocked_reason="Already at final stage.", allowed_next_stage=None)
+    if cur == "equity":
+        return GateResult(ok=False, blocked_reason="Already at final stage.", blockers=[])
 
-    if nxt == "deal":
-        if not has_property:
-            return GateResult(ok=False, blocked_reason="Property must exist first.", allowed_next_stage=None)
-        return GateResult(ok=True, allowed_next_stage=nxt)
-
-    if nxt == "decision":
-        if not has_deal:
-            return GateResult(ok=False, blocked_reason="Create a deal first.", allowed_next_stage=None)
-        if not has_underwriting:
-            return GateResult(ok=False, blocked_reason="Run underwriting evaluation first.", allowed_next_stage=None)
-        return GateResult(ok=True, allowed_next_stage=nxt)
-
-    if nxt == "acquisition":
-        if not has_underwriting:
-            return GateResult(ok=False, blocked_reason="Underwriting result is required first.", allowed_next_stage=None)
-        if not decision_is_buy:
+    if cur == "deal":
+        if decision == "REJECT":
             return GateResult(
                 ok=False,
-                blocked_reason="Only BUY-approved deals can move to acquisition.",
+                blocked_reason="Rejected deals cannot advance until assumptions change and the deal is re-underwritten.",
                 allowed_next_stage=None,
+                blockers=["decision_reject"],
             )
-        return GateResult(ok=True, allowed_next_stage=nxt)
-
-    if nxt == "rehab_plan":
-        if not has_acquisition_fields:
+        if not deal_complete:
             return GateResult(
                 ok=False,
-                blocked_reason="Add acquisition fields (purchase price / closing date / loan info).",
-                allowed_next_stage=None,
+                blocked_reason="Complete underwriting and reach a GOOD decision first.",
+                allowed_next_stage="rehab",
+                blockers=["deal_incomplete"],
             )
-        return GateResult(ok=True, allowed_next_stage=nxt)
+        return GateResult(ok=True, allowed_next_stage="rehab")
 
-    if nxt == "rehab_exec":
-        if not has_rehab_plan_tasks:
-            return GateResult(ok=False, blocked_reason="Create rehab plan tasks first.", allowed_next_stage=None)
-        return GateResult(ok=True, allowed_next_stage=nxt)
-
-    if nxt == "compliance":
-        if rehab_blockers_open:
+    if cur == "rehab":
+        if not rehab_complete:
             return GateResult(
                 ok=False,
-                blocked_reason="Rehab blockers are still open.",
-                allowed_next_stage=None,
+                blocked_reason="Complete all rehab tasks and clear rehab blockers first.",
+                allowed_next_stage="compliance",
+                blockers=["rehab_incomplete"],
             )
-        if rehab_open_tasks:
+        return GateResult(ok=True, allowed_next_stage="compliance")
+
+    if cur == "compliance":
+        if not compliance_complete:
             return GateResult(
                 ok=False,
-                blocked_reason="Complete rehab execution tasks first.",
-                allowed_next_stage=None,
+                blocked_reason="Pass inspection and clear compliance blockers first.",
+                allowed_next_stage="tenant",
+                blockers=["compliance_incomplete"],
             )
-        return GateResult(ok=True, allowed_next_stage=nxt)
+        return GateResult(ok=True, allowed_next_stage="tenant")
 
-    if nxt == "tenant":
-        if not compliance_passed:
+    if cur == "tenant":
+        if not tenant_complete:
             return GateResult(
                 ok=False,
-                blocked_reason="Compliance is not passed yet.",
-                allowed_next_stage=None,
+                blocked_reason="An active lease is required before moving into cashflow.",
+                allowed_next_stage="cash",
+                blockers=["tenant_incomplete"],
             )
-        return GateResult(ok=True, allowed_next_stage=nxt)
+        return GateResult(ok=True, allowed_next_stage="cash")
 
-    if nxt == "lease":
-        if not tenant_selected:
+    if cur == "cash":
+        if not cash_complete:
             return GateResult(
                 ok=False,
-                blocked_reason="Create/select a tenant first.",
-                allowed_next_stage=None,
+                blocked_reason="Record actual transactions before moving into equity tracking.",
+                allowed_next_stage="equity",
+                blockers=["cash_incomplete"],
             )
-        return GateResult(ok=True, allowed_next_stage=nxt)
+        return GateResult(ok=True, allowed_next_stage="equity")
 
-    if nxt == "cash":
-        if not lease_active:
-            return GateResult(
-                ok=False,
-                blocked_reason="Activate a lease first.",
-                allowed_next_stage=None,
-            )
-        return GateResult(ok=True, allowed_next_stage=nxt)
-
-    if nxt == "equity":
-        if not has_cash_txns:
-            return GateResult(
-                ok=False,
-                blocked_reason="Add cash transactions first.",
-                allowed_next_stage=None,
-            )
-        if not has_valuation:
-            return GateResult(
-                ok=False,
-                blocked_reason="Add a valuation snapshot first.",
-                allowed_next_stage=None,
-            )
-        return GateResult(ok=True, allowed_next_stage=nxt)
-
-    return GateResult(
-        ok=False,
-        blocked_reason=f"Unknown gate transition: {cur} -> {nxt}",
-        allowed_next_stage=None,
-    )
-
-
-def distinct_stages() -> list[str]:
-    return list(STAGES)
+    return GateResult(ok=False, blocked_reason="Unknown workflow state.", blockers=["unknown_state"])

@@ -95,21 +95,25 @@ def _ensure_policy_task(
         return False
 
     now = _now()
-    db.add(
-        RehabTask(
-            org_id=org_id,
-            property_id=property_id,
-            title=title,
-            category=category or "compliance",
-            status="open",
-            priority=priority or "med",
-            estimated_cost=None,
-            actual_cost=None,
-            notes=notes,
-            created_at=now,
-            updated_at=now,
-        )
+
+    row = RehabTask(
+        org_id=org_id,
+        property_id=property_id,
+        title=title,
+        category=category or "compliance",
+        status="todo",
+        notes=notes,
+        created_at=now,
     )
+
+    if hasattr(row, "inspection_relevant"):
+        row.inspection_relevant = True
+    if hasattr(row, "cost_estimate"):
+        row.cost_estimate = None
+    if hasattr(row, "updated_at"):
+        row.updated_at = now
+
+    db.add(row)
     return True
 
 

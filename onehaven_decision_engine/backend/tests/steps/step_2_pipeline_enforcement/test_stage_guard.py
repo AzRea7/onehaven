@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from types import SimpleNamespace
 
 import pytest
@@ -22,27 +24,35 @@ def test_require_stage_allows_when_current_stage_meets_minimum(monkeypatch):
         db=SimpleNamespace(),
         org_id=1,
         property_id=101,
-        min_stage="lease",
+        min_stage="tenant",
         action="view cash transactions",
     )
 
     assert result["current_stage"] == "cash"
 
 
-def test_require_stage_raises_409_with_useful_context(monkeypatch):
+def test_require_stage_blocks_when_current_stage_is_before_minimum(monkeypatch):
     monkeypatch.setattr(
         stage_guard,
         "get_state_payload",
         lambda db, org_id, property_id, recompute=True: {
-            "current_stage": "deal",
-            "next_actions": ["Run underwriting evaluation for the deal."],
-            "constraints": {"missing_underwriting": True},
+            "current_stage": "rehab",
+            "next_actions": ["Pass inspection", "Create lease"],
+            "constraints": {"inspection": {"passed": False}},
         },
     )
     monkeypatch.setattr(
         stage_guard,
         "_policy_blockers",
-        lambda db, org_id, property_id: [{"rule": "example"}],
+        lambda db, org_id, property_id: [{"code": "LOCAL_AGENT_REQUIRED"}],
+    )
+    monkeypatch.setattr(
+        stage_guard,
+        "build_workflow_summary",
+        lambda db, org_id, property_id, recompute=False: {
+            "current_stage": "rehab",
+            "gate_status": "BLOCKED",
+        },
     )
 
     with pytest.raises(HTTPException) as exc:
@@ -50,81 +60,87 @@ def test_require_stage_raises_409_with_useful_context(monkeypatch):
             db=SimpleNamespace(),
             org_id=1,
             property_id=101,
-            min_stage="compliance",
-            action="create inspection",
+            min_stage="cash",
+            action="view cash transactions",
         )
 
-    err = exc.value
-    assert err.status_code == 409
-    assert err.detail["error"] == "stage_locked"
-    assert err.detail["current_stage"] == "deal"
-    assert err.detail["required_stage"] == "compliance"
-    assert err.detail["action"] == "create inspection"
-    assert "Run underwriting evaluation" in err.detail["why"]
-    assert err.detail["next_actions"] == ["Run underwriting evaluation for the deal."]
-    assert err.detail["constraints"] == {"missing_underwriting": True}
-    assert err.detail["policy_blockers"] == [{"rule": "example"}]
+    assert exc.value.status_code == 409
+    detail = exc.value.detail
+    assert detail["error"] == "stage_locked"
+    assert detail["current_stage"] == "rehab"
+    assert detail["required_stage"] == "cash"
+    assert detail["action"] == "view cash transactions"
+    assert detail["next_actions"] == ["Pass inspection", "Create lease"]
+    assert detail["policy_blockers"] == [{"code": "LOCAL_AGENT_REQUIRED"}]
+    assert detail["workflow"]["gate_status"] == "BLOCKED"
 
 
-def test_require_next_stage_available_allows_when_gate_open(monkeypatch):
+def test_require_next_stage_available_allows_when_gate_is_open(monkeypatch):
     monkeypatch.setattr(
         stage_guard,
         "get_transition_payload",
         lambda db, org_id, property_id: {
             "current_stage": "deal",
-            "gate": {
-                "ok": True,
-                "blocked_reason": None,
-                "allowed_next_stage": "decision",
-            },
-            "constraints": {},
+            "gate": {"ok": True, "allowed_next_stage": "rehab"},
             "next_actions": [],
+            "constraints": {},
         },
     )
-    monkeypatch.setattr(stage_guard, "_policy_blockers", lambda db, org_id, property_id: [])
 
     result = stage_guard.require_next_stage_available(
         db=SimpleNamespace(),
         org_id=1,
-        property_id=101,
+        property_id=202,
         action="advance workflow",
     )
 
     assert result["gate"]["ok"] is True
-    assert result["gate"]["allowed_next_stage"] == "decision"
+    assert result["gate"]["allowed_next_stage"] == "rehab"
 
 
-def test_require_next_stage_available_raises_409_with_context(monkeypatch):
+def test_require_next_stage_available_blocks_when_gate_is_closed(monkeypatch):
     monkeypatch.setattr(
         stage_guard,
         "get_transition_payload",
         lambda db, org_id, property_id: {
-            "current_stage": "rehab_exec",
+            "current_stage": "compliance",
             "gate": {
                 "ok": False,
-                "blocked_reason": "Complete rehab execution tasks first.",
-                "allowed_next_stage": "compliance",
+                "allowed_next_stage": "tenant",
+                "blocked_reason": "Pass inspection first.",
             },
-            "constraints": {"rehab_open_tasks": 3},
-            "next_actions": ["Complete rehab execution tasks (3 open)."],
+            "next_actions": ["Resolve failed inspection items"],
+            "constraints": {"inspection": {"passed": False}},
         },
     )
-    monkeypatch.setattr(stage_guard, "_policy_blockers", lambda db, org_id, property_id: [])
+    monkeypatch.setattr(
+        stage_guard,
+        "_policy_blockers",
+        lambda db, org_id, property_id: [],
+    )
+    monkeypatch.setattr(
+        stage_guard,
+        "build_workflow_summary",
+        lambda db, org_id, property_id, recompute=False: {
+            "current_stage": "compliance",
+            "gate_status": "BLOCKED",
+        },
+    )
 
     with pytest.raises(HTTPException) as exc:
         stage_guard.require_next_stage_available(
             db=SimpleNamespace(),
             org_id=1,
-            property_id=101,
+            property_id=202,
             action="advance workflow",
         )
 
-    err = exc.value
-    assert err.status_code == 409
-    assert err.detail["error"] == "stage_transition_blocked"
-    assert err.detail["current_stage"] == "rehab_exec"
-    assert err.detail["action"] == "advance workflow"
-    assert err.detail["allowed_next_stage"] == "compliance"
-    assert err.detail["constraints"] == {"rehab_open_tasks": 3}
-    assert err.detail["next_actions"] == ["Complete rehab execution tasks (3 open)."]
-    assert "Complete rehab execution tasks first." in err.detail["why"]
+    assert exc.value.status_code == 409
+    detail = exc.value.detail
+    assert detail["error"] == "stage_transition_blocked"
+    assert detail["current_stage"] == "compliance"
+    assert detail["allowed_next_stage"] == "tenant"
+    assert detail["why"] == "Pass inspection first."
+    assert detail["next_actions"] == ["Resolve failed inspection items"]
+    assert detail["workflow"]["current_stage"] == "compliance"
+    

@@ -18,18 +18,16 @@ def _policy_blockers(db: Session, *, org_id: int, property_id: int) -> list:
             Property.org_id == org_id,
         )
     )
-    if not prop:
+    if prop is None:
         return []
 
-    brief = build_property_compliance_brief(
-        db,
-        org_id=None,
-        state=prop.state or "MI",
-        county=getattr(prop, "county", None),
-        city=prop.city,
-        pha_name=None,
-    )
-    return brief.get("blocking_items", []) or []
+    try:
+        brief = build_property_compliance_brief(db, org_id=org_id, property=prop)
+    except Exception:
+        return []
+
+    blockers = brief.get("blockers") if isinstance(brief, dict) else []
+    return blockers if isinstance(blockers, list) else []
 
 
 def require_stage(
@@ -40,32 +38,32 @@ def require_stage(
     min_stage: str,
     action: str,
 ) -> dict:
-    st = get_state_payload(db, org_id=org_id, property_id=property_id, recompute=True)
-    cur = str(st.get("current_stage") or "import")
-    workflow = build_workflow_summary(db, org_id=org_id, property_id=property_id, recompute=False)
+    state = get_state_payload(db, org_id=org_id, property_id=property_id, recompute=True)
+    current_stage = state.get("current_stage") or "deal"
 
-    if not stage_gte(cur, min_stage):
-        why = f"Requires stage ≥ {min_stage} to {action}."
-        next_actions = st.get("next_actions") or []
-        if next_actions:
-            why = f"{why} Next: {next_actions[0]}"
+    if stage_gte(current_stage, min_stage):
+        return state
 
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "stage_locked",
-                "current_stage": cur,
-                "required_stage": min_stage,
-                "action": action,
-                "why": why,
-                "next_actions": next_actions,
-                "constraints": st.get("constraints") or {},
-                "policy_blockers": _policy_blockers(db, org_id=org_id, property_id=property_id),
-                "workflow": workflow,
-            },
-        )
-
-    return st
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "error": "stage_locked",
+            "property_id": property_id,
+            "current_stage": current_stage,
+            "required_stage": min_stage,
+            "action": action,
+            "why": f"{action} requires workflow stage >= {min_stage}.",
+            "next_actions": state.get("next_actions") or [],
+            "constraints": state.get("constraints") or {},
+            "policy_blockers": _policy_blockers(db, org_id=org_id, property_id=property_id),
+            "workflow": build_workflow_summary(
+                db,
+                org_id=org_id,
+                property_id=property_id,
+                recompute=False,
+            ),
+        },
+    )
 
 
 def require_next_stage_available(
@@ -77,22 +75,27 @@ def require_next_stage_available(
 ) -> dict:
     tx = get_transition_payload(db, org_id=org_id, property_id=property_id)
     gate = tx.get("gate") or {}
-    workflow = build_workflow_summary(db, org_id=org_id, property_id=property_id, recompute=False)
 
-    if not bool(gate.get("ok")):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "stage_transition_blocked",
-                "current_stage": tx.get("current_stage"),
-                "action": action,
-                "why": gate.get("blocked_reason") or "Next stage is blocked.",
-                "allowed_next_stage": gate.get("allowed_next_stage"),
-                "constraints": tx.get("constraints") or {},
-                "next_actions": tx.get("next_actions") or [],
-                "policy_blockers": _policy_blockers(db, org_id=org_id, property_id=property_id),
-                "workflow": workflow,
-            },
-        )
+    if gate.get("ok"):
+        return tx
 
-    return tx
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "error": "stage_transition_blocked",
+            "property_id": property_id,
+            "current_stage": tx.get("current_stage"),
+            "allowed_next_stage": gate.get("allowed_next_stage"),
+            "action": action,
+            "why": gate.get("blocked_reason"),
+            "next_actions": tx.get("next_actions") or [],
+            "constraints": tx.get("constraints") or {},
+            "policy_blockers": _policy_blockers(db, org_id=org_id, property_id=property_id),
+            "workflow": build_workflow_summary(
+                db,
+                org_id=org_id,
+                property_id=property_id,
+                recompute=False,
+            ),
+        },
+    )

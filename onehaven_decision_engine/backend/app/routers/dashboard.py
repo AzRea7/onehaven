@@ -1,4 +1,3 @@
-# backend/app/routers/dashboard.py
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -12,7 +11,7 @@ from ..db import get_db
 from ..models import Deal, Property
 from ..services.dashboard_rollups import compute_rollups
 from ..services.property_state_machine import get_state_payload
-from .properties import property_view  # reuse “single source of truth”
+from .properties import _build_property_list_item
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -26,31 +25,29 @@ def dashboard_properties(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    q = select(Property.id).where(Property.org_id == p.org_id).order_by(desc(Property.id))
+    q = select(Property).where(Property.org_id == p.org_id).order_by(desc(Property.id))
 
     if city:
         q = q.where(Property.city == city, Property.state == state)
     else:
         q = q.where(Property.state == state)
 
-    prop_ids = [row[0] for row in db.execute(q.limit(limit)).all()]
+    props = list(db.scalars(q.limit(limit)).all())
 
     out: list[dict] = []
-    for pid in prop_ids:
+    for prop in props:
         try:
             if strategy:
                 d = db.scalar(
                     select(Deal)
-                    .where(Deal.org_id == p.org_id, Deal.property_id == pid)
+                    .where(Deal.org_id == p.org_id, Deal.property_id == prop.id)
                     .order_by(desc(Deal.id))
                     .limit(1)
                 )
                 if not d or (d.strategy or "").strip().lower() != strategy.strip().lower():
                     continue
 
-            view = property_view(property_id=pid, db=db, p=p)
-            v = view.model_dump() if hasattr(view, "model_dump") else dict(view)
-            out.append(v)
+            out.append(_build_property_list_item(db, org_id=p.org_id, prop=prop))
         except Exception:
             continue
 
@@ -64,33 +61,27 @@ def portfolio_rollup(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    prop_ids = [
-        r[0]
-        for r in db.execute(
-            select(Property.id)
-            .where(Property.org_id == p.org_id, Property.state == state)
-            .order_by(desc(Property.id))
-            .limit(limit)
-        ).all()
-    ]
+    data = compute_rollups(db, org_id=p.org_id, state=state, limit=limit)
 
-    stage_counts: dict[str, int] = {}
     has_next_action = 0
-
-    for pid in prop_ids:
+    for row in data.get("rows", []):
         try:
-            st = get_state_payload(db, org_id=p.org_id, property_id=pid, recompute=True)
-            stage = str(st.get("current_stage") or "deal")
-            stage_counts[stage] = stage_counts.get(stage, 0) + 1
-            if (st.get("next_actions") or []) and len(st.get("next_actions") or []) > 0:
+            payload = get_state_payload(db, org_id=p.org_id, property_id=int(row["property_id"]), recompute=True)
+            if payload.get("next_actions"):
                 has_next_action += 1
         except Exception:
             continue
 
     return {
-        "properties": len(prop_ids),
-        "stage_counts": stage_counts,
+        "properties": data.get("summary", {}).get("property_count", 0),
+        "stage_counts": data.get("buckets", {}).get("stages", {}),
+        "decision_counts": data.get("buckets", {}).get("decisions", {}),
         "properties_with_next_actions": has_next_action,
+        "averages": {
+            "asking_price": data.get("summary", {}).get("avg_asking_price", 0.0),
+            "projected_monthly_cashflow": data.get("summary", {}).get("avg_projected_monthly_cashflow", 0.0),
+            "dscr": data.get("summary", {}).get("avg_dscr", 0.0),
+        },
     }
 
 
@@ -102,8 +93,8 @@ def next_actions(
     p=Depends(get_principal),
 ):
     prop_ids = [
-        r[0]
-        for r in db.execute(
+        row[0]
+        for row in db.execute(
             select(Property.id)
             .where(Property.org_id == p.org_id, Property.state == state)
             .order_by(desc(Property.id))
@@ -123,31 +114,51 @@ def next_actions(
             if not prop:
                 continue
 
-            for a in actions[:3]:
+            for action in actions[:3]:
                 rows.append(
                     {
                         "property_id": pid,
                         "address": prop.address,
                         "city": prop.city,
                         "stage": st.get("current_stage"),
-                        "action": a,
+                        "decision": st.get("normalized_decision"),
+                        "action": action,
                     }
                 )
         except Exception:
             continue
 
-    order = {"compliance": 0, "rehab": 1, "tenant": 2, "cash": 3, "equity": 4, "deal": 5}
-    rows = sorted(rows, key=lambda r: (order.get(str(r.get("stage") or ""), 9), r["city"] or "", r["address"] or ""))[
-        :limit
-    ]
+    order = {"deal": 0, "rehab": 1, "compliance": 2, "tenant": 3, "cash": 4, "equity": 5}
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            order.get(str(row.get("stage") or ""), 99),
+            str(row.get("city") or ""),
+            str(row.get("address") or ""),
+        ),
+    )[:limit]
+
     return {"rows": rows, "count": len(rows)}
 
 
 @router.get("/rollups", response_model=dict)
 def dashboard_rollups(
     state: str = Query(default="MI"),
+    county: Optional[str] = Query(default=None),
+    city: Optional[str] = Query(default=None),
+    decision: Optional[str] = Query(default=None),
+    stage: Optional[str] = Query(default=None),
     limit: int = Query(default=500, ge=1, le=2000),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    return compute_rollups(db, org_id=p.org_id, state=state, limit=limit)
+    return compute_rollups(
+        db,
+        org_id=p.org_id,
+        state=state,
+        county=county,
+        city=city,
+        decision=decision,
+        stage=stage,
+        limit=limit,
+    )
