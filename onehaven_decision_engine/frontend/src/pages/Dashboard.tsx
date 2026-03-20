@@ -9,6 +9,7 @@ import {
   Users,
   Wallet,
   Home,
+  RefreshCcw,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import PageHero from "../components/PageHero";
@@ -267,6 +268,7 @@ export default function Dashboard() {
           actions={
             <>
               <button onClick={refresh} className="oh-btn oh-btn-secondary">
+                <RefreshCcw className="h-4 w-4" />
                 Sync dashboard
               </button>
               <Link to="/properties" className="oh-btn oh-btn-secondary">

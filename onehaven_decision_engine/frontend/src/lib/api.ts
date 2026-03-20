@@ -198,19 +198,47 @@ export function clearOrgSlug() {
   localStorage.removeItem("org_slug");
 }
 
-export function buildZillowUrl(property: {
-  address?: string;
-  city?: string;
-  state?: string;
-}) {
-  if (!property?.address) return null;
+export function buildZillowUrl(
+  addressOrProperty?:
+    | string
+    | {
+        address?: string | null;
+        city?: string | null;
+        state?: string | null;
+        zip?: string | null;
+      }
+    | null,
+  city?: string | null,
+  state?: string | null,
+  zip?: string | null,
+) {
+  const address =
+    typeof addressOrProperty === "object" && addressOrProperty !== null
+      ? addressOrProperty.address
+      : addressOrProperty;
 
-  const slug =
-    `${property.address} ${property.city ?? ""} ${property.state ?? ""}`
-      .replace(/,/g, "")
-      .replace(/\s+/g, "-");
+  const finalCity =
+    typeof addressOrProperty === "object" && addressOrProperty !== null
+      ? addressOrProperty.city
+      : city;
 
-  return `https://www.zillow.com/homes/${slug}_rb/`;
+  const finalState =
+    typeof addressOrProperty === "object" && addressOrProperty !== null
+      ? addressOrProperty.state
+      : state;
+
+  const finalZip =
+    typeof addressOrProperty === "object" && addressOrProperty !== null
+      ? addressOrProperty.zip
+      : zip;
+
+  const parts = [address, finalCity, finalState, finalZip]
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
+
+  if (!parts.length) return null;
+
+  return `https://www.zillow.com/homes/${encodeURIComponent(parts.join(", "))}_rb/`;
 }
 
 function getAuth(): AuthContext {

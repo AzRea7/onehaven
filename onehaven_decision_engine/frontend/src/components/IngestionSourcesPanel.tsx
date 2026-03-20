@@ -56,7 +56,10 @@ function statusTone(status?: string) {
   return "border-white/10 bg-white/5 text-neutral-200";
 }
 
-export default function IngestionSourcesPanel({ refreshKey }: Props) {
+export default function IngestionSourcesPanel({
+  refreshKey,
+  onChanged,
+}: Props) {
   const [rows, setRows] = React.useState<IngestionSource[]>([]);
   const [loading, setLoading] = React.useState(true);
 
@@ -72,6 +75,11 @@ export default function IngestionSourcesPanel({ refreshKey }: Props) {
   React.useEffect(() => {
     load();
   }, [refreshKey]);
+
+  function handleRefresh() {
+    load();
+    onChanged?.();
+  }
 
   if (loading) {
     return (
@@ -89,12 +97,12 @@ export default function IngestionSourcesPanel({ refreshKey }: Props) {
             Daily sync coverage
           </h3>
           <p className="mt-1 text-sm text-neutral-400">
-            Warm markets that keep the property database fresh without
-            cluttering the intake workflow.
+            This is a monitoring panel, not part of the main investor intake
+            flow. It exists to show warm-market coverage and source health.
           </p>
         </div>
         <button
-          onClick={() => load()}
+          onClick={handleRefresh}
           className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-white transition hover:bg-white/5"
         >
           <RefreshCcw className="h-4 w-4" />
@@ -126,15 +134,6 @@ export default function IngestionSourcesPanel({ refreshKey }: Props) {
                     >
                       {row.status}
                     </span>
-                    {row.is_enabled ? (
-                      <span className="rounded-full border border-sky-400/20 bg-sky-400/10 px-3 py-1 text-xs text-sky-100">
-                        enabled
-                      </span>
-                    ) : (
-                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-neutral-300">
-                        disabled
-                      </span>
-                    )}
                   </div>
 
                   <div className="mt-1 text-sm text-neutral-400">

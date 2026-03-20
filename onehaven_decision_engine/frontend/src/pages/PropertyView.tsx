@@ -1,5 +1,5 @@
 import React from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { api, buildZillowUrl } from "../lib/api";
 
 import AgentSlots from "../components/AgentSlots";
@@ -19,6 +19,8 @@ import TenantPipeline from "../components/TenantPipeline";
 import Surface from "../components/Surface";
 import KpiCard from "../components/KpiCard";
 import EmptyState from "../components/EmptyState";
+
+import { ExternalLink, Hammer, RefreshCcw, Sparkles } from "lucide-react";
 
 const tabs = [
   "Deal",
@@ -146,6 +148,12 @@ function prettyStage(stage: string | null | undefined) {
   if (s === "tenant") return "Tenant Placement";
   if (s === "lease") return "Lease / Management";
   return "Cashflow / Equity";
+}
+
+function getFinancingType(price?: number | null) {
+  const n = Number(price);
+  if (!Number.isFinite(n) || n <= 0) return "Unknown";
+  return n < 75000 ? "Cash" : "DSCR";
 }
 
 function classificationTone(classification: string) {
@@ -659,7 +667,7 @@ export default function PropertyView() {
   const checklistItems = checklist?.items ?? v?.checklist?.items ?? [];
 
   const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
-  const zillowUrl = p ? buildZillowUrl(p) : null;
+  const zillowUrl = buildZillowUrl(p?.address, p?.city, p?.state, p?.zip);
 
   const classification = normalizeDecision(
     r?.decision ?? v?.classification ?? ops?.classification ?? "REVIEW",
@@ -838,6 +846,20 @@ export default function PropertyView() {
   );
   const crimeScore = numberOrNull(geo?.crime_score ?? p?.crime_score);
 
+  const currentStageRaw = workflow?.current_stage || ops?.stage || "deal";
+  const checklistTotal = checklistItems.length;
+  const checklistDone = checklistItems.filter(
+    (item: any) => String(item?.status || "").toLowerCase() === "done",
+  ).length;
+  const openRehabCount = rehab.filter((task: any) =>
+    ["todo", "in_progress", "blocked"].includes(
+      String(task?.status || "").toLowerCase(),
+    ),
+  ).length;
+  const activeLease = leases.find((lease: any) =>
+    ["active", "current"].includes(String(lease?.status || "").toLowerCase()),
+  );
+
   return (
     <PageShell className="relative space-y-6">
       <AgentsDrawer
@@ -860,31 +882,21 @@ export default function PropertyView() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/properties"
+              className="oh-btn oh-btn-secondary cursor-pointer"
+            >
+              Back to properties
+            </Link>
+
             <button
               onClick={loadAll}
               className="oh-btn oh-btn-secondary cursor-pointer"
               disabled={!!busy}
             >
-              sync
+              <RefreshCcw className="h-4 w-4" />
+              Refresh
             </button>
-
-            <button
-              onClick={createDealQuick}
-              className="oh-btn oh-btn-secondary cursor-pointer"
-              disabled={!!busy}
-            >
-              {busy?.includes("Creating") ? "creating…" : "+ deal"}
-            </button>
-
-            {workflow?.primary_action?.kind === "advance" && (
-              <button
-                onClick={advanceWorkflow}
-                className="oh-btn oh-btn-primary cursor-pointer"
-                disabled={!!busy}
-              >
-                {busy?.includes("Advancing") ? "advancing…" : "advance"}
-              </button>
-            )}
 
             {zillowUrl && (
               <a
@@ -893,7 +905,8 @@ export default function PropertyView() {
                 rel="noopener noreferrer"
                 className="oh-btn oh-btn-secondary cursor-pointer"
               >
-                Zillow ↗
+                Zillow
+                <ExternalLink className="h-4 w-4" />
               </a>
             )}
 
@@ -1086,16 +1099,16 @@ export default function PropertyView() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           title="Asking price"
           value={askingPrice != null ? money(askingPrice) : "—"}
-          subtitle="Acquisition target"
+          subtitle="Current acquisition target"
         />
         <KpiCard
           title="Cash flow est."
           value={cashflowEstimate != null ? money(cashflowEstimate) : "—"}
-          subtitle="Current projected view"
+          subtitle="Projected operating view"
           tone="success"
         />
         <KpiCard
@@ -1110,13 +1123,66 @@ export default function PropertyView() {
           subtitle="Area risk signal"
           tone="warning"
         />
+        <KpiCard
+          title="Financing"
+          value={getFinancingType(askingPrice)}
+          subtitle="Likely acquisition mode"
+        />
       </div>
 
-      {busy && (
-        <Surface tone="accent">
-          <div className="text-app-2">{busy}</div>
-        </Surface>
-      )}
+      <Surface
+        title="Property actions"
+        subtitle="Use these when you want to refresh workflow guidance, generate concrete work, or run agent assistance."
+      >
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={loadAll}
+            className="oh-btn oh-btn-secondary cursor-pointer"
+            disabled={!!busy}
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Refresh actions
+          </button>
+
+          <button
+            onClick={generateRehabFromGaps}
+            className="oh-btn oh-btn-secondary cursor-pointer"
+            disabled={!!busy}
+          >
+            <Hammer className="h-4 w-4" />
+            Generate actions
+          </button>
+
+          <button
+            onClick={() =>
+              doAction("Running agent suggestions…", async () => {
+                await api.createAgentRun({
+                  property_id: propertyId,
+                  agent_key: "next_actions",
+                  input_json: { property_id: propertyId },
+                });
+              })
+            }
+            className="oh-btn oh-btn-primary cursor-pointer"
+            disabled={!!busy}
+          >
+            <Sparkles className="h-4 w-4" />
+            Run agent suggestions
+          </button>
+
+          {!d ? (
+            <button
+              onClick={createDealQuick}
+              className="oh-btn oh-btn-secondary cursor-pointer"
+              disabled={!!busy}
+            >
+              + deal
+            </button>
+          ) : null}
+        </div>
+
+        {busy ? <div className="mt-3 text-sm text-app-3">{busy}</div> : null}
+      </Surface>
 
       {err && (
         <Surface tone="danger">
@@ -1161,6 +1227,49 @@ export default function PropertyView() {
               </button>
             );
           })}
+        </div>
+      </Surface>
+
+      <Surface
+        title="Workflow gate"
+        subtitle="This property moves through deal, rehab, compliance, tenant, lease, and cash/equity in sequence."
+      >
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-2xl border border-app bg-app-muted p-4">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+              Current stage
+            </div>
+            <div className="mt-2 text-base font-semibold text-app-0">
+              {prettyStage(currentStageRaw)}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted p-4">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+              Compliance
+            </div>
+            <div className="mt-2 text-base font-semibold text-app-0">
+              {checklistDone}/{checklistTotal} done
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted p-4">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+              Rehab blockers
+            </div>
+            <div className="mt-2 text-base font-semibold text-app-0">
+              {openRehabCount}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted p-4">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+              Lease status
+            </div>
+            <div className="mt-2 text-base font-semibold text-app-0">
+              {activeLease ? activeLease.status || "active" : "No active lease"}
+            </div>
+          </div>
         </div>
       </Surface>
 

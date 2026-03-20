@@ -59,16 +59,21 @@ function normalizeStage(raw?: string) {
     .trim()
     .toLowerCase();
 
-  if (["deal", "intake", "sourcing", "procurement", "underwriting"].includes(x))
+  if (
+    ["deal", "intake", "sourcing", "procurement", "underwriting"].includes(x)
+  ) {
     return "deal";
+  }
   if (["rehab", "renovation", "construction"].includes(x)) return "rehab";
-  if (["compliance", "inspection", "licensing"].includes(x))
+  if (["compliance", "inspection", "licensing"].includes(x)) {
     return "compliance";
+  }
   if (["tenant", "voucher"].includes(x)) return "tenant";
   if (["lease", "leasing"].includes(x)) return "lease";
   if (["management", "ops"].includes(x)) return "management";
-  if (["cash", "cashflow", "equity", "portfolio"].includes(x))
+  if (["cash", "cashflow", "equity", "portfolio"].includes(x)) {
     return "cash_equity";
+  }
 
   return "deal";
 }
@@ -88,8 +93,9 @@ function stagePillClass(raw?: string) {
   const s = normalizeStage(raw);
   if (s === "cash_equity") return "oh-pill oh-pill-good";
   if (s === "lease" || s === "management") return "oh-pill oh-pill-accent";
-  if (s === "tenant" || s === "compliance" || s === "rehab")
+  if (s === "tenant" || s === "compliance" || s === "rehab") {
     return "oh-pill oh-pill-warn";
+  }
   return "oh-pill";
 }
 

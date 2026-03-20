@@ -12,7 +12,6 @@ import DealIntake from "./pages/DealIntake";
 import Jurisdictions from "./pages/Jurisdictions";
 import JurisdictionProfiles from "./pages/JurisdictionProfiles";
 import PipelineDrilldown from "./pages/drilldowns/PipelineDrilldown";
-import TrustDrilldown from "./pages/drilldowns/TrustDrilldown";
 import ComplianceDrilldown from "./pages/drilldowns/ComplianceDrilldown";
 import RehabDrilldown from "./pages/drilldowns/RehabDrilldown";
 import CashflowDrilldown from "./pages/drilldowns/CashflowDrilldown";
@@ -65,6 +64,20 @@ export default function App() {
         />
 
         <Route
+          path="/property/:id"
+          element={<Navigate to="/properties/:id" replace />}
+        />
+
+        <Route
+          path="/imports"
+          element={
+            <Protected>
+              <ImportsPage />
+            </Protected>
+          }
+        />
+
+        <Route
           path="/agents"
           element={
             <Protected>
@@ -110,15 +123,6 @@ export default function App() {
         />
 
         <Route
-          path="/drilldowns/trust"
-          element={
-            <Protected>
-              <TrustDrilldown />
-            </Protected>
-          }
-        />
-
-        <Route
           path="/drilldowns/compliance"
           element={
             <Protected>
@@ -155,38 +159,6 @@ export default function App() {
         />
 
         <Route
-          path="/properties"
-          element={
-            <Protected>
-              <Property />
-            </Protected>
-          }
-        />
-
-        <Route
-          path="/properties/:id"
-          element={
-            <Protected>
-              <PropertyView />
-            </Protected>
-          }
-        />
-
-        <Route
-          path="/property/:id"
-          element={<Navigate to="/properties/:id" replace />}
-        />
-
-        <Route
-          path="/agents"
-          element={
-            <Protected>
-              <Agents />
-            </Protected>
-          }
-        />
-
-        <Route
           path="/constitution"
           element={
             <Protected>
@@ -200,15 +172,6 @@ export default function App() {
           element={
             <Protected>
               <PolicyReview />
-            </Protected>
-          }
-        />
-
-        <Route
-          path="/imports"
-          element={
-            <Protected>
-              <ImportsPage />
             </Protected>
           }
         />
