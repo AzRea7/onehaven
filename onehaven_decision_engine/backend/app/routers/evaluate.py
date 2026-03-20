@@ -61,6 +61,16 @@ def _normalize_decision(decision: Optional[str]) -> str:
     return "REVIEW"
 
 
+def _decision_filter_values(decision: str) -> list[str]:
+    normalized = _normalize_decision(decision)
+    equivalents = {
+        "GOOD": ["GOOD", "PASS"],
+        "REVIEW": ["REVIEW", "UNKNOWN"],
+        "REJECT": ["REJECT", "FAIL"],
+    }
+    return equivalents.get(normalized, [normalized])
+
+
 def _almost_equal(a: Optional[float], b: Optional[float], tol: float = _MONEY_TOL) -> bool:
     if a is None or b is None:
         return False
@@ -540,7 +550,7 @@ def evaluate_properties(
         "evaluated": len(results),
         "property_ids": property_ids,
         "good_count": good_count,
-        "pass_count": good_count,  # backward compatibility
+        "pass_count": good_count,  # backward compatibility only
         "review_count": review_count,
         "reject_count": reject_count,
         "results": results,
@@ -596,6 +606,7 @@ def evaluate_snapshot(
             event_type="snapshot_evaluated",
             payload={
                 "snapshot_id": snapshot_id,
+                "legacy": True,
                 "total": len(deals),
                 "good": int(res.get("good_count", 0) or 0),
                 "review": int(res.get("review_count", 0) or 0),
@@ -609,7 +620,7 @@ def evaluate_snapshot(
     return BatchEvalOut(
         snapshot_id=snapshot_id,
         total_deals=len(deals),
-        pass_count=int(res.get("good_count", 0) or 0),  # backward compatibility field
+        pass_count=int(res.get("good_count", 0) or 0),  # legacy response field
         review_count=int(res.get("review_count", 0) or 0),
         reject_count=int(res.get("reject_count", 0) or 0),
         errors=[str(x) for x in list(res.get("errors") or [])],
@@ -635,7 +646,7 @@ def evaluate_run(
 
 @router.get("/results", response_model=List[UnderwritingResultOut])
 def evaluate_results(
-    decision: Optional[str] = Query(None, description="GOOD|REVIEW|REJECT"),
+    decision: Optional[str] = Query(None, description="GOOD|REVIEW|REJECT. PASS/FAIL/UNKNOWN accepted as aliases."),
     property_ids: Optional[str] = Query(None, description="Comma-separated property ids"),
     snapshot_id: Optional[int] = Query(None, description="Legacy filter"),
     limit: int = Query(50, ge=1, le=500),
@@ -668,13 +679,7 @@ def evaluate_results(
             q = q.where(Property.id.in_(ids))
 
     if decision is not None:
-        normalized = _normalize_decision(decision)
-        equivalents = {
-            "GOOD": ["GOOD", "PASS"],
-            "REVIEW": ["REVIEW", "UNKNOWN"],
-            "REJECT": ["REJECT", "FAIL"],
-        }
-        q = q.where(UnderwritingResult.decision.in_(equivalents.get(normalized, [normalized])))
+        q = q.where(UnderwritingResult.decision.in_(_decision_filter_values(decision)))
 
     rows = db.execute(q.order_by(desc(UnderwritingResult.id)).limit(limit)).all()
 

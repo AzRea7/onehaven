@@ -12,8 +12,8 @@ router = APIRouter(prefix="/imports", tags=["import"])
 
 @router.get("/status")
 def imports_status(
-    run_id: int | None = Query(default=None),
-    snapshot_id: int | None = Query(default=None, description="Legacy only"),
+    run_id: int | None = Query(default=None, description="Preferred normal-path ingestion run id"),
+    snapshot_id: int | None = Query(default=None, description="Legacy only; manual CSV audit/status"),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):

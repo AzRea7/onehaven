@@ -367,7 +367,7 @@ def _import_rows(
             d = Deal(
                 org_id=org_id,
                 property_id=prop.id,
-                snapshot_id=snap.id,  # legacy audit only, not pipeline dependency
+                snapshot_id=snap.id,  # legacy audit only
                 source=source,
                 source_fingerprint=fp,
                 source_raw_json=json.dumps(n.raw),
@@ -471,6 +471,32 @@ def _build_run_status(run: IngestionRun) -> dict:
     }
 
 
+def _build_legacy_snapshot_status(
+    *,
+    snapshot_id: int,
+    snap: ImportSnapshot,
+    deal_count: int,
+    distinct_props: int,
+) -> dict:
+    return {
+        "mode": "legacy_snapshot",
+        "snapshot_id": snapshot_id,
+        "exists": True,
+        "legacy": True,
+        "deprecated": True,
+        "detail": (
+            "snapshot_id is supported only for legacy manual CSV audit/status. "
+            "The normal execution path is ingestion-run and property-first."
+        ),
+        "org_id": snap.org_id,
+        "source": snap.source,
+        "notes": snap.notes,
+        "created_at": snap.created_at,
+        "deal_count": int(deal_count),
+        "distinct_property_count": int(distinct_props),
+    }
+
+
 @router.get("/overview", response_model=IngestionOverviewOut)
 def imports_overview(
     db: Session = Depends(get_db),
@@ -517,8 +543,8 @@ def import_investorlift(
 
 @router.get("/status")
 def import_status(
-    run_id: int | None = Query(default=None),
-    snapshot_id: int | None = Query(default=None, description="Legacy only"),
+    run_id: int | None = Query(default=None, description="Preferred normal-path ingestion run id"),
+    snapshot_id: int | None = Query(default=None, description="Legacy only; manual CSV audit/status"),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
@@ -539,7 +565,13 @@ def import_status(
             .where(ImportSnapshot.org_id == principal.org_id)
         )
         if snap is None:
-            return {"mode": "legacy_snapshot", "snapshot_id": snapshot_id, "exists": False}
+            return {
+                "mode": "legacy_snapshot",
+                "snapshot_id": snapshot_id,
+                "exists": False,
+                "legacy": True,
+                "deprecated": True,
+            }
 
         deal_count = db.scalar(
             select(func.count())
@@ -555,19 +587,12 @@ def import_status(
             .where(Deal.org_id == principal.org_id)
         ) or 0
 
-        return {
-            "mode": "legacy_snapshot",
-            "snapshot_id": snapshot_id,
-            "exists": True,
-            "legacy": True,
-            "detail": "snapshot_id is supported only for legacy manual CSV audit/status. The real pipeline is ingestion-run and property-first.",
-            "org_id": snap.org_id,
-            "source": snap.source,
-            "notes": snap.notes,
-            "created_at": snap.created_at,
-            "deal_count": int(deal_count),
-            "distinct_property_count": int(distinct_props),
-        }
+        return _build_legacy_snapshot_status(
+            snapshot_id=int(snapshot_id),
+            snap=snap,
+            deal_count=int(deal_count),
+            distinct_props=int(distinct_props),
+        )
 
     return {
         "exists": False,

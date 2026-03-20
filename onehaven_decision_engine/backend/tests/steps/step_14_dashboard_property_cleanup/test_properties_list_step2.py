@@ -42,7 +42,7 @@ def test_build_property_list_item_includes_step2_investor_fields(monkeypatch):
         "_latest_underwriting",
         lambda db, org_id, property_id: SimpleNamespace(
             id=2,
-            decision="PASS",
+            decision="GOOD",
             cash_flow=525.0,
             dscr=1.31,
         ),
