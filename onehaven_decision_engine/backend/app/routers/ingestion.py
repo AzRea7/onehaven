@@ -1,3 +1,4 @@
+# backend/app/routers/ingestion.py
 from __future__ import annotations
 
 from typing import Any
@@ -212,6 +213,8 @@ def overview(db: Session = Depends(get_db), p=Depends(get_principal)):
     payload = get_ingestion_overview(db, org_id=p.org_id)
     payload["daily_markets"] = list_default_daily_markets()
     payload["ui_mode"] = "consolidated"
+    payload["normal_path"] = "property_first_pipeline"
+    payload["legacy_snapshot_flow_enabled"] = False
     return payload
 
 
@@ -272,6 +275,7 @@ def sync_now(
         )
         out = _run_response(run)
         out["queued"] = False
+        out["normal_path"] = True
         return out
 
     job = sync_source_task.delay(p.org_id, row.id, trigger_type, runtime_config)
@@ -281,6 +285,7 @@ def sync_now(
         "task_id": job.id,
         "source_id": row.id,
         "runtime_config": runtime_config,
+        "normal_path": True,
     }
 
 
@@ -308,14 +313,22 @@ def sync_default_sources_now(
                 trigger_type="manual",
                 runtime_config=runtime,
             )
-            runs.append(_run_response(run))
-        return {"ok": True, "queued": False, "runs": runs}
+            item = _run_response(run)
+            item["normal_path"] = True
+            runs.append(item)
+        return {"ok": True, "queued": False, "runs": runs, "normal_path": True}
 
     queued: list[int] = []
     for row in rows:
         sync_source_task.delay(int(p.org_id), int(row.id), "manual", runtime)
         queued.append(int(row.id))
-    return {"ok": True, "queued": len(queued), "source_ids": queued, "runtime_config": runtime}
+    return {
+        "ok": True,
+        "queued": len(queued),
+        "source_ids": queued,
+        "runtime_config": runtime,
+        "normal_path": True,
+    }
 
 
 @router.post("/sync-due", response_model=dict)
@@ -369,6 +382,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db), p=Depends(get_princip
         "error_json": row.error_json,
         "summary_json": summary,
         "pipeline_outcome": _pipeline_outcome(summary),
+        "normal_path": True,
     }
 
 
@@ -402,4 +416,5 @@ async def webhook_ingest(
         trigger_type="webhook",
     )
     out = _run_response(run)
+    out["normal_path"] = True
     return out

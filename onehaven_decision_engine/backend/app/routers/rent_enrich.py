@@ -215,6 +215,12 @@ def _candidates_to_dicts(cands: list[CeilingCandidate]) -> list[dict[str, Any]]:
 
 
 def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "section8") -> RentEnrichOut:
+    """
+    Admin/backfill helper only.
+
+    Normal ingestion should reach rent enrichment through the property-first
+    ingestion pipeline, not through manual button flows.
+    """
     prop = db.get(Property, property_id)
     if not prop or prop.org_id != org_id:
         raise HTTPException(status_code=404, detail="Property not found")
@@ -462,6 +468,10 @@ def enrich_rent_batch(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
+    """
+    Admin/backfill endpoint only.
+    Normal ingestion should enrich rent inside the ingestion pipeline.
+    """
     seen: set[int] = set()
     property_ids: list[int] = []
     for pid in payload.property_ids:
@@ -540,4 +550,8 @@ def enrich_rent(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
+    """
+    Admin/backfill endpoint only.
+    Normal ingestion should enrich rent automatically.
+    """
     return _enrich_one(db, property_id, org_id=p.org_id, strategy=strategy)

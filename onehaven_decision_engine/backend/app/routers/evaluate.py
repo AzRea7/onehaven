@@ -1,9 +1,10 @@
+# backend/app/routers/evaluate.py
 from __future__ import annotations
 
 import json
 from typing import Optional, Tuple, List, Any
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -16,7 +17,7 @@ from ..domain.events import emit_workflow_event
 from ..domain.jurisdiction_scoring import compute_friction
 from ..domain.underwriting import underwrite
 from ..models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule
-from ..schemas import BatchEvalOut, UnderwritingResultOut
+from ..schemas import UnderwritingResultOut
 
 from .rent import explain_rent
 
@@ -558,101 +559,19 @@ def evaluate_properties(
     }
 
 
-@router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
-def evaluate_snapshot(
-    snapshot_id: int,
-    strategy: Optional[str] = Query(default=None, description="section8|market (optional override)"),
-    payment_standard_pct: float | None = Query(default=None, description="Override. Default from config."),
-    db: Session = Depends(get_db),
-    principal=Depends(get_principal),
-):
-    ps_default = getattr(settings, "default_payment_standard_pct", None)
-    if ps_default is None:
-        ps_default = getattr(settings, "payment_standard_pct", 1.0)
-    ps = float(payment_standard_pct) if payment_standard_pct is not None else float(ps_default)
-
-    deals = db.scalars(
-        select(Deal)
-        .where(Deal.snapshot_id == snapshot_id)
-        .where(Deal.org_id == principal.org_id)
-        .order_by(desc(Deal.id))
-    ).all()
-
-    property_ids: list[int] = []
-    seen: set[int] = set()
-    for d in deals:
-        pid = int(d.property_id)
-        if pid in seen:
-            continue
-        seen.add(pid)
-        property_ids.append(pid)
-
-    res = evaluate_properties(
-        payload=EvaluatePropertiesIn(
-            property_ids=property_ids,
-            strategy=strategy,
-            payment_standard_pct=ps,
-            explain_rent_first=True,
-        ),
-        db=db,
-        principal=principal,
-    )
-
-    try:
-        emit_workflow_event(
-            db,
-            org_id=principal.org_id,
-            actor_user_id=principal.user_id,
-            event_type="snapshot_evaluated",
-            payload={
-                "snapshot_id": snapshot_id,
-                "legacy": True,
-                "total": len(deals),
-                "good": int(res.get("good_count", 0) or 0),
-                "review": int(res.get("review_count", 0) or 0),
-                "reject": int(res.get("reject_count", 0) or 0),
-            },
-        )
-        db.commit()
-    except Exception:
-        db.rollback()
-
-    return BatchEvalOut(
-        snapshot_id=snapshot_id,
-        total_deals=len(deals),
-        pass_count=int(res.get("good_count", 0) or 0),  # legacy response field
-        review_count=int(res.get("review_count", 0) or 0),
-        reject_count=int(res.get("reject_count", 0) or 0),
-        errors=[str(x) for x in list(res.get("errors") or [])],
-    )
-
-
-@router.post("/run", response_model=BatchEvalOut)
-def evaluate_run(
-    snapshot_id: int = Query(..., description="Legacy snapshot reevaluation only"),
-    strategy: Optional[str] = Query(default=None, description="section8|market (optional override)"),
-    payment_standard_pct: float | None = Query(default=None),
-    db: Session = Depends(get_db),
-    principal=Depends(get_principal),
-):
-    return evaluate_snapshot(
-        snapshot_id=snapshot_id,
-        strategy=strategy,
-        payment_standard_pct=payment_standard_pct,
-        db=db,
-        principal=principal,
-    )
-
-
 @router.get("/results", response_model=List[UnderwritingResultOut])
 def evaluate_results(
     decision: Optional[str] = Query(None, description="GOOD|REVIEW|REJECT. PASS/FAIL/UNKNOWN accepted as aliases."),
     property_ids: Optional[str] = Query(None, description="Comma-separated property ids"),
-    snapshot_id: Optional[int] = Query(None, description="Legacy filter"),
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
+    """
+    Property-first results view only.
+
+    Legacy snapshot filtering was intentionally removed from the normal path.
+    """
     q = (
         select(UnderwritingResult, Deal, Property)
         .join(Deal, Deal.id == UnderwritingResult.deal_id)
@@ -661,9 +580,6 @@ def evaluate_results(
         .where(Deal.org_id == principal.org_id)
         .where(Property.org_id == principal.org_id)
     )
-
-    if snapshot_id is not None:
-        q = q.where(Deal.snapshot_id == snapshot_id)
 
     if property_ids:
         ids: list[int] = []
@@ -750,3 +666,33 @@ def evaluate_property(
         "created": res["created"],
         "result": UnderwritingResultOut.model_validate(res["result"]),
     }
+
+
+@router.post("/snapshot/{snapshot_id}", response_model=dict, deprecated=True)
+def evaluate_snapshot_legacy_disabled(
+    snapshot_id: int,
+    _db: Session = Depends(get_db),
+    _principal=Depends(get_principal),
+):
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_snapshot_evaluation_removed",
+            "message": "Snapshot-based evaluation was retired. Use /evaluate/property/{property_id} or /evaluate/properties.",
+            "snapshot_id": snapshot_id,
+        },
+    )
+
+
+@router.post("/run", response_model=dict, deprecated=True)
+def evaluate_run_legacy_disabled(
+    _db: Session = Depends(get_db),
+    _principal=Depends(get_principal),
+):
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_snapshot_evaluation_removed",
+            "message": "Legacy snapshot reevaluation was retired. Use property-first evaluation endpoints.",
+        },
+    )
