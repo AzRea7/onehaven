@@ -25,6 +25,7 @@ from ..domain.operating_truth import (
 from ..models import Deal, ImportSnapshot, IngestionRun, Property, RentAssumption
 from ..schemas import ImportErrorRow, ImportResultOut, IngestionOverviewOut
 from ..services.geo_enrichment import enrich_property_geo
+from ..services.ingestion_enrichment_service import execute_post_ingestion_pipeline
 from ..services.ingestion_run_service import get_ingestion_overview
 from ..services.ingestion_source_service import ensure_default_manual_sources
 from ..services.property_photo_service import upsert_zillow_photos
@@ -318,6 +319,9 @@ def _import_rows(
 
     normalizer = normalize_investorlift if source == "investorlift" else normalize_zillow
 
+    imported_property_ids: list[int] = []
+    seen_property_ids: set[int] = set()
+
     for idx, row in enumerate(rows, start=2):
         try:
             n = normalizer(row)
@@ -341,6 +345,11 @@ def _import_rows(
                         )
                     except Exception:
                         pass
+
+                if int(prop.id) not in seen_property_ids:
+                    imported_property_ids.append(int(prop.id))
+                    seen_property_ids.add(int(prop.id))
+
                 skipped += 1
                 continue
 
@@ -358,7 +367,7 @@ def _import_rows(
             d = Deal(
                 org_id=org_id,
                 property_id=prop.id,
-                snapshot_id=snap.id,
+                snapshot_id=snap.id,  # legacy audit only, not pipeline dependency
                 source=source,
                 source_fingerprint=fp,
                 source_raw_json=json.dumps(n.raw),
@@ -369,6 +378,7 @@ def _import_rows(
                 interest_rate=0.07,
                 term_years=30,
                 down_payment_pct=0.20,
+                strategy=getattr(n, "strategy", None) or "section8",
             )
             db.add(d)
             db.commit()
@@ -387,6 +397,10 @@ def _import_rows(
                 except Exception:
                     pass
 
+            if int(prop.id) not in seen_property_ids:
+                imported_property_ids.append(int(prop.id))
+                seen_property_ids.add(int(prop.id))
+
             imported += 1
 
         except Exception as e:
@@ -394,6 +408,18 @@ def _import_rows(
             errors.append(ImportErrorRow(row=idx, error=str(e)))
 
     _backfill_inventory_counts_from_snapshot(db, org_id, snap.id)
+
+    for property_id in imported_property_ids:
+        try:
+            execute_post_ingestion_pipeline(
+                db,
+                org_id=int(org_id),
+                property_id=int(property_id),
+                actor_user_id=None,
+                emit_events=False,
+            )
+        except Exception:
+            db.rollback()
 
     return ImportResultOut(
         snapshot_id=snap.id,
@@ -429,6 +455,7 @@ def _build_run_status(run: IngestionRun) -> dict:
         "pipeline": {
             "attempted": int(summary.get("post_import_pipeline_attempted", 0) or 0),
             "geo_enriched": int(summary.get("geo_enriched", 0) or 0),
+            "risk_scored": int(summary.get("risk_scored", 0) or 0),
             "rent_refreshed": int(summary.get("rent_refreshed", 0) or 0),
             "evaluated": int(summary.get("evaluated", 0) or 0),
             "state_synced": int(summary.get("state_synced", 0) or 0),
@@ -491,7 +518,7 @@ def import_investorlift(
 @router.get("/status")
 def import_status(
     run_id: int | None = Query(default=None),
-    snapshot_id: int | None = Query(default=None),
+    snapshot_id: int | None = Query(default=None, description="Legacy only"),
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
@@ -532,6 +559,8 @@ def import_status(
             "mode": "legacy_snapshot",
             "snapshot_id": snapshot_id,
             "exists": True,
+            "legacy": True,
+            "detail": "snapshot_id is supported only for legacy manual CSV audit/status. The real pipeline is ingestion-run and property-first.",
             "org_id": snap.org_id,
             "source": snap.source,
             "notes": snap.notes,
@@ -542,5 +571,5 @@ def import_status(
 
     return {
         "exists": False,
-        "detail": "Provide run_id for ingestion-run status or snapshot_id for legacy manual CSV import status.",
+        "detail": "Provide run_id for ingestion-run status. snapshot_id is legacy-only.",
     }

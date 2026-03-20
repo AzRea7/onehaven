@@ -27,7 +27,11 @@ from ..services.ingestion_source_service import (
     list_sources,
     update_source,
 )
-from ..tasks.ingestion_tasks import daily_market_refresh_task, sync_due_sources_task, sync_source_task
+from ..tasks.ingestion_tasks import (
+    daily_market_refresh_task,
+    sync_due_sources_task,
+    sync_source_task,
+)
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
@@ -107,6 +111,7 @@ def _pipeline_outcome(summary_json: dict[str, Any] | None) -> dict[str, Any]:
         "filtered_out": int(summary.get("filtered_out", 0) or 0),
         "enrichments_completed": {
             "geo": int(summary.get("geo_enriched", 0) or 0),
+            "risk": int(summary.get("risk_scored", 0) or 0),
             "rent": int(summary.get("rent_refreshed", 0) or 0),
         },
         "evaluations_completed": int(summary.get("evaluated", 0) or 0),
@@ -322,7 +327,12 @@ def queue_due_sources(_op=Depends(require_operator)):
 @router.post("/daily-refresh", response_model=dict)
 def queue_daily_market_refresh(_op=Depends(require_operator)):
     job = daily_market_refresh_task.delay()
-    return {"ok": True, "queued": True, "task_id": job.id, "markets": list_default_daily_markets()}
+    return {
+        "ok": True,
+        "queued": True,
+        "task_id": job.id,
+        "markets": list_default_daily_markets(),
+    }
 
 
 @router.get("/runs", response_model=list[IngestionRunListItem])
@@ -385,6 +395,11 @@ async def webhook_ingest(
     db.commit()
     db.refresh(source)
 
-    run = execute_source_sync(db, org_id=int(source.org_id), source=source, trigger_type="webhook")
+    run = execute_source_sync(
+        db,
+        org_id=int(source.org_id),
+        source=source,
+        trigger_type="webhook",
+    )
     out = _run_response(run)
     return out

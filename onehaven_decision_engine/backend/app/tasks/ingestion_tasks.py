@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from ..db import SessionLocal
 from ..services.ingestion_run_execute import execute_source_sync
-from ..services.ingestion_scheduler_service import build_runtime_payload, list_default_daily_markets
-from ..services.ingestion_source_service import ensure_default_manual_sources, list_sources
+from ..services.ingestion_scheduler_service import (
+    build_runtime_payload,
+    list_default_daily_markets,
+)
+from ..services.ingestion_source_service import (
+    ensure_default_manual_sources,
+    list_sources,
+)
 from ..workers.agent_worker import celery_app
 
 
@@ -22,6 +28,7 @@ def _pipeline_outcome(summary_json: dict | None) -> dict:
         "invalid_rows": int(summary.get("invalid_rows", 0) or 0),
         "filtered_out": int(summary.get("filtered_out", 0) or 0),
         "geo_enriched": int(summary.get("geo_enriched", 0) or 0),
+        "risk_scored": int(summary.get("risk_scored", 0) or 0),
         "rent_refreshed": int(summary.get("rent_refreshed", 0) or 0),
         "evaluated": int(summary.get("evaluated", 0) or 0),
         "state_synced": int(summary.get("state_synced", 0) or 0),
@@ -30,11 +37,17 @@ def _pipeline_outcome(summary_json: dict | None) -> dict:
         "post_import_failures": int(summary.get("post_import_failures", 0) or 0),
         "post_import_partials": int(summary.get("post_import_partials", 0) or 0),
         "post_import_errors": list(summary.get("post_import_errors") or []),
+        "filter_reason_counts": dict(summary.get("filter_reason_counts") or {}),
     }
 
 
 @celery_app.task(name="ingestion.sync_source")
-def sync_source_task(org_id: int, source_id: int, trigger_type: str = "manual", runtime_config: dict | None = None):
+def sync_source_task(
+    org_id: int,
+    source_id: int,
+    trigger_type: str = "manual",
+    runtime_config: dict | None = None,
+):
     db = SessionLocal()
     try:
         from ..services.ingestion_source_service import get_source
@@ -89,7 +102,11 @@ def daily_market_refresh_task():
         markets = list_default_daily_markets()
         for org_id in org_ids:
             ensure_default_manual_sources(db, org_id=int(org_id))
-            sources = [s for s in list_sources(db, org_id=int(org_id)) if bool(getattr(s, "is_enabled", False))]
+            sources = [
+                s
+                for s in list_sources(db, org_id=int(org_id))
+                if bool(getattr(s, "is_enabled", False))
+            ]
             for market in markets:
                 for source in sources:
                     payload = build_runtime_payload(
@@ -97,7 +114,12 @@ def daily_market_refresh_task():
                         county=market.get("county"),
                         city=market.get("city"),
                     )
-                    sync_source_task.delay(int(org_id), int(source.id), "daily_refresh", payload)
+                    sync_source_task.delay(
+                        int(org_id),
+                        int(source.id),
+                        "daily_refresh",
+                        payload,
+                    )
                     queued += 1
         return {"ok": True, "queued": queued, "markets": markets}
     finally:

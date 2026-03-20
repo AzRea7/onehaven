@@ -50,6 +50,17 @@ def _norm_strategy(strategy: Optional[str]) -> str:
     return s if s in {"section8", "market"} else "section8"
 
 
+def _normalize_decision(decision: Optional[str]) -> str:
+    value = str(decision or "").strip().upper()
+    if value in {"GOOD", "PASS"}:
+        return "GOOD"
+    if value in {"REJECT", "FAIL"}:
+        return "REJECT"
+    if value in {"REVIEW", "UNKNOWN", ""}:
+        return "REVIEW"
+    return "REVIEW"
+
+
 def _almost_equal(a: Optional[float], b: Optional[float], tol: float = _MONEY_TOL) -> bool:
     if a is None or b is None:
         return False
@@ -201,7 +212,7 @@ def _result_to_schema_payload(r: UnderwritingResult, p: Optional[Property] = Non
         "id": r.id,
         "deal_id": r.deal_id,
         "org_id": r.org_id,
-        "decision": r.decision,
+        "decision": _normalize_decision(r.decision),
         "score": r.score,
         "dscr": r.dscr,
         "cash_flow": r.cash_flow,
@@ -295,7 +306,7 @@ def evaluate_property_core(
         gross_rent=float(rent_used or 0.0),
     )
 
-    decision, score, reasons = score_and_decide(
+    raw_decision, score, reasons = score_and_decide(
         property=prop,
         deal=deal,
         rent_assumption=ra,
@@ -304,9 +315,11 @@ def evaluate_property_core(
     )
     reasons.extend(notes)
 
-    if fallback_used and decision == "PASS":
+    decision = _normalize_decision(raw_decision)
+
+    if fallback_used and decision == "GOOD":
         decision = "REVIEW"
-        reasons.append("Rent was heuristic-estimated; verify comps/FMR/ceiling before PASS.")
+        reasons.append("Rent was heuristic-estimated; verify comps/FMR/ceiling before GOOD.")
 
     jr = db.scalar(
         select(JurisdictionRule).where(
@@ -331,9 +344,9 @@ def evaluate_property_core(
     if fr_reasons:
         reasons.extend([f"[Jurisdiction] {r}" for r in fr_reasons])
 
-    if jr is None and decision == "PASS":
+    if jr is None and decision == "GOOD":
         decision = "REVIEW"
-        reasons.append("No jurisdiction row → cannot PASS without compliance friction data.")
+        reasons.append("No jurisdiction row → cannot mark GOOD without compliance friction data.")
 
     score = int(round(float(score) * fr_mult))
     score = max(0, min(100, score))
@@ -346,6 +359,7 @@ def evaluate_property_core(
         dscr=float(uw.dscr),
         cash_flow=float(uw.cash_flow),
     )
+    decision = _normalize_decision(decision)
 
     existing = db.scalar(
         select(UnderwritingResult)
@@ -374,7 +388,7 @@ def evaluate_property_core(
         db.add(existing)
         created = True
 
-    existing.decision = decision
+    existing.decision = _normalize_decision(decision)
     existing.score = int(score)
     existing.reasons_json = json.dumps(reasons)
 
@@ -408,7 +422,7 @@ def evaluate_property_core(
                 payload={
                     "deal_id": int(deal.id),
                     "property_id": int(property_id),
-                    "decision": decision,
+                    "decision": _normalize_decision(decision),
                     "score": int(score),
                     "jurisdiction_multiplier": float(fr_mult),
                 },
@@ -426,7 +440,7 @@ def evaluate_property_core(
         "ok": True,
         "property_id": int(property_id),
         "deal_id": int(deal.id),
-        "decision": decision,
+        "decision": _normalize_decision(decision),
         "score": int(score),
         "fallback_used": fallback_used,
         "computed_ceiling": computed_ceiling,
@@ -457,7 +471,7 @@ def evaluate_properties(
         ps_default = getattr(settings, "payment_standard_pct", 1.0)
     pct = float(payload.payment_standard_pct) if payload.payment_standard_pct is not None else float(ps_default)
 
-    pass_count = 0
+    good_count = 0
     review_count = 0
     reject_count = 0
     errors: list[dict[str, Any]] = []
@@ -500,8 +514,8 @@ def evaluate_properties(
                 errors.append({"property_id": int(pid), "error": res.get("detail")})
                 continue
 
-            if res["decision"] == "PASS":
-                pass_count += 1
+            if res["decision"] == "GOOD":
+                good_count += 1
             elif res["decision"] == "REVIEW":
                 review_count += 1
             else:
@@ -525,7 +539,8 @@ def evaluate_properties(
         "attempted": len(property_ids),
         "evaluated": len(results),
         "property_ids": property_ids,
-        "pass_count": pass_count,
+        "good_count": good_count,
+        "pass_count": good_count,  # backward compatibility
         "review_count": review_count,
         "reject_count": reject_count,
         "results": results,
@@ -533,7 +548,6 @@ def evaluate_properties(
     }
 
 
-# Legacy compatibility route.
 @router.post("/snapshot/{snapshot_id}", response_model=BatchEvalOut)
 def evaluate_snapshot(
     snapshot_id: int,
@@ -583,7 +597,7 @@ def evaluate_snapshot(
             payload={
                 "snapshot_id": snapshot_id,
                 "total": len(deals),
-                "pass": int(res.get("pass_count", 0) or 0),
+                "good": int(res.get("good_count", 0) or 0),
                 "review": int(res.get("review_count", 0) or 0),
                 "reject": int(res.get("reject_count", 0) or 0),
             },
@@ -595,7 +609,7 @@ def evaluate_snapshot(
     return BatchEvalOut(
         snapshot_id=snapshot_id,
         total_deals=len(deals),
-        pass_count=int(res.get("pass_count", 0) or 0),
+        pass_count=int(res.get("good_count", 0) or 0),  # backward compatibility field
         review_count=int(res.get("review_count", 0) or 0),
         reject_count=int(res.get("reject_count", 0) or 0),
         errors=[str(x) for x in list(res.get("errors") or [])],
@@ -604,7 +618,7 @@ def evaluate_snapshot(
 
 @router.post("/run", response_model=BatchEvalOut)
 def evaluate_run(
-    snapshot_id: int = Query(...),
+    snapshot_id: int = Query(..., description="Legacy snapshot reevaluation only"),
     strategy: Optional[str] = Query(default=None, description="section8|market (optional override)"),
     payment_standard_pct: float | None = Query(default=None),
     db: Session = Depends(get_db),
@@ -621,7 +635,7 @@ def evaluate_run(
 
 @router.get("/results", response_model=List[UnderwritingResultOut])
 def evaluate_results(
-    decision: Optional[str] = Query(None, description="PASS|REVIEW|REJECT"),
+    decision: Optional[str] = Query(None, description="GOOD|REVIEW|REJECT"),
     property_ids: Optional[str] = Query(None, description="Comma-separated property ids"),
     snapshot_id: Optional[int] = Query(None, description="Legacy filter"),
     limit: int = Query(50, ge=1, le=500),
@@ -654,7 +668,13 @@ def evaluate_results(
             q = q.where(Property.id.in_(ids))
 
     if decision is not None:
-        q = q.where(UnderwritingResult.decision == decision)
+        normalized = _normalize_decision(decision)
+        equivalents = {
+            "GOOD": ["GOOD", "PASS"],
+            "REVIEW": ["REVIEW", "UNKNOWN"],
+            "REJECT": ["REJECT", "FAIL"],
+        }
+        q = q.where(UnderwritingResult.decision.in_(equivalents.get(normalized, [normalized])))
 
     rows = db.execute(q.order_by(desc(UnderwritingResult.id)).limit(limit)).all()
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import inspect
 import re
 from typing import Any
 
@@ -16,10 +14,10 @@ from ..services.ingestion_dedupe_service import (
     upsert_record_link,
 )
 from ..services.ingestion_enrichment_service import (
+    apply_pipeline_summary,
     canonical_listing_payload,
     derive_photo_kind,
-    get_google_maps_api_key,
-    refresh_property_rent_assumptions,
+    execute_post_ingestion_pipeline,
 )
 from ..services.ingestion_run_service import finish_run, start_run
 from ..services.rentcast_listing_source import RentCastListingSource
@@ -452,185 +450,6 @@ def _collect_matching_rows(
     }
 
 
-def _run_maybe_async(value: Any) -> Any:
-    if inspect.isawaitable(value):
-        try:
-            return asyncio.run(value)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(value)
-            finally:
-                loop.close()
-    return value
-
-
-def _seed_next_actions_if_available(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    candidates: list[tuple[str, str]] = [
-        ("..services.next_actions_service", "seed_property_next_actions"),
-        ("..services.next_actions_service", "generate_property_next_actions"),
-        ("..services.next_actions_service", "recompute_property_next_actions"),
-    ]
-
-    for module_name, fn_name in candidates:
-        try:
-            module = __import__(module_name, globals(), locals(), [fn_name], 1)
-            fn = getattr(module, fn_name, None)
-            if callable(fn):
-                out = fn(db, org_id=int(org_id), property_id=int(property_id))
-                return {"ok": True, "handler": fn_name, "result": out}
-        except Exception:
-            continue
-
-    return {"ok": False, "skipped": True, "reason": "next_actions_service_unavailable"}
-
-
-def _run_post_import_pipeline(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "geo_ok": False,
-        "rent_ok": False,
-        "evaluate_ok": False,
-        "state_ok": False,
-        "workflow_ok": False,
-        "next_actions_ok": False,
-        "partial": False,
-        "errors": [],
-    }
-
-    try:
-        from ..services.geo_enrichment import enrich_property_geo
-
-        geo_res = _run_maybe_async(
-            enrich_property_geo(
-                db,
-                org_id=int(org_id),
-                property_id=int(property_id),
-                google_api_key=get_google_maps_api_key(),
-                force=False,
-            )
-        )
-        geo_res = geo_res if isinstance(geo_res, dict) else {"ok": bool(geo_res)}
-        result["geo_ok"] = bool(geo_res.get("ok"))
-        result["geo"] = geo_res
-    except Exception as e:
-        result["errors"].append(f"geo:{type(e).__name__}:{e}")
-
-    try:
-        rent_res = refresh_property_rent_assumptions(
-            db,
-            org_id=int(org_id),
-            property_id=int(property_id),
-        )
-        result["rent_ok"] = bool(rent_res.get("ok"))
-        result["rent"] = rent_res
-    except Exception as e:
-        result["errors"].append(f"rent:{type(e).__name__}:{e}")
-
-    try:
-        from ..routers.evaluate import evaluate_property_core
-        from ..routers.rent import explain_rent
-
-        principal_shim = type("PrincipalShim", (), {"org_id": int(org_id), "user_id": None})()
-
-        explain_res = explain_rent(
-            property_id=int(property_id),
-            strategy="section8",
-            payment_standard_pct=None,
-            persist=True,
-            db=db,
-            p=principal_shim,
-        )
-        result["rent_explain"] = {
-            "run_id": getattr(explain_res, "run_id", None),
-            "rent_used": getattr(explain_res, "rent_used", None),
-            "approved_rent_ceiling": getattr(explain_res, "approved_rent_ceiling", None),
-            "cap_reason": getattr(explain_res, "cap_reason", None),
-        }
-
-        eval_res = evaluate_property_core(
-            db,
-            org_id=int(org_id),
-            property_id=int(property_id),
-            emit_events=False,
-            commit=True,
-        )
-        result["evaluate_ok"] = bool(eval_res.get("ok"))
-        result["evaluate"] = eval_res
-    except Exception as e:
-        result["errors"].append(f"evaluate:{type(e).__name__}:{e}")
-
-    try:
-        from ..services.property_state_machine import sync_property_state
-
-        sync_property_state(db, org_id=int(org_id), property_id=int(property_id))
-        result["state_ok"] = True
-    except Exception as e:
-        result["errors"].append(f"state:{type(e).__name__}:{e}")
-
-    try:
-        from ..services.workflow_gate_service import build_workflow_summary
-
-        build_workflow_summary(db, org_id=int(org_id), property_id=int(property_id), recompute=True)
-        result["workflow_ok"] = True
-    except Exception as e:
-        result["errors"].append(f"workflow:{type(e).__name__}:{e}")
-
-    try:
-        next_actions_res = _seed_next_actions_if_available(
-            db,
-            org_id=int(org_id),
-            property_id=int(property_id),
-        )
-        result["next_actions_ok"] = bool(next_actions_res.get("ok"))
-        result["next_actions"] = next_actions_res
-    except Exception as e:
-        result["errors"].append(f"next_actions:{type(e).__name__}:{e}")
-
-    oks = [
-        bool(result.get("geo_ok")),
-        bool(result.get("rent_ok")),
-        bool(result.get("evaluate_ok")),
-        bool(result.get("state_ok")),
-        bool(result.get("workflow_ok")),
-    ]
-    result["partial"] = any(oks) and not all(oks)
-    return result
-
-
-def _apply_pipeline_summary(summary: dict[str, Any], pipeline_res: dict[str, Any], property_id: int) -> None:
-    summary["post_import_pipeline_attempted"] += 1
-
-    if pipeline_res.get("geo_ok"):
-        summary["geo_enriched"] += 1
-    if pipeline_res.get("rent_ok"):
-        summary["rent_refreshed"] += 1
-    if pipeline_res.get("evaluate_ok"):
-        summary["evaluated"] += 1
-    if pipeline_res.get("state_ok"):
-        summary["state_synced"] += 1
-    if pipeline_res.get("workflow_ok"):
-        summary["workflow_synced"] += 1
-    if pipeline_res.get("next_actions_ok"):
-        summary["next_actions_seeded"] += 1
-    if pipeline_res.get("partial"):
-        summary["post_import_partials"] += 1
-
-    errors = list(pipeline_res.get("errors") or [])
-    if errors:
-        summary["post_import_failures"] += 1
-        summary["post_import_errors"].append(
-            {
-                "property_id": int(property_id),
-                "errors": errors,
-            }
-        )
-
-
 def execute_source_sync(
     db: Session,
     *,
@@ -658,6 +477,7 @@ def execute_source_sync(
         "launch": normalized_runtime,
         "post_import_pipeline_attempted": 0,
         "geo_enriched": 0,
+        "risk_scored": 0,
         "rent_refreshed": 0,
         "evaluated": 0,
         "state_synced": 0,
@@ -775,12 +595,14 @@ def execute_source_sync(
                 summary["rent_rows_upserted"] += 1
                 summary["photos_upserted"] += photo_count
 
-                pipeline_res = _run_post_import_pipeline(
+                pipeline_res = execute_post_ingestion_pipeline(
                     db,
                     org_id=int(org_id),
                     property_id=int(prop.id),
+                    actor_user_id=None,
+                    emit_events=False,
                 )
-                _apply_pipeline_summary(summary, pipeline_res, int(prop.id))
+                apply_pipeline_summary(summary, pipeline_res, int(prop.id))
                 continue
 
             prop, prop_created = _upsert_property(db, org_id=org_id, payload=payload)
@@ -827,12 +649,14 @@ def execute_source_sync(
             summary["rent_rows_upserted"] += 1
             summary["photos_upserted"] += photo_count
 
-            pipeline_res = _run_post_import_pipeline(
+            pipeline_res = execute_post_ingestion_pipeline(
                 db,
                 org_id=int(org_id),
                 property_id=int(prop.id),
+                actor_user_id=None,
+                emit_events=False,
             )
-            _apply_pipeline_summary(summary, pipeline_res, int(prop.id))
+            apply_pipeline_summary(summary, pipeline_res, int(prop.id))
 
         db.commit()
         return finish_run(db, row=run, status="success", summary=summary)

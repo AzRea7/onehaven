@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import os
 from typing import Any, Optional
 
@@ -59,6 +61,19 @@ def canonical_listing_payload(row: dict[str, Any]) -> dict[str, Any]:
         or row.get("predictedRent")
     )
 
+    bedrooms_raw = row.get("bedrooms")
+    bathrooms_raw = row.get("bathrooms")
+
+    try:
+        bedrooms = int(bedrooms_raw or 0)
+    except Exception:
+        bedrooms = 0
+
+    try:
+        bathrooms = float(bathrooms_raw or 1)
+    except Exception:
+        bathrooms = 1.0
+
     return {
         "external_record_id": str(
             row.get("external_record_id")
@@ -74,8 +89,8 @@ def canonical_listing_payload(row: dict[str, Any]) -> dict[str, Any]:
         "county": str(row.get("county") or "").strip() or None,
         "state": str(row.get("state") or "MI").strip() or "MI",
         "zip": str(row.get("zip") or row.get("zipCode") or row.get("postalCode") or "").strip(),
-        "bedrooms": int(row.get("bedrooms") or 0),
-        "bathrooms": float(row.get("bathrooms") or 1),
+        "bedrooms": bedrooms,
+        "bathrooms": bathrooms,
         "square_feet": row.get("square_feet") or row.get("squareFootage") or row.get("livingArea"),
         "year_built": row.get("year_built") or row.get("yearBuilt"),
         "property_type": row.get("property_type") or row.get("propertyType") or "single_family",
@@ -259,3 +274,222 @@ def refresh_property_rent_assumptions(
         "approved_rent_ceiling": _safe_float(getattr(existing, "approved_rent_ceiling", None)),
         "section8_fmr": _safe_float(getattr(existing, "section8_fmr", None)),
     }
+
+
+def _run_maybe_async(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        try:
+            return asyncio.run(value)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(value)
+            finally:
+                loop.close()
+    return value
+
+
+def _seed_next_actions_if_available(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    candidates: list[tuple[str, str]] = [
+        ("app.services.next_actions_service", "seed_property_next_actions"),
+        ("app.services.next_actions_service", "generate_property_next_actions"),
+        ("app.services.next_actions_service", "recompute_property_next_actions"),
+    ]
+
+    for module_name, fn_name in candidates:
+        try:
+            module = __import__(module_name, fromlist=[fn_name])
+            fn = getattr(module, fn_name, None)
+            if callable(fn):
+                out = fn(db, org_id=int(org_id), property_id=int(property_id))
+                return {"ok": True, "handler": fn_name, "result": out}
+        except Exception:
+            continue
+
+    return {"ok": False, "skipped": True, "reason": "next_actions_service_unavailable"}
+
+
+def _try_risk_refresh(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    candidates: list[tuple[str, str]] = [
+        ("app.services.risk_scoring", "refresh_property_risk"),
+        ("app.services.risk_scoring", "score_property_risk"),
+        ("app.services.risk_scoring", "recompute_property_risk"),
+        ("app.services.geo_enrichment", "enrich_property_risk"),
+    ]
+
+    for module_name, fn_name in candidates:
+        try:
+            module = __import__(module_name, fromlist=[fn_name])
+            fn = getattr(module, fn_name, None)
+            if callable(fn):
+                out = fn(db, org_id=int(org_id), property_id=int(property_id))
+                out = out if isinstance(out, dict) else {"ok": bool(out)}
+                out["handler"] = fn_name
+                return out
+        except Exception:
+            continue
+
+    return {"ok": False, "skipped": True, "reason": "risk_service_unavailable"}
+
+
+def execute_post_ingestion_pipeline(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    actor_user_id: int | None = None,
+    emit_events: bool = False,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "geo_ok": False,
+        "risk_ok": False,
+        "rent_ok": False,
+        "evaluate_ok": False,
+        "state_ok": False,
+        "workflow_ok": False,
+        "next_actions_ok": False,
+        "partial": False,
+        "errors": [],
+    }
+
+    try:
+        from ..services.geo_enrichment import enrich_property_geo
+
+        geo_res = _run_maybe_async(
+            enrich_property_geo(
+                db,
+                org_id=int(org_id),
+                property_id=int(property_id),
+                google_api_key=get_google_maps_api_key(),
+                force=False,
+            )
+        )
+        geo_res = geo_res if isinstance(geo_res, dict) else {"ok": bool(geo_res)}
+        result["geo_ok"] = bool(geo_res.get("ok"))
+        result["geo"] = geo_res
+    except Exception as e:
+        result["errors"].append(f"geo:{type(e).__name__}:{e}")
+
+    try:
+        risk_res = _try_risk_refresh(db, org_id=int(org_id), property_id=int(property_id))
+        result["risk_ok"] = bool(risk_res.get("ok"))
+        result["risk"] = risk_res
+    except Exception as e:
+        result["errors"].append(f"risk:{type(e).__name__}:{e}")
+
+    try:
+        rent_res = refresh_property_rent_assumptions(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+        result["rent_ok"] = bool(rent_res.get("ok"))
+        result["rent"] = rent_res
+    except Exception as e:
+        result["errors"].append(f"rent:{type(e).__name__}:{e}")
+
+    try:
+        from ..routers.evaluate import evaluate_property_core
+        from ..routers.rent import explain_rent
+
+        principal_shim = type("PrincipalShim", (), {"org_id": int(org_id), "user_id": actor_user_id})()
+
+        explain_res = explain_rent(
+            property_id=int(property_id),
+            strategy="section8",
+            payment_standard_pct=None,
+            persist=True,
+            db=db,
+            p=principal_shim,
+        )
+        result["rent_explain"] = {
+            "run_id": getattr(explain_res, "run_id", None),
+            "rent_used": getattr(explain_res, "rent_used", None),
+            "approved_rent_ceiling": getattr(explain_res, "approved_rent_ceiling", None),
+            "cap_reason": getattr(explain_res, "cap_reason", None),
+        }
+
+        eval_res = evaluate_property_core(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+            emit_events=bool(emit_events),
+            actor_user_id=actor_user_id,
+            commit=True,
+        )
+        result["evaluate_ok"] = bool(eval_res.get("ok"))
+        result["evaluate"] = eval_res
+    except Exception as e:
+        result["errors"].append(f"evaluate:{type(e).__name__}:{e}")
+
+    try:
+        from ..services.property_state_machine import sync_property_state
+
+        sync_property_state(db, org_id=int(org_id), property_id=int(property_id))
+        result["state_ok"] = True
+    except Exception as e:
+        result["errors"].append(f"state:{type(e).__name__}:{e}")
+
+    try:
+        from ..services.workflow_gate_service import build_workflow_summary
+
+        build_workflow_summary(db, org_id=int(org_id), property_id=int(property_id), recompute=True)
+        result["workflow_ok"] = True
+    except Exception as e:
+        result["errors"].append(f"workflow:{type(e).__name__}:{e}")
+
+    try:
+        next_actions_res = _seed_next_actions_if_available(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+        result["next_actions_ok"] = bool(next_actions_res.get("ok"))
+        result["next_actions"] = next_actions_res
+    except Exception as e:
+        result["errors"].append(f"next_actions:{type(e).__name__}:{e}")
+
+    oks = [
+        bool(result.get("geo_ok")),
+        bool(result.get("risk_ok")) or bool(result.get("risk", {}).get("skipped")),
+        bool(result.get("rent_ok")),
+        bool(result.get("evaluate_ok")),
+        bool(result.get("state_ok")),
+        bool(result.get("workflow_ok")),
+    ]
+    result["partial"] = any(oks) and not all(oks)
+    return result
+
+
+def apply_pipeline_summary(summary: dict[str, Any], pipeline_res: dict[str, Any], property_id: int) -> None:
+    summary["post_import_pipeline_attempted"] = int(summary.get("post_import_pipeline_attempted", 0) or 0) + 1
+
+    if pipeline_res.get("geo_ok"):
+        summary["geo_enriched"] = int(summary.get("geo_enriched", 0) or 0) + 1
+    if pipeline_res.get("risk_ok"):
+        summary["risk_scored"] = int(summary.get("risk_scored", 0) or 0) + 1
+    if pipeline_res.get("rent_ok"):
+        summary["rent_refreshed"] = int(summary.get("rent_refreshed", 0) or 0) + 1
+    if pipeline_res.get("evaluate_ok"):
+        summary["evaluated"] = int(summary.get("evaluated", 0) or 0) + 1
+    if pipeline_res.get("state_ok"):
+        summary["state_synced"] = int(summary.get("state_synced", 0) or 0) + 1
+    if pipeline_res.get("workflow_ok"):
+        summary["workflow_synced"] = int(summary.get("workflow_synced", 0) or 0) + 1
+    if pipeline_res.get("next_actions_ok"):
+        summary["next_actions_seeded"] = int(summary.get("next_actions_seeded", 0) or 0) + 1
+    if pipeline_res.get("partial"):
+        summary["post_import_partials"] = int(summary.get("post_import_partials", 0) or 0) + 1
+
+    errors = list(pipeline_res.get("errors") or [])
+    if errors:
+        summary["post_import_failures"] = int(summary.get("post_import_failures", 0) or 0) + 1
+        post_import_errors = list(summary.get("post_import_errors") or [])
+        post_import_errors.append(
+            {
+                "property_id": int(property_id),
+                "errors": errors,
+            }
+        )
+        summary["post_import_errors"] = post_import_errors
+        
