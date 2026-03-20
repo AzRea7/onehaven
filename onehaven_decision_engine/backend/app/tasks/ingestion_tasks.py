@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from ..db import SessionLocal
+from ..services.geo_enrichment import enrich_property_geo
 from ..services.ingestion_run_execute import execute_source_sync
 from ..services.ingestion_scheduler_service import (
+    build_location_refresh_payload,
     build_runtime_payload,
     list_default_daily_markets,
+    list_properties_needing_location_refresh,
 )
 from ..services.ingestion_source_service import (
     ensure_default_manual_sources,
     list_sources,
 )
-from ..workers.agent_worker import celery_app
+from ..workers.celery_app import celery_app
 
 
 def _pipeline_outcome(summary_json: dict | None) -> dict:
@@ -38,6 +41,8 @@ def _pipeline_outcome(summary_json: dict | None) -> dict:
         "post_import_partials": int(summary.get("post_import_partials", 0) or 0),
         "post_import_errors": list(summary.get("post_import_errors") or []),
         "filter_reason_counts": dict(summary.get("filter_reason_counts") or {}),
+        "location_automation_enabled": bool(summary.get("location_automation_enabled", False)),
+        "normal_path": bool(summary.get("normal_path", True)),
     }
 
 
@@ -126,6 +131,70 @@ def daily_market_refresh_task():
         db.close()
 
 
+@celery_app.task(name="location.refresh_property")
+def refresh_property_location_task(
+    org_id: int,
+    property_id: int,
+    force: bool = False,
+):
+    db = SessionLocal()
+    try:
+        result = enrich_property_geo(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+            force=bool(force),
+        )
+        return {
+            "ok": bool(result.get("ok")),
+            "property_id": int(property_id),
+            "org_id": int(org_id),
+            "force": bool(force),
+            "result": result,
+        }
+    finally:
+        db.close()
+
+
+@celery_app.task(name="location.refresh_stale_properties")
+def refresh_stale_locations_task(
+    org_id: int = 1,
+    *,
+    force: bool = False,
+    batch_size: int | None = None,
+):
+    db = SessionLocal()
+    try:
+        rows = list_properties_needing_location_refresh(
+            db,
+            org_id=int(org_id),
+            batch_size=batch_size,
+        )
+
+        queued = 0
+        property_ids: list[int] = []
+        for row in rows:
+            property_id = int(getattr(row, "id"))
+            refresh_property_location_task.delay(
+                int(org_id),
+                property_id,
+                bool(force),
+            )
+            queued += 1
+            property_ids.append(property_id)
+
+        return {
+            "ok": True,
+            "org_id": int(org_id),
+            "queued": queued,
+            "property_ids": property_ids,
+            "force": bool(force),
+            "payload": build_location_refresh_payload(force=force, batch_size=batch_size),
+        }
+    finally:
+        db.close()
+
+
 celery_app.conf.beat_schedule.setdefault(
     "ingestion-sync-due-hourly",
     {
@@ -139,5 +208,13 @@ celery_app.conf.beat_schedule.setdefault(
     {
         "task": "ingestion.daily_market_refresh",
         "schedule": 24 * 60 * 60,
+    },
+)
+
+celery_app.conf.beat_schedule.setdefault(
+    "location-refresh-stale-properties",
+    {
+        "task": "location.refresh_stale_properties",
+        "schedule": 6 * 60 * 60,
     },
 )

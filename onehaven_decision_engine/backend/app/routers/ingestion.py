@@ -110,6 +110,7 @@ def _pipeline_outcome(summary_json: dict[str, Any] | None) -> dict[str, Any]:
         "duplicates_skipped": int(summary.get("duplicates_skipped", 0) or 0),
         "invalid_rows": int(summary.get("invalid_rows", 0) or 0),
         "filtered_out": int(summary.get("filtered_out", 0) or 0),
+        "location_automation_enabled": bool(summary.get("location_automation_enabled", False)),
         "enrichments_completed": {
             "geo": int(summary.get("geo_enriched", 0) or 0),
             "risk": int(summary.get("risk_scored", 0) or 0),
@@ -125,6 +126,7 @@ def _pipeline_outcome(summary_json: dict[str, Any] | None) -> dict[str, Any]:
         "partials": int(summary.get("post_import_partials", 0) or 0),
         "errors": list(summary.get("post_import_errors") or []),
         "filter_reason_counts": dict(summary.get("filter_reason_counts") or {}),
+        "normal_path": bool(summary.get("normal_path", True)),
     }
 
 

@@ -56,6 +56,42 @@ class Settings(BaseSettings):
     rentcast_base_url: str = "https://api.rentcast.io/v1"
     rentcast_daily_limit: int = 100
 
+    # ---- Geocoding / location automation ----
+    geocoding_enabled: bool = True
+    geocode_default_country_code: str = "US"
+
+    # comma-separated priority order; keep simple for env usage
+    geocode_provider_order: str = "google,nominatim"
+
+    geocode_cache_enabled: bool = True
+    geocode_cache_ttl_hours: int = 24 * 30
+    geocode_stale_after_hours: int = 24 * 14
+
+    geocode_timeout_seconds: int = 12
+    geocode_min_confidence: float = 0.55
+    geocode_allow_fallback_providers: bool = True
+    geocode_fail_open: bool = True
+
+    geocode_refresh_on_ingestion: bool = True
+    geocode_refresh_missing_only: bool = False
+
+    location_refresh_batch_size: int = 250
+    location_refresh_max_attempts: int = 3
+    location_refresh_schedule_minutes: int = 12 * 60
+
+    # ---- Google Geocoding ----
+    google_geocode_api_key: str | None = None
+    google_geocode_base_url: str = "https://maps.googleapis.com/maps/api/geocode/json"
+
+    # ---- Nominatim ----
+    nominatim_base_url: str = "https://nominatim.openstreetmap.org"
+    nominatim_user_agent: str = "onehaven-location-automation/1.0"
+    nominatim_email: str | None = None
+
+    # ---- OpenCage (optional secondary provider) ----
+    opencage_api_key: str | None = None
+    opencage_base_url: str = "https://api.opencagedata.com/geocode/v1/json"
+
     # ---- SaaS Auth / tenancy ----
     auth_mode: str = "dev"  # dev|jwt
     dev_auto_provision: bool = True
@@ -115,6 +151,16 @@ class Settings(BaseSettings):
     # ---- Trace / observability ----
     trace_mirror_to_messages: int = 0
 
+    @property
+    def geocode_provider_order_list(self) -> list[str]:
+        raw = self.geocode_provider_order or ""
+        parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
+        deduped: list[str] = []
+        for p in parts:
+            if p not in deduped:
+                deduped.append(p)
+        return deduped or ["nominatim"]
+
     def model_post_init(self, __context) -> None:
         if self.rent_calibration_apha is not None:
             object.__setattr__(self, "rent_calibration_alpha", float(self.rent_calibration_apha))
@@ -138,6 +184,15 @@ class Settings(BaseSettings):
             if self.lm_studio_enabled and not self.lm_studio_base_url:
                 raise ValueError("SECURITY: lm_studio_base_url must be configured when LM Studio is enabled")
 
+            if self.geocoding_enabled:
+                has_google = bool((self.google_geocode_api_key or "").strip())
+                has_nominatim = "nominatim" in self.geocode_provider_order_list
+                has_opencage = bool((self.opencage_api_key or "").strip())
+                if not (has_google or has_nominatim or has_opencage):
+                    raise ValueError(
+                        "SECURITY: geocoding_enabled=True but no usable geocode provider is configured"
+                    )
+
         # local/dev safety defaults
         if not getattr(self, "agents_max_running_per_org", None):
             object.__setattr__(self, "agents_max_running_per_org", 3)
@@ -147,6 +202,24 @@ class Settings(BaseSettings):
 
         if self.agents_max_runs_per_property_per_hour < 1:
             object.__setattr__(self, "agents_max_runs_per_property_per_hour", 1)
+
+        if self.geocode_timeout_seconds < 3:
+            object.__setattr__(self, "geocode_timeout_seconds", 3)
+
+        if self.geocode_cache_ttl_hours < 1:
+            object.__setattr__(self, "geocode_cache_ttl_hours", 1)
+
+        if self.geocode_stale_after_hours < 1:
+            object.__setattr__(self, "geocode_stale_after_hours", 1)
+
+        if self.location_refresh_batch_size < 1:
+            object.__setattr__(self, "location_refresh_batch_size", 1)
+
+        if self.location_refresh_max_attempts < 1:
+            object.__setattr__(self, "location_refresh_max_attempts", 1)
+
+        clamped_confidence = min(max(float(self.geocode_min_confidence), 0.0), 1.0)
+        object.__setattr__(self, "geocode_min_confidence", clamped_confidence)
 
 
 settings = Settings()

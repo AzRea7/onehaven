@@ -3,14 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import Property
-from app.services.risk_scoring import compute_property_risk
+from app.services.geocoding_service import GeocodingService
+from app.services.risk_scoring import compute_property_risk, refresh_property_risk
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 REDZONES_PATH = DATA_DIR / "red_zones_detroit.geojson"
@@ -93,64 +94,16 @@ def _normalize_county(value: Optional[str]) -> Optional[str]:
     return s or None
 
 
-async def geocode_address_google(*, api_key: str, address: str) -> Optional[Tuple[float, float]]:
-    url = "https://maps.googleapis.com/maps/api/geocode/json"
-    params = {"address": address, "key": api_key}
+def _apply_redzone_flag(prop: Property) -> bool:
+    lat = getattr(prop, "lat", None)
+    lng = getattr(prop, "lng", None)
 
-    async with httpx.AsyncClient(timeout=12) as client:
-        r = await client.get(url, params=params)
-        r.raise_for_status()
-        data = r.json()
-
-    if str(data.get("status") or "").upper() != "OK":
-        return None
-
-    results = data.get("results") or []
-    if not results:
-        return None
-
-    loc = ((results[0] or {}).get("geometry") or {}).get("location") or {}
-    lat = loc.get("lat")
-    lng = loc.get("lng")
     if lat is None or lng is None:
-        return None
+        prop.is_red_zone = False
+        return False
 
-    return float(lat), float(lng)
-
-
-async def reverse_geocode_county_google(*, api_key: str, lat: float, lng: float) -> Optional[str]:
-    url = "https://maps.googleapis.com/maps/api/geocode/json"
-    params = {"latlng": f"{lat},{lng}", "key": api_key}
-
-    async with httpx.AsyncClient(timeout=12) as client:
-        r = await client.get(url, params=params)
-        r.raise_for_status()
-        data = r.json()
-
-    if str(data.get("status") or "").upper() != "OK":
-        return None
-
-    results = data.get("results") or []
-    for res in results:
-        comps = res.get("address_components") or []
-        for c in comps:
-            types = c.get("types") or []
-            if "administrative_area_level_2" in types:
-                return _normalize_county(c.get("long_name"))
-
-    return None
-
-
-def _address_for_property(prop: Property) -> str:
-    parts = [
-        (getattr(prop, "address", None) or "").strip(),
-        (getattr(prop, "city", None) or "").strip(),
-        (getattr(prop, "state", None) or "").strip(),
-        (getattr(prop, "zip", None) or "").strip(),
-    ]
-    return ", ".join(
-        [p for p in parts[:2] if p] + [" ".join([p for p in parts[2:] if p]).strip()]
-    ).strip(", ").strip()
+    prop.is_red_zone = bool(is_in_redzone(lat=float(lat), lng=float(lng)))
+    return bool(prop.is_red_zone)
 
 
 def _apply_risk_fields(prop: Property) -> dict[str, Any]:
@@ -182,6 +135,58 @@ def _apply_risk_fields(prop: Property) -> dict[str, Any]:
     return risk
 
 
+def enrich_property_risk(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    prop = db.scalar(
+        select(Property).where(
+            Property.org_id == int(org_id),
+            Property.id == int(property_id),
+        )
+    )
+    if not prop:
+        return {"ok": False, "error": "property_not_found"}
+
+    if getattr(prop, "lat", None) is None or getattr(prop, "lng", None) is None:
+        return {
+            "ok": False,
+            "error": "missing_coordinates",
+            "property_id": int(property_id),
+        }
+
+    _apply_redzone_flag(prop)
+    risk = _apply_risk_fields(prop)
+
+    db.add(prop)
+    db.commit()
+    db.refresh(prop)
+
+    return {
+        "ok": True,
+        "property_id": int(prop.id),
+        "lat": getattr(prop, "lat", None),
+        "lng": getattr(prop, "lng", None),
+        "county": getattr(prop, "county", None),
+        "is_red_zone": bool(getattr(prop, "is_red_zone", False)),
+        "crime_density": getattr(prop, "crime_density", None),
+        "crime_score": getattr(prop, "crime_score", None),
+        "offender_count": getattr(prop, "offender_count", None),
+        "crime_band": risk.get("crime_band"),
+        "crime_source": risk.get("crime_source"),
+        "offender_band": risk.get("offender_band"),
+        "offender_source": risk.get("offender_source"),
+        "offender_radius_miles": risk.get("offender_radius_miles"),
+        "nearest_offender_miles": risk.get("nearest_offender_miles"),
+        "risk_score": risk.get("risk_score"),
+        "risk_band": risk.get("risk_band"),
+        "risk_summary": risk.get("risk_summary"),
+        "risk_factors": risk.get("risk_factors"),
+    }
+
+
 async def enrich_property_geo_async(
     db: Session,
     *,
@@ -208,44 +213,61 @@ async def enrich_property_geo_async(
     geocoded = False
     reverse_geocoded = False
     risk_computed = False
+    cache_hit = False
 
-    address = _address_for_property(prop)
+    if not settings.geocoding_enabled:
+        warnings.append("geocoding_disabled")
+    else:
+        geocoding_service = GeocodingService(db)
 
-    if force or current_lat is None or current_lng is None:
-        if google_api_key:
-            coords = await geocode_address_google(api_key=google_api_key, address=address)
-            if coords:
-                prop.lat = float(coords[0])
-                prop.lng = float(coords[1])
-                geocoded = True
-            else:
-                warnings.append("google_geocode_failed")
+        result = geocoding_service.geocode(
+            address=getattr(prop, "address", None),
+            city=getattr(prop, "city", None),
+            state=getattr(prop, "state", None),
+            postal_code=getattr(prop, "zip", None),
+            force_refresh=bool(force),
+        )
+
+        if result is None:
+            warnings.append("geocode_no_result")
         else:
-            warnings.append("missing_google_maps_api_key")
+            cache_hit = bool(result.cache_hit)
 
-    current_lat = getattr(prop, "lat", None)
-    current_lng = getattr(prop, "lng", None)
+            previous_lat = current_lat
+            previous_lng = current_lng
+            previous_county = current_county
 
-    if current_lat is not None and current_lng is not None and (force or not current_county):
-        if google_api_key:
-            county = await reverse_geocode_county_google(
-                api_key=google_api_key,
-                lat=float(current_lat),
-                lng=float(current_lng),
+            prop.normalized_address = result.normalized_address
+            prop.geocode_source = result.source
+            prop.geocode_confidence = result.confidence
+            prop.geocode_last_refreshed = None if result.cache_hit and getattr(prop, "geocode_last_refreshed", None) else result.raw_json and __import__("datetime").datetime.utcnow()
+
+            if result.lat is not None and result.lng is not None:
+                prop.lat = float(result.lat)
+                prop.lng = float(result.lng)
+
+            if result.county:
+                prop.county = _normalize_county(result.county)
+
+            geocoded = (
+                (previous_lat is None or previous_lng is None)
+                and result.lat is not None
+                and result.lng is not None
+            ) or bool(force and result.lat is not None and result.lng is not None)
+
+            reverse_geocoded = (
+                (not previous_county and bool(result.county))
+                or (bool(force) and bool(result.county))
             )
-            if county:
-                prop.county = county
-                reverse_geocoded = True
-            else:
-                warnings.append("google_reverse_geocode_failed")
-        else:
-            warnings.append("missing_google_maps_api_key")
+
+            if not result.is_success:
+                warnings.append(f"geocode_provider_status:{result.provider_status or 'unknown'}")
 
     current_lat = getattr(prop, "lat", None)
     current_lng = getattr(prop, "lng", None)
 
     if current_lat is not None and current_lng is not None:
-        prop.is_red_zone = bool(is_in_redzone(lat=float(current_lat), lng=float(current_lng)))
+        _apply_redzone_flag(prop)
     else:
         warnings.append("missing_coordinates_for_redzone_check")
 
@@ -278,9 +300,14 @@ async def enrich_property_geo_async(
     return {
         "ok": True,
         "property_id": int(prop.id),
+        "normalized_address": getattr(prop, "normalized_address", None),
         "lat": getattr(prop, "lat", None),
         "lng": getattr(prop, "lng", None),
         "county": getattr(prop, "county", None),
+        "geocode_source": getattr(prop, "geocode_source", None),
+        "geocode_confidence": getattr(prop, "geocode_confidence", None),
+        "geocode_last_refreshed": getattr(prop, "geocode_last_refreshed", None),
+        "cache_hit": cache_hit,
         "is_red_zone": bool(getattr(prop, "is_red_zone", False)),
         "crime_density": getattr(prop, "crime_density", None),
         "crime_score": getattr(prop, "crime_score", None),

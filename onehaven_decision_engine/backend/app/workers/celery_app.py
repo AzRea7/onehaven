@@ -15,34 +15,27 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
-    # Serialization
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
 
-    # Reliability
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
 
-    # Timeouts
     task_time_limit=int(getattr(settings, "agents_run_timeout_seconds", 120) or 120),
 
-    # Time
     timezone="UTC",
     enable_utc=True,
 
-    # Queue wiring
     task_default_queue=queue,
     task_default_routing_key=queue,
 
-    # Task discovery
     imports=(
         "app.workers.agent_tasks",
         "app.tasks.ingestion_tasks",
     ),
 
-    # Beat schedule
     beat_schedule={
         "ingestion-sync-due-sources-every-15-minutes": {
             "task": "ingestion.sync_due_sources",
@@ -51,6 +44,10 @@ celery_app.conf.update(
         "ingestion-daily-market-refresh": {
             "task": "ingestion.daily_market_refresh",
             "schedule": 24 * 60 * 60.0,
+        },
+        "location-refresh-stale-properties": {
+            "task": "location.refresh_stale_properties",
+            "schedule": float(max(300, int(settings.location_refresh_schedule_minutes) * 60)),
         },
     },
 )

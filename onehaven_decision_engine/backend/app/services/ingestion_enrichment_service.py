@@ -8,6 +8,7 @@ from typing import Any, Optional
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..models import Property, RentAssumption
 from .rentcast_service import RentCastClient, persist_rentcast_comps_and_get_median
 
@@ -119,7 +120,8 @@ def build_post_import_actions() -> list[dict[str, str]]:
 
 def get_rentcast_api_key() -> Optional[str]:
     key = (
-        os.getenv("RENTCAST_INGESTION_API_KEY")
+        settings.rentcast_api_key
+        or os.getenv("RENTCAST_INGESTION_API_KEY")
         or os.getenv("RENTCAST_API_KEY")
         or ""
     ).strip()
@@ -128,7 +130,8 @@ def get_rentcast_api_key() -> Optional[str]:
 
 def get_google_maps_api_key() -> Optional[str]:
     key = (
-        os.getenv("GOOGLE_MAPS_API_KEY")
+        settings.google_geocode_api_key
+        or os.getenv("GOOGLE_MAPS_API_KEY")
         or os.getenv("GOOGLE_GEOCODING_API_KEY")
         or ""
     ).strip()
@@ -492,4 +495,3 @@ def apply_pipeline_summary(summary: dict[str, Any], pipeline_res: dict[str, Any]
             }
         )
         summary["post_import_errors"] = post_import_errors
-        

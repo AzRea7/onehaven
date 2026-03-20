@@ -10,6 +10,10 @@ import {
   RefreshCcw,
   Filter,
   ClipboardList,
+  MapPinned,
+  Crosshair,
+  LocateFixed,
+  AlertTriangle,
 } from "lucide-react";
 
 import { api } from "../lib/api";
@@ -176,8 +180,78 @@ function inferProperty(r: any) {
   return r?.property || r || {};
 }
 
+function inferLocationConfidence(r: any) {
+  return (
+    numberOrNull(r?.geocode_confidence) ??
+    numberOrNull(r?.property?.geocode_confidence) ??
+    null
+  );
+}
+
+function inferLocationSource(r: any) {
+  return r?.geocode_source || r?.property?.geocode_source || null;
+}
+
+function inferNormalizedAddress(r: any) {
+  return r?.normalized_address || r?.property?.normalized_address || null;
+}
+
+function inferLat(r: any) {
+  return numberOrNull(r?.lat) ?? numberOrNull(r?.property?.lat) ?? null;
+}
+
+function inferLng(r: any) {
+  return numberOrNull(r?.lng) ?? numberOrNull(r?.property?.lng) ?? null;
+}
+
+function inferCounty(r: any) {
+  return r?.county || r?.property?.county || null;
+}
+
+function inferLocationStatus(r: any): {
+  label: string;
+  pillClass: string;
+  detail: string;
+} {
+  const lat = inferLat(r);
+  const lng = inferLng(r);
+  const normalizedAddress = inferNormalizedAddress(r);
+  const confidence = inferLocationConfidence(r);
+
+  if (lat == null || lng == null) {
+    return {
+      label: "Location incomplete",
+      pillClass: "oh-pill oh-pill-bad",
+      detail: "Missing usable coordinates",
+    };
+  }
+
+  if (!normalizedAddress) {
+    return {
+      label: "Location partial",
+      pillClass: "oh-pill oh-pill-warn",
+      detail: "Coordinates found but normalization missing",
+    };
+  }
+
+  if (confidence != null && confidence < 0.7) {
+    return {
+      label: "Location approximate",
+      pillClass: "oh-pill oh-pill-warn",
+      detail: "Coordinates found with lower confidence",
+    };
+  }
+
+  return {
+    label: "Location verified",
+    pillClass: "oh-pill oh-pill-good",
+    detail: "Normalized and geocoded",
+  };
+}
+
 type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
 type FinancingFilter = "ALL" | "CASH" | "DSCR";
+type LocationFilter = "ALL" | "VERIFIED" | "PARTIAL" | "MISSING";
 
 export default function Properties() {
   const [rows, setRows] = React.useState<Row[]>([]);
@@ -191,6 +265,8 @@ export default function Properties() {
 
   const [decision, setDecision] = React.useState<DecisionFilter>("ALL");
   const [financing, setFinancing] = React.useState<FinancingFilter>("ALL");
+  const [locationFilter, setLocationFilter] =
+    React.useState<LocationFilter>("ALL");
 
   const abortRef = React.useRef<AbortController | null>(null);
 
@@ -225,17 +301,41 @@ export default function Properties() {
       const d = inferDecision(r);
       const price = inferAskingPrice(r);
       const financingType = getFinancingType(price);
+      const locationStatus = inferLocationStatus(r);
+
       const hay =
-        `${p.address || ""} ${p.city || ""} ${p.state || ""} ${p.zip || ""} ${p.county || ""}`.toLowerCase();
+        `${p.address || ""} ${p.city || ""} ${p.state || ""} ${p.zip || ""} ${p.county || ""} ${
+          inferNormalizedAddress(r) || ""
+        } ${inferLocationSource(r) || ""}`.toLowerCase();
 
       if (needle && !hay.includes(needle)) return false;
       if (decision !== "ALL" && d !== decision) return false;
       if (financing === "CASH" && financingType !== "Cash") return false;
       if (financing === "DSCR" && financingType !== "DSCR") return false;
 
+      if (
+        locationFilter === "VERIFIED" &&
+        locationStatus.label !== "Location verified"
+      ) {
+        return false;
+      }
+      if (
+        locationFilter === "PARTIAL" &&
+        locationStatus.label !== "Location partial" &&
+        locationStatus.label !== "Location approximate"
+      ) {
+        return false;
+      }
+      if (
+        locationFilter === "MISSING" &&
+        locationStatus.label !== "Location incomplete"
+      ) {
+        return false;
+      }
+
       return true;
     });
-  }, [rows, deferredQ, decision, financing]);
+  }, [rows, deferredQ, decision, financing, locationFilter]);
 
   const counts = React.useMemo(() => {
     const c = { GOOD_DEAL: 0, REVIEW: 0, REJECT: 0 };
@@ -254,6 +354,17 @@ export default function Properties() {
     }
     return out;
   }, [filtered]);
+
+  const locationCounts = React.useMemo(() => {
+    const out = { verified: 0, partial: 0, missing: 0 };
+    for (const r of rows || []) {
+      const status = inferLocationStatus(r).label;
+      if (status === "Location verified") out.verified += 1;
+      else if (status === "Location incomplete") out.missing += 1;
+      else out.partial += 1;
+    }
+    return out;
+  }, [rows]);
 
   function refreshIngestion() {
     setIngestionRefreshKey((v) => v + 1);
@@ -335,6 +446,43 @@ export default function Properties() {
               </div>
             </Surface>
 
+            <Surface
+              title="Location quality"
+              subtitle="Track which properties are ready for jurisdiction, risk, and rent workflows."
+            >
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    <LocateFixed className="h-3.5 w-3.5" />
+                    Verified
+                  </div>
+                  <div className="mt-3 text-2xl font-semibold text-app-0">
+                    {locationCounts.verified}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Partial
+                  </div>
+                  <div className="mt-3 text-2xl font-semibold text-app-0">
+                    {locationCounts.partial}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    <Crosshair className="h-3.5 w-3.5" />
+                    Missing
+                  </div>
+                  <div className="mt-3 text-2xl font-semibold text-app-0">
+                    {locationCounts.missing}
+                  </div>
+                </div>
+              </div>
+            </Surface>
+
             {err ? (
               <Surface tone="danger">
                 <div className="text-sm text-red-300">{err}</div>
@@ -348,7 +496,7 @@ export default function Properties() {
               }`}
             >
               <div className="mb-4 rounded-3xl border border-app bg-app-panel px-4 py-4">
-                <div className="grid gap-3 lg:grid-cols-[1.3fr_0.7fr_0.7fr_auto]">
+                <div className="grid gap-3 lg:grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr_auto]">
                   <label className="block">
                     <span className="oh-field-label">Search</span>
                     <div className="relative">
@@ -356,7 +504,7 @@ export default function Properties() {
                       <input
                         value={q}
                         onChange={(e) => setQ(e.target.value)}
-                        placeholder="Search address, city, county, zip"
+                        placeholder="Search address, city, county, zip, normalized location"
                         className="oh-input pl-10"
                       />
                     </div>
@@ -393,6 +541,22 @@ export default function Properties() {
                     </select>
                   </label>
 
+                  <label className="block">
+                    <span className="oh-field-label">Location</span>
+                    <select
+                      value={locationFilter}
+                      onChange={(e) =>
+                        setLocationFilter(e.target.value as LocationFilter)
+                      }
+                      className="oh-input"
+                    >
+                      <option value="ALL">All</option>
+                      <option value="VERIFIED">Verified</option>
+                      <option value="PARTIAL">Partial / approximate</option>
+                      <option value="MISSING">Missing</option>
+                    </select>
+                  </label>
+
                   <div className="flex items-end">
                     <button
                       onClick={refresh}
@@ -410,7 +574,7 @@ export default function Properties() {
                   {Array.from({ length: 6 }).map((_, i) => (
                     <div
                       key={i}
-                      className="oh-skeleton h-[120px] rounded-3xl"
+                      className="oh-skeleton h-[150px] rounded-3xl"
                     />
                   ))}
                 </div>
@@ -418,7 +582,7 @@ export default function Properties() {
                 <EmptyState
                   icon={Filter}
                   title="No properties matched"
-                  description="Try a broader search or change the classification / financing filter."
+                  description="Try a broader search or change the classification, financing, or location filter."
                 />
               ) : (
                 <div className="max-h-[980px] overflow-y-auto pr-1">
@@ -435,13 +599,21 @@ export default function Properties() {
 
                       const financingType = getFinancingType(askingPrice);
 
+                      const locationStatus = inferLocationStatus(r);
+                      const locationSource = inferLocationSource(r);
+                      const locationConfidence = inferLocationConfidence(r);
+                      const normalizedAddress = inferNormalizedAddress(r);
+                      const lat = inferLat(r);
+                      const lng = inferLng(r);
+                      const county = inferCounty(r);
+
                       return (
                         <Link
                           key={p.id}
                           to={`/properties/${p.id}`}
                           className="group block rounded-3xl border border-app bg-app-panel px-5 py-5 shadow-soft hover:-translate-y-[1px] hover:border-app-strong hover:shadow-soft-lg"
                         >
-                          <div className="grid gap-5 xl:grid-cols-[1.4fr_0.95fr]">
+                          <div className="grid gap-5 xl:grid-cols-[1.35fr_0.95fr]">
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="min-w-0">
@@ -452,7 +624,7 @@ export default function Properties() {
                                     {p.city
                                       ? `${p.city}, ${p.state || ""} ${p.zip || ""}`
                                       : "—"}
-                                    {p.county ? ` · ${p.county}` : ""}
+                                    {county ? ` · ${county}` : ""}
                                     {p.bedrooms != null
                                       ? ` · ${p.bedrooms}bd`
                                       : ""}
@@ -477,6 +649,9 @@ export default function Properties() {
                                   {stageLabel(stage)}
                                 </span>
                                 <span className="oh-pill">{financingType}</span>
+                                <span className={locationStatus.pillClass}>
+                                  {locationStatus.label}
+                                </span>
                               </div>
 
                               <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
@@ -495,6 +670,51 @@ export default function Properties() {
                                   and move it toward compliant occupancy and
                                   cashflow.
                                 </div>
+                              </div>
+
+                              <div className="mt-3 rounded-2xl border border-app px-4 py-3">
+                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                                  <MapPinned className="h-3.5 w-3.5" />
+                                  Location automation
+                                </div>
+
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <span className={locationStatus.pillClass}>
+                                    {locationStatus.label}
+                                  </span>
+
+                                  {locationSource ? (
+                                    <span className="oh-pill">
+                                      source {locationSource}
+                                    </span>
+                                  ) : null}
+
+                                  {locationConfidence != null ? (
+                                    <span className="oh-pill">
+                                      confidence {locationConfidence.toFixed(2)}
+                                    </span>
+                                  ) : null}
+                                </div>
+
+                                <div className="mt-2 text-xs text-app-4">
+                                  {locationStatus.detail}
+                                </div>
+
+                                {normalizedAddress ? (
+                                  <div className="mt-2 text-sm text-app-2">
+                                    {normalizedAddress}
+                                  </div>
+                                ) : (
+                                  <div className="mt-2 text-sm text-app-4">
+                                    Normalized address not available yet
+                                  </div>
+                                )}
+
+                                {lat != null && lng != null ? (
+                                  <div className="mt-2 text-xs text-app-4">
+                                    {lat.toFixed(4)}, {lng.toFixed(4)}
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
 

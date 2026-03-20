@@ -118,12 +118,12 @@ class WorkflowEvent(Base):
 class Property(Base):
     __tablename__ = "properties"
     __table_args__ = (
-        # keep existing uniqueness semantics if you already rely on them;
-        # if you currently have an explicit unique constraint elsewhere, remove this.
         UniqueConstraint("org_id", "address", "city", "state", "zip", name="uq_properties_org_addr"),
         Index("ix_properties_org_state", "org_id", "state"),
         Index("ix_properties_org_county", "org_id", "county"),
         Index("ix_properties_org_is_red_zone", "org_id", "is_red_zone"),
+        Index("ix_properties_org_normalized_address", "org_id", "normalized_address"),
+        Index("ix_properties_org_geocode_last_refreshed", "org_id", "geocode_last_refreshed"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -134,6 +134,9 @@ class Property(Base):
     state: Mapped[str] = mapped_column(String(2), nullable=False, default="MI")
     zip: Mapped[str] = mapped_column(String(10), nullable=False)
 
+    # canonical normalized address used for deterministic geocode lookup/cache hits
+    normalized_address: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+
     bedrooms: Mapped[int] = mapped_column(Integer, nullable=False)
     bathrooms: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     square_feet: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -143,10 +146,15 @@ class Property(Base):
     property_type: Mapped[str] = mapped_column(String(60), nullable=False, default="single_family")
 
     # -----------------------------
-    # NEW: geo + jurisdiction + risk
+    # Geo + jurisdiction + risk
     # -----------------------------
+    # keep existing coordinate columns to avoid breaking current services
     lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    geocode_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    geocode_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    geocode_last_refreshed: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # For your “county filter”
     county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
@@ -154,7 +162,7 @@ class Property(Base):
     # Detroit “danger zone” boolean
     is_red_zone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # Crime metrics (you can compute from dataset; keep nullable until populated)
+    # Crime metrics
     crime_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     crime_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
@@ -197,6 +205,42 @@ class Property(Base):
         primaryjoin="Property.id==foreign(AgentRun.property_id)",
         viewonly=True,
     )
+
+class GeocodeCache(Base):
+    __tablename__ = "geocode_cache"
+    __table_args__ = (
+        UniqueConstraint("normalized_address", name="uq_geocode_cache_normalized_address"),
+        Index("ix_geocode_cache_source", "source"),
+        Index("ix_geocode_cache_expires_at", "expires_at"),
+        Index("ix_geocode_cache_last_refreshed_at", "last_refreshed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    normalized_address: Mapped[str] = mapped_column(String(400), nullable=False)
+    raw_address: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+
+    city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    state: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    zip: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
+    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    formatted_address: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    provider_response_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    last_refreshed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class ImportSnapshot(Base):

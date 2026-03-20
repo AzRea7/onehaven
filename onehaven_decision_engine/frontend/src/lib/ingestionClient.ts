@@ -11,6 +11,10 @@ export type IngestionOverview = {
   total_sources?: number;
   properties_created_7d?: number;
   properties_updated_7d?: number;
+  daily_markets?: Array<Record<string, any>>;
+  ui_mode?: string;
+  normal_path?: string | boolean;
+  legacy_snapshot_flow_enabled?: boolean;
 };
 
 export type IngestionSource = {
@@ -31,6 +35,37 @@ export type IngestionSource = {
   last_error_summary?: string | null;
 };
 
+export type PipelineOutcome = {
+  records_seen: number;
+  records_imported: number;
+  properties_created: number;
+  properties_updated: number;
+  deals_created: number;
+  deals_updated: number;
+  rent_rows_upserted: number;
+  photos_upserted: number;
+  duplicates_skipped: number;
+  invalid_rows: number;
+  filtered_out: number;
+  location_automation_enabled?: boolean;
+  enrichments_completed?: {
+    geo: number;
+    risk: number;
+    rent: number;
+  };
+  evaluations_completed?: number;
+  workflow?: {
+    state_synced: number;
+    workflow_synced: number;
+    next_actions_seeded: number;
+  };
+  failures?: number;
+  partials?: number;
+  errors?: Array<Record<string, any>>;
+  filter_reason_counts?: Record<string, number>;
+  normal_path?: boolean;
+};
+
 export type IngestionRun = {
   id: number;
   source_id: number;
@@ -47,6 +82,8 @@ export type IngestionRun = {
   duplicates_skipped: number;
   invalid_rows: number;
   error_summary?: string | null;
+  summary_json?: Record<string, any> | null;
+  pipeline_outcome?: PipelineOutcome;
 };
 
 export type IngestionLaunchPayload = {
@@ -65,6 +102,34 @@ export type IngestionLaunchPayload = {
   pages_per_shard?: number;
   limit?: number;
   execute_inline?: boolean;
+};
+
+export type SyncSourceResponse = {
+  ok: boolean;
+  queued: boolean;
+  task_id?: string;
+  run_id?: number;
+  status?: string;
+  source_id: number;
+  summary_json?: Record<string, any>;
+  pipeline_outcome?: PipelineOutcome;
+  runtime_config?: Record<string, any>;
+  normal_path?: boolean;
+};
+
+export type SyncDefaultSourcesResponse = {
+  ok: boolean;
+  queued?: number | boolean;
+  source_ids?: number[];
+  runs?: Array<{
+    source_id: number;
+    run_id?: number;
+    status?: string;
+    summary_json?: Record<string, any>;
+    pipeline_outcome?: PipelineOutcome;
+    normal_path?: boolean;
+  }>;
+  normal_path?: boolean;
 };
 
 function readOrgSlug(): string {
@@ -127,15 +192,7 @@ export const ingestionClient = {
   },
 
   syncSource(sourceId: number, payload: IngestionLaunchPayload = {}) {
-    return request<{
-      ok: boolean;
-      queued: boolean;
-      task_id?: string;
-      run_id?: number;
-      status?: string;
-      source_id: number;
-      summary_json?: Record<string, any>;
-    }>(`/ingestion/sources/${sourceId}/sync`, {
+    return request<SyncSourceResponse>(`/ingestion/sources/${sourceId}/sync`, {
       method: "POST",
       body: JSON.stringify({
         trigger_type: payload.trigger_type ?? "manual",
@@ -158,17 +215,7 @@ export const ingestionClient = {
   },
 
   syncDefaultSources(payload: IngestionLaunchPayload = {}) {
-    return request<{
-      ok: boolean;
-      queued?: number;
-      source_ids?: number[];
-      runs?: Array<{
-        source_id: number;
-        run_id?: number;
-        status?: string;
-        summary_json?: Record<string, any>;
-      }>;
-    }>("/ingestion/sync-defaults", {
+    return request<SyncDefaultSourcesResponse>("/ingestion/sync-defaults", {
       method: "POST",
       body: JSON.stringify({
         trigger_type: payload.trigger_type ?? "manual",
@@ -195,6 +242,7 @@ export const ingestionClient = {
       ok: boolean;
       queued: boolean;
       task_id?: string;
+      markets?: Array<Record<string, any>>;
     }>("/ingestion/daily-refresh", {
       method: "POST",
       body: JSON.stringify({}),
@@ -202,6 +250,29 @@ export const ingestionClient = {
   },
 
   runDetail(runId: number) {
-    return request<any>(`/ingestion/runs/${runId}`);
+    return request<{
+      id: number;
+      source_id: number;
+      trigger_type: string;
+      status: string;
+      started_at: string;
+      finished_at?: string | null;
+      records_seen: number;
+      records_imported: number;
+      properties_created: number;
+      properties_updated: number;
+      deals_created: number;
+      deals_updated: number;
+      rent_rows_upserted: number;
+      photos_upserted: number;
+      duplicates_skipped: number;
+      invalid_rows: number;
+      retry_count: number;
+      error_summary?: string | null;
+      error_json?: Record<string, any> | null;
+      summary_json?: Record<string, any>;
+      pipeline_outcome?: PipelineOutcome;
+      normal_path?: boolean;
+    }>(`/ingestion/runs/${runId}`);
   },
 };

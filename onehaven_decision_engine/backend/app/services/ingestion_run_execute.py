@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..models import Deal, Property, PropertyPhoto, RentAssumption
 from ..services.ingestion_dedupe_service import (
     build_property_fingerprint,
@@ -475,6 +476,8 @@ def execute_source_sync(
         "filtered_out": 0,
         "matched_before_limit": 0,
         "launch": normalized_runtime,
+        "normal_path": True,
+        "location_automation_enabled": bool(settings.geocoding_enabled),
         "post_import_pipeline_attempted": 0,
         "geo_enriched": 0,
         "risk_scored": 0,
@@ -671,4 +674,3 @@ def execute_source_sync(
             error_summary=str(e),
             error_json={"type": type(e).__name__},
         )
-    

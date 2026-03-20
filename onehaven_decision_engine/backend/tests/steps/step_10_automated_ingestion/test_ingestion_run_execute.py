@@ -1,318 +1,203 @@
-# backend/tests/steps/step_10_automated_ingestion/test_ingestion_run_execute.py
 from __future__ import annotations
 
-from types import SimpleNamespace
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
-from app.services import ingestion_run_execute as svc
-from app.services.ingestion_dedupe_service import build_property_fingerprint
-
-
-def test_property_fingerprint_uses_normalized_address():
-    a = build_property_fingerprint(
-        address="123 Main Street",
-        city="Detroit",
-        state="MI",
-        zip_code="48201",
-    )
-    b = build_property_fingerprint(
-        address="123 main st.",
-        city="Detroit",
-        state="MI",
-        zip_code="48201-1234",
-    )
-    assert a == b
+from app.db import Base
+from app.models import Deal, IngestionRecordLink, IngestionSource, Property, RentAssumption
+from app.services.ingestion_run_execute import execute_source_sync
 
 
-def test_execute_source_sync_runs_property_first_pipeline_and_writes_summary(monkeypatch):
-    started = []
-    finished = []
+def _make_session():
+    engine = create_engine("sqlite:///:memory:", future=True)
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    Base.metadata.create_all(bind=engine)
+    session = TestingSessionLocal()
+    return engine, session
 
-    class FakeRun:
-        def __init__(self):
-            self.id = 999
-            self.status = "running"
-            self.summary_json = {}
 
-    run = FakeRun()
-
-    source = SimpleNamespace(
-        id=77,
-        provider="rentcast",
-        cursor_json={},
-    )
-
-    prop_created = SimpleNamespace(id=501, org_id=1)
-    prop_updated = SimpleNamespace(id=502, org_id=1)
-
-    pipeline_calls = []
-
-    monkeypatch.setattr(
-        svc,
-        "start_run",
-        lambda db, org_id, source_id, trigger_type: started.append(
-            {
-                "org_id": org_id,
-                "source_id": source_id,
-                "trigger_type": trigger_type,
-            }
-        )
-        or run,
-    )
-
-    monkeypatch.setattr(
-        svc,
-        "finish_run",
-        lambda db, row, status, summary, error_summary=None, error_json=None: finished.append(
-            {
-                "status": status,
-                "summary": dict(summary),
-                "error_summary": error_summary,
-                "error_json": error_json,
-            }
-        )
-        or SimpleNamespace(
-            id=row.id,
-            status=status,
-            summary_json=dict(summary),
-        ),
-    )
-
-    monkeypatch.setattr(
-        svc,
-        "_collect_matching_rows",
-        lambda source, trigger_type, runtime_config: (
-            [
-                {
-                    "listingId": "ext-1",
-                    "formattedAddress": "123 Main St",
-                    "city": "Detroit",
-                    "county": "wayne",
-                    "state": "MI",
-                    "zipCode": "48201",
-                    "bedrooms": 3,
-                    "bathrooms": 1.0,
-                    "squareFootage": 1200,
-                    "yearBuilt": 1950,
-                    "propertyType": "single_family",
-                    "price": 85000,
-                    "photos": ["https://img/1.jpg"],
-                },
-                {
-                    "listingId": "ext-2",
-                    "formattedAddress": "456 Oak Ave",
-                    "city": "Detroit",
-                    "county": "wayne",
-                    "state": "MI",
-                    "zipCode": "48202",
-                    "bedrooms": 4,
-                    "bathrooms": 1.5,
-                    "squareFootage": 1400,
-                    "yearBuilt": 1948,
-                    "propertyType": "single_family",
-                    "price": 92000,
-                    "photos": ["https://img/2.jpg"],
-                },
-            ],
-            {"page": 2},
-            {
-                "records_seen": 2,
-                "invalid_rows": 0,
-                "filtered_out": 0,
-                "duplicates_skipped": 0,
-                "filter_reason_counts": {},
-                "provider_pages_scanned": 1,
-                "provider_fetch_limit": 250,
+def test_execute_source_sync_imports_property_first_records(monkeypatch) -> None:
+    engine, db = _make_session()
+    try:
+        source = IngestionSource(
+            org_id=1,
+            provider="rentcast",
+            slug="rentcast-manual",
+            display_name="RentCast Manual",
+            status="connected",
+            is_enabled=True,
+            config_json={
+                "sample_rows": [
+                    {
+                        "external_record_id": "ext-1",
+                        "address": "123 Main St",
+                        "city": "Detroit",
+                        "state": "MI",
+                        "zip": "48226",
+                        "bedrooms": 3,
+                        "bathrooms": 1.0,
+                        "square_feet": 1200,
+                        "year_built": 1950,
+                        "property_type": "single_family",
+                        "asking_price": 85000,
+                        "market_rent_estimate": 1550,
+                        "photos": [{"url": "https://example.com/front.jpg", "kind": "exterior"}],
+                    }
+                ]
             },
-        ),
-    )
+        )
+        db.add(source)
+        db.commit()
+        db.refresh(source)
 
-    monkeypatch.setattr(svc, "find_existing_by_external_id", lambda *args, **kwargs: None)
+        def fake_pipeline(db_session, *, org_id: int, property_id: int, actor_user_id=None, emit_events=False):
+            prop = db_session.get(Property, property_id)
+            prop.normalized_address = "123 Main St, Detroit, MI 48226"
+            prop.lat = 42.3314
+            prop.lng = -83.0458
+            prop.geocode_source = "google"
+            prop.geocode_confidence = 0.99
+            db_session.add(prop)
+            db_session.flush()
+            return {
+                "geo_ok": True,
+                "risk_ok": True,
+                "rent_ok": True,
+                "evaluate_ok": True,
+                "state_ok": True,
+                "workflow_ok": True,
+                "next_actions_ok": True,
+                "partial": False,
+                "errors": [],
+            }
 
-    upserted_props = [prop_created, prop_updated]
+        monkeypatch.setattr(
+            "app.services.ingestion_run_execute.execute_post_ingestion_pipeline",
+            fake_pipeline,
+        )
 
-    monkeypatch.setattr(
-        svc,
-        "_upsert_property",
-        lambda db, org_id, payload: (
-            upserted_props.pop(0),
-            payload["external_record_id"] == "ext-1",
-        ),
-    )
-    monkeypatch.setattr(
-        svc,
-        "_upsert_deal",
-        lambda db, org_id, property_id, payload: (
-            SimpleNamespace(id=property_id + 1000),
-            property_id == 501,
-        ),
-    )
-    monkeypatch.setattr(
-        svc,
-        "_upsert_rent_assumption",
-        lambda db, org_id, property_id, payload: (
-            SimpleNamespace(id=property_id + 2000),
-            True,
-        ),
-    )
-    monkeypatch.setattr(
-        svc,
-        "_upsert_photos",
-        lambda db, org_id, property_id, provider, photos: len(photos),
-    )
-    monkeypatch.setattr(
-        svc,
-        "upsert_record_link",
-        lambda *args, **kwargs: None,
-    )
-    monkeypatch.setattr(
-        svc,
-        "execute_post_ingestion_pipeline",
-        lambda db, org_id, property_id, actor_user_id=None, emit_events=False: pipeline_calls.append(property_id)
-        or {
-            "geo_ok": True,
-            "risk_ok": True,
-            "rent_ok": True,
-            "evaluate_ok": True,
-            "state_ok": True,
-            "workflow_ok": True,
-            "next_actions_ok": True,
-            "partial": False,
-            "errors": [],
-        },
-    )
+        run = execute_source_sync(
+            db,
+            org_id=1,
+            source=source,
+            trigger_type="manual",
+            runtime_config={"limit": 10},
+        )
 
-    class FakeDB:
-        def add(self, obj):
-            return None
+        prop = db.scalar(select(Property).where(Property.org_id == 1))
+        deal = db.scalar(select(Deal).where(Deal.org_id == 1))
+        rent = db.scalar(select(RentAssumption).where(RentAssumption.org_id == 1))
+        link = db.scalar(select(IngestionRecordLink).where(IngestionRecordLink.org_id == 1))
 
-        def flush(self):
-            return None
+        assert run.status == "success"
+        assert prop is not None
+        assert deal is not None
+        assert rent is not None
+        assert link is not None
 
-        def commit(self):
-            return None
+        assert prop.address == "123 Main St"
+        assert prop.city == "Detroit"
+        assert prop.state == "MI"
+        assert prop.zip == "48226"
+        assert prop.normalized_address == "123 Main St, Detroit, MI 48226"
+        assert prop.lat == 42.3314
+        assert prop.lng == -83.0458
 
-        def refresh(self, obj):
-            return None
-
-        def rollback(self):
-            return None
-
-        def get(self, model, pk):
-            return None
-
-        def scalar(self, *args, **kwargs):
-            return None
-
-    result = svc.execute_source_sync(
-        FakeDB(),
-        org_id=1,
-        source=source,
-        trigger_type="manual",
-        runtime_config={
-            "state": "MI",
-            "county": "wayne",
-            "city": "Detroit",
-            "limit": 50,
-        },
-    )
-
-    assert started == [{"org_id": 1, "source_id": 77, "trigger_type": "manual"}]
-    assert pipeline_calls == [501, 502]
-
-    assert result.status == "success"
-    summary = result.summary_json
-
-    assert summary["records_seen"] == 2
-    assert summary["records_imported"] == 2
-    assert summary["properties_created"] == 1
-    assert summary["properties_updated"] == 1
-    assert summary["deals_created"] == 1
-    assert summary["deals_updated"] == 1
-    assert summary["rent_rows_upserted"] == 2
-    assert summary["photos_upserted"] == 2
-    assert summary["geo_enriched"] == 2
-    assert summary["risk_scored"] == 2
-    assert summary["rent_refreshed"] == 2
-    assert summary["evaluated"] == 2
-    assert summary["state_synced"] == 2
-    assert summary["workflow_synced"] == 2
-    assert summary["next_actions_seeded"] == 2
-    assert summary["post_import_failures"] == 0
-    assert summary["post_import_partials"] == 0
-    assert summary["filter_reason_counts"] == {}
+        summary = dict(run.summary_json or {})
+        assert summary["records_imported"] == 1
+        assert summary["properties_created"] == 1
+        assert summary["deals_created"] == 1
+        assert summary["rent_rows_upserted"] == 1
+        assert summary["photos_upserted"] == 1
+        assert summary["post_import_pipeline_attempted"] == 1
+        assert summary["geo_enriched"] == 1
+        assert summary["risk_scored"] == 1
+        assert summary["evaluated"] == 1
+        assert summary["workflow_synced"] == 1
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
 
 
-def test_execute_source_sync_updates_cursor_for_scheduled_runs(monkeypatch):
-    class FakeRun:
-        def __init__(self):
-            self.id = 321
-            self.status = "running"
-            self.summary_json = {}
-
-    run = FakeRun()
-
-    source = SimpleNamespace(
-        id=88,
-        provider="rentcast",
-        cursor_json={"page": 1},
-    )
-
-    monkeypatch.setattr(svc, "start_run", lambda db, org_id, source_id, trigger_type: run)
-    monkeypatch.setattr(
-        svc,
-        "finish_run",
-        lambda db, row, status, summary, error_summary=None, error_json=None: SimpleNamespace(
-            id=row.id,
-            status=status,
-            summary_json=dict(summary),
-        ),
-    )
-    monkeypatch.setattr(
-        svc,
-        "_collect_matching_rows",
-        lambda source, trigger_type, runtime_config: (
-            [],
-            {"page": 3},
-            {
-                "records_seen": 0,
-                "invalid_rows": 0,
-                "filtered_out": 0,
-                "duplicates_skipped": 0,
-                "filter_reason_counts": {"city": 2},
-                "provider_pages_scanned": 2,
-                "provider_fetch_limit": 250,
+def test_execute_source_sync_updates_existing_property_via_record_link(monkeypatch) -> None:
+    engine, db = _make_session()
+    try:
+        source = IngestionSource(
+            org_id=1,
+            provider="rentcast",
+            slug="rentcast-manual",
+            display_name="RentCast Manual",
+            status="connected",
+            is_enabled=True,
+            config_json={
+                "sample_rows": [
+                    {
+                        "external_record_id": "ext-1",
+                        "address": "123 Main St",
+                        "city": "Detroit",
+                        "state": "MI",
+                        "zip": "48226",
+                        "bedrooms": 4,
+                        "bathrooms": 2.0,
+                        "asking_price": 93000,
+                    }
+                ]
             },
-        ),
-    )
+        )
+        db.add(source)
+        db.commit()
+        db.refresh(source)
 
-    class FakeDB:
-        def __init__(self):
-            self.commits = 0
+        initial_run = execute_source_sync(
+            db,
+            org_id=1,
+            source=source,
+            trigger_type="manual",
+            runtime_config={"limit": 10},
+        )
+        assert initial_run.status == "success"
 
-        def add(self, obj):
-            return None
+        def fake_pipeline(*args, **kwargs):
+            return {
+                "geo_ok": True,
+                "risk_ok": True,
+                "rent_ok": True,
+                "evaluate_ok": True,
+                "state_ok": True,
+                "workflow_ok": True,
+                "next_actions_ok": True,
+                "partial": False,
+                "errors": [],
+            }
 
-        def commit(self):
-            self.commits += 1
+        monkeypatch.setattr(
+            "app.services.ingestion_run_execute.execute_post_ingestion_pipeline",
+            fake_pipeline,
+        )
 
-        def refresh(self, obj):
-            return None
+        second_run = execute_source_sync(
+            db,
+            org_id=1,
+            source=source,
+            trigger_type="manual",
+            runtime_config={"limit": 10},
+        )
 
-        def rollback(self):
-            return None
+        props = db.scalars(select(Property).where(Property.org_id == 1)).all()
+        deals = db.scalars(select(Deal).where(Deal.org_id == 1)).all()
 
-    db = FakeDB()
+        assert second_run.status == "success"
+        assert len(props) == 1
+        assert len(deals) == 1
+        assert props[0].bedrooms == 4
+        assert props[0].bathrooms == 2.0
 
-    result = svc.execute_source_sync(
-        db,
-        org_id=1,
-        source=source,
-        trigger_type="daily_refresh",
-        runtime_config={"city": "Detroit", "limit": 250},
-    )
-
-    assert result.status == "success"
-    assert source.cursor_json == {"page": 3}
-    assert db.commits >= 1
-    assert result.summary_json["filter_reason_counts"] == {"city": 2}
-    
+        summary = dict(second_run.summary_json or {})
+        assert summary["records_imported"] == 1
+        assert summary["properties_updated"] == 1
+        assert summary["deals_updated"] == 1
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()

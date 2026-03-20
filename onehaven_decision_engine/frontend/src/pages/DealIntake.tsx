@@ -1,7 +1,95 @@
 import React from "react";
+import { Link } from "react-router-dom";
+import {
+  MapPinned,
+  LocateFixed,
+  AlertTriangle,
+  ArrowUpRight,
+} from "lucide-react";
+
 import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
 import GlassCard from "../components/GlassCard";
+
+function numberOrNull(v: any) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getLocationSummary(ok: any) {
+  const property = ok?.property || {};
+  const pipeline = ok?.pipeline || ok?.post_import_pipeline || {};
+  const geo = pipeline?.geo || {};
+
+  const normalizedAddress =
+    property?.normalized_address ||
+    ok?.normalized_address ||
+    geo?.normalized_address ||
+    null;
+
+  const geocodeSource =
+    property?.geocode_source ||
+    ok?.geocode_source ||
+    geo?.geocode_source ||
+    null;
+
+  const geocodeConfidence =
+    numberOrNull(property?.geocode_confidence) ??
+    numberOrNull(ok?.geocode_confidence) ??
+    numberOrNull(geo?.geocode_confidence) ??
+    null;
+
+  const lat =
+    numberOrNull(property?.lat) ??
+    numberOrNull(ok?.lat) ??
+    numberOrNull(geo?.lat) ??
+    null;
+
+  const lng =
+    numberOrNull(property?.lng) ??
+    numberOrNull(ok?.lng) ??
+    numberOrNull(geo?.lng) ??
+    null;
+
+  const county = property?.county || ok?.county || geo?.county || null;
+
+  if (lat == null || lng == null) {
+    return {
+      label: "Location incomplete",
+      pillClass: "oh-pill oh-pill-bad",
+      normalizedAddress,
+      geocodeSource,
+      geocodeConfidence,
+      lat,
+      lng,
+      county,
+    };
+  }
+
+  if (geocodeConfidence != null && geocodeConfidence < 0.7) {
+    return {
+      label: "Location approximate",
+      pillClass: "oh-pill oh-pill-warn",
+      normalizedAddress,
+      geocodeSource,
+      geocodeConfidence,
+      lat,
+      lng,
+      county,
+    };
+  }
+
+  return {
+    label: "Location verified",
+    pillClass: "oh-pill oh-pill-good",
+    normalizedAddress,
+    geocodeSource,
+    geocodeConfidence,
+    lat,
+    lng,
+    county,
+  };
+}
 
 export default function DealIntake() {
   const [form, setForm] = React.useState({
@@ -69,17 +157,18 @@ export default function DealIntake() {
 
   const createdDealId = ok?.deal?.id ?? ok?.deal_id ?? null;
   const createdPropertyId = ok?.property?.id ?? ok?.property_id ?? null;
+  const location = React.useMemo(() => getLocationSummary(ok), [ok]);
 
   return (
     <div className="space-y-6">
       <PageHero
         eyebrow="Phase 1"
         title="Deal Intake"
-        subtitle="Clean manual intake. Constitution enforced. Rent assumption stub created automatically."
+        subtitle="Clean manual intake with immediate property creation and downstream location, risk, and rent workflow support."
       />
 
       <GlassCard>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {[
             ["Address", "address", "text"],
             ["City", "city", "text"],
@@ -89,7 +178,7 @@ export default function DealIntake() {
             <label key={key} className="space-y-1">
               <div className="text-sm text-white/70">{label}</div>
               <input
-                className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 outline-none focus:border-white/30"
                 type={type}
                 value={(form as any)[key]}
                 onChange={(e) =>
@@ -102,7 +191,7 @@ export default function DealIntake() {
           <label className="space-y-1">
             <div className="text-sm text-white/70">Bedrooms</div>
             <input
-              className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2"
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2"
               type="number"
               value={form.bedrooms}
               onChange={(e) => set("bedrooms", Number(e.target.value))}
@@ -112,7 +201,7 @@ export default function DealIntake() {
           <label className="space-y-1">
             <div className="text-sm text-white/70">Bathrooms</div>
             <input
-              className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2"
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2"
               type="number"
               step="0.5"
               value={form.bathrooms}
@@ -123,7 +212,7 @@ export default function DealIntake() {
           <label className="space-y-1">
             <div className="text-sm text-white/70">Purchase Price</div>
             <input
-              className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2"
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2"
               type="number"
               value={form.purchase_price}
               onChange={(e) => set("purchase_price", Number(e.target.value))}
@@ -133,7 +222,7 @@ export default function DealIntake() {
           <label className="space-y-1">
             <div className="text-sm text-white/70">Estimated Rehab</div>
             <input
-              className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2"
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2"
               type="number"
               value={form.est_rehab}
               onChange={(e) => set("est_rehab", Number(e.target.value))}
@@ -143,7 +232,7 @@ export default function DealIntake() {
           <label className="space-y-1">
             <div className="text-sm text-white/70">Square Feet (optional)</div>
             <input
-              className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2"
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2"
               type="number"
               value={form.square_feet}
               onChange={(e) => set("square_feet", e.target.value)}
@@ -153,7 +242,7 @@ export default function DealIntake() {
           <label className="space-y-1">
             <div className="text-sm text-white/70">Year Built (optional)</div>
             <input
-              className="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-2"
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2"
               type="number"
               value={form.year_built}
               onChange={(e) => set("year_built", e.target.value)}
@@ -161,16 +250,16 @@ export default function DealIntake() {
           </label>
         </div>
 
-        <div className="mt-5 flex items-center gap-3 flex-wrap">
+        <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
             onClick={submit}
             disabled={busy}
-            className="rounded-2xl px-4 py-2 bg-white text-black font-semibold hover:opacity-90 disabled:opacity-50"
+            className="rounded-2xl bg-white px-4 py-2 font-semibold text-black hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "Creating..." : "Create Deal + Property"}
           </button>
 
-          {err && <div className="text-sm text-red-300 break-all">{err}</div>}
+          {err && <div className="break-all text-sm text-red-300">{err}</div>}
 
           {ok && (
             <div className="text-sm text-emerald-300">
@@ -179,6 +268,65 @@ export default function DealIntake() {
             </div>
           )}
         </div>
+
+        {ok ? (
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-white/50">
+              <LocateFixed className="h-3.5 w-3.5" />
+              Location automation
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className={location.pillClass}>{location.label}</span>
+
+              {location.geocodeSource ? (
+                <span className="oh-pill">source {location.geocodeSource}</span>
+              ) : null}
+
+              {location.geocodeConfidence != null ? (
+                <span className="oh-pill">
+                  confidence {location.geocodeConfidence.toFixed(2)}
+                </span>
+              ) : null}
+
+              {location.county ? (
+                <span className="oh-pill">
+                  <MapPinned className="h-3.5 w-3.5" />
+                  {location.county}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="mt-3 text-sm text-white/80">
+              {location.normalizedAddress ||
+                "Normalized address not available yet"}
+            </div>
+
+            {location.lat != null && location.lng != null ? (
+              <div className="mt-2 text-xs text-white/50">
+                {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
+              </div>
+            ) : (
+              <div className="mt-2 flex items-center gap-2 text-xs text-amber-300">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Coordinates not available yet. Downstream risk and jurisdiction
+                workflows may still be incomplete.
+              </div>
+            )}
+
+            {createdPropertyId ? (
+              <div className="mt-4">
+                <Link
+                  to={`/properties/${createdPropertyId}`}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-sm text-white/90 hover:bg-white/5"
+                >
+                  Open property
+                  <ArrowUpRight className="h-4 w-4" />
+                </Link>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </GlassCard>
     </div>
   );
