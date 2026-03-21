@@ -111,7 +111,7 @@ def test_sync_now_endpoint_execute_inline_uses_same_pipeline_path(
             (),
             {
                 "id": 456,
-                "status": "success",
+                "status": "completed",
                 "source_id": source.id,
                 "trigger_type": trigger_type,
                 "summary_json": {
@@ -137,6 +137,7 @@ def test_sync_now_endpoint_execute_inline_uses_same_pipeline_path(
                     "post_import_partials": 0,
                     "post_import_errors": [],
                     "filter_reason_counts": {"max_price": 7},
+                    "idempotency": {"key": "abc123", "context": {}},
                 },
             },
         )()
@@ -163,7 +164,7 @@ def test_sync_now_endpoint_execute_inline_uses_same_pipeline_path(
     assert body["queued"] is False
     assert body["normal_path"] is True
     assert body["run_id"] == 456
-    assert body["status"] == "success"
+    assert body["status"] == "completed"
 
     assert captured["org_id"] == org_id
     assert captured["source_id"] == source.id
@@ -182,4 +183,3 @@ def test_sync_now_endpoint_execute_inline_uses_same_pipeline_path(
     assert outcome["workflow"]["workflow_synced"] == 3
     assert outcome["workflow"]["next_actions_seeded"] == 3
     assert outcome["filter_reason_counts"] == {"max_price": 7}
-    

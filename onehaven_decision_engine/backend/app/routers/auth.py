@@ -4,16 +4,20 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import _jwt_sign, _jwt_verify, get_principal_core, jwt_debug_fingerprint
 from ..config import settings
 from ..db import get_db
-from ..models import Organization, OrgMembership, Plan, OrgSubscription, AppUser
+from ..models import AppUser, Organization, OrgMembership, Plan
+try:
+    from ..models import Subscription as OrgSubscription  # type: ignore
+except Exception:
+    from ..models import OrgSubscription  # type: ignore
 from ..schemas import PrincipalOut
-from ..auth import _jwt_sign, _jwt_verify, jwt_debug_fingerprint, get_principal_core
-from ..services import auth_service
+from ..services import auth_service, plan_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -23,32 +27,11 @@ def _now() -> datetime:
 
 
 def _ensure_default_plan_seeded(db: Session) -> None:
-    def upsert(code: str, name: str, limits: dict[str, Any]) -> None:
-        row = db.scalar(select(Plan).where(Plan.code == code))
-        if row:
-            return
-        db.add(Plan(code=code, name=name, limits_json=str(limits).replace("'", '"'), created_at=_now()))
-
-    upsert(
-        "free",
-        "Free",
-        {"max_properties": 3, "agent_runs_per_day": 20, "external_calls_per_day": 50, "max_concurrent_runs": 2},
-    )
-    upsert(
-        "starter",
-        "Starter",
-        {"max_properties": 25, "agent_runs_per_day": 200, "external_calls_per_day": 500, "max_concurrent_runs": 5},
-    )
-    db.commit()
+    plan_service.ensure_default_plans(db)
 
 
 def _cookie_name() -> str:
     return str(getattr(settings, "jwt_cookie_name", "onehaven_jwt") or "onehaven_jwt")
-
-
-def _is_localhost(request: Request) -> bool:
-    host = (request.headers.get("host") or "").lower()
-    return host.startswith("localhost") or host.startswith("127.0.0.1")
 
 
 def _set_auth_cookie(response: Response, request: Request, token: str) -> None:
@@ -96,6 +79,18 @@ def _require_user_id_from_cookie(request: Request) -> int:
     return int(sub)
 
 
+def _issue_token_for_org(*, user_id: int, org_slug: str) -> str:
+    exp = int((_now() + timedelta(minutes=int(getattr(settings, "jwt_exp_minutes", 60)))).timestamp())
+    return _jwt_sign(
+        {
+            "sub": str(user_id),
+            "org": str(org_slug),
+            "exp": exp,
+            "iat": int(_now().timestamp()),
+        }
+    )
+
+
 @router.post("/register")
 def register(payload: dict[str, Any], request: Request, response: Response, db: Session = Depends(get_db)):
     _ensure_default_plan_seeded(db)
@@ -124,28 +119,43 @@ def register(payload: dict[str, Any], request: Request, response: Response, db: 
     if org is None or user is None:
         raise HTTPException(status_code=500, detail="register_inconsistent_state")
 
-    mem = db.scalar(select(OrgMembership).where(OrgMembership.org_id == int(org.id), OrgMembership.user_id == int(user.id)))
+    mem = db.scalar(
+        select(OrgMembership).where(
+            OrgMembership.org_id == int(org.id),
+            OrgMembership.user_id == int(user.id),
+        )
+    )
     if mem is None:
         auth_service.ensure_membership(db, org_id=int(org.id), user_id=int(user.id), role="owner")
-        mem = db.scalar(select(OrgMembership).where(OrgMembership.org_id == int(org.id), OrgMembership.user_id == int(user.id)))
+        mem = db.scalar(
+            select(OrgMembership).where(
+                OrgMembership.org_id == int(org.id),
+                OrgMembership.user_id == int(user.id),
+            )
+        )
 
     sub = db.scalar(select(OrgSubscription).where(OrgSubscription.org_id == int(org.id)))
     if sub is None:
-        db.add(
-            OrgSubscription(
-                org_id=int(org.id),
-                plan_code=getattr(settings, "default_plan_code", None) or "free",
-                status="active",
-                created_at=_now(),
-            )
-        )
+        kwargs: dict[str, Any] = {
+            "org_id": int(org.id),
+            "plan_code": getattr(settings, "default_plan_code", None) or "free",
+            "status": "active",
+        }
+        if hasattr(OrgSubscription, "created_at"):
+            kwargs["created_at"] = _now()
+        db.add(OrgSubscription(**kwargs))
         db.commit()
 
-    exp = int((_now() + timedelta(minutes=int(getattr(settings, "jwt_exp_minutes", 60)))).timestamp())
-    token = _jwt_sign({"sub": str(user.id), "org": str(org.slug), "exp": exp})
+    token = _issue_token_for_org(user_id=int(user.id), org_slug=str(org.slug))
     _set_auth_cookie(response, request, token)
 
-    return {"ok": True, "user_id": int(user.id), "org_slug": str(org.slug), "role": str(mem.role if mem else "owner")}
+    return {
+        "ok": True,
+        "user_id": int(user.id),
+        "org_slug": str(org.slug),
+        "role": str(mem.role if mem else "owner"),
+        "plan_code": plan_service.get_plan_code(db, org_id=int(org.id)),
+    }
 
 
 @router.post("/login")
@@ -169,11 +179,19 @@ def login(payload: dict[str, Any], request: Request, response: Response, db: Ses
             raise HTTPException(status_code=403, detail="Not a member of org")
         raise HTTPException(status_code=401, detail=msg)
 
-    exp = int((_now() + timedelta(minutes=int(getattr(settings, "jwt_exp_minutes", 60)))).timestamp())
-    token = _jwt_sign({"sub": str(out["user_id"]), "org": str(out["org_slug"]), "exp": exp})
+    token = _issue_token_for_org(user_id=int(out["user_id"]), org_slug=str(out["org_slug"]))
     _set_auth_cookie(response, request, token)
 
-    return {"ok": True, "user_id": int(out["user_id"]), "org_slug": str(out["org_slug"]), "role": str(out["role"])}
+    org = db.scalar(select(Organization).where(Organization.slug == str(out["org_slug"])))
+    plan_code = plan_service.get_plan_code(db, org_id=int(org.id)) if org else "free"
+
+    return {
+        "ok": True,
+        "user_id": int(out["user_id"]),
+        "org_slug": str(out["org_slug"]),
+        "role": str(out["role"]),
+        "plan_code": plan_code,
+    }
 
 
 @router.post("/logout")
@@ -215,7 +233,6 @@ def my_orgs(request: Request, db: Session = Depends(get_db)):
     return [{"org_slug": r[0], "org_name": r[1], "role": r[2]} for r in rows]
 
 
-# ✅ Accept both spellings to prevent frontend/backend drift causing 404
 @router.post("/select-org")
 @router.post("/select_org")
 def select_org(
@@ -233,15 +250,24 @@ def select_org(
     if org is None:
         raise HTTPException(status_code=404, detail="Org not found")
 
-    mem = db.scalar(select(OrgMembership).where(OrgMembership.org_id == int(org.id), OrgMembership.user_id == int(user_id)))
+    mem = db.scalar(
+        select(OrgMembership).where(
+            OrgMembership.org_id == int(org.id),
+            OrgMembership.user_id == int(user_id),
+        )
+    )
     if mem is None:
         raise HTTPException(status_code=403, detail="Not a member of that org")
 
-    exp = int((_now() + timedelta(minutes=int(getattr(settings, "jwt_exp_minutes", 60)))).timestamp())
-    token = _jwt_sign({"sub": str(user_id), "org": str(org.slug), "exp": exp})
+    token = _issue_token_for_org(user_id=int(user_id), org_slug=str(org.slug))
     _set_auth_cookie(response, request, token)
 
-    return {"ok": True, "org_slug": str(org.slug), "role": str(mem.role)}
+    return {
+        "ok": True,
+        "org_slug": str(org.slug),
+        "role": str(mem.role),
+        "plan_code": plan_service.get_plan_code(db, org_id=int(org.id)),
+    }
 
 
 @router.get("/debug-auth")

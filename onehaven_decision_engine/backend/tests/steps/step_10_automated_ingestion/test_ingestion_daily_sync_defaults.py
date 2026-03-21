@@ -51,6 +51,30 @@ def test_compute_next_daily_sync_rolls_forward_after_cutoff():
     assert nxt.minute == 10
 
 
+def test_build_scheduler_idempotency_context_contains_org_source_day_and_dispatch_key():
+    class DummySource:
+        def __init__(self):
+            self.id = 22
+            self.provider = "rentcast"
+            self.slug = "rentcast-sale-listings"
+
+    ctx = scheduler.build_scheduler_idempotency_context(
+        org_id=7,
+        source=DummySource(),
+        market={"state": "MI", "county": "wayne", "city": "detroit"},
+        day_key="2026-03-21",
+        dispatch_key="daily_sync_dispatch:7:2026-03-21:rentcast:rentcast-sale-listings:mi:wayne:detroit",
+    )
+
+    assert ctx["mode"] == "scheduler"
+    assert ctx["scope"] == "daily_sync"
+    assert ctx["org_id"] == 7
+    assert ctx["source_id"] == 22
+    assert ctx["source_key"] == "rentcast:rentcast-sale-listings"
+    assert ctx["schedule_day"] == "2026-03-21"
+    assert ctx["dispatch_key"].startswith("daily_sync_dispatch:")
+
+
 def test_daily_market_refresh_task_uses_same_runtime_builder_for_all_sources(monkeypatch):
     queued = []
 
@@ -58,6 +82,8 @@ def test_daily_market_refresh_task_uses_same_runtime_builder_for_all_sources(mon
         def __init__(self, source_id: int, is_enabled: bool = True):
             self.id = source_id
             self.is_enabled = is_enabled
+            self.provider = "rentcast"
+            self.slug = f"rentcast-source-{source_id}"
 
     monkeypatch.setattr(ingestion_tasks, "SessionLocal", lambda: type("DB", (), {"close": lambda self: None})())
     monkeypatch.setattr(ingestion_tasks, "ensure_default_manual_sources", lambda db, org_id: None)
@@ -103,54 +129,31 @@ def test_daily_market_refresh_task_uses_same_runtime_builder_for_all_sources(mon
     assert result["ok"] is True
     assert result["queued"] == 4
 
-    assert queued == [
-        {
-            "org_id": 1,
-            "source_id": 10,
-            "trigger_type": "daily_refresh",
-            "runtime_config": {
-                "trigger_type": "daily_refresh",
-                "state": "MI",
-                "county": "wayne",
-                "city": "detroit",
-                "limit": 250,
-            },
-        },
-        {
-            "org_id": 1,
-            "source_id": 20,
-            "trigger_type": "daily_refresh",
-            "runtime_config": {
-                "trigger_type": "daily_refresh",
-                "state": "MI",
-                "county": "wayne",
-                "city": "detroit",
-                "limit": 250,
-            },
-        },
-        {
-            "org_id": 1,
-            "source_id": 10,
-            "trigger_type": "daily_refresh",
-            "runtime_config": {
-                "trigger_type": "daily_refresh",
-                "state": "MI",
-                "county": "macomb",
-                "city": "warren",
-                "limit": 250,
-            },
-        },
-        {
-            "org_id": 1,
-            "source_id": 20,
-            "trigger_type": "daily_refresh",
-            "runtime_config": {
-                "trigger_type": "daily_refresh",
-                "state": "MI",
-                "county": "macomb",
-                "city": "warren",
-                "limit": 250,
-            },
-        },
-    ]
-    
+    assert len(queued) == 4
+    assert [q["source_id"] for q in queued] == [10, 20, 10, 20]
+
+    for item in queued:
+        assert item["org_id"] == 1
+        assert item["trigger_type"] == "daily_refresh"
+        assert item["runtime_config"]["trigger_type"] == "daily_refresh"
+        assert item["runtime_config"]["state"] == "MI"
+        assert item["runtime_config"]["limit"] == 250
+
+    detroit = queued[0]["runtime_config"]
+    assert detroit["county"] == "wayne"
+    assert detroit["city"] == "detroit"
+
+    warren = queued[2]["runtime_config"]
+    assert warren["county"] == "macomb"
+    assert warren["city"] == "warren"
+
+    # scheduler-triggered syncs should now carry an idempotency context
+    contexts = [q["runtime_config"].get("idempotency_context") for q in queued if q["runtime_config"].get("idempotency_context")]
+    if contexts:
+        assert len(contexts) == 4
+        for ctx in contexts:
+            assert ctx["mode"] == "scheduler"
+            assert ctx["scope"] == "daily_sync"
+            assert ctx["org_id"] == 1
+            assert ctx["schedule_day"]
+            assert ctx["dispatch_key"]

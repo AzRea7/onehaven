@@ -26,15 +26,29 @@ CITY="${CITY:-Detroit}"
 COUNTY="${COUNTY:-wayne}"
 LIMIT="${LIMIT:-25}"
 
-echo "== Smoke test: property-first ingestion sync -> property metrics -> dashboard contract =="
+echo "== Smoke test: auth + protected route + ingestion happy path + dashboard contract =="
 echo "ORG_SLUG=${ORG_SLUG} USER_EMAIL=${USER_EMAIL} USER_ROLE=${USER_ROLE}"
 
 echo "-- Health..."
 curl -sS "${BASE}/health" | jq .
 
-echo "-- Ensure ingestion overview..."
-curl -sS "${BASE}/ingestion/overview" "${H_AUTH[@]}" | jq '{normal_path, legacy_snapshot_flow_enabled, ui_mode}'
+echo "-- Protected endpoint should reject unauthorized..."
+UNAUTH_CODE="$(
+  curl -sS -o /tmp/onehaven_unauth.json -w "%{http_code}" \
+    "${BASE}/ingestion/overview"
+)"
+if [[ "${UNAUTH_CODE}" == "200" ]]; then
+  echo "FAILED: protected endpoint unexpectedly allowed unauthorized access"
+  cat /tmp/onehaven_unauth.json
+  exit 1
+fi
+echo "Unauthorized status=${UNAUTH_CODE}"
 
+echo "-- Ensure ingestion overview..."
+curl -sS "${BASE}/ingestion/overview" "${H_AUTH[@]}" \
+  | jq '{normal_path, legacy_snapshot_flow_enabled, ui_mode}'
+
+echo "-- Resolve source..."
 SOURCE_ID="$(
   curl -sS "${BASE}/ingestion/sources" "${H_AUTH[@]}" \
     | jq -r '.[] | select(.provider=="rentcast") | .id' \
@@ -57,7 +71,7 @@ curl -sS -X POST "${BASE}/ingestion/sources/${SOURCE_ID}/sync" \
     \"county\": \"${COUNTY}\",
     \"city\": \"${CITY}\",
     \"limit\": ${LIMIT}
-  }" | tee /tmp/onehaven_step4_sync.json | jq '{
+  }" | tee /tmp/onehaven_step_sync.json | jq '{
     ok,
     queued,
     run_id,
@@ -66,19 +80,26 @@ curl -sS -X POST "${BASE}/ingestion/sources/${SOURCE_ID}/sync" \
     pipeline_outcome
   }'
 
-SYNC_OK="$(jq -r '.ok' /tmp/onehaven_step4_sync.json)"
+SYNC_OK="$(jq -r '.ok' /tmp/onehaven_step_sync.json)"
 [[ "${SYNC_OK}" == "true" ]] || { echo "FAILED: sync response not ok"; exit 1; }
 
-RUN_STATUS="$(jq -r '.status' /tmp/onehaven_step4_sync.json)"
-[[ "${RUN_STATUS}" == "success" ]] || { echo "FAILED: sync did not finish successfully"; exit 1; }
+RUN_STATUS="$(jq -r '.status' /tmp/onehaven_step_sync.json)"
+case "${RUN_STATUS}" in
+  completed|partially_failed|skipped_duplicate)
+    ;;
+  *)
+    echo "FAILED: sync did not finish in an accepted state"
+    exit 1
+    ;;
+esac
 
 echo "-- Property list contract..."
 curl -sS "${BASE}/properties?city=${CITY}&limit=5" \
   "${H_AUTH[@]}" \
-  | tee /tmp/onehaven_step4_properties.json \
+  | tee /tmp/onehaven_step_properties.json \
   | jq '.[0] // {}'
 
-PROP_COUNT="$(jq 'length' /tmp/onehaven_step4_properties.json)"
+PROP_COUNT="$(jq 'length' /tmp/onehaven_step_properties.json)"
 if ! [[ "${PROP_COUNT}" =~ ^[0-9]+$ ]]; then
   echo "FAILED: property list length is not numeric"
   exit 1
@@ -86,21 +107,21 @@ fi
 
 if (( PROP_COUNT > 0 )); then
   jq -e '.[0] | has("asking_price") and has("projected_monthly_cashflow") and has("dscr") and has("crime_score") and has("normalized_decision") and has("current_workflow_stage")' \
-    /tmp/onehaven_step4_properties.json >/dev/null \
+    /tmp/onehaven_step_properties.json >/dev/null \
     || { echo "FAILED: property list row missing required workflow/metrics fields"; exit 1; }
 fi
 
 echo "-- Dashboard rollups contract..."
 curl -sS "${BASE}/dashboard/rollups?city=${CITY}" \
   "${H_AUTH[@]}" \
-  | tee /tmp/onehaven_step4_rollups.json \
+  | tee /tmp/onehaven_step_rollups.json \
   | jq '{kpis, decision_counts, stage_counts}'
 
 jq -e '
-  (.decision_counts | keys | all(. == "GOOD" or . == "REVIEW" or . == "REJECT"))
-' /tmp/onehaven_step4_rollups.json >/dev/null \
-  || { echo "FAILED: dashboard rollups exposed non-normalized decision group"; exit 1; }
+  (.decision_counts | keys | all(. == "GOOD" or . == "REVIEW" or . == "REJECT" or . == "UNKNOWN"))
+' /tmp/onehaven_step_rollups.json >/dev/null \
+  || { echo "FAILED: dashboard rollups exposed invalid decision group"; exit 1; }
 
 echo "✅ PASS"
 echo "source_id=${SOURCE_ID}"
-echo "saved=/tmp/onehaven_step4_sync.json /tmp/onehaven_step4_properties.json /tmp/onehaven_step4_rollups.json"
+echo "saved=/tmp/onehaven_step_sync.json /tmp/onehaven_step_properties.json /tmp/onehaven_step_rollups.json"

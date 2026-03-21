@@ -1,3 +1,4 @@
+# backend/tests/steps/step_10_automated_ingestion/test_ingestion_pipeline_post_import.py
 from __future__ import annotations
 
 from app.services.ingestion_enrichment_service import apply_pipeline_summary
@@ -60,4 +61,33 @@ def test_apply_pipeline_summary_counts_partial_and_errors() -> None:
     assert len(errors) == 1
     assert errors[0]["property_id"] == 202
     assert errors[0]["errors"] == ["risk:RuntimeError:boom", "evaluate:ValueError:bad"]
-    
+
+
+def test_apply_pipeline_summary_is_safe_for_rerun_aggregation() -> None:
+    summary: dict = {}
+
+    ok_pipeline = {
+        "geo_ok": True,
+        "risk_ok": True,
+        "rent_ok": True,
+        "evaluate_ok": True,
+        "state_ok": True,
+        "workflow_ok": True,
+        "next_actions_ok": True,
+        "partial": False,
+        "errors": [],
+    }
+
+    apply_pipeline_summary(summary, ok_pipeline, property_id=303)
+    apply_pipeline_summary(summary, ok_pipeline, property_id=303)
+
+    assert summary["post_import_pipeline_attempted"] == 2
+    assert summary["geo_enriched"] == 2
+    assert summary["risk_scored"] == 2
+    assert summary["rent_refreshed"] == 2
+    assert summary["evaluated"] == 2
+    assert summary["state_synced"] == 2
+    assert summary["workflow_synced"] == 2
+    assert summary["next_actions_seeded"] == 2
+    assert summary.get("post_import_failures", 0) == 0
+    assert summary.get("post_import_partials", 0) == 0
