@@ -137,6 +137,22 @@ function GraphBars({
     </div>
   );
 }
+function resolvePropertyId(row: any): number | null {
+  const candidates = [
+    row?.id,
+    row?.property_id,
+    row?.property?.id,
+    row?.propertyId,
+    row?.property?.property_id,
+  ];
+
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  return null;
+}
 
 function Leaderboard({
   rows,
@@ -154,20 +170,29 @@ function Leaderboard({
 
   return (
     <div className="space-y-2">
-      {items.slice(0, 6).map((row) => (
-        <Link
-          key={row.id}
-          to={`/properties/${row.id}`}
-          className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
-        >
+      {items.slice(0, 6).map((row, idx) => {
+        const propertyId = resolvePropertyId(row);
+        const title =
+          row?.address ||
+          row?.property?.address ||
+          `Property #${propertyId ?? "—"}`;
+        const city = row?.city || row?.property?.city || "";
+        const state = row?.state || row?.property?.state || "";
+        const stageLabel = row?.stage_label || row?.property?.stage_label || "";
+
+        const content = (
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-app-0">
-                {row.address}
+                {title}
               </div>
               <div className="mt-1 truncate text-xs text-app-4">
-                {row.city}, {row.state}
-                {row.stage_label ? ` · ${row.stage_label}` : ""}
+                {[
+                  city && state ? `${city}, ${state}` : city || state,
+                  stageLabel,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </div>
             </div>
             <div className="text-right">
@@ -179,8 +204,29 @@ function Leaderboard({
               </div>
             </div>
           </div>
-        </Link>
-      ))}
+        );
+
+        if (!propertyId) {
+          return (
+            <div
+              key={`leaderboard-${idx}`}
+              className="block rounded-2xl border border-app bg-app-panel px-4 py-3 opacity-70"
+            >
+              {content}
+            </div>
+          );
+        }
+
+        return (
+          <Link
+            key={propertyId}
+            to={`/properties/${propertyId}`}
+            className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
+          >
+            {content}
+          </Link>
+        );
+      })}
     </div>
   );
 }
