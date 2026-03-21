@@ -373,8 +373,10 @@ function AgentsDrawer({
 }
 
 export default function PropertyView() {
-  const { id } = useParams();
-  const propertyId = Number(id);
+  const { id, propertyId: legacyPropertyId } = useParams();
+  const rawPropertyId = id ?? legacyPropertyId;
+  const propertyId = Number(rawPropertyId);
+  const hasValidPropertyId = Number.isFinite(propertyId) && propertyId > 0;
 
   const [tab, setTab] = React.useState<Tab>("Deal");
   const [bundle, setBundle] = React.useState<any | null>(null);
@@ -447,6 +449,20 @@ export default function PropertyView() {
   );
 
   const loadAll = React.useCallback(async () => {
+    if (!hasValidPropertyId) {
+      setBundle(null);
+      setOps(null);
+      setWorkflow(null);
+      setComplianceBrief(null);
+      setComplianceStatus(null);
+      setComplianceRunSummary(null);
+      setInspectionReadiness(null);
+      setChecklist(null);
+      setPhotos([]);
+      setErr("Invalid property id.");
+      return;
+    }
+
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -514,16 +530,27 @@ export default function PropertyView() {
       setPhotos([]);
       setErr(String(e.message || e));
     }
-  }, [propertyId, refreshChecklist, refreshPhotos]);
+  }, [hasValidPropertyId, propertyId, refreshChecklist, refreshPhotos]);
 
   React.useEffect(() => {
-    if (!Number.isFinite(propertyId)) {
+    if (!hasValidPropertyId) {
+      abortRef.current?.abort();
+      setBundle(null);
+      setOps(null);
+      setWorkflow(null);
+      setComplianceBrief(null);
+      setComplianceStatus(null);
+      setComplianceRunSummary(null);
+      setInspectionReadiness(null);
+      setChecklist(null);
+      setPhotos([]);
       setErr("Invalid property id.");
       return;
     }
+
     loadAll();
     return () => abortRef.current?.abort();
-  }, [propertyId, loadAll]);
+  }, [hasValidPropertyId, loadAll]);
 
   React.useEffect(() => {
     const currentStage = workflow?.current_stage || ops?.stage || "deal";
@@ -666,7 +693,11 @@ export default function PropertyView() {
 
   const checklistItems = checklist?.items ?? v?.checklist?.items ?? [];
 
-  const heroTitle = p?.address ? p.address : `Property ${propertyId}`;
+  const heroTitle = p?.address
+    ? p.address
+    : hasValidPropertyId
+      ? `Property ${propertyId}`
+      : "Invalid property route";
   const zillowUrl = buildZillowUrl(p?.address, p?.city, p?.state, p?.zip);
 
   const classification = normalizeDecision(

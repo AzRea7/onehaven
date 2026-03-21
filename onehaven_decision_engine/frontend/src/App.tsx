@@ -1,5 +1,5 @@
 import React from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import AppShell from "./components/AppShell";
 
 import Dashboard from "./pages/Dashboard";
@@ -25,6 +25,11 @@ import { AuthGate } from "./lib/auth";
 
 function Protected({ children }: { children: React.ReactNode }) {
   return <AuthGate>{children}</AuthGate>;
+}
+
+function LegacyPropertyRedirect() {
+  const { id } = useParams();
+  return <Navigate to={id ? `/properties/${id}` : "/properties"} replace />;
 }
 
 export default function App() {
@@ -63,9 +68,15 @@ export default function App() {
           }
         />
 
+
+
         <Route
           path="/property/:id"
-          element={<Navigate to="/properties/:id" replace />}
+          element={
+            <Protected>
+              <LegacyPropertyRedirect />
+            </Protected>
+          }
         />
 
         <Route
