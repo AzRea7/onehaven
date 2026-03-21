@@ -1,5 +1,13 @@
 import React from "react";
-import { Bot, RefreshCw, RotateCcw } from "lucide-react";
+import {
+  Bot,
+  RefreshCw,
+  RotateCcw,
+  CheckCircle2,
+  AlertTriangle,
+  Clock3,
+  Activity,
+} from "lucide-react";
 import { api } from "../lib/api";
 import Surface from "./Surface";
 import EmptyState from "./EmptyState";
@@ -18,6 +26,23 @@ function statusTone(status: string) {
   if (s === "blocked") return "oh-pill oh-pill-warn";
   if (s === "running") return "oh-pill oh-pill-accent";
   return "oh-pill";
+}
+
+function SummaryStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-semibold text-app-0">{value}</div>
+    </div>
+  );
 }
 
 export default function AgentRunsPanel({ propertyId }: { propertyId: number }) {
@@ -59,10 +84,21 @@ export default function AgentRunsPanel({ propertyId }: { propertyId: number }) {
     }
   }
 
+  const doneCount = rows.filter(
+    (r) => String(r?.status || "").toLowerCase() === "done",
+  ).length;
+  const failedCount = rows.filter((r) =>
+    ["failed", "timed_out"].includes(String(r?.status || "").toLowerCase()),
+  ).length;
+  const runningCount = rows.filter(
+    (r) => String(r?.status || "").toLowerCase() === "running",
+  ).length;
+  const latest = rows[0] || null;
+
   return (
     <Surface
       title="Recent agent runs"
-      subtitle={`Latest runs for property #${propertyId}. Retry, inspect status, and watch the little automation goblins work.`}
+      subtitle={`Latest runs for property #${propertyId}. Retry, inspect status, and keep workflow automation visible directly on the property page.`}
       actions={
         <button
           className="oh-btn oh-btn-secondary"
@@ -94,39 +130,105 @@ export default function AgentRunsPanel({ propertyId }: { propertyId: number }) {
           description="This property has not produced any recent agent runs."
         />
       ) : (
-        <div className="space-y-2">
-          {rows.map((r) => (
-            <div
-              key={r.id}
-              className="rounded-2xl border border-app bg-app-panel p-4"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="text-sm font-semibold text-app-0">
-                      {r.agent_key}
-                    </div>
-                    <span className={statusTone(r.status)}>{r.status}</span>
-                  </div>
+        <>
+          <div className="grid gap-3 md:grid-cols-4">
+            <SummaryStat label="Total runs" value={rows.length} />
+            <SummaryStat
+              label="Done"
+              value={
+                <span className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                  {doneCount}
+                </span>
+              }
+            />
+            <SummaryStat
+              label="Failed"
+              value={
+                <span className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-red-300" />
+                  {failedCount}
+                </span>
+              }
+            />
+            <SummaryStat
+              label="Running"
+              value={
+                <span className="flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-app-4" />
+                  {runningCount}
+                </span>
+              }
+            />
+          </div>
 
-                  <div className="mt-2 text-xs text-app-4 flex flex-wrap gap-x-4 gap-y-1">
-                    <span>started: {fmtDate(r.started_at)}</span>
-                    <span>finished: {fmtDate(r.finished_at)}</span>
-                  </div>
+          {latest ? (
+            <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-4">
+              <div className="text-xs text-app-4">Latest run summary</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div className="text-sm font-semibold text-app-0">
+                  {latest.agent_key || "unknown agent"}
                 </div>
-
-                <button
-                  className="oh-btn oh-btn-secondary"
-                  onClick={() => rerun(Number(r.id))}
-                  disabled={busyId === Number(r.id)}
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  {busyId === Number(r.id) ? "Working…" : "Rerun"}
-                </button>
+                <span className={statusTone(latest.status || "")}>
+                  {latest.status || "unknown"}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-4 text-xs text-app-4">
+                <span>started: {fmtDate(latest.started_at)}</span>
+                <span>finished: {fmtDate(latest.finished_at)}</span>
               </div>
             </div>
-          ))}
-        </div>
+          ) : null}
+
+          <div className="mt-4 space-y-2">
+            {rows.map((r) => (
+              <div
+                key={r.id}
+                className="rounded-2xl border border-app bg-app-panel p-4"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="text-sm font-semibold text-app-0">
+                        {r.agent_key}
+                      </div>
+                      <span className={statusTone(r.status)}>{r.status}</span>
+                    </div>
+
+                    <div className="mt-2 text-xs text-app-4 flex flex-wrap gap-x-4 gap-y-1">
+                      <span>started: {fmtDate(r.started_at)}</span>
+                      <span>finished: {fmtDate(r.finished_at)}</span>
+                      {r.created_at ? (
+                        <span>created: {fmtDate(r.created_at)}</span>
+                      ) : null}
+                    </div>
+
+                    {r.message || r.summary || r.error ? (
+                      <div className="mt-2 text-sm leading-6 text-app-3">
+                        {r.message || r.summary || r.error}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <button
+                    className="oh-btn oh-btn-secondary"
+                    onClick={() => rerun(Number(r.id))}
+                    disabled={busyId === Number(r.id)}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    {busyId === Number(r.id) ? "Working…" : "Rerun"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex items-center gap-2 text-xs text-app-4">
+            <Clock3 className="h-3.5 w-3.5" />
+            This panel absorbs the useful operational visibility that used to
+            live behind separate workflow-style drilldowns.
+          </div>
+        </>
       )}
     </Surface>
   );

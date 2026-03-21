@@ -9,6 +9,8 @@ import {
   Wrench,
   ShieldAlert,
   BadgeCheck,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { api } from "../lib/api";
 import Surface from "./Surface";
@@ -68,8 +70,10 @@ function badgeTone(v: any) {
     s === "ready" ||
     s === "high" ||
     s === "complete"
-  )
+  ) {
     return "oh-pill oh-pill-good";
+  }
+
   if (
     s === "partial" ||
     s === "medium" ||
@@ -77,8 +81,10 @@ function badgeTone(v: any) {
     s === "conditional" ||
     s === "attention" ||
     s === "in_progress"
-  )
+  ) {
     return "oh-pill oh-pill-warn";
+  }
+
   if (
     s === "low" ||
     s === "needs_review" ||
@@ -89,8 +95,10 @@ function badgeTone(v: any) {
     s === "critical_failures" ||
     s === "needs_remediation" ||
     s === "not_ready"
-  )
+  ) {
     return "oh-pill oh-pill-bad";
+  }
+
   return "oh-pill";
 }
 
@@ -109,6 +117,37 @@ function titleCase(v: any) {
   return String(v || "")
     .replace(/_/g, " ")
     .trim();
+}
+
+function FindingCard({ item, tone }: { item: any; tone: "bad" | "warn" }) {
+  const outer =
+    tone === "bad"
+      ? "rounded-2xl border border-red-500/20 bg-red-500/[0.04] px-3 py-3"
+      : "rounded-2xl border border-amber-400/20 bg-amber-500/[0.04] px-3 py-3";
+  const titleTone = tone === "bad" ? "text-red-200" : "text-amber-100";
+  const metaTone = tone === "bad" ? "text-red-200/70" : "text-amber-100/70";
+  const detailTone = tone === "bad" ? "text-red-100/85" : "text-amber-50/90";
+
+  return (
+    <div className={outer}>
+      <div className={`text-sm font-medium ${titleTone}`}>
+        {item?.label ||
+          item?.title ||
+          item?.description ||
+          item?.code ||
+          item?.key ||
+          "Untitled finding"}
+      </div>
+      <div className={`mt-1 text-xs ${metaTone}`}>
+        {(item?.category || item?.severity || "uncategorized").toString()}
+      </div>
+      {item?.suggested_fix ? (
+        <div className={`mt-2 text-sm leading-6 ${detailTone}`}>
+          {item.suggested_fix}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function PropertyCompliancePanel({
@@ -175,10 +214,10 @@ export default function PropertyCompliancePanel({
   const m = brief?.market || {};
   const coverage = brief?.coverage || {};
   const requiredActions = Array.isArray(brief?.required_actions)
-    ? brief?.required_actions
+    ? brief.required_actions
     : [];
   const blockingItems = Array.isArray(brief?.blocking_items)
-    ? brief?.blocking_items
+    ? brief.blocking_items
     : [];
 
   const readinessState = readiness?.readiness || {};
@@ -207,7 +246,7 @@ export default function PropertyCompliancePanel({
   return (
     <Surface
       title="Compliance posture"
-      subtitle="Municipal rules, inspection readiness, blockers, and remediation in one place instead of hiding the real answer behind pretty labels."
+      subtitle="Municipal rules, inspection readiness, blockers, failed items, and remediation now live directly on the property page."
       actions={
         readiness?.posture ? (
           <span className={badgeTone(readiness.posture)}>
@@ -456,7 +495,7 @@ export default function PropertyCompliancePanel({
             />
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <Field
               label="Latest inspection passed"
               value={
@@ -482,6 +521,58 @@ export default function PropertyCompliancePanel({
             <Field
               label="Critical failed items"
               value={readinessCounts?.inspection_failed_critical_items ?? "—"}
+            />
+            <Field label="Warning items" value={readinessWarningItems.length} />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field
+              label="Blocking findings"
+              value={
+                <span className="flex items-center gap-2">
+                  <XCircle className="h-4 w-4 text-red-300" />
+                  {mergedBlockingItems.length}
+                </span>
+              }
+            />
+            <Field
+              label="Required actions"
+              value={
+                <span className="flex items-center gap-2">
+                  <ClipboardX className="h-4 w-4 text-app-4" />
+                  {requiredActions.length}
+                </span>
+              }
+            />
+            <Field
+              label="Remediation actions"
+              value={
+                <span className="flex items-center gap-2">
+                  <Wrench className="h-4 w-4 text-app-4" />
+                  {
+                    (recommendedActions.length > 0
+                      ? recommendedActions
+                      : failureActions
+                    ).length
+                  }
+                </span>
+              }
+            />
+            <Field
+              label="PHA workflow"
+              value={
+                <span
+                  className={badgeTone(
+                    c.pha_specific_workflow ? "ready" : "unknown",
+                  )}
+                >
+                  {c.pha_specific_workflow == null
+                    ? "Unknown"
+                    : c.pha_specific_workflow
+                      ? "Specific"
+                      : "Standard"}
+                </span>
+              }
             />
           </div>
 
@@ -534,31 +625,11 @@ export default function PropertyCompliancePanel({
                 {mergedBlockingItems
                   .slice(0, 6)
                   .map((item: any, idx: number) => (
-                    <div
+                    <FindingCard
                       key={`${item?.rule_key || item?.code || item?.key || item?.title || idx}`}
-                      className="rounded-2xl border border-red-500/20 bg-red-500/[0.04] px-3 py-3"
-                    >
-                      <div className="text-sm font-medium text-red-200">
-                        {item?.label ||
-                          item?.title ||
-                          item?.description ||
-                          item?.code ||
-                          item?.key ||
-                          "Untitled blocker"}
-                      </div>
-                      <div className="mt-1 text-xs text-red-200/70">
-                        {(
-                          item?.category ||
-                          item?.severity ||
-                          "uncategorized"
-                        ).toString()}
-                      </div>
-                      {item?.suggested_fix ? (
-                        <div className="mt-2 text-sm leading-6 text-red-100/85">
-                          {item.suggested_fix}
-                        </div>
-                      ) : null}
-                    </div>
+                      item={item}
+                      tone="bad"
+                    />
                   ))}
               </div>
             </div>
@@ -575,31 +646,11 @@ export default function PropertyCompliancePanel({
                 {readinessWarningItems
                   .slice(0, 4)
                   .map((item: any, idx: number) => (
-                    <div
+                    <FindingCard
                       key={`${item?.rule_key || item?.code || item?.key || item?.title || idx}`}
-                      className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.04] px-3 py-3"
-                    >
-                      <div className="text-sm font-medium text-amber-100">
-                        {item?.label ||
-                          item?.title ||
-                          item?.description ||
-                          item?.code ||
-                          item?.key ||
-                          "Untitled warning"}
-                      </div>
-                      <div className="mt-1 text-xs text-amber-100/70">
-                        {(
-                          item?.category ||
-                          item?.severity ||
-                          "uncategorized"
-                        ).toString()}
-                      </div>
-                      {item?.suggested_fix ? (
-                        <div className="mt-2 text-sm leading-6 text-amber-50/90">
-                          {item.suggested_fix}
-                        </div>
-                      ) : null}
-                    </div>
+                      item={item}
+                      tone="warn"
+                    />
                   ))}
               </div>
             </div>
@@ -693,17 +744,37 @@ export default function PropertyCompliancePanel({
             </div>
           </div>
 
-          {m?.pha_name ? (
-            <div className="flex items-center gap-2 text-xs text-app-4">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              PHA: {m.pha_name}
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                What survives from the old compliance drilldown
+              </div>
+              <div className="mt-2 text-sm leading-6 text-app-3">
+                Inspection readiness, blocking findings, warning findings,
+                required actions, remediation actions, and jurisdiction quality
+                all now live directly on the property page.
+              </div>
             </div>
-          ) : (
-            <div className="flex items-center gap-2 text-xs text-app-4">
-              <TriangleAlert className="h-3.5 w-3.5" />
-              No specific PHA override shown in this brief
+
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+              {m?.pha_name ? (
+                <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                  <ShieldCheck className="h-4 w-4 text-app-4" />
+                  PHA: {m.pha_name}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                  <TriangleAlert className="h-4 w-4 text-app-4" />
+                  No specific PHA override shown in this brief
+                </div>
+              )}
+              <div className="mt-2 text-sm leading-6 text-app-3">
+                This panel is now the single operating view for compliance
+                readiness instead of a separate page.
+              </div>
             </div>
-          )}
+          </div>
         </div>
       )}
     </Surface>

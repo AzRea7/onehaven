@@ -1,5 +1,16 @@
 import React from "react";
-import { ArrowRight, CheckCircle2, Lock, AlertTriangle } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Lock,
+  AlertTriangle,
+  Activity,
+  ShieldCheck,
+  Wrench,
+  UserRound,
+  Wallet,
+  Home,
+} from "lucide-react";
 import Surface from "./Surface";
 
 const ORDER = [
@@ -117,6 +128,33 @@ function getStageSpecificWarning(stage: string, workflow?: any) {
   return null;
 }
 
+function iconForStage(stage: string) {
+  const s = normalizeStage(stage);
+  if (s === "deal") return <Home className="h-4 w-4 text-app-4" />;
+  if (s === "rehab") return <Wrench className="h-4 w-4 text-app-4" />;
+  if (s === "compliance") return <ShieldCheck className="h-4 w-4 text-app-4" />;
+  if (s === "tenant") return <UserRound className="h-4 w-4 text-app-4" />;
+  if (s === "lease") return <Activity className="h-4 w-4 text-app-4" />;
+  return <Wallet className="h-4 w-4 text-app-4" />;
+}
+
+function SummaryStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-semibold text-app-0">{value}</div>
+    </div>
+  );
+}
+
 export default function StageProgress({
   workflow,
   currentStage,
@@ -148,6 +186,9 @@ export default function StageProgress({
     gate?.allowed_next_stage || gate?.allowed_next_stage_label || "rehab",
   );
 
+  const completedCount = idx;
+  const remainingCount = ORDER.length - idx - 1;
+
   return (
     <Surface
       title="Workflow progress"
@@ -165,7 +206,29 @@ export default function StageProgress({
         ) : null
       }
     >
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-4">
+        <SummaryStat label="Current" value={normalizedCurrentLabel} />
+        <SummaryStat label="Completed" value={completedCount} />
+        <SummaryStat label="Remaining" value={remainingCount} />
+        <SummaryStat
+          label="Gate"
+          value={
+            gate ? (
+              <span
+                className={
+                  gate?.ok ? "oh-pill oh-pill-good" : "oh-pill oh-pill-warn"
+                }
+              >
+                {gate?.ok ? "Ready" : "Blocked"}
+              </span>
+            ) : (
+              "—"
+            )
+          }
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {ORDER.map((stage, i) => {
           const done = i < idx;
           const active = i === idx;
@@ -196,8 +259,11 @@ export default function StageProgress({
                 ) : null}
               </div>
 
-              <div className="mt-2 text-sm font-semibold text-app-0">
-                {labelize(stage)}
+              <div className="mt-2 flex items-center gap-2">
+                {iconForStage(stage)}
+                <div className="text-sm font-semibold text-app-0">
+                  {labelize(stage)}
+                </div>
               </div>
 
               <div className="mt-2 text-xs leading-relaxed text-app-4">

@@ -11,11 +11,6 @@ import Constitution from "./pages/Constitution";
 import DealIntake from "./pages/DealIntake";
 import Jurisdictions from "./pages/Jurisdictions";
 import JurisdictionProfiles from "./pages/JurisdictionProfiles";
-import PipelineDrilldown from "./pages/drilldowns/PipelineDrilldown";
-import ComplianceDrilldown from "./pages/drilldowns/ComplianceDrilldown";
-import RehabDrilldown from "./pages/drilldowns/RehabDrilldown";
-import CashflowDrilldown from "./pages/drilldowns/CashflowDrilldown";
-import EquityDrilldown from "./pages/drilldowns/EquityDrilldown";
 import ImportsPage from "./pages/ImportsPage";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -30,6 +25,26 @@ function Protected({ children }: { children: React.ReactNode }) {
 function LegacyPropertyRedirect() {
   const { id } = useParams();
   return <Navigate to={id ? `/properties/${id}` : "/properties"} replace />;
+}
+
+function LegacyPipelineRedirect() {
+  return <Navigate to="/dashboard" replace />;
+}
+
+function LegacyComplianceRedirect() {
+  return <Navigate to="/dashboard" replace />;
+}
+
+function LegacyRehabRedirect() {
+  return <Navigate to="/dashboard" replace />;
+}
+
+function LegacyCashflowRedirect() {
+  return <Navigate to="/dashboard" replace />;
+}
+
+function LegacyEquityRedirect() {
+  return <Navigate to="/dashboard" replace />;
 }
 
 export default function App() {
@@ -67,8 +82,6 @@ export default function App() {
             </Protected>
           }
         />
-
-
 
         <Route
           path="/property/:id"
@@ -128,7 +141,7 @@ export default function App() {
           path="/pipeline"
           element={
             <Protected>
-              <PipelineDrilldown />
+              <LegacyPipelineRedirect />
             </Protected>
           }
         />
@@ -137,7 +150,7 @@ export default function App() {
           path="/drilldowns/compliance"
           element={
             <Protected>
-              <ComplianceDrilldown />
+              <LegacyComplianceRedirect />
             </Protected>
           }
         />
@@ -146,7 +159,7 @@ export default function App() {
           path="/drilldowns/rehab"
           element={
             <Protected>
-              <RehabDrilldown />
+              <LegacyRehabRedirect />
             </Protected>
           }
         />
@@ -155,7 +168,7 @@ export default function App() {
           path="/drilldowns/cashflow"
           element={
             <Protected>
-              <CashflowDrilldown />
+              <LegacyCashflowRedirect />
             </Protected>
           }
         />
@@ -164,7 +177,7 @@ export default function App() {
           path="/drilldowns/equity"
           element={
             <Protected>
-              <EquityDrilldown />
+              <LegacyEquityRedirect />
             </Protected>
           }
         />

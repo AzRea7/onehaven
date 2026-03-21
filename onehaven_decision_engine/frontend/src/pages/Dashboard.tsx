@@ -10,6 +10,10 @@ import {
   Wallet,
   Home,
   RefreshCcw,
+  AlertTriangle,
+  LocateFixed,
+  Activity,
+  BadgeDollarSign,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import PageHero from "../components/PageHero";
@@ -84,6 +88,23 @@ function num(v?: number | null, digits = 2) {
   return n.toFixed(digits);
 }
 
+function resolvePropertyId(row: any): number | null {
+  const candidates = [
+    row?.id,
+    row?.property_id,
+    row?.property?.id,
+    row?.propertyId,
+    row?.property?.property_id,
+  ];
+
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  return null;
+}
+
 function GraphBars({
   items,
   emptyLabel,
@@ -136,22 +157,6 @@ function GraphBars({
       })}
     </div>
   );
-}
-function resolvePropertyId(row: any): number | null {
-  const candidates = [
-    row?.id,
-    row?.property_id,
-    row?.property?.id,
-    row?.propertyId,
-    row?.property?.property_id,
-  ];
-
-  for (const value of candidates) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
-  return null;
 }
 
 function Leaderboard({
@@ -269,6 +274,26 @@ function SectionCard({
   );
 }
 
+function StatTile({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: React.ReactNode;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-3xl border border-app bg-app-panel p-5">
+      <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
+        {icon}
+        {label}
+      </div>
+      <div className="mt-2 text-3xl font-semibold text-app-0">{value}</div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [data, setData] = React.useState<RollupPayload | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
@@ -296,6 +321,23 @@ export default function Dashboard() {
   const kpis = data?.kpis || {};
   const counts = data?.counts || {};
   const totalHomes = Number(kpis.total_homes || 0);
+  const decisionMix = Array.isArray(data?.series?.decision_mix)
+    ? data?.series?.decision_mix
+    : [];
+  const workflowMix = Array.isArray(data?.series?.workflow_mix)
+    ? data?.series?.workflow_mix
+    : [];
+  const complianceAttention = Array.isArray(
+    data?.leaderboards?.compliance_attention,
+  )
+    ? data!.leaderboards!.compliance_attention!
+    : [];
+
+  const stageValue = (key: string) =>
+    Number(workflowMix.find((x) => x.key === key)?.count || 0);
+
+  const verifiedWorkflowCount =
+    stageValue("cash_equity") + stageValue("management") + stageValue("lease");
 
   return (
     <PageShell>
@@ -303,7 +345,7 @@ export default function Dashboard() {
         <PageHero
           eyebrow="OneHaven"
           title="Investment dashboard"
-          subtitle="A cleaner investor view focused on pipeline movement, portfolio performance, and the fastest path from acquisition to tenant-occupied cashflow."
+          subtitle="The dashboard now acts as the portfolio command surface: decisions, workflow stages, cashflow, equity, compliance attention, and risk concentration all live here instead of behind drilldown pages."
           right={
             <div className="absolute inset-0 flex items-center justify-center overflow-visible pointer-events-auto">
               <div className="h-[220px] w-[220px] translate-y-[-8px] opacity-95 md:h-[250px] md:w-[250px]">
@@ -337,7 +379,7 @@ export default function Dashboard() {
 
         <Surface
           title="Portfolio snapshot"
-          subtitle="High-signal metrics first so the dashboard feels like a control plane instead of a pile of modules."
+          subtitle="High-signal rollups first so the dashboard stays portfolio-first and absorbs the old drilldown summaries."
         >
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
             <KpiCard
@@ -385,7 +427,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
           <Surface
             title="Decision mix"
-            subtitle="The simplified three-way classification for investors."
+            subtitle="The simplified three-way classification for investors now lives directly on the dashboard."
             actions={
               <Link to="/properties" className="oh-btn oh-btn-secondary">
                 Review inventory
@@ -393,7 +435,7 @@ export default function Dashboard() {
             }
           >
             <GraphBars
-              items={data?.series?.decision_mix}
+              items={decisionMix}
               emptyLabel={
                 loading ? "Loading decisions…" : "No decision data yet."
               }
@@ -402,10 +444,10 @@ export default function Dashboard() {
 
           <Surface
             title="Workflow stages"
-            subtitle="Properties grouped by the real business workflow."
+            subtitle="Properties grouped by the real business workflow instead of a separate pipeline drilldown."
           >
             <GraphBars
-              items={data?.series?.workflow_mix}
+              items={workflowMix}
               emptyLabel={
                 loading ? "Loading workflow…" : "No workflow data yet."
               }
@@ -422,68 +464,66 @@ export default function Dashboard() {
               title="Deal / Procurement"
               subtitle="Source, ingest, classify, and decide"
               icon={<BriefcaseBusiness className="h-5 w-5" />}
-              value={Number(
-                data?.series?.workflow_mix?.find((x) => x.key === "deal")
-                  ?.count || 0,
-              )}
+              value={stageValue("deal")}
             />
             <SectionCard
               title="Rehab"
               subtitle="Scope, tasks, budget, execution"
               icon={<Hammer className="h-5 w-5" />}
-              value={Number(
-                data?.series?.workflow_mix?.find((x) => x.key === "rehab")
-                  ?.count || 0,
-              )}
+              value={stageValue("rehab")}
               tone="warn"
             />
             <SectionCard
               title="Compliance"
               subtitle="Inspection, licensing, readiness"
               icon={<ClipboardCheck className="h-5 w-5" />}
-              value={Number(
-                data?.series?.workflow_mix?.find((x) => x.key === "compliance")
-                  ?.count || 0,
-              )}
+              value={stageValue("compliance")}
               tone="warn"
             />
             <SectionCard
               title="Tenant"
               subtitle="Placement and voucher readiness"
               icon={<Users className="h-5 w-5" />}
-              value={Number(
-                data?.series?.workflow_mix?.find((x) => x.key === "tenant")
-                  ?.count || 0,
-              )}
+              value={stageValue("tenant")}
             />
             <SectionCard
               title="Lease / Management"
               subtitle="Occupancy activation and operations"
               icon={<PieChart className="h-5 w-5" />}
-              value={
-                Number(
-                  data?.series?.workflow_mix?.find((x) => x.key === "lease")
-                    ?.count || 0,
-                ) +
-                Number(
-                  data?.series?.workflow_mix?.find(
-                    (x) => x.key === "management",
-                  )?.count || 0,
-                )
-              }
+              value={stageValue("lease") + stageValue("management")}
             />
             <SectionCard
               title="Cashflow / Equity"
               subtitle="Income and long-term value"
               icon={<Wallet className="h-5 w-5" />}
-              value={Number(
-                data?.series?.workflow_mix?.find((x) => x.key === "cash_equity")
-                  ?.count || 0,
-              )}
+              value={stageValue("cash_equity")}
               tone="good"
             />
           </div>
         </Surface>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+          <StatTile
+            label="Compliance attention"
+            value={complianceAttention.length}
+            icon={<AlertTriangle className="h-3.5 w-3.5" />}
+          />
+          <StatTile
+            label="Red-zone flags"
+            value={Number(kpis.red_zone_count || 0)}
+            icon={<ShieldCheck className="h-3.5 w-3.5" />}
+          />
+          <StatTile
+            label="Active leases"
+            value={Number(kpis.active_leases || 0)}
+            icon={<Activity className="h-3.5 w-3.5" />}
+          />
+          <StatTile
+            label="Lease / cash-ready"
+            value={verifiedWorkflowCount}
+            icon={<LocateFixed className="h-3.5 w-3.5" />}
+          />
+        </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <Surface
@@ -535,6 +575,31 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <Surface
+            title="Compliance attention queue"
+            subtitle="Properties needing compliance review now surface directly on the dashboard instead of a separate compliance drilldown."
+            actions={
+              <Link to="/properties" className="oh-btn oh-btn-secondary">
+                Open properties
+              </Link>
+            }
+          >
+            <Leaderboard
+              rows={data?.leaderboards?.compliance_attention}
+              metricLabel="attention"
+              metricGetter={(row) =>
+                row?.issue_count != null
+                  ? `${row.issue_count} issues`
+                  : row?.status || row?.readiness || "review"
+              }
+              emptyLabel={
+                loading
+                  ? "Loading compliance queue…"
+                  : "No compliance attention rows yet."
+              }
+            />
+          </Surface>
+
+          <Surface
             title="Cash trend"
             subtitle="Monthly net trend for the current portfolio slice."
           >
@@ -546,7 +611,9 @@ export default function Dashboard() {
               }
             />
           </Surface>
+        </div>
 
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <Surface
             title="County concentration"
             subtitle="Where current inventory is clustering."
@@ -558,46 +625,55 @@ export default function Dashboard() {
               }
             />
           </Surface>
-        </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-          <div className="rounded-3xl border border-app bg-app-panel p-5">
-            <div className="text-[11px] uppercase tracking-widest text-app-4">
-              Active leases
-            </div>
-            <div className="mt-2 text-3xl font-semibold text-app-0">
-              {Number(kpis.active_leases || 0)}
-            </div>
-          </div>
+          <Surface
+            title="Portfolio operating quality"
+            subtitle="These metrics absorb the useful trust/cash/equity signal summaries that used to be spread across separate pages."
+          >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="rounded-3xl border border-app bg-app-panel p-5">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
+                  <BadgeDollarSign className="h-3.5 w-3.5" />
+                  Avg DSCR
+                </div>
+                <div className="mt-2 text-3xl font-semibold text-app-0">
+                  {num(kpis.avg_dscr)}
+                </div>
+              </div>
 
-          <div className="rounded-3xl border border-app bg-app-panel p-5">
-            <div className="text-[11px] uppercase tracking-widest text-app-4">
-              Avg DSCR
-            </div>
-            <div className="mt-2 text-3xl font-semibold text-app-0">
-              {num(kpis.avg_dscr)}
-            </div>
-          </div>
+              <div className="rounded-3xl border border-app bg-app-panel p-5">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
+                  <Wallet className="h-3.5 w-3.5" />
+                  Avg cashflow est.
+                </div>
+                <div className="mt-2 text-3xl font-semibold text-app-0">
+                  {money(kpis.avg_cashflow_estimate)}
+                </div>
+              </div>
 
-          <div className="rounded-3xl border border-app bg-app-panel p-5">
-            <div className="text-[11px] uppercase tracking-widest text-app-4">
-              Avg cashflow est.
-            </div>
-            <div className="mt-2 text-3xl font-semibold text-app-0">
-              {money(kpis.avg_cashflow_estimate)}
-            </div>
-          </div>
+              <div className="rounded-3xl border border-app bg-app-panel p-5">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Avg crime score
+                </div>
+                <div className="mt-2 text-3xl font-semibold text-app-0">
+                  {kpis.avg_crime_score != null
+                    ? num(kpis.avg_crime_score, 1)
+                    : "—"}
+                </div>
+              </div>
 
-          <div className="rounded-3xl border border-app bg-app-panel p-5">
-            <div className="text-[11px] uppercase tracking-widest text-app-4">
-              Avg crime score
+              <div className="rounded-3xl border border-app bg-app-panel p-5">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
+                  <Landmark className="h-3.5 w-3.5" />
+                  Total value
+                </div>
+                <div className="mt-2 text-3xl font-semibold text-app-0">
+                  {money(kpis.total_estimated_value)}
+                </div>
+              </div>
             </div>
-            <div className="mt-2 text-3xl font-semibold text-app-0">
-              {kpis.avg_crime_score != null
-                ? num(kpis.avg_crime_score, 1)
-                : "—"}
-            </div>
-          </div>
+          </Surface>
         </div>
       </div>
     </PageShell>

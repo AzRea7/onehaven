@@ -270,7 +270,7 @@ type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
 type FinancingFilter = "ALL" | "CASH" | "DSCR";
 type LocationFilter = "ALL" | "VERIFIED" | "PARTIAL" | "MISSING";
 
-export default function Properties() {
+export default function Property() {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -367,9 +367,13 @@ export default function Properties() {
   }, [rows, deferredQ, decision, financing, locationFilter]);
 
   const counts = React.useMemo(() => {
-    const c = { GOOD_DEAL: 0, REVIEW: 0, REJECT: 0 };
+    const c: Record<"GOOD_DEAL" | "REVIEW" | "REJECT", number> = {
+      GOOD_DEAL: 0,
+      REVIEW: 0,
+      REJECT: 0,
+    };
     for (const r of rows || []) {
-      const d = inferDecision(r);
+      const d = inferDecision(r) as "GOOD_DEAL" | "REVIEW" | "REJECT";
       c[d] += 1;
     }
     return c;

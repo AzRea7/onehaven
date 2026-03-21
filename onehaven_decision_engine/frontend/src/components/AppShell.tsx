@@ -144,48 +144,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       />
                     </div>
                   </div>
-
-                  <div className="oh-sidebar-section">
-                    <div className="oh-sidebar-heading">Drilldowns</div>
-                    <div className="oh-sidebar-links">
-                      <SideLink
-                        to="/pipeline"
-                        icon={<GitBranch className="h-4 w-4" />}
-                        label="Pipeline"
-                        small
-                      />
-                      <SideLink
-                        to="/drilldowns/trust"
-                        icon={<ShieldCheck className="h-4 w-4" />}
-                        label="Trust"
-                        small
-                      />
-                      <SideLink
-                        to="/drilldowns/compliance"
-                        icon={<FileCheck2 className="h-4 w-4" />}
-                        label="Compliance"
-                        small
-                      />
-                      <SideLink
-                        to="/drilldowns/rehab"
-                        icon={<Hammer className="h-4 w-4" />}
-                        label="Rehab"
-                        small
-                      />
-                      <SideLink
-                        to="/drilldowns/cashflow"
-                        icon={<BarChart3 className="h-4 w-4" />}
-                        label="Cashflow"
-                        small
-                      />
-                      <SideLink
-                        to="/drilldowns/equity"
-                        icon={<Landmark className="h-4 w-4" />}
-                        label="Equity"
-                        small
-                      />
-                    </div>
-                  </div>
                 </div>
               </div>
 
