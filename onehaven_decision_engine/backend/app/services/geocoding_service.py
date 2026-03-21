@@ -1,4 +1,3 @@
-# backend/app/services/geocoding_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -80,7 +79,17 @@ class GeocodingService:
         self.cache_service = cache_service or GeocodeCacheService(db)
         self.google_client = google_client or GoogleGeocodeClient()
         self.nominatim_client = nominatim_client or NominatimClient()
-        self.provider_order = provider_order or list(settings.geocode_provider_order_list)
+
+        # 🔥 SAFE SETTINGS ACCESS (FIX)
+        default_order = ["google", "nominatim"]
+
+        try:
+            cfg = getattr(settings, "geocode_provider_order_list", default_order)
+            if isinstance(cfg, str):
+                cfg = [p.strip() for p in cfg.split(",") if p.strip()]
+            self.provider_order = provider_order or list(cfg)
+        except Exception:
+            self.provider_order = provider_order or default_order
 
     def geocode(
         self,
@@ -93,22 +102,25 @@ class GeocodingService:
         allow_fallback_providers: bool | None = None,
         min_confidence: float | None = None,
     ) -> GeocodingResult | None:
+
         normalized = normalize_full_address(address, city, state, postal_code)
         if not normalized.full_address:
             return None
 
         raw_input_address = ", ".join([p for p in [address, city, state, postal_code] if p])
 
-        allow_fallback = (
-            settings.geocode_allow_fallback_providers
-            if allow_fallback_providers is None
-            else bool(allow_fallback_providers)
-        )
-        confidence_threshold = (
-            float(settings.geocode_min_confidence) if min_confidence is None else float(min_confidence)
-        )
+        # 🔥 SAFE SETTINGS ACCESS
+        allow_fallback = getattr(settings, "geocode_allow_fallback_providers", True)
+        confidence_threshold = float(getattr(settings, "geocode_min_confidence", 0.0))
+
+        if allow_fallback_providers is not None:
+            allow_fallback = bool(allow_fallback_providers)
+
+        if min_confidence is not None:
+            confidence_threshold = float(min_confidence)
 
         cache_entry = self.cache_service.get_by_normalized_address(normalized.full_address)
+
         if not force_refresh and cache_entry is not None and not self.cache_service.is_expired(cache_entry):
             self.cache_service.touch_hit(cache_entry)
             return GeocodingResult(
@@ -132,14 +144,17 @@ class GeocodingService:
         provider_names = self._resolve_provider_names()
         best_result: GeocodingResult | None = None
 
-        for index, provider_name in enumerate(provider_names):
+        for provider_name in provider_names:
             provider = self._get_provider(provider_name)
             if provider is None or not provider.is_enabled:
                 continue
 
-            provider_result = self._safe_provider_geocode(provider, normalized.full_address)
-            if provider_result is None:
-                continue
+            try:
+                provider_result = provider.geocode(normalized.full_address)
+            except Exception:
+                if getattr(settings, "geocode_fail_open", True):
+                    continue
+                raise
 
             mapped = self._map_provider_result(
                 normalized_address=normalized.full_address,
@@ -147,92 +162,45 @@ class GeocodingService:
                 provider_result=provider_result,
             )
 
-            if mapped is None:
+            if not mapped:
                 continue
 
             if mapped.is_success:
                 self.cache_service.upsert(mapped.to_cache_payload())
+
                 if (mapped.confidence or 0.0) >= confidence_threshold:
                     return mapped
+
                 best_result = self._prefer_result(best_result, mapped)
 
                 if not allow_fallback:
                     return mapped
-                continue
-
-            if best_result is None:
-                best_result = mapped
-
-            if not allow_fallback:
-                break
-
-        if best_result is not None and best_result.is_success:
-            self.cache_service.upsert(best_result.to_cache_payload())
 
         return best_result
-
-    def refresh_property_location(
-        self,
-        *,
-        property_obj: Any,
-        force_refresh: bool = False,
-    ) -> GeocodingResult | None:
-        result = self.geocode(
-            address=getattr(property_obj, "address", None),
-            city=getattr(property_obj, "city", None),
-            state=getattr(property_obj, "state", None),
-            postal_code=getattr(property_obj, "zip", None),
-            force_refresh=force_refresh,
-        )
-        if result is None:
-            return None
-
-        setattr(property_obj, "normalized_address", result.normalized_address)
-        setattr(property_obj, "lat", result.lat)
-        setattr(property_obj, "lng", result.lng)
-        setattr(property_obj, "county", result.county or getattr(property_obj, "county", None))
-        setattr(property_obj, "geocode_source", result.source)
-        setattr(property_obj, "geocode_confidence", result.confidence)
-        setattr(property_obj, "geocode_last_refreshed", datetime.utcnow())
-
-        self.db.add(property_obj)
-        self.db.commit()
-        self.db.refresh(property_obj)
-
-        return result
 
     def _resolve_provider_names(self) -> list[str]:
         ordered: list[str] = []
         for name in self.provider_order:
-            normalized = (name or "").strip().lower()
-            if normalized and normalized not in ordered:
-                ordered.append(normalized)
+            n = (name or "").strip().lower()
+            if n and n not in ordered:
+                ordered.append(n)
         return ordered or ["nominatim"]
 
     def _get_provider(self, provider_name: str) -> GeocodeProvider | None:
-        name = (provider_name or "").strip().lower()
-        if name == "google":
-            setattr(self.google_client, "source", "google")
+        if provider_name == "google":
+            self.google_client.source = "google"
             return self.google_client
-        if name == "nominatim":
-            setattr(self.nominatim_client, "source", "nominatim")
+        if provider_name == "nominatim":
+            self.nominatim_client.source = "nominatim"
             return self.nominatim_client
         return None
-
-    def _safe_provider_geocode(self, provider: GeocodeProvider, full_address: str) -> Any | None:
-        try:
-            return provider.geocode(full_address)
-        except Exception:
-            if settings.geocode_fail_open:
-                return None
-            raise
 
     def _map_provider_result(
         self,
         *,
         normalized_address: str,
         raw_input_address: str,
-        provider_result: GoogleGeocodeResult | NominatimGeocodeResult | Any,
+        provider_result: Any,
     ) -> GeocodingResult | None:
         if provider_result is None:
             return None
@@ -256,23 +224,12 @@ class GeocodingService:
         )
 
     @staticmethod
-    def _prefer_result(
-        current: GeocodingResult | None,
-        candidate: GeocodingResult | None,
-    ) -> GeocodingResult | None:
-        if candidate is None:
+    def _prefer_result(current, candidate):
+        if not candidate:
             return current
-        if current is None:
+        if not current:
             return candidate
-
-        current_score = float(current.confidence or 0.0)
-        candidate_score = float(candidate.confidence or 0.0)
-
-        if candidate.is_success and not current.is_success:
-            return candidate
-        if current.is_success and not candidate.is_success:
-            return current
-        if candidate_score > current_score:
+        if (candidate.confidence or 0) > (current.confidence or 0):
             return candidate
         return current
 

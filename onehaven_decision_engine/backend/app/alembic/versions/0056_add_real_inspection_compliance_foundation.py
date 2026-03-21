@@ -156,6 +156,91 @@ def upgrade() -> None:
         )
 
     # ------------------------------------------------------------------
+    # inspection_items
+    # IMPORTANT: this must run before inspections backfill because the
+    # inspections aggregation query reads ii.result_status.
+    # ------------------------------------------------------------------
+    if _has_table("inspection_items"):
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("category", sa.String(length=80), nullable=True),
+        )
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("result_status", sa.String(length=32), nullable=False, server_default="pending"),
+        )
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("fail_reason", sa.String(length=255), nullable=True),
+        )
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("remediation_guidance", sa.Text(), nullable=True),
+        )
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("evidence_json", sa.Text(), nullable=False, server_default="[]"),
+        )
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("photo_references_json", sa.Text(), nullable=False, server_default="[]"),
+        )
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("standard_label", sa.String(length=255), nullable=True),
+        )
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("standard_citation", sa.String(length=255), nullable=True),
+        )
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("readiness_impact", sa.Float(), nullable=False, server_default="0.0"),
+        )
+        _add_column_if_missing(
+            "inspection_items",
+            sa.Column("requires_reinspection", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        )
+
+        bind.execute(
+            text(
+                """
+                UPDATE inspection_items
+                SET result_status = CASE
+                        WHEN COALESCE(failed, true) THEN 'fail'
+                        ELSE 'pass'
+                    END,
+                    evidence_json = COALESCE(evidence_json, '[]'),
+                    photo_references_json = COALESCE(photo_references_json, '[]'),
+                    readiness_impact = CASE
+                        WHEN COALESCE(failed, true) AND COALESCE(severity, 0) >= 4 THEN 25.0
+                        WHEN COALESCE(failed, true) AND COALESCE(severity, 0) = 3 THEN 15.0
+                        WHEN COALESCE(failed, true) AND COALESCE(severity, 0) = 2 THEN 8.0
+                        WHEN COALESCE(failed, true) AND COALESCE(severity, 0) = 1 THEN 4.0
+                        ELSE 0.0
+                    END,
+                    requires_reinspection = COALESCE(failed, true)
+                """
+            )
+        )
+
+        with op.batch_alter_table("inspection_items") as batch:
+            batch.alter_column("result_status", server_default=None)
+            batch.alter_column("evidence_json", server_default=None)
+            batch.alter_column("photo_references_json", server_default=None)
+            batch.alter_column("readiness_impact", server_default=None)
+            batch.alter_column("requires_reinspection", server_default=None)
+
+        _create_index_if_missing("ix_inspection_items_result_status", "inspection_items", ["result_status"])
+        _create_index_if_missing(
+            "ix_inspection_items_inspection_result_status",
+            "inspection_items",
+            ["inspection_id", "result_status"],
+        )
+        _create_index_if_missing("ix_inspection_items_category", "inspection_items", ["category"])
+        _create_index_if_missing("ix_inspection_items_requires_reinspection", "inspection_items", ["requires_reinspection"])
+
+    # ------------------------------------------------------------------
     # inspections
     # ------------------------------------------------------------------
     if _has_table("inspections"):
@@ -362,89 +447,6 @@ def upgrade() -> None:
             "inspections",
             ["property_id", "template_version"],
         )
-
-    # ------------------------------------------------------------------
-    # inspection_items
-    # ------------------------------------------------------------------
-    if _has_table("inspection_items"):
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("category", sa.String(length=80), nullable=True),
-        )
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("result_status", sa.String(length=32), nullable=False, server_default="pending"),
-        )
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("fail_reason", sa.String(length=255), nullable=True),
-        )
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("remediation_guidance", sa.Text(), nullable=True),
-        )
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("evidence_json", sa.Text(), nullable=False, server_default="[]"),
-        )
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("photo_references_json", sa.Text(), nullable=False, server_default="[]"),
-        )
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("standard_label", sa.String(length=255), nullable=True),
-        )
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("standard_citation", sa.String(length=255), nullable=True),
-        )
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("readiness_impact", sa.Float(), nullable=False, server_default="0.0"),
-        )
-        _add_column_if_missing(
-            "inspection_items",
-            sa.Column("requires_reinspection", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-        )
-
-        bind.execute(
-            text(
-                """
-                UPDATE inspection_items
-                SET result_status = CASE
-                        WHEN COALESCE(failed, true) THEN 'fail'
-                        ELSE 'pass'
-                    END,
-                    evidence_json = COALESCE(evidence_json, '[]'),
-                    photo_references_json = COALESCE(photo_references_json, '[]'),
-                    readiness_impact = CASE
-                        WHEN COALESCE(failed, true) AND COALESCE(severity, 0) >= 4 THEN 25.0
-                        WHEN COALESCE(failed, true) AND COALESCE(severity, 0) = 3 THEN 15.0
-                        WHEN COALESCE(failed, true) AND COALESCE(severity, 0) = 2 THEN 8.0
-                        WHEN COALESCE(failed, true) AND COALESCE(severity, 0) = 1 THEN 4.0
-                        ELSE 0.0
-                    END,
-                    requires_reinspection = COALESCE(failed, true)
-                """
-            )
-        )
-
-        with op.batch_alter_table("inspection_items") as batch:
-            batch.alter_column("result_status", server_default=None)
-            batch.alter_column("evidence_json", server_default=None)
-            batch.alter_column("photo_references_json", server_default=None)
-            batch.alter_column("readiness_impact", server_default=None)
-            batch.alter_column("requires_reinspection", server_default=None)
-
-        _create_index_if_missing("ix_inspection_items_result_status", "inspection_items", ["result_status"])
-        _create_index_if_missing(
-            "ix_inspection_items_inspection_result_status",
-            "inspection_items",
-            ["inspection_id", "result_status"],
-        )
-        _create_index_if_missing("ix_inspection_items_category", "inspection_items", ["category"])
-        _create_index_if_missing("ix_inspection_items_requires_reinspection", "inspection_items", ["requires_reinspection"])
 
 
 def downgrade() -> None:

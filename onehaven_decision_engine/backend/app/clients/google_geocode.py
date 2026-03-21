@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
-
-import requests
+from typing import Any
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+import json
 
 from ..config import settings
 
@@ -31,14 +32,20 @@ class GoogleGeocodeClient:
         api_key: str | None = None,
         base_url: str | None = None,
         timeout_seconds: int | None = None,
-        session: requests.Session | None = None,
+        user_agent: str | None = None,
     ) -> None:
-        self.api_key = api_key if api_key is not None else settings.google_geocode_api_key
-        self.base_url = base_url if base_url is not None else settings.google_geocode_base_url
-        self.timeout_seconds = (
-            int(timeout_seconds) if timeout_seconds is not None else int(settings.geocode_timeout_seconds)
+        self.api_key = api_key if api_key is not None else getattr(settings, "google_geocode_api_key", None)
+        self.base_url = (
+            base_url
+            if base_url is not None
+            else getattr(settings, "google_geocode_base_url", "https://maps.googleapis.com/maps/api/geocode/json")
         )
-        self.session = session or requests.Session()
+        self.timeout_seconds = int(
+            timeout_seconds
+            if timeout_seconds is not None
+            else getattr(settings, "geocode_timeout_seconds", 10)
+        )
+        self.user_agent = user_agent or "OneHaven-Geocoder/1.0"
 
     @property
     def is_enabled(self) -> bool:
@@ -50,16 +57,26 @@ class GoogleGeocodeClient:
         if not address or not address.strip():
             return None
 
-        response = self.session.get(
-            self.base_url,
-            params={
+        query = urlencode(
+            {
                 "address": address,
                 "key": self.api_key,
-            },
-            timeout=self.timeout_seconds,
+            }
         )
-        response.raise_for_status()
-        payload = response.json()
+        url = f"{self.base_url}?{query}"
+
+        request = Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": self.user_agent,
+            },
+            method="GET",
+        )
+
+        with urlopen(request, timeout=self.timeout_seconds) as response:
+            raw_body = response.read().decode("utf-8")
+            payload = json.loads(raw_body)
 
         return self.parse_response(payload)
 
@@ -85,7 +102,7 @@ class GoogleGeocodeClient:
         best = results[0]
         geometry = best.get("geometry") or {}
         location = geometry.get("location") or {}
-        location_type = (geometry.get("location_type") or "").strip()
+        location_type = str(geometry.get("location_type") or "").strip()
 
         city = None
         state = None
@@ -143,4 +160,3 @@ class GoogleGeocodeClient:
             return float(value)
         except Exception:
             return None
-        

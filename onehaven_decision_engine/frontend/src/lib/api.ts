@@ -307,6 +307,15 @@ function qs(params: Record<string, any>) {
   return s ? `?${s}` : "";
 }
 
+function isValidId(value: any): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function normalizeOptionalId(value: any): number | undefined {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 function makeEventSource(pathWithQuery: string): EventSource {
   const auth = getAuth();
 
@@ -1179,11 +1188,11 @@ export const api = {
     let signal: AbortSignal | undefined;
 
     if (typeof a === "number") {
-      property_id = a;
+      property_id = normalizeOptionalId(a);
       signal = b;
       limit = 200;
     } else if (a && typeof a === "object") {
-      property_id = a.property_id;
+      property_id = normalizeOptionalId(a.property_id);
       limit = a.limit ?? 200;
       signal = a.signal;
     } else {
@@ -1234,13 +1243,14 @@ export const api = {
   ) => {
     const params =
       typeof arg === "number"
-        ? { property_id: arg, limit: 100 }
+        ? { property_id: normalizeOptionalId(arg), limit: 100 }
         : {
-            property_id: arg?.property_id,
+            property_id: normalizeOptionalId(arg?.property_id),
             agent_key: arg?.agent_key,
             status: arg?.status,
             limit: arg?.limit ?? 100,
           };
+
     return requestArray<any>(`/agent-runs/${qs(params)}`, {
       cacheTtlMs: 800,
       signal,
@@ -1677,11 +1687,16 @@ export const api = {
       { method: "GET", cacheTtlMs: 0 },
     ),
 
-  complianceInspectionReadiness: (propertyId: number, signal?: AbortSignal) =>
-    request(`/compliance/property/${propertyId}/inspection-readiness`, {
+  complianceInspectionReadiness: (propertyId: number, signal?: AbortSignal) => {
+    const id = normalizeOptionalId(propertyId);
+    if (!id) {
+      return Promise.reject(new Error("Invalid property id."));
+    }
+    return request(`/compliance/property/${id}/inspection-readiness`, {
       method: "GET",
       signal,
-    }),
+    });
+  },
 
   runComplianceAutomation: (
     propertyId: number,
@@ -1696,11 +1711,16 @@ export const api = {
       },
     ),
 
-  compliancePropertyBrief: (propertyId: number, signal?: AbortSignal) =>
-    request(`/compliance/property/${propertyId}/brief`, {
+  compliancePropertyBrief: (propertyId: number, signal?: AbortSignal) => {
+    const id = normalizeOptionalId(propertyId);
+    if (!id) {
+      return Promise.reject(new Error("Invalid property id."));
+    }
+    return request(`/compliance/property/${id}/brief`, {
       method: "GET",
       signal,
-    }),
+    });
+  },
 
   complianceStatus: (propertyId: number, signal?: AbortSignal) =>
     request(`/compliance/status/${propertyId}`, {
@@ -1958,13 +1978,20 @@ export const api = {
     }),
 
   property(propertyId: number | string) {
-    return this.get(`/properties/${propertyId}`);
+    const id = normalizeOptionalId(propertyId);
+    if (!id) {
+      return Promise.reject(new Error("Invalid property id."));
+    }
+    return this.get(`/properties/${id}`);
   },
 
   propertyWorkflow(propertyId: number | string) {
-    return this.get(`/workflow/property/${propertyId}`);
+    const id = normalizeOptionalId(propertyId);
+    if (!id) {
+      return Promise.reject(new Error("Invalid property id."));
+    }
+    return this.get(`/workflow/property/${id}`);
   },
-
   complianceAutomationRun(
     propertyId: number | string,
     createTasks: boolean = true,

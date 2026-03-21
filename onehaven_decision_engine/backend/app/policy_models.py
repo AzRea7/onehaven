@@ -250,7 +250,9 @@ class PolicySource(Base):
     extracted_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # ---- Step 17 jurisdiction finalize foundation ----
+    # add this
+    is_authoritative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     normalized_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     freshness_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
     freshness_reason: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
@@ -258,7 +260,6 @@ class PolicySource(Base):
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     effective_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    # -----------------------------------------------
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-
-import requests
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+import json
 
 from ..config import settings
 
@@ -32,15 +33,16 @@ class NominatimClient:
         user_agent: str | None = None,
         email: str | None = None,
         timeout_seconds: int | None = None,
-        session: requests.Session | None = None,
     ) -> None:
-        self.base_url = (base_url if base_url is not None else settings.nominatim_base_url).rstrip("/")
-        self.user_agent = user_agent if user_agent is not None else settings.nominatim_user_agent
-        self.email = email if email is not None else settings.nominatim_email
-        self.timeout_seconds = (
-            int(timeout_seconds) if timeout_seconds is not None else int(settings.geocode_timeout_seconds)
+        self.base_url = (
+            (base_url if base_url is not None else getattr(settings, "nominatim_base_url", "https://nominatim.openstreetmap.org"))
+            .rstrip("/")
         )
-        self.session = session or requests.Session()
+        self.user_agent = user_agent or getattr(settings, "nominatim_user_agent", "OneHaven-Geocoder/1.0")
+        self.email = email if email is not None else getattr(settings, "nominatim_email", None)
+        self.timeout_seconds = int(
+            timeout_seconds if timeout_seconds is not None else getattr(settings, "geocode_timeout_seconds", 10)
+        )
 
     @property
     def is_enabled(self) -> bool:
@@ -57,22 +59,27 @@ class NominatimClient:
             "format": "jsonv2",
             "addressdetails": 1,
             "limit": 1,
-            "countrycodes": settings.geocode_default_country_code.lower(),
+            "countrycodes": str(getattr(settings, "geocode_default_country_code", "us")).lower(),
         }
+
         if self.email:
             params["email"] = self.email
 
-        response = self.session.get(
-            f"{self.base_url}/search",
-            params=params,
+        query = urlencode(params)
+        url = f"{self.base_url}/search?{query}"
+
+        request = Request(
+            url,
             headers={
                 "User-Agent": self.user_agent,
                 "Accept": "application/json",
             },
-            timeout=self.timeout_seconds,
+            method="GET",
         )
-        response.raise_for_status()
-        payload = response.json()
+
+        with urlopen(request, timeout=self.timeout_seconds) as response:
+            raw_body = response.read().decode("utf-8")
+            payload = json.loads(raw_body)
 
         return self.parse_response(payload)
 

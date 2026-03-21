@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   ClipboardList,
   RefreshCcw,
-  Building2,
   Wrench,
   FileCheck2,
 } from "lucide-react";
@@ -19,11 +18,6 @@ import EmptyState from "../components/EmptyState";
 import InspectionReadiness from "../components/InspectionReadiness";
 import PropertyCompliancePanel from "../components/PropertyCompliancePanel";
 import NextActionsPanel from "../components/NextActionsPanel";
-
-function money(v: any) {
-  if (v == null || Number.isNaN(Number(v))) return "—";
-  return `$${Math.round(Number(v)).toLocaleString()}`;
-}
 
 function titleCase(v: any) {
   return String(v || "")
@@ -54,8 +48,10 @@ function pillTone(v: any) {
 }
 
 export default function PropertyPage() {
-  const { propertyId } = useParams();
-  const id = Number(propertyId);
+  const { id: routeId, propertyId: legacyPropertyId } = useParams();
+  const rawId = routeId ?? legacyPropertyId;
+  const propertyId = Number(rawId);
+  const hasValidPropertyId = Number.isFinite(propertyId) && propertyId > 0;
 
   const [property, setProperty] = React.useState<any>(null);
   const [workflow, setWorkflow] = React.useState<any>(null);
@@ -67,50 +63,70 @@ export default function PropertyPage() {
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
-    if (!id || Number.isNaN(id)) return;
+    if (!hasValidPropertyId) {
+      setProperty(null);
+      setWorkflow(null);
+      setComplianceBrief(null);
+      setInspectionReadiness(null);
+      setError("Invalid property id.");
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);
       setError(null);
 
       const results = await Promise.allSettled([
-        api.property(id),
-        api.propertyWorkflow(id),
-        api.compliancePropertyBrief(id),
-        api.complianceInspectionReadiness(id),
+        api.property(propertyId),
+        api.propertyWorkflow(propertyId),
+        api.compliancePropertyBrief(propertyId),
+        api.complianceInspectionReadiness(propertyId),
       ]);
 
       const [propertyRes, workflowRes, briefRes, readinessRes] = results;
 
-      if (propertyRes.status === "fulfilled")
-        setProperty(propertyRes.value || null);
-      if (workflowRes.status === "fulfilled")
-        setWorkflow(workflowRes.value || null);
-      if (briefRes.status === "fulfilled")
-        setComplianceBrief(briefRes.value || null);
-      if (readinessRes.status === "fulfilled")
-        setInspectionReadiness(readinessRes.value || null);
+      setProperty(
+        propertyRes.status === "fulfilled" ? (propertyRes.value ?? null) : null,
+      );
+      setWorkflow(
+        workflowRes.status === "fulfilled" ? (workflowRes.value ?? null) : null,
+      );
+      setComplianceBrief(
+        briefRes.status === "fulfilled" ? (briefRes.value ?? null) : null,
+      );
+      setInspectionReadiness(
+        readinessRes.status === "fulfilled"
+          ? (readinessRes.value ?? null)
+          : null,
+      );
 
       const failedAll = results.every((r) => r.status === "rejected");
       if (failedAll) {
-        throw new Error("Could not load property page data.");
+        const reasons = results
+          .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+          .map((r) =>
+            String(r.reason?.message || r.reason || "Request failed"),
+          );
+        throw new Error(reasons.join(" | "));
       }
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [hasValidPropertyId, propertyId]);
 
   React.useEffect(() => {
     load();
   }, [load]);
 
   async function runComplianceAutomation() {
-    if (!id || Number.isNaN(id)) return;
+    if (!hasValidPropertyId) return;
+
     try {
       setAutomationBusy(true);
-      await api.complianceAutomationRun(id, true);
+      await api.complianceAutomationRun(propertyId, true);
       await load();
     } catch (e: any) {
       setError(String(e?.message || e));
@@ -126,6 +142,7 @@ export default function PropertyPage() {
   const readinessMeta = readinessSummary?.readiness || {};
   const completionMeta = readinessSummary?.completion || {};
   const workflowSummary = workflow || {};
+
   const nextActions = Array.isArray(workflowSummary?.next_actions)
     ? workflowSummary.next_actions
     : Array.isArray(workflowSummary?.outstanding_tasks?.next_actions)
@@ -144,7 +161,9 @@ export default function PropertyPage() {
       <div className="space-y-6">
         <PageHero
           eyebrow="Property workflow"
-          title={p?.address || `Property #${id || "—"}`}
+          title={
+            p?.address || `Property #${hasValidPropertyId ? propertyId : "—"}`
+          }
           subtitle="Inspection-grade compliance, workflow gates, and real remediation visibility for this property."
           actions={
             <>
@@ -154,7 +173,7 @@ export default function PropertyPage() {
               </button>
               <button
                 onClick={runComplianceAutomation}
-                disabled={automationBusy}
+                disabled={automationBusy || !hasValidPropertyId}
                 className="oh-btn oh-btn-primary"
               >
                 <ShieldCheck className="h-4 w-4" />
@@ -178,8 +197,16 @@ export default function PropertyPage() {
           </div>
         ) : !property && !inspectionReadiness ? (
           <EmptyState
-            title="Property not found"
-            description="This property could not be loaded."
+            title={
+              hasValidPropertyId
+                ? "Property not found"
+                : "Invalid property route"
+            }
+            description={
+              hasValidPropertyId
+                ? "This property could not be loaded."
+                : "The URL does not contain a valid property id."
+            }
           />
         ) : (
           <>
@@ -285,7 +312,7 @@ export default function PropertyPage() {
 
                 <PropertyCompliancePanel
                   property={{
-                    id,
+                    id: propertyId,
                     state: p?.state,
                     county: p?.county,
                     city: p?.city,
@@ -383,33 +410,6 @@ export default function PropertyPage() {
                           </div>
                         )}
                       </div>
-
-                      {Array.isArray(workflowSummary?.next_actions) &&
-                      workflowSummary.next_actions.length > 0 ? (
-                        <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-                          <div className="text-sm font-semibold text-app-0">
-                            Workflow next actions
-                          </div>
-                          <div className="mt-3 space-y-2">
-                            {workflowSummary.next_actions
-                              .slice(0, 8)
-                              .map((item: any, idx: number) => (
-                                <div
-                                  key={`${String(item)}-${idx}`}
-                                  className="rounded-2xl border border-app bg-app-muted px-3 py-3 text-sm text-app-3"
-                                >
-                                  {typeof item === "string"
-                                    ? item
-                                    : item?.title ||
-                                      item?.label ||
-                                      item?.description ||
-                                      item?.code ||
-                                      "Untitled action"}
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      ) : null}
                     </div>
                   )}
                 </Surface>
