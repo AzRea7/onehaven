@@ -44,6 +44,10 @@ def build_workflow_summary(
 
     jurisdiction = constraints.get("jurisdiction") or {}
     jurisdiction_tasks = outstanding_tasks.get("jurisdiction_tasks") or []
+    readiness = constraints.get("readiness") or {}
+    completion = constraints.get("completion") or {}
+    inspection = constraints.get("inspection") or {}
+    inspection_failure_actions = outstanding_tasks.get("inspection_failure_actions") or []
 
     rows: list[dict[str, Any]] = []
     completed_lookup = {
@@ -86,6 +90,13 @@ def build_workflow_summary(
             row["jurisdiction_completeness_status"] = jurisdiction.get("completeness_status")
             row["jurisdiction_is_stale"] = jurisdiction.get("is_stale")
             row["jurisdiction_missing_categories"] = jurisdiction.get("missing_categories") or []
+            row["inspection_readiness_status"] = readiness.get("status")
+            row["inspection_result_status"] = readiness.get("result_status")
+            row["inspection_posture"] = completion.get("posture")
+            row["latest_inspection_passed"] = completion.get("latest_inspection_passed")
+            row["compliance_failed_count"] = completion.get("failed_count")
+            row["compliance_blocked_count"] = completion.get("blocked_count")
+            row["open_failed_items"] = inspection.get("open_failed_items")
 
         rows.append(row)
 
@@ -138,6 +149,24 @@ def build_workflow_summary(
             "is_stale": jurisdiction.get("is_stale"),
             "stale_reason": jurisdiction.get("stale_reason"),
             "tasks": jurisdiction_tasks,
+        },
+        "compliance": {
+            "inspection_readiness_status": readiness.get("status"),
+            "inspection_result_status": readiness.get("result_status"),
+            "hqs_ready": readiness.get("hqs_ready"),
+            "local_ready": readiness.get("local_ready"),
+            "voucher_ready": readiness.get("voucher_ready"),
+            "lease_up_ready": readiness.get("lease_up_ready"),
+            "is_compliant": completion.get("is_compliant"),
+            "completion_pct": completion.get("completion_pct"),
+            "completion_projection_pct": completion.get("completion_projection_pct"),
+            "posture": completion.get("posture"),
+            "latest_inspection_passed": completion.get("latest_inspection_passed"),
+            "failed_count": completion.get("failed_count"),
+            "blocked_count": completion.get("blocked_count"),
+            "latest_readiness_score": completion.get("latest_readiness_score"),
+            "open_failed_items": inspection.get("open_failed_items"),
+            "failure_actions": inspection_failure_actions,
         },
         "stage_completion_summary": stage_completion_summary,
         "stages": rows,

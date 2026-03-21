@@ -125,13 +125,25 @@ class JurisdictionProfile(Base):
 
 class HqsRule(Base):
     __tablename__ = "hqs_rules"
-    __table_args__ = (UniqueConstraint("code", name="uq_hqs_rules_code"),)
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_hqs_rules_code"),
+        Index("ix_hqs_rules_template_key", "template_key"),
+        Index("ix_hqs_rules_template_version", "template_version"),
+        Index("ix_hqs_rules_template_key_version", "template_key", "template_version"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(40), nullable=False)
     severity: Mapped[str] = mapped_column(String(20), nullable=False, default="fail")
     description: Mapped[str] = mapped_column(String(260), nullable=False)
+
+    # ---- Step 18 real inspection compliance foundation ----
+    template_key: Mapped[str] = mapped_column(String(80), nullable=False, default="hqs")
+    template_version: Mapped[str] = mapped_column(String(40), nullable=False, default="hqs_v1")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # ------------------------------------------------------
 
     evidence_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     remediation_hints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -143,6 +155,9 @@ class HqsAddendumRule(Base):
     __tablename__ = "hqs_addendum_rules"
     __table_args__ = (
         UniqueConstraint("jurisdiction_profile_id", "code", name="uq_hqs_addendum_jp_code"),
+        Index("ix_hqs_addendum_template_key", "template_key"),
+        Index("ix_hqs_addendum_template_version", "template_version"),
+        Index("ix_hqs_addendum_template_key_version", "template_key", "template_version"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -164,6 +179,14 @@ class HqsAddendumRule(Base):
     category: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     severity: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(String(260), nullable=True)
+
+    # ---- Step 18 real inspection compliance foundation ----
+    template_key: Mapped[str] = mapped_column(String(80), nullable=False, default="hqs")
+    template_version: Mapped[str] = mapped_column(String(40), nullable=False, default="hqs_v1")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # ------------------------------------------------------
+
     evidence_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     remediation_hints_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

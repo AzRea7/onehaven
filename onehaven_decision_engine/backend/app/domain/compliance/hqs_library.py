@@ -1,4 +1,3 @@
-# backend/app/domain/compliance/hqs_library.py
 from __future__ import annotations
 
 from typing import Any
@@ -9,160 +8,51 @@ from sqlalchemy.orm import Session
 from app.models import Property
 from app.policy_models import HqsAddendum, HqsRule
 
+from .inspection_rules import criteria_as_dicts, normalize_rule_code, normalize_severity
+
 
 def _baseline_hqs_items() -> list[dict[str, Any]]:
-    return [
-        {
-            "code": "SMOKE_DETECTORS",
-            "description": "Working smoke detectors installed in required locations",
-            "category": "safety",
-            "severity": "fail",
-            "suggested_fix": "Install or replace smoke detectors and verify operation.",
-        },
-        {
-            "code": "CO_DETECTORS",
-            "description": "Carbon monoxide detectors installed where required",
-            "category": "safety",
-            "severity": "fail",
-            "suggested_fix": "Install CO detectors near sleeping areas and fuel-burning appliances where required.",
-        },
-        {
-            "code": "EGRESS",
-            "description": "Bedrooms and habitable areas have safe legal egress",
-            "category": "egress",
-            "severity": "fail",
-            "suggested_fix": "Repair blocked windows/doors and ensure emergency escape is functional.",
-        },
-        {
-            "code": "WINDOWS_LOCKS",
-            "description": "Windows are intact, weather-tight, and lockable",
-            "category": "egress",
-            "severity": "fail",
-            "suggested_fix": "Repair or replace damaged windows, glazing, or locks.",
-        },
-        {
-            "code": "DOORS_SECURE",
-            "description": "Exterior doors are secure and operable",
-            "category": "security",
-            "severity": "fail",
-            "suggested_fix": "Repair jambs, locks, weatherstripping, and door hardware.",
-        },
-        {
-            "code": "HANDRAILS",
-            "description": "Required stair handrails are secure",
-            "category": "safety",
-            "severity": "fail",
-            "suggested_fix": "Install or repair handrails and verify they are firmly anchored.",
-        },
-        {
-            "code": "HEAT",
-            "description": "Permanent heat source is present and operational",
-            "category": "hvac",
-            "severity": "fail",
-            "suggested_fix": "Repair furnace/boiler/electric heat and verify thermostat control.",
-        },
-        {
-            "code": "HOT_WATER",
-            "description": "Safe hot water is available",
-            "category": "plumbing",
-            "severity": "fail",
-            "suggested_fix": "Repair water heater, leaks, or venting issues.",
-        },
-        {
-            "code": "PLUMBING_LEAKS",
-            "description": "No active plumbing leaks or unsafe moisture conditions",
-            "category": "plumbing",
-            "severity": "fail",
-            "suggested_fix": "Repair leaks and replace damaged materials.",
-        },
-        {
-            "code": "TOILET_SINK_TUB",
-            "description": "Required bathroom fixtures are present and operable",
-            "category": "plumbing",
-            "severity": "fail",
-            "suggested_fix": "Repair or replace nonfunctional bathroom fixtures.",
-        },
-        {
-            "code": "KITCHEN_WORKING",
-            "description": "Kitchen has operable sink, prep area, and safe utility service",
-            "category": "interior",
-            "severity": "fail",
-            "suggested_fix": "Restore sink, cabinets, counters, and utility connections as needed.",
-        },
-        {
-            "code": "GFCI_KITCHEN",
-            "description": "Kitchen counter outlets have GFCI protection where required",
-            "category": "electrical",
-            "severity": "fail",
-            "suggested_fix": "Install GFCI receptacles or breaker protection in kitchen wet areas.",
-        },
-        {
-            "code": "GFCI_BATH",
-            "description": "Bathroom outlets have GFCI protection where required",
-            "category": "electrical",
-            "severity": "fail",
-            "suggested_fix": "Install GFCI receptacles or breaker protection in bathrooms.",
-        },
-        {
-            "code": "ELECT_PANEL",
-            "description": "Electrical panel and wiring are safe with no exposed live parts",
-            "category": "electrical",
-            "severity": "fail",
-            "suggested_fix": "Install blanks/covers and correct unsafe wiring conditions.",
-        },
-        {
-            "code": "OUTLETS_LIGHTS",
-            "description": "Required outlets, switches, and lighting are operable and safe",
-            "category": "electrical",
-            "severity": "fail",
-            "suggested_fix": "Repair dead outlets, switches, fixtures, and unsafe splices.",
-        },
-        {
-            "code": "LEAKS_ROOF",
-            "description": "No active roof leaks or significant water intrusion",
-            "category": "exterior",
-            "severity": "fail",
-            "suggested_fix": "Repair roof, flashing, gutters, and replace damaged finishes.",
-        },
-        {
-            "code": "FOUNDATION_STRUCTURAL",
-            "description": "No obvious structural instability or dangerous settlement",
-            "category": "structure",
-            "severity": "fail",
-            "suggested_fix": "Repair structural defects and obtain contractor/engineer evaluation if needed.",
-        },
-        {
-            "code": "PEELING_PAINT",
-            "description": "No hazardous deteriorated paint where prohibited",
-            "category": "lead",
-            "severity": "warn",
-            "suggested_fix": "Stabilize peeling paint and follow lead-safe work practices.",
-        },
-        {
-            "code": "TRIP_HAZARDS",
-            "description": "No dangerous trip/fall hazards in walking paths and stairs",
-            "category": "safety",
-            "severity": "fail",
-            "suggested_fix": "Repair broken flooring, loose treads, and uneven transitions.",
-        },
-        {
-            "code": "PESTS",
-            "description": "No severe infestation or unsanitary pest conditions",
-            "category": "sanitation",
-            "severity": "warn",
-            "suggested_fix": "Treat infestation and seal entry points.",
-        },
-    ]
+    """
+    Full baseline catalog derived from the uploaded HUD-52580-A inspection form.
+    """
+    return criteria_as_dicts()
 
 
 def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
-    code = str(item.get("code") or item.get("rule_key") or "").strip().upper()
+    code = normalize_rule_code(item.get("code") or item.get("rule_key") or "")
+    description = str(item.get("description") or item.get("label") or code.replace("_", " ").title()).strip()
+    category = str(item.get("category") or "other").strip().lower() or "other"
+    severity = normalize_severity(item.get("severity") or "fail")
+    suggested_fix = str(item.get("suggested_fix")).strip() if item.get("suggested_fix") else None
+    standard_label = str(item.get("standard_label")).strip() if item.get("standard_label") else None
+    standard_citation = str(item.get("standard_citation")).strip() if item.get("standard_citation") else None
+    fail_reason_hint = str(item.get("fail_reason_hint")).strip() if item.get("fail_reason_hint") else None
+    common_fail = bool(item.get("common_fail", True))
+    template_key = str(item.get("template_key") or "hud_52580a").strip() or "hud_52580a"
+    template_version = str(item.get("template_version") or "hud_52580a_2019").strip() or "hud_52580a_2019"
+    sort_order = int(item.get("sort_order", 0) or 0)
+    section = str(item.get("section") or "").strip().lower() or None
+    item_number = str(item.get("item_number") or "").strip() or None
+    room_scope = str(item.get("room_scope") or "").strip().lower() or None
+    not_applicable_allowed = bool(item.get("not_applicable_allowed", False))
+
     return {
         "code": code,
-        "description": str(item.get("description") or item.get("label") or code.replace("_", " ").title()).strip(),
-        "category": str(item.get("category") or "other").strip().lower(),
-        "severity": str(item.get("severity") or "fail").strip().lower(),
-        "suggested_fix": (str(item.get("suggested_fix")).strip() if item.get("suggested_fix") else None),
+        "description": description,
+        "category": category,
+        "severity": severity,
+        "suggested_fix": suggested_fix,
+        "fail_reason_hint": fail_reason_hint,
+        "standard_label": standard_label,
+        "standard_citation": standard_citation,
+        "common_fail": common_fail,
+        "template_key": template_key,
+        "template_version": template_version,
+        "sort_order": sort_order,
+        "section": section,
+        "item_number": item_number,
+        "room_scope": room_scope,
+        "not_applicable_allowed": not_applicable_allowed,
         "source": item.get("source"),
     }
 
@@ -195,8 +85,6 @@ def _profile_hqs_items(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
         return []
 
     out: list[dict[str, Any]] = []
-
-    # Accept either name because reality is messy and schemas drift like raccoons in an attic.
     raw_items = (
         policy.get("hqs_addenda")
         or policy.get("hqs_overrides")
@@ -208,7 +96,7 @@ def _profile_hqs_items(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
         for raw in raw_items:
             if not isinstance(raw, dict):
                 continue
-            code = str(raw.get("code") or raw.get("rule_key") or "").strip().upper()
+            code = normalize_rule_code(raw.get("code") or raw.get("rule_key") or "")
             if not code:
                 continue
             out.append(
@@ -219,10 +107,18 @@ def _profile_hqs_items(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
                         "category": raw.get("category") or "jurisdiction",
                         "severity": raw.get("severity") or "fail",
                         "suggested_fix": raw.get("suggested_fix") or raw.get("fix"),
-                        "source": {
-                            "type": "jurisdiction_policy",
-                            "name": "profile_hqs_item",
-                        },
+                        "fail_reason_hint": raw.get("fail_reason_hint") or raw.get("reason_hint"),
+                        "standard_label": raw.get("standard_label"),
+                        "standard_citation": raw.get("standard_citation"),
+                        "template_key": raw.get("template_key") or "hud_52580a",
+                        "template_version": raw.get("template_version") or "hud_52580a_2019",
+                        "sort_order": raw.get("sort_order") or 10_000,
+                        "section": raw.get("section"),
+                        "item_number": raw.get("item_number"),
+                        "room_scope": raw.get("room_scope"),
+                        "not_applicable_allowed": raw.get("not_applicable_allowed", False),
+                        "common_fail": raw.get("common_fail", True),
+                        "source": {"type": "jurisdiction_policy", "name": "profile_hqs_item"},
                     }
                 )
             )
@@ -238,28 +134,15 @@ def _profile_hqs_items(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
                         "category": "jurisdiction",
                         "severity": "fail",
                         "suggested_fix": "Prepare the unit for local rental inspection and complete jurisdiction-specific inspection steps.",
+                        "fail_reason_hint": "Local inspection readiness requirement not satisfied.",
+                        "standard_label": "Local inspection requirement",
+                        "standard_citation": "Local jurisdiction policy",
+                        "template_key": "hud_52580a",
+                        "template_version": "hud_52580a_2019",
+                        "sort_order": 20_000,
+                        "section": "jurisdiction_overlay",
+                        "item_number": "J.1",
                         "source": {"type": "jurisdiction_policy", "name": "inspection_required"},
-                    }
-                )
-            )
-        if str(compliance.get("certificate_required_before_occupancy") or "").strip().lower() in {
-            "yes",
-            "true",
-            "required",
-            "1",
-        }:
-            out.append(
-                _normalize_item(
-                    {
-                        "code": "LOCAL_CERTIFICATE_BEFORE_OCCUPANCY",
-                        "description": "Certificate or compliance approval is required before occupancy",
-                        "category": "jurisdiction",
-                        "severity": "fail",
-                        "suggested_fix": "Obtain the required municipal certificate or occupancy/compliance approval before move-in.",
-                        "source": {
-                            "type": "jurisdiction_policy",
-                            "name": "certificate_required_before_occupancy",
-                        },
                     }
                 )
             )
@@ -275,12 +158,42 @@ def _contextual_items(prop: Property, profile_summary: dict[str, Any]) -> list[d
         out.append(
             _normalize_item(
                 {
-                    "code": "LEAD_SAFE_SURFACES",
-                    "description": "Pre-1978 property should be checked for deteriorated paint / lead-safe compliance",
+                    "code": "PRE_1978_LEAD_RISK_SCREEN",
+                    "description": "Pre-1978 property should be screened carefully for deteriorated paint / lead-safe compliance triggers",
                     "category": "lead",
                     "severity": "warn",
-                    "suggested_fix": "Verify lead-safe workflow, stabilization, and required disclosures/certifications.",
+                    "suggested_fix": "Verify lead-safe workflow, stabilization, clearance rules, and required owner certification where applicable.",
+                    "fail_reason_hint": "Potential pre-1978 lead-risk condition requires verification.",
+                    "standard_label": "Pre-1978 lead risk screen",
+                    "standard_citation": "HUD lead-based paint applicability",
+                    "template_key": "hud_52580a",
+                    "template_version": "hud_52580a_2019",
+                    "sort_order": 30_000,
+                    "section": "contextual",
+                    "item_number": "C.1",
                     "source": {"type": "contextual_rule", "reason": "pre_1978"},
+                }
+            )
+        )
+
+    if getattr(prop, "property_type", "") == "manufactured_home":
+        out.append(
+            _normalize_item(
+                {
+                    "code": "BUILDING_EXTERIOR_MANUFACTURED_HOMES_TIE_DOWNS",
+                    "description": "Manufactured home tie-down / anchoring should be verified",
+                    "category": "structure",
+                    "severity": "critical",
+                    "suggested_fix": "Inspect and repair manufactured-home anchoring, tie-downs, and ground attachment.",
+                    "fail_reason_hint": "Manufactured home anchoring may be unsafe or missing.",
+                    "standard_label": "Manufactured home tie-downs",
+                    "standard_citation": "HUD-52580-A 6.7",
+                    "template_key": "hud_52580a",
+                    "template_version": "hud_52580a_2019",
+                    "sort_order": 30_100,
+                    "section": "building_exterior",
+                    "item_number": "6.7",
+                    "source": {"type": "contextual_rule", "reason": "manufactured_home"},
                 }
             )
         )
@@ -297,6 +210,14 @@ def _contextual_items(prop: Property, profile_summary: dict[str, Any]) -> list[d
                         "category": "documents",
                         "severity": "warn",
                         "suggested_fix": "Prepare valid local agent or responsible party information required by the jurisdiction.",
+                        "fail_reason_hint": "Local agent / responsible party documentation missing.",
+                        "standard_label": "Local agent documentation",
+                        "standard_citation": "Local jurisdiction policy",
+                        "template_key": "hud_52580a",
+                        "template_version": "hud_52580a_2019",
+                        "sort_order": 30_200,
+                        "section": "contextual",
+                        "item_number": "C.2",
                         "source": {"type": "contextual_rule", "reason": "local_agent_required"},
                     }
                 )
@@ -313,32 +234,33 @@ def get_effective_hqs_items(
     profile_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Effective HQS set:
-      1) internal baseline
+    Effective inspection rule set:
+      1) full HUD-52580-A baseline
       2) HqsRule policy table overrides/extensions
       3) HqsAddendum policy table overrides/extensions
-      4) jurisdiction profile HQS/policy adds
+      4) jurisdiction profile adds
       5) contextual property adds
     """
     profile_summary = profile_summary or {}
+    baseline_items = _baseline_hqs_items()
 
     items: dict[str, dict[str, Any]] = {
         row["code"]: _normalize_item(
             {
                 **row,
-                "source": {"type": "baseline_internal", "name": "OneHaven HQS baseline"},
+                "source": {"type": "baseline_internal", "name": "HUD-52580-A full baseline"},
             }
         )
-        for row in _baseline_hqs_items()
+        for row in baseline_items
     }
 
     sources: list[dict[str, Any]] = [
-        {"type": "baseline_internal", "name": "OneHaven HQS baseline", "count": len(items)}
+        {"type": "baseline_internal", "name": "HUD-52580-A full baseline", "count": len(items)}
     ]
 
     rule_rows = _load_hqs_rule_rows(db)
     for row in rule_rows:
-        code = str(getattr(row, "code", "") or "").strip().upper()
+        code = normalize_rule_code(getattr(row, "code", "") or "")
         if not code:
             continue
         prior = items.get(code, {})
@@ -348,7 +270,22 @@ def get_effective_hqs_items(
                 "description": getattr(row, "description", None) or prior.get("description") or code.replace("_", " ").title(),
                 "category": getattr(row, "category", None) or prior.get("category") or "other",
                 "severity": getattr(row, "severity", None) or prior.get("severity") or "fail",
-                "suggested_fix": getattr(row, "suggested_fix", None) or prior.get("suggested_fix"),
+                "suggested_fix": getattr(row, "suggested_fix", None)
+                or getattr(row, "remediation_guidance", None)
+                or prior.get("suggested_fix"),
+                "fail_reason_hint": getattr(row, "fail_reason_hint", None) or prior.get("fail_reason_hint"),
+                "standard_label": getattr(row, "standard_label", None) or prior.get("standard_label"),
+                "standard_citation": getattr(row, "standard_citation", None) or prior.get("standard_citation"),
+                "template_key": getattr(row, "template_key", None) or prior.get("template_key") or "hud_52580a",
+                "template_version": getattr(row, "template_version", None) or prior.get("template_version") or "hud_52580a_2019",
+                "sort_order": getattr(row, "sort_order", None) or prior.get("sort_order") or 40_000,
+                "section": getattr(row, "section", None) or prior.get("section"),
+                "item_number": getattr(row, "item_number", None) or prior.get("item_number"),
+                "room_scope": getattr(row, "room_scope", None) or prior.get("room_scope"),
+                "not_applicable_allowed": getattr(row, "not_applicable_allowed", None)
+                if getattr(row, "not_applicable_allowed", None) is not None
+                else prior.get("not_applicable_allowed", False),
+                "common_fail": prior.get("common_fail", True),
                 "source": {"type": "policy_table", "table": "HqsRule"},
             }
         )
@@ -357,7 +294,7 @@ def get_effective_hqs_items(
 
     addenda = _load_hqs_addendum_rows(db, org_id=org_id)
     for row in addenda:
-        code = str(getattr(row, "code", "") or "").strip().upper()
+        code = normalize_rule_code(getattr(row, "code", "") or "")
         if not code:
             continue
         prior = items.get(code, {})
@@ -367,7 +304,22 @@ def get_effective_hqs_items(
                 "description": getattr(row, "description", None) or prior.get("description") or code.replace("_", " ").title(),
                 "category": getattr(row, "category", None) or prior.get("category") or "other",
                 "severity": getattr(row, "severity", None) or prior.get("severity") or "fail",
-                "suggested_fix": getattr(row, "suggested_fix", None) or prior.get("suggested_fix"),
+                "suggested_fix": getattr(row, "suggested_fix", None)
+                or getattr(row, "remediation_guidance", None)
+                or prior.get("suggested_fix"),
+                "fail_reason_hint": getattr(row, "fail_reason_hint", None) or prior.get("fail_reason_hint"),
+                "standard_label": getattr(row, "standard_label", None) or prior.get("standard_label"),
+                "standard_citation": getattr(row, "standard_citation", None) or prior.get("standard_citation"),
+                "template_key": getattr(row, "template_key", None) or prior.get("template_key") or "hud_52580a",
+                "template_version": getattr(row, "template_version", None) or prior.get("template_version") or "hud_52580a_2019",
+                "sort_order": getattr(row, "sort_order", None) or prior.get("sort_order") or 50_000,
+                "section": getattr(row, "section", None) or prior.get("section"),
+                "item_number": getattr(row, "item_number", None) or prior.get("item_number"),
+                "room_scope": getattr(row, "room_scope", None) or prior.get("room_scope"),
+                "not_applicable_allowed": getattr(row, "not_applicable_allowed", None)
+                if getattr(row, "not_applicable_allowed", None) is not None
+                else prior.get("not_applicable_allowed", False),
+                "common_fail": prior.get("common_fail", True),
                 "source": {"type": "policy_table", "table": "HqsAddendum"},
             }
         )
@@ -386,12 +338,25 @@ def get_effective_hqs_items(
     if ctx_items:
         sources.append({"type": "contextual_rules", "count": len(ctx_items)})
 
+    ordered = sorted(
+        items.values(),
+        key=lambda x: (
+            str(x.get("template_key") or "hud_52580a"),
+            str(x.get("template_version") or "hud_52580a_2019"),
+            str(x.get("section") or ""),
+            str(x.get("item_number") or ""),
+            int(x.get("sort_order", 0) or 0),
+            str(x.get("category") or ""),
+            str(x.get("code") or ""),
+        ),
+    )
+
     return {
-        "items": sorted(items.values(), key=lambda x: (x["category"], x["code"])),
+        "items": ordered,
         "sources": sources,
         "counts": {
             "total": len(items),
-            "baseline": len(_baseline_hqs_items()),
+            "baseline": len(baseline_items),
             "profile_items": len(profile_items),
             "contextual_items": len(ctx_items),
         },

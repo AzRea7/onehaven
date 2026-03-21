@@ -17,6 +17,19 @@ from ..models import (
     RehabTask,
     WorkflowEvent,
 )
+from ..services.inspection_failure_task_service import (
+    build_failure_next_actions,
+    create_failure_tasks_from_inspection,
+)
+from ..services.inspection_readiness_service import (
+    build_property_readiness_summary,
+    compute_property_readiness_score,
+)
+from ..services.inspection_template_service import (
+    apply_raw_inspection_payload,
+    build_inspection_template,
+    ensure_template_backed_checklist,
+)
 from ..services.jurisdiction_profile_service import resolve_operational_policy
 from ..services.policy_projection_service import build_property_compliance_brief
 
@@ -136,7 +149,7 @@ def _status_from_checklist(
         return STATUS_PASS, notes
 
     if completed is False or status_norm in {"fail", "failed", "open", "blocked"}:
-        return (STATUS_FAIL if severity == "fail" else STATUS_WARN), notes
+        return (STATUS_FAIL if severity in {"fail", "critical"} else STATUS_WARN), notes
 
     if status_norm in {"todo", "in_progress"}:
         return STATUS_UNKNOWN, notes
@@ -201,16 +214,16 @@ def _policy_item_to_rule(
     ).strip()
 
     severity = str(raw.get("severity") or default_severity).strip().lower()
-    if severity not in {"fail", "warn", "unknown", "info"}:
+    if severity not in {"fail", "warn", "unknown", "info", "critical"}:
         try:
             sev_num = int(raw.get("severity"))
-            severity = "fail" if sev_num >= 4 else "warn"
+            severity = "critical" if sev_num >= 4 else "fail" if sev_num == 3 else "warn"
         except Exception:
             severity = default_severity
 
     status = str(raw.get("status") or STATUS_FAIL).strip().lower()
     if status not in {STATUS_PASS, STATUS_FAIL, STATUS_WARN, STATUS_UNKNOWN, STATUS_NA}:
-        status = STATUS_FAIL if severity == "fail" else STATUS_WARN
+        status = STATUS_FAIL if severity in {"fail", "critical"} else STATUS_WARN
 
     return _rule_result(
         key=code,
@@ -390,6 +403,7 @@ def _build_warren_fallback_rules(profile_summary: dict[str, Any]) -> list[dict[s
 def _dedupe_rules(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     rank = {
+        "critical": 5,
         "fail": 4,
         "warn": 3,
         "unknown": 2,
@@ -484,7 +498,8 @@ def _build_local_rules_from_profile(profile_summary: dict[str, Any]) -> list[dic
         )
     )
 
-    return _dedupe_rules(rules)
+    fallback_rules = _build_warren_fallback_rules(profile_summary)
+    return _dedupe_rules(rules + fallback_rules)
 
 
 def _safe_property_policy_brief(
@@ -534,6 +549,19 @@ def _sorted_actions(rows: list[dict[str, Any]], *, limit: int = 8) -> list[dict[
     )[: max(1, int(limit))]
 
 
+def ensure_property_compliance_template(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    return ensure_template_backed_checklist(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+
+
 def build_property_inspection_readiness(
     db: Session,
     *,
@@ -541,6 +569,12 @@ def build_property_inspection_readiness(
     property_id: int,
 ) -> dict[str, Any]:
     prop = _get_property(db, org_id=org_id, property_id=property_id)
+    checklist_sync = ensure_template_backed_checklist(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+
     checklist_rows = _checklist_rows(db, org_id=org_id, property_id=property_id)
 
     by_code: dict[str, PropertyChecklistItem] = {}
@@ -549,7 +583,7 @@ def build_property_inspection_readiness(
         if code:
             by_code[code] = r
 
-    profile_summary = resolve_operational_policy(
+    profile_summary = checklist_sync["template"].get("profile_summary") or resolve_operational_policy(
         db,
         org_id=org_id,
         state=getattr(prop, "state", None) or "MI",
@@ -582,9 +616,9 @@ def build_property_inspection_readiness(
                 status=status,
                 severity=severity,
                 category=str(item.get("category") or "other"),
-                blocks_hqs=(status in {STATUS_FAIL, STATUS_UNKNOWN} and severity == "fail"),
-                blocks_voucher=(status in {STATUS_FAIL, STATUS_UNKNOWN} and severity == "fail"),
-                blocks_lease_up=(status == STATUS_FAIL and severity == "fail"),
+                blocks_hqs=(status in {STATUS_FAIL, STATUS_UNKNOWN} and severity in {"fail", "critical"}),
+                blocks_voucher=(status in {STATUS_FAIL, STATUS_UNKNOWN} and severity in {"fail", "critical"}),
+                blocks_lease_up=(status == STATUS_FAIL and severity in {"fail", "critical"}),
                 suggested_fix=item.get("suggested_fix"),
                 evidence=evidence,
             )
@@ -624,32 +658,17 @@ def build_property_inspection_readiness(
     unknowns = [r for r in all_results if r["status"] == STATUS_UNKNOWN]
     passed_items = [r for r in all_results if r["status"] == STATUS_PASS]
 
-    hqs_ready = not any(
-        r["blocks_hqs"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
-        for r in all_results
+    readiness_score = compute_property_readiness_score(
+        db,
+        org_id=org_id,
+        property_id=property_id,
     )
-    local_ready = not any(
-        r["blocks_local"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
-        for r in all_results
-    )
-    voucher_ready = not any(
-        r["blocks_voucher"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
-        for r in all_results
-    )
-    lease_up_ready = not any(
-        r["blocks_lease_up"] and r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
-        for r in all_results
+    readiness_summary = build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
     )
 
-    score_pct = round((len(passed_items) / len(all_results)) * 100.0, 2) if all_results else 0.0
-
-    overall_status = "ready"
-    if not lease_up_ready or not voucher_ready or not local_ready:
-        overall_status = "blocked"
-    elif warnings:
-        overall_status = "attention"
-
-    coverage = profile_summary.get("coverage") or {}
     brief = _safe_property_policy_brief(
         db,
         org_id=org_id,
@@ -657,10 +676,45 @@ def build_property_inspection_readiness(
         profile_summary=profile_summary,
     )
 
-    action_plan = _sorted_actions(
+    latest_inspection_id = getattr(latest_inspection, "id", None) if latest_inspection else None
+    failure_actions = build_failure_next_actions(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        inspection_id=latest_inspection_id,
+        limit=10,
+    )
+
+    recommended_actions = _sorted_actions(
         [r for r in all_results if r["status"] in {STATUS_FAIL, STATUS_UNKNOWN, STATUS_WARN}],
         limit=10,
     )
+
+    for action in failure_actions.get("recommended_actions") or []:
+        recommended_actions.append(
+            {
+                "rule_key": action.get("code"),
+                "label": action.get("title"),
+                "source": "inspection_failure",
+                "status": STATUS_FAIL,
+                "severity": "fail" if action.get("priority") != "high" else "critical",
+                "category": action.get("category") or "compliance_repair",
+                "blocks_hqs": bool(action.get("requires_reinspection", True)),
+                "blocks_local": False,
+                "blocks_voucher": bool(action.get("requires_reinspection", True)),
+                "blocks_lease_up": bool(action.get("requires_reinspection", True)),
+                "suggested_fix": action.get("notes"),
+                "evidence": None,
+            }
+        )
+
+    recommended_actions = _sorted_actions(recommended_actions, limit=10)
+
+    overall_status = "ready"
+    if readiness_score.posture in {"critical_failures", "needs_remediation", "not_ready"}:
+        overall_status = "blocked"
+    elif warnings:
+        overall_status = "attention"
 
     return {
         "ok": True,
@@ -681,12 +735,19 @@ def build_property_inspection_readiness(
         },
         "coverage": profile_summary.get("coverage") or {},
         "overall_status": overall_status,
-        "score_pct": score_pct,
+        "score_pct": float(readiness_score.readiness_score),
+        "completion_pct": float(readiness_score.completion_pct),
+        "completion_projection_pct": float(readiness_score.completion_projection_pct),
+        "posture": readiness_score.posture,
         "readiness": {
-            "hqs_ready": hqs_ready,
-            "local_ready": local_ready,
-            "voucher_ready": voucher_ready,
-            "lease_up_ready": lease_up_ready,
+            "hqs_ready": bool(readiness_score.hqs_ready),
+            "local_ready": bool(readiness_score.local_ready),
+            "voucher_ready": bool(readiness_score.voucher_ready),
+            "lease_up_ready": bool(readiness_score.lease_up_ready),
+            "status": readiness_score.readiness_status,
+            "result_status": readiness_score.result_status,
+            "latest_inspection_passed": bool(readiness_score.latest_inspection_passed),
+            "is_compliant": bool(readiness_score.is_compliant),
         },
         "counts": {
             "total_rules": len(all_results),
@@ -695,26 +756,145 @@ def build_property_inspection_readiness(
             "unknown": len(unknowns),
             "warnings": len(warnings),
             "blocking": len(blockers),
+            "inspection_items_total": int(readiness_score.total_items),
+            "inspection_failed_items": int(readiness_score.failed_items),
+            "inspection_blocked_items": int(readiness_score.blocked_items),
+            "inspection_unknown_items": int(readiness_score.unknown_items),
+            "inspection_failed_critical_items": int(readiness_score.failed_critical_items),
+            "checklist_failed_count": int(readiness_score.checklist_failed_count),
+            "checklist_blocked_count": int(readiness_score.checklist_blocked_count),
         },
         "results": all_results,
         "blocking_items": blockers,
         "warning_items": warnings,
-        "recommended_actions": action_plan,
+        "recommended_actions": recommended_actions,
+        "inspection_failure_actions": failure_actions,
         "effective_hqs_sources": effective_hqs.get("sources") or [],
         "effective_hqs_counts": effective_hqs.get("counts") or {},
         "policy_brief": brief,
         "jurisdiction": profile_summary,
         "latest_inspection": {
-            "id": getattr(latest_inspection, "id", None) if latest_inspection else None,
+            "id": latest_inspection_id,
             "passed": bool(getattr(latest_inspection, "passed", False)) if latest_inspection else None,
+            "template_key": getattr(latest_inspection, "template_key", None) if latest_inspection else None,
+            "template_version": getattr(latest_inspection, "template_version", None) if latest_inspection else None,
+        },
+        "template": {
+            "template_key": checklist_sync["template_key"],
+            "template_version": checklist_sync["template_version"],
+            "checklist_id": checklist_sync["checklist_id"],
+            "created_checklist": checklist_sync["created_checklist"],
+            "created_items": checklist_sync["created_items"],
+            "updated_items": checklist_sync["updated_items"],
         },
         "run_summary": {
             "passed": len(passed_items),
             "failed": len(failing),
             "blocked": len(blockers),
             "not_yet": len(unknowns),
-            "score_pct": score_pct,
+            "score_pct": float(readiness_score.readiness_score),
+            "completion_pct": float(readiness_score.completion_pct),
+            "completion_projection_pct": float(readiness_score.completion_projection_pct),
+            "posture": readiness_score.posture,
         },
+        "readiness_summary": readiness_summary,
+    }
+
+
+def apply_inspection_form_results(
+    db: Session,
+    *,
+    org_id: int,
+    actor_user_id: int,
+    property_id: int,
+    inspection_id: int,
+    raw_payload: dict[str, Any] | list[dict[str, Any]] | None,
+    sync_checklist: bool = True,
+    create_failure_tasks: bool = True,
+) -> dict[str, Any]:
+    result = apply_raw_inspection_payload(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+        raw_payload=raw_payload,
+        sync_checklist=sync_checklist,
+    )
+
+    failure_task_result = {
+        "ok": True,
+        "inspection_id": inspection_id,
+        "property_id": property_id,
+        "created": 0,
+        "skipped_existing": 0,
+        "titles": [],
+    }
+    if create_failure_tasks:
+        failure_task_result = create_failure_tasks_from_inspection(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            inspection_id=inspection_id,
+        )
+
+    readiness_summary = build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+
+    now = _now()
+    db.add(
+        WorkflowEvent(
+            org_id=org_id,
+            property_id=property_id,
+            actor_user_id=actor_user_id,
+            event_type="inspection.form.applied",
+            payload_json=_j(
+                {
+                    "inspection_id": inspection_id,
+                    "template_key": result["template_key"],
+                    "template_version": result["template_version"],
+                    "mapped_count": result["mapped_count"],
+                    "created_items": result["created_items"],
+                    "updated_items": result["updated_items"],
+                    "readiness": result["readiness"],
+                    "failure_tasks": failure_task_result,
+                    "readiness_summary": readiness_summary,
+                    "workflow_effect": {
+                        "blocks_compliance": not bool(
+                            (readiness_summary.get("completion") or {}).get("is_compliant", False)
+                        ),
+                        "posture": ((readiness_summary.get("readiness") or {}).get("posture")),
+                    },
+                }
+            ),
+            created_at=now,
+        )
+    )
+    db.add(
+        AuditEvent(
+            org_id=org_id,
+            actor_user_id=actor_user_id,
+            action="inspection.form.applied",
+            entity_type="inspection",
+            entity_id=str(inspection_id),
+            before_json=None,
+            after_json=_j(
+                {
+                    **result,
+                    "failure_tasks": failure_task_result,
+                    "readiness_summary": readiness_summary,
+                }
+            ),
+            created_at=now,
+        )
+    )
+
+    return {
+        **result,
+        "failure_tasks": failure_task_result,
+        "readiness_summary": readiness_summary,
     }
 
 
@@ -778,6 +958,22 @@ def generate_policy_tasks_for_property(
             created += 1
             created_titles.append(title)
 
+    latest_inspection = _latest_inspection(db, org_id=org_id, property_id=property_id)
+    failure_task_result = create_failure_tasks_from_inspection(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        inspection_id=getattr(latest_inspection, "id", None) if latest_inspection else None,
+    )
+    created += int(failure_task_result.get("created", 0))
+    created_titles.extend(failure_task_result.get("titles", []))
+
+    readiness_summary = build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+
     now = _now()
     db.add(
         WorkflowEvent(
@@ -791,6 +987,8 @@ def generate_policy_tasks_for_property(
                     "overall_status": readiness["overall_status"],
                     "readiness": readiness["readiness"],
                     "score_pct": readiness["score_pct"],
+                    "inspection_failure_tasks": failure_task_result,
+                    "readiness_summary": readiness_summary,
                 }
             ),
             created_at=now,
@@ -810,6 +1008,8 @@ def generate_policy_tasks_for_property(
                     "titles": created_titles,
                     "overall_status": readiness["overall_status"],
                     "score_pct": readiness["score_pct"],
+                    "inspection_failure_tasks": failure_task_result,
+                    "readiness_summary": readiness_summary,
                 }
             ),
             created_at=now,
@@ -824,6 +1024,8 @@ def generate_policy_tasks_for_property(
         "overall_status": readiness["overall_status"],
         "readiness": readiness["readiness"],
         "score_pct": readiness["score_pct"],
+        "inspection_failure_tasks": failure_task_result,
+        "readiness_summary": readiness_summary,
     }
 
 
@@ -848,7 +1050,11 @@ def run_hqs(
     )
     checklist_rows = _checklist_rows(db, org_id=org_id, property_id=property_id)
 
-    summary = summarize_items(checklist_rows)
+    latest_inspection = _latest_inspection(db, org_id=org_id, property_id=property_id)
+    summary = summarize_items(
+        checklist_rows,
+        latest_inspection_passed=bool(getattr(latest_inspection, "passed", False)) if latest_inspection else False,
+    )
     fix_candidates = top_fix_candidates(checklist_rows)
 
     task_info = {"ok": True, "created": 0, "titles": []}
@@ -859,6 +1065,12 @@ def run_hqs(
             actor_user_id=actor_user_id,
             property_id=property_id,
         )
+
+    readiness_summary = build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
 
     now = _now()
     db.add(
@@ -873,6 +1085,15 @@ def run_hqs(
                     "score_pct": readiness["score_pct"],
                     "counts": readiness["counts"],
                     "tasks_created": task_info.get("created", 0),
+                    "template": readiness.get("template"),
+                    "inspection_failure_actions": readiness.get("inspection_failure_actions"),
+                    "readiness_summary": readiness_summary,
+                    "workflow_effect": {
+                        "blocks_compliance": not bool(
+                            (readiness_summary.get("completion") or {}).get("is_compliant", False)
+                        ),
+                        "posture": ((readiness_summary.get("readiness") or {}).get("posture")),
+                    },
                 }
             ),
             created_at=now,
@@ -886,4 +1107,18 @@ def run_hqs(
         "top_fix_candidates": fix_candidates,
         "inspection_readiness": readiness,
         "task_generation": task_info,
+        "readiness_summary": readiness_summary,
     }
+
+
+def preview_property_inspection_template(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    return build_inspection_template(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )

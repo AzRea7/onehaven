@@ -33,7 +33,8 @@ class Organization(Base):
     slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow) 
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
 
 class AppUser(Base):
     __tablename__ = "app_users"
@@ -50,6 +51,7 @@ class AppUser(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     org = relationship("Organization", backref="users")
+
 
 class OrgMembership(Base):
     __tablename__ = "org_memberships"
@@ -82,9 +84,9 @@ class AuditEvent(Base):
 class PropertyState(Base):
     __tablename__ = "property_states"
     __table_args__ = (
-    UniqueConstraint("org_id", "property_id", name="uq_property_states_org_property"),
-    Index("ix_property_states_org_stage", "org_id", "current_stage"),
-)
+        UniqueConstraint("org_id", "property_id", name="uq_property_states_org_property"),
+        Index("ix_property_states_org_stage", "org_id", "current_stage"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
@@ -134,7 +136,6 @@ class Property(Base):
     state: Mapped[str] = mapped_column(String(2), nullable=False, default="MI")
     zip: Mapped[str] = mapped_column(String(10), nullable=False)
 
-    # canonical normalized address used for deterministic geocode lookup/cache hits
     normalized_address: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
 
     bedrooms: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -145,10 +146,6 @@ class Property(Base):
     has_garage: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     property_type: Mapped[str] = mapped_column(String(60), nullable=False, default="single_family")
 
-    # -----------------------------
-    # Geo + jurisdiction + risk
-    # -----------------------------
-    # keep existing coordinate columns to avoid breaking current services
     lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
@@ -156,19 +153,14 @@ class Property(Base):
     geocode_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     geocode_last_refreshed: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # For your “county filter”
     county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
 
-    # Detroit “danger zone” boolean
     is_red_zone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # Crime metrics
     crime_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     crime_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # Sex offender proximity metric
     offender_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    # -----------------------------
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -205,6 +197,7 @@ class Property(Base):
         primaryjoin="Property.id==foreign(AgentRun.property_id)",
         viewonly=True,
     )
+
 
 class GeocodeCache(Base):
     __tablename__ = "geocode_cache"
@@ -287,19 +280,12 @@ class Deal(Base):
     term_years: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     down_payment_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.20)
 
-    # -----------------------------
-    # NEW: pipeline gating fields
-    # -----------------------------
-    # decision: buy/pass/watch (decision stage)
     decision: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
-    # acquisition stage (rehab is locked until these are set)
     purchase_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     closing_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # if you want explicit loan details separate from “financing_type”
     loan_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    # -----------------------------
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -307,6 +293,7 @@ class Deal(Base):
     property: Mapped["Property"] = relationship(back_populates="deals")
     results: Mapped[List["UnderwritingResult"]] = relationship(back_populates="deal", cascade="all, delete-orphan")
     snapshot: Mapped[Optional["ImportSnapshot"]] = relationship(back_populates="deals")
+
 
 # -----------------------------
 # Rent
@@ -403,12 +390,12 @@ class IngestionSource(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
-    provider: Mapped[str] = mapped_column(String(50), nullable=False)  # zillow|investorlift|partner_feed|custom
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str] = mapped_column(String(160), nullable=False)
 
-    source_type: Mapped[str] = mapped_column(String(30), nullable=False, default="api")  # api|webhook|feed
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="disconnected")  # connected|disconnected|error
+    source_type: Mapped[str] = mapped_column(String(30), nullable=False, default="api")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="disconnected")
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     base_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
@@ -449,8 +436,8 @@ class IngestionRun(Base):
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     source_id: Mapped[int] = mapped_column(Integer, ForeignKey("ingestion_sources.id"), nullable=False, index=True)
 
-    trigger_type: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")  # manual|scheduled|webhook
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")  # queued|running|success|partial|failed
+    trigger_type: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -496,6 +483,7 @@ class IngestionRecordLink(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     raw_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
 
 # -----------------------------
 # Jurisdiction + Underwriting
@@ -585,6 +573,13 @@ class Inspector(Base):
 
 class Inspection(Base):
     __tablename__ = "inspections"
+    __table_args__ = (
+        Index("ix_inspections_template_key", "template_key"),
+        Index("ix_inspections_template_version", "template_version"),
+        Index("ix_inspections_result_status", "result_status"),
+        Index("ix_inspections_readiness_status", "readiness_status"),
+        Index("ix_inspections_property_template_version", "property_id", "template_version"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
@@ -599,6 +594,29 @@ class Inspection(Base):
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reinspect_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # ---- Step 18 real inspection compliance foundation ----
+    template_key: Mapped[str] = mapped_column(String(80), nullable=False, default="hqs")
+    template_version: Mapped[str] = mapped_column(String(40), nullable=False, default="hqs_v1")
+    inspection_status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed")
+    result_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    inspection_method: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    standards_version: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+
+    readiness_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    readiness_status: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+
+    total_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    passed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    blocked_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    na_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_critical_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    evidence_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    last_scored_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # ------------------------------------------------------
+
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -609,7 +627,13 @@ class Inspection(Base):
 
 class InspectionItem(Base):
     __tablename__ = "inspection_items"
-    __table_args__ = (UniqueConstraint("inspection_id", "code", name="uq_inspection_item_per_code"),)
+    __table_args__ = (
+        UniqueConstraint("inspection_id", "code", name="uq_inspection_item_per_code"),
+        Index("ix_inspection_items_result_status", "result_status"),
+        Index("ix_inspection_items_inspection_result_status", "inspection_id", "result_status"),
+        Index("ix_inspection_items_category", "category"),
+        Index("ix_inspection_items_requires_reinspection", "requires_reinspection"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     inspection_id: Mapped[int] = mapped_column(ForeignKey("inspections.id", ondelete="CASCADE"), nullable=False)
@@ -620,6 +644,19 @@ class InspectionItem(Base):
     severity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     location: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ---- Step 18 real inspection compliance foundation ----
+    category: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    result_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    fail_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    remediation_guidance: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    photo_references_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    standard_label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    standard_citation: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    readiness_impact: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    requires_reinspection: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # ------------------------------------------------------
 
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     resolution_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -729,17 +766,9 @@ class PropertyChecklistItem(Base):
 
 
 # -----------------------------
-# Trust models (FIXED to match Alembic 0030_add_trust_tables)
+# Trust models
 # -----------------------------
 class TrustSignal(Base):
-    """
-    Table created by 0030_add_trust_tables:
-      - value (Float)   <-- IMPORTANT
-      - weight (Float)
-      - meta_json (Text)
-      - created_at (DateTime)
-    """
-
     __tablename__ = "trust_signals"
     __table_args__ = (
         Index("ix_trust_signals_org_entity", "org_id", "entity_type", "entity_id", "created_at"),
@@ -755,7 +784,6 @@ class TrustSignal(Base):
 
     signal_key: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
 
-    # MUST be named 'value' to match DB
     value: Mapped[float] = mapped_column(Float, nullable=False)
     weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
 
@@ -764,11 +792,6 @@ class TrustSignal(Base):
 
 
 class TrustScore(Base):
-    """
-    Aggregated trust score per (org, entity_type, entity_id).
-    Convention: score is 0..100; confidence is 0..1.
-    """
-
     __tablename__ = "trust_scores"
     __table_args__ = (UniqueConstraint("org_id", "entity_type", "entity_id", name="uq_trust_scores_org_entity"),)
 
@@ -812,8 +835,8 @@ class PropertyPhoto(Base):
         index=True,
     )
 
-    source: Mapped[str] = mapped_column(String(40), nullable=False, default="upload")   # upload|zillow
-    kind: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")     # interior|exterior|unknown
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="upload")
+    kind: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
     label: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
 
     url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -831,6 +854,7 @@ class PropertyPhoto(Base):
 
     property: Mapped["Property"] = relationship(back_populates="photos")
 
+
 class RehabTask(Base):
     __tablename__ = "rehab_tasks"
     __table_args__ = (UniqueConstraint("org_id", "property_id", "title", name="uq_rehab_tasks_org_property_title"),)
@@ -845,7 +869,7 @@ class RehabTask(Base):
     category: Mapped[str] = mapped_column(String(60), nullable=False, default="rehab")
     inspection_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")  # todo|in_progress|done|blocked
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
     cost_estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     vendor: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -914,7 +938,7 @@ class Transaction(Base):
     )
 
     txn_date: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    txn_type: Mapped[str] = mapped_column(String(80), nullable=False, default="other")  # income|expense|capex|other
+    txn_type: Mapped[str] = mapped_column(String(80), nullable=False, default="other")
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     memo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -979,7 +1003,7 @@ class AgentRun(Base):
     property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id"), index=True, nullable=True)
     agent_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
 
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")  # queued|running|done|failed|blocked|timed_out
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
 
     input_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     output_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -995,7 +1019,7 @@ class AgentRun(Base):
 
     created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
 
-    approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required")  # not_required|pending|approved|rejected
+    approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required")
     approved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -1138,7 +1162,7 @@ class EmailToken(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
-    purpose: Mapped[str] = mapped_column(String(50), nullable=False)  # verify_email | reset_password
+    purpose: Mapped[str] = mapped_column(String(50), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -1164,7 +1188,7 @@ class Plan(Base):
     __table_args__ = (UniqueConstraint("code", name="uq_plans_code"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    code: Mapped[str] = mapped_column(String(50), nullable=False)  # free | starter | pro
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     limits_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -1177,7 +1201,7 @@ class OrgSubscription(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, nullable=False)
     plan_code: Mapped[str] = mapped_column(String(50), nullable=False, default="free")
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="active")  # active|past_due|canceled
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="active")
     stripe_customer_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -1189,7 +1213,7 @@ class UsageLedger(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    metric: Mapped[str] = mapped_column(String(80), nullable=False)  # agent_runs|external_calls|properties
+    metric: Mapped[str] = mapped_column(String(80), nullable=False)
     units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
@@ -1200,7 +1224,7 @@ class ExternalBudgetLedger(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    provider: Mapped[str] = mapped_column(String(50), nullable=False)  # rentcast|hud|zillow|etc
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
     cost_units: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)

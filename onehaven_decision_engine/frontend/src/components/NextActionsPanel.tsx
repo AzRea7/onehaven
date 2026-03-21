@@ -8,6 +8,8 @@ import {
   ShieldCheck,
   AlertTriangle,
   Building2,
+  Wrench,
+  ClipboardX,
 } from "lucide-react";
 import Surface from "./Surface";
 import EmptyState from "./EmptyState";
@@ -30,6 +32,12 @@ type ActionLike =
       code?: string | null;
       severity?: string | null;
       source?: string | null;
+      suggested_fix?: string | null;
+      notes?: string | null;
+      blocks_hqs?: boolean;
+      blocks_local?: boolean;
+      blocks_voucher?: boolean;
+      blocks_lease_up?: boolean;
     };
 
 function normalizeAction(action: ActionLike) {
@@ -48,6 +56,10 @@ function normalizeAction(action: ActionLike) {
       code: null as string | null,
       severity: null as string | null,
       source: null as string | null,
+      blocks_hqs: false,
+      blocks_local: false,
+      blocks_voucher: false,
+      blocks_lease_up: false,
     };
   }
 
@@ -67,7 +79,12 @@ function normalizeAction(action: ActionLike) {
 
   return {
     title: action?.title || action?.label || "Untitled action",
-    detail: action?.detail || action?.description || "",
+    detail:
+      action?.detail ||
+      action?.description ||
+      action?.suggested_fix ||
+      action?.notes ||
+      "",
     kind: derivedKind,
     priority: derivedPriority,
     due_at: action?.due_at || null,
@@ -79,6 +96,10 @@ function normalizeAction(action: ActionLike) {
     code: action?.code || null,
     severity: action?.severity || null,
     source: action?.source || null,
+    blocks_hqs: Boolean(action?.blocks_hqs),
+    blocks_local: Boolean(action?.blocks_local),
+    blocks_voucher: Boolean(action?.blocks_voucher),
+    blocks_lease_up: Boolean(action?.blocks_lease_up),
   };
 }
 
@@ -103,6 +124,7 @@ function kindTone(kind?: string) {
       "municipal_registration",
       "municipal_inspection",
       "municipal_certificate",
+      "compliance_repair",
     ].includes(k)
   ) {
     return "oh-pill oh-pill-warn";
@@ -136,6 +158,9 @@ function iconForKind(kind?: string) {
   if (["compliance", "inspection", "municipal_certificate"].includes(k)) {
     return <AlertTriangle className="h-4 w-4 text-app-4" />;
   }
+  if (["compliance_repair", "repair", "rehab"].includes(k)) {
+    return <Wrench className="h-4 w-4 text-app-4" />;
+  }
   return <ShieldCheck className="h-4 w-4 text-app-4" />;
 }
 
@@ -149,13 +174,13 @@ export default function NextActionsPanel({
   return (
     <Surface
       title="Next actions"
-      subtitle="The smallest useful list of actions that actually move the property toward the next gate."
+      subtitle="Real next moves from workflow gates, inspection failures, and compliance blockers."
     >
       {!rows.length ? (
         <EmptyState
           compact
           title="No next actions"
-          description="Once workflow gates and operating truth surface action items, they will show up here."
+          description="Once workflow gates and inspection failures surface action items, they will show up here."
         />
       ) : (
         <div className="space-y-3">
@@ -228,6 +253,14 @@ export default function NextActionsPanel({
                       {action.source ? (
                         <span>source: {action.source}</span>
                       ) : null}
+                      {action.blocks_hqs ? <span>blocks HQS</span> : null}
+                      {action.blocks_local ? <span>blocks local</span> : null}
+                      {action.blocks_voucher ? (
+                        <span>blocks voucher</span>
+                      ) : null}
+                      {action.blocks_lease_up ? (
+                        <span>blocks lease-up</span>
+                      ) : null}
                     </div>
 
                     {action.due_at ? (
@@ -248,8 +281,9 @@ export default function NextActionsPanel({
 
       {!!rows.length ? (
         <div className="mt-4 flex items-center gap-2 text-xs text-app-4">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          ordered for operator attention, not decorative dashboard fluff
+          <ClipboardX className="h-3.5 w-3.5" />
+          ordered for operator attention using real workflow and inspection
+          blockers
         </div>
       ) : null}
     </Surface>

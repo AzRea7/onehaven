@@ -1957,6 +1957,23 @@ export const api = {
       }),
     }),
 
+  property(propertyId: number | string) {
+    return this.get(`/properties/${propertyId}`);
+  },
+
+  propertyWorkflow(propertyId: number | string) {
+    return this.get(`/workflow/property/${propertyId}`);
+  },
+
+  complianceAutomationRun(
+    propertyId: number | string,
+    createTasks: boolean = true,
+  ) {
+    return this.post(
+      `/compliance/property/${propertyId}/automation/run?create_tasks=${encodeURIComponent(String(createTasks))}`,
+    );
+  },
+
   notifyStaleJurisdiction: (profile_id: number, force: boolean = false) =>
     request<any>(`/jurisdiction-profiles/${profile_id}/notify-stale`, {
       method: "POST",

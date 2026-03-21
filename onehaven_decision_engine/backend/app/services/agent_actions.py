@@ -1,4 +1,3 @@
-# backend/app/services/agent_actions.py
 from __future__ import annotations
 
 import json
@@ -13,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.domain.agents.contracts import get_contract, validate_agent_output
 from app.models import AgentRun, WorkflowEvent, RehabTask, PropertyChecklistItem
 from app.services.agent_trace import emit_trace_safe
+from app.services.property_state_machine import sync_property_state
 
 
 def _loads(s: Optional[str], default: Any) -> Any:
@@ -51,7 +51,6 @@ def apply_run_actions(
     if r is None:
         raise HTTPException(status_code=404, detail="AgentRun not found")
 
-    # Idempotent apply: if already done, never double-write.
     if r.status == "done":
         return ApplyResult(ok=True, status="done", run_id=int(r.id), applied_count=0, errors=[])
 
@@ -63,7 +62,6 @@ def apply_run_actions(
 
     actions = _loads(getattr(r, "proposed_actions_json", None), [])
     if not isinstance(actions, list) or not actions:
-        # No actions => complete the run cleanly
         r.status = "done"
         r.finished_at = datetime.utcnow()
         db.add(r)
@@ -79,6 +77,9 @@ def apply_run_actions(
             )
         )
 
+        if r.property_id:
+            sync_property_state(db, org_id=org_id, property_id=int(r.property_id))
+
         emit_trace_safe(
             db,
             org_id=org_id,
@@ -93,7 +94,6 @@ def apply_run_actions(
         db.commit()
         return ApplyResult(ok=True, status="done", run_id=int(r.id), applied_count=0, errors=[])
 
-    # Defense-in-depth: re-validate output contract before applying
     output = _loads(getattr(r, "output_json", None), {})
     ok, errs = validate_agent_output(str(r.agent_key), output if isinstance(output, dict) else {})
     if not ok:
@@ -194,6 +194,9 @@ def apply_run_actions(
             created_at=datetime.utcnow(),
         )
     )
+
+    if r.property_id:
+        sync_property_state(db, org_id=org_id, property_id=int(r.property_id))
 
     emit_trace_safe(
         db,

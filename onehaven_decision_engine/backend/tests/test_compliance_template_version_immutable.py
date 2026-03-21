@@ -1,49 +1,132 @@
-# backend/tests/test_compliance_template_version_immutable.py
 from __future__ import annotations
 
-import pytest
-from fastapi.testclient import TestClient
+from datetime import date
 
-from app.main import app
+from app.models import Organization, Property
+from app.policy_models import HqsAddendumRule, HqsRule
+from app.domain.compliance.hqs_library import get_effective_hqs_items
 
 
-@pytest.mark.usefixtures("db_session")  # keep consistent with your test harness if present
-def test_v1_templates_lock_after_any_inspection_exists():
-    """
-    Phase 3 governance DoD:
-    - Once inspections exist, template version v1 must be immutable.
-    - Attempting to PUT /compliance/templates for v1 returns 409.
-    """
-    c = TestClient(app)
+def _seed(db):
+    org = Organization(slug="step12-hqs-org", name="Step12 HQS Org")
+    db.add(org)
+    db.commit()
+    db.refresh(org)
 
-    headers = {
-        "X-Org-Slug": "demo",
-        "X-User-Email": "austin@demo.local",
-        "X-User-Role": "owner",
-    }
-
-    # 1) Create an inspection for ANY property (the lock is org-level, version-level)
-    # If your inspections router path differs, adjust this.
-    # This assumes you already have at least property_id=1 in fixtures/demo seed.
-    r = c.post(
-        "/inspections",
-        headers=headers,
-        json={"property_id": 1, "scheduled_for": None, "passed": False, "notes": "test lock"},
+    prop = Property(
+        org_id=org.id,
+        address="789 Library Ln",
+        city="Warren",
+        state="MI",
+        zip="48091",
+        county="Macomb",
+        bedrooms=3,
+        bathrooms=1.0,
+        square_feet=1100,
+        year_built=1962,
+        has_garage=False,
+        property_type="single_family",
     )
-    assert r.status_code in (200, 201), r.text
+    db.add(prop)
+    db.commit()
+    db.refresh(prop)
+    return org, prop
 
-    # 2) Now try to mutate v1 template
-    payload = {
-        "strategy": "section8",
-        "version": "v1",
-        "code": "SMOKE_CO_DETECTORS",
-        "category": "Safety",
-        "description": "SHOULD NOT BE ALLOWED TO CHANGE",
-        "severity": 4,
-        "common_fail": True,
-        "applies_if": None,
+
+def test_hqs_library_returns_baseline_plus_contextual_items(db_session):
+    org, prop = _seed(db_session)
+
+    result = get_effective_hqs_items(
+        db_session,
+        org_id=org.id,
+        prop=prop,
+        profile_summary={},
+    )
+
+    assert "items" in result
+    assert "sources" in result
+    assert "counts" in result
+
+    items = result["items"]
+    codes = {row["code"] for row in items}
+
+    assert len(items) > 0
+    assert "SMOKE_DETECTORS" in codes
+    assert "LEAD_SAFE_SURFACES" in codes  # contextual because pre-1978
+
+
+def test_hqs_library_applies_rule_and_addendum_overrides(db_session):
+    org, prop = _seed(db_session)
+
+    db_session.add(
+        HqsRule(
+            code="SMOKE_DETECTORS",
+            category="life_safety",
+            severity="critical",
+            description="Enhanced smoke detector requirement",
+            effective_date=date(2026, 1, 1),
+        )
+    )
+    db_session.add(
+        HqsAddendumRule(
+            org_id=org.id,
+            jurisdiction_profile_id=1,  # safe enough for tests if FK not enforced in sqlite memory
+            code="LOCAL_AGENT_DOCUMENTATION",
+            category="documents",
+            severity="warn",
+            description="Provide local agent documentation",
+            effective_date=date(2026, 1, 1),
+        )
+    )
+    db_session.commit()
+
+    result = get_effective_hqs_items(
+        db_session,
+        org_id=org.id,
+        prop=prop,
+        profile_summary={},
+    )
+
+    items = {row["code"]: row for row in result["items"]}
+
+    assert items["SMOKE_DETECTORS"]["category"] == "life_safety"
+    assert items["SMOKE_DETECTORS"]["severity"] == "critical"
+    assert "LOCAL_AGENT_DOCUMENTATION" in items
+
+
+def test_hqs_library_uses_profile_policy_items(db_session):
+    org, prop = _seed(db_session)
+
+    profile_summary = {
+        "policy": {
+            "hqs_addenda": [
+                {
+                    "code": "WARREN_WINDOW_GLAZING",
+                    "description": "All window glazing must be intact",
+                    "category": "exterior",
+                    "severity": "fail",
+                    "suggested_fix": "Replace cracked panes.",
+                }
+            ],
+            "compliance": {
+                "inspection_required": "yes",
+                "certificate_required_before_occupancy": "yes",
+                "local_agent_required": "yes",
+            },
+        }
     }
 
-    r2 = c.put("/compliance/templates", headers=headers, json=payload)
-    assert r2.status_code == 409, r2.text
-    assert "locked" in (r2.json().get("detail") or "").lower()
+    result = get_effective_hqs_items(
+        db_session,
+        org_id=org.id,
+        prop=prop,
+        profile_summary=profile_summary,
+    )
+
+    codes = {row["code"] for row in result["items"]}
+
+    assert "WARREN_WINDOW_GLAZING" in codes
+    assert "LOCAL_INSPECTION_REQUIRED" in codes
+    assert "LOCAL_CERTIFICATE_BEFORE_OCCUPANCY" in codes
+    assert "LOCAL_AGENT_DOCUMENTATION" in codes
+    

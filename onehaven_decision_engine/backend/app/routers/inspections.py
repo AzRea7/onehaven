@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
-from ..db import get_db
 from ..domain.audit import emit_audit
 from ..domain.compliance import compliance_stats, top_fail_points
 from ..domain.compliance.inspection_mapping import map_inspection_code
+from ..db import get_db
 from ..models import (
     Inspection,
     InspectionItem,
@@ -30,7 +32,13 @@ from ..schemas import (
     InspectorUpsert,
     PredictFailPointsOut,
 )
+from ..services.compliance_service import apply_inspection_form_results
 from ..services.events_facade import wf
+from ..services.inspection_failure_task_service import (
+    build_failure_next_actions,
+    create_failure_tasks_from_inspection,
+)
+from ..services.inspection_readiness_service import build_property_readiness_summary
 from ..services.ownership import must_get_property
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
@@ -43,7 +51,7 @@ def _normalize_code(raw: str) -> str:
     return (raw or "").strip().upper().replace(" ", "_")
 
 
-def _inspection_payload(row: Inspection) -> dict:
+def _inspection_payload(row: Inspection) -> dict[str, Any]:
     return {
         "id": row.id,
         "property_id": row.property_id,
@@ -52,10 +60,15 @@ def _inspection_payload(row: Inspection) -> dict:
         "passed": row.passed,
         "reinspect_required": row.reinspect_required,
         "notes": row.notes,
+        "template_key": getattr(row, "template_key", None),
+        "template_version": getattr(row, "template_version", None),
+        "result_status": getattr(row, "result_status", None),
+        "readiness_score": getattr(row, "readiness_score", None),
+        "readiness_status": getattr(row, "readiness_status", None),
     }
 
 
-def _inspection_item_payload(row: InspectionItem) -> dict:
+def _inspection_item_payload(row: InspectionItem) -> dict[str, Any]:
     return {
         "id": row.id,
         "inspection_id": row.inspection_id,
@@ -66,6 +79,16 @@ def _inspection_item_payload(row: InspectionItem) -> dict:
         "details": row.details,
         "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
         "resolution_notes": row.resolution_notes,
+        "category": getattr(row, "category", None),
+        "result_status": getattr(row, "result_status", None),
+        "fail_reason": getattr(row, "fail_reason", None),
+        "remediation_guidance": getattr(row, "remediation_guidance", None),
+        "evidence_json": getattr(row, "evidence_json", None),
+        "photo_references_json": getattr(row, "photo_references_json", None),
+        "standard_label": getattr(row, "standard_label", None),
+        "standard_citation": getattr(row, "standard_citation", None),
+        "readiness_impact": getattr(row, "readiness_impact", None),
+        "requires_reinspection": getattr(row, "requires_reinspection", None),
     }
 
 
@@ -398,6 +421,174 @@ def resolve_item(
     return item
 
 
+@router.post("/{inspection_id}/submit-form", response_model=dict)
+def submit_inspection_form(
+    inspection_id: int,
+    raw_payload: dict[str, Any] | list[dict[str, Any]] = Body(...),
+    sync_checklist: bool = Query(default=True),
+    create_failure_tasks: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    insp = db.get(Inspection, inspection_id)
+    if not insp:
+        raise HTTPException(status_code=404, detail="Inspection not found")
+
+    if getattr(insp, "org_id", None) != p.org_id:
+        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
+
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+        min_stage="compliance",
+        action="submit inspection form",
+    )
+
+    try:
+        result = apply_inspection_form_results(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            property_id=insp.property_id,
+            inspection_id=inspection_id,
+            raw_payload=raw_payload,
+            sync_checklist=sync_checklist,
+            create_failure_tasks=create_failure_tasks,
+        )
+        sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
+        db.commit()
+
+        return {
+            **result,
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=insp.property_id,
+                recompute=True,
+            ),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"inspection form submission failed: {e}")
+
+
+@router.get("/{inspection_id}/normalized-results", response_model=dict)
+def inspection_normalized_results(
+    inspection_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    insp = db.get(Inspection, inspection_id)
+    if not insp:
+        raise HTTPException(status_code=404, detail="Inspection not found")
+
+    if getattr(insp, "org_id", None) != p.org_id:
+        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
+
+    rows = db.scalars(
+        select(InspectionItem)
+        .where(InspectionItem.inspection_id == inspection_id)
+        .order_by(InspectionItem.id.asc())
+    ).all()
+
+    return {
+        "ok": True,
+        "inspection": _inspection_payload(insp),
+        "items": [_inspection_item_payload(r) for r in rows],
+        "count": len(rows),
+    }
+
+
+@router.get("/{inspection_id}/readiness-summary", response_model=dict)
+def inspection_readiness_summary(
+    inspection_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    insp = db.get(Inspection, inspection_id)
+    if not insp:
+        raise HTTPException(status_code=404, detail="Inspection not found")
+
+    if getattr(insp, "org_id", None) != p.org_id:
+        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
+
+    return build_property_readiness_summary(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+    )
+
+
+@router.post("/{inspection_id}/tasks/from-failures", response_model=dict)
+def inspection_tasks_from_failures(
+    inspection_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    insp = db.get(Inspection, inspection_id)
+    if not insp:
+        raise HTTPException(status_code=404, detail="Inspection not found")
+
+    if getattr(insp, "org_id", None) != p.org_id:
+        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
+
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+        min_stage="compliance",
+        action="generate tasks from inspection failures",
+    )
+
+    try:
+        result = create_failure_tasks_from_inspection(
+            db,
+            org_id=p.org_id,
+            property_id=insp.property_id,
+            inspection_id=inspection_id,
+        )
+        sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
+        db.commit()
+        return {
+            **result,
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=insp.property_id,
+                recompute=True,
+            ),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failure task generation failed: {e}")
+
+
+@router.get("/{inspection_id}/failure-actions", response_model=dict)
+def inspection_failure_actions(
+    inspection_id: int,
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    insp = db.get(Inspection, inspection_id)
+    if not insp:
+        raise HTTPException(status_code=404, detail="Inspection not found")
+
+    if getattr(insp, "org_id", None) != p.org_id:
+        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
+
+    return build_failure_next_actions(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+        inspection_id=inspection_id,
+        limit=limit,
+    )
+
+
 @router.get("/predict", response_model=PredictFailPointsOut)
 def predict_fail_points(
     city: str = Query(...),
@@ -472,11 +663,17 @@ def inspection_readiness(
     ).all()
 
     open_failed = [i for i in items if bool(i.failed) and i.resolved_at is None]
+    readiness_summary = build_property_readiness_summary(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
 
     return {
         "property_id": property_id,
         "latest_inspection": _inspection_payload(latest) if latest else None,
         "open_failed_count": len(open_failed),
         "open_failed_items": [_inspection_item_payload(i) for i in open_failed[:25]],
+        "readiness_summary": readiness_summary,
         "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
     }

@@ -8,6 +8,7 @@ from typing import Any, Optional
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import Session
 
+from ..domain.compliance.compliance_completion import compute_compliance_status
 from ..domain.workflow.stages import (
     STAGES,
     clamp_stage,
@@ -28,6 +29,8 @@ from ..models import (
     Valuation,
 )
 from ..policy_models import JurisdictionProfile
+from .inspection_failure_task_service import build_failure_next_actions
+from .inspection_readiness_service import build_property_readiness_summary
 from .jurisdiction_task_mapper import map_profile_jurisdiction_task_dicts
 
 
@@ -320,11 +323,13 @@ def _inspection_summary(db: Session, *, org_id: int, property_id: int) -> dict[s
             "open_failed_items": 0,
             "latest_inspection_id": None,
             "latest_inspection_date": None,
+            "result_status": "pending",
+            "readiness_score": 0.0,
+            "readiness_status": "unknown",
+            "posture": "unknown",
         }
 
     open_failed = _open_failed_inspection_items(db, org_id=org_id, property_id=property_id)
-    passed = bool(getattr(insp, "passed", False)) and open_failed == 0
-
     latest_date = None
     if getattr(insp, "inspection_date", None) is not None:
         try:
@@ -332,12 +337,26 @@ def _inspection_summary(db: Session, *, org_id: int, property_id: int) -> dict[s
         except Exception:
             latest_date = str(insp.inspection_date)
 
+    readiness = build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    readiness_data = readiness.get("readiness") or {}
+    raw = readiness.get("raw") or {}
+
+    passed = bool(readiness_data.get("latest_inspection_passed")) and open_failed == 0
+
     return {
         "exists": True,
         "passed": passed,
         "open_failed_items": open_failed,
         "latest_inspection_id": getattr(insp, "id", None),
         "latest_inspection_date": latest_date,
+        "result_status": readiness_data.get("result_status"),
+        "readiness_score": readiness_data.get("score", 0.0),
+        "readiness_status": readiness_data.get("status", "unknown"),
+        "posture": readiness_data.get("posture") or raw.get("posture"),
     }
 
 
@@ -603,6 +622,13 @@ def derive_stage_and_constraints(
     cash = _cash_summary(db, org_id=org_id, property_id=property_id)
     valuation = _valuation_summary(db, org_id=org_id, property_id=property_id)
     jurisdiction = _jurisdiction_summary(db, org_id=org_id, prop=prop)
+    readiness = build_property_readiness_summary(db, org_id=org_id, property_id=property_id)
+    completion = compute_compliance_status(db, org_id=org_id, property_id=property_id)
+    failure_actions = build_failure_next_actions(db, org_id=org_id, property_id=property_id, limit=10)
+
+    readiness_info = readiness.get("readiness") or {}
+    readiness_counts = readiness.get("counts") or {}
+    completion_info = readiness.get("completion") or {}
 
     decision_bucket = normalize_decision_bucket(
         getattr(uw, "decision", None) if uw is not None else getattr(deal, "decision", None)
@@ -611,13 +637,18 @@ def derive_stage_and_constraints(
 
     deal_complete = uw is not None and decision_bucket == "GOOD"
     rehab_complete = deal_complete and rehab["is_complete"]
-    compliance_complete = (
+
+    compliance_complete = bool(
         rehab_complete
-        and inspection["passed"]
-        and checklist.blocked == 0
-        and checklist.failed == 0
         and jurisdiction["gate_ok"]
+        and completion.is_compliant
+        and readiness_info.get("hqs_ready", False)
+        and readiness_info.get("local_ready", False)
+        and readiness_info.get("voucher_ready", False)
+        and readiness_info.get("lease_up_ready", False)
+        and completion.latest_inspection_passed
     )
+
     tenant_complete = compliance_complete and lease["active"]
     cash_complete = tenant_complete and cash["has_transactions"]
     equity_complete = cash_complete and valuation["exists"]
@@ -672,14 +703,34 @@ def derive_stage_and_constraints(
         if rehab_complete and not inspection["exists"]:
             blockers.append("missing_inspection")
             next_actions.append("Schedule and record the first inspection.")
-        elif rehab_complete and inspection["open_failed_items"] > 0:
+
+        if rehab_complete and not completion.latest_inspection_passed:
+            blockers.append("latest_inspection_not_passed")
+            next_actions.append("Address failed inspection findings and pass the latest inspection.")
+
+        if rehab_complete and inspection["open_failed_items"] > 0:
             blockers.append("inspection_open_failures")
             next_actions.append(
                 f"Resolve failed inspection items ({inspection['open_failed_items']} still open)."
             )
-        elif rehab_complete and checklist.total > 0 and (checklist.blocked > 0 or checklist.failed > 0):
-            blockers.append("checklist_blockers")
-            next_actions.append("Clear blocked or failed compliance checklist items.")
+
+        if rehab_complete and completion.failed_count > 0:
+            blockers.append("compliance_failed_items")
+            next_actions.append(f"Resolve compliance failed items ({completion.failed_count} remaining).")
+
+        if rehab_complete and completion.blocked_count > 0:
+            blockers.append("compliance_blocked_items")
+            next_actions.append(f"Resolve blocked compliance items ({completion.blocked_count} remaining).")
+
+        if rehab_complete and completion.latest_readiness_status in {"critical", "needs_work", "unknown"}:
+            blockers.append("inspection_readiness_not_sufficient")
+            next_actions.append(
+                f"Improve inspection readiness (current status: {completion.latest_readiness_status}, score: {completion.latest_readiness_score})."
+            )
+
+        if rehab_complete and completion.posture in {"critical_failures", "needs_remediation", "not_ready"}:
+            blockers.append("compliance_posture_blocked")
+            next_actions.append(f"Resolve compliance posture blockers ({completion.posture}).")
 
         if compliance_complete and not lease["active"]:
             blockers.append("missing_active_lease")
@@ -692,6 +743,11 @@ def derive_stage_and_constraints(
         if cash_complete and not valuation["exists"]:
             blockers.append("missing_valuation")
             next_actions.append("Add a valuation snapshot for equity tracking.")
+
+    for action in failure_actions.get("recommended_actions") or []:
+        title = str(action.get("title") or "").strip()
+        if title and title not in next_actions:
+            next_actions.append(title)
 
     for task in jurisdiction["tasks"]:
         title = str(task.get("title") or "").strip()
@@ -709,16 +765,18 @@ def derive_stage_and_constraints(
         equity_complete=equity_complete,
     ).as_dict()
 
-    if current_stage == "compliance" and not jurisdiction["gate_ok"]:
-        gate["ok"] = False
-        gate["reason"] = jurisdiction["gate_reason"] or "jurisdiction_blocked"
-        gate["allowed_next_stage"] = None
+    if current_stage == "compliance":
+        if not jurisdiction["gate_ok"]:
+            gate["ok"] = False
+            gate["reason"] = jurisdiction["gate_reason"] or "jurisdiction_blocked"
+            gate["allowed_next_stage"] = None
+        elif not completion.is_compliant:
+            gate["ok"] = False
+            gate["reason"] = completion.posture or "inspection_grade_compliance_blocked"
+            gate["allowed_next_stage"] = None
 
     allowed_next = gate.get("allowed_next_stage")
-    if allowed_next:
-        gate["allowed_next_stage_label"] = stage_label(allowed_next)
-    else:
-        gate["allowed_next_stage_label"] = None
+    gate["allowed_next_stage_label"] = stage_label(allowed_next) if allowed_next else None
 
     stage_completion_summary = [
         {
@@ -740,7 +798,14 @@ def derive_stage_and_constraints(
             "blockers": [
                 x
                 for x in blockers
-                if "inspection" in x or "checklist" in x or x.startswith("jurisdiction_") or x == "missing_jurisdiction_profile"
+                if (
+                    "inspection" in x
+                    or "checklist" in x
+                    or "compliance_" in x
+                    or x.startswith("jurisdiction_")
+                    or x == "missing_jurisdiction_profile"
+                    or x == "latest_inspection_not_passed"
+                )
             ],
         },
         {
@@ -790,12 +855,29 @@ def derive_stage_and_constraints(
         "valuation": valuation,
         "jurisdiction": jurisdiction,
         "decision_reasons": _decision_reason_list(uw),
+        "readiness": readiness_info,
+        "readiness_counts": readiness_counts,
+        "completion": {
+            "completion_pct": completion.completion_pct,
+            "completion_projection_pct": completion.completion_projection_pct,
+            "failed_count": completion.failed_count,
+            "blocked_count": completion.blocked_count,
+            "latest_inspection_passed": completion.latest_inspection_passed,
+            "latest_readiness_score": completion.latest_readiness_score,
+            "latest_readiness_status": completion.latest_readiness_status,
+            "latest_result_status": completion.latest_result_status,
+            "posture": completion.posture,
+            "is_compliant": completion.is_compliant,
+        },
+        "readiness_summary": readiness,
+        "completion_projection": completion_info,
     }
 
     outstanding_tasks = {
         "blockers": blockers,
         "next_actions": next_actions,
         "jurisdiction_tasks": jurisdiction["tasks"],
+        "inspection_failure_actions": failure_actions.get("recommended_actions") or [],
         "counts": {
             "rehab_open": rehab["open"],
             "rehab_blocked": rehab["blocked"],
@@ -803,6 +885,9 @@ def derive_stage_and_constraints(
             "checklist_blocked": checklist.blocked,
             "checklist_failed": checklist.failed,
             "jurisdiction_missing_categories": len(jurisdiction["missing_categories"]),
+            "inspection_failed_items": readiness_counts.get("failed_items", 0),
+            "inspection_blocked_items": readiness_counts.get("blocked_items", 0),
+            "failed_critical_items": readiness_counts.get("failed_critical_items", 0),
         },
     }
 

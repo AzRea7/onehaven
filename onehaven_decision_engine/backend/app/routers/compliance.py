@@ -4,12 +4,13 @@ import json
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_owner
 from ..db import get_db
+from ..domain.compliance.compliance_completion import compute_compliance_status
 from ..models import (
     AppUser,
     AuditEvent,
@@ -29,10 +30,17 @@ from ..schemas import (
     PropertyChecklistOut,
 )
 from ..services.compliance_service import (
+    apply_inspection_form_results,
     build_property_inspection_readiness,
     generate_policy_tasks_for_property,
+    preview_property_inspection_template,
     run_hqs as run_hqs_service,
 )
+from ..services.inspection_failure_task_service import (
+    build_failure_next_actions,
+    create_failure_tasks_from_inspection,
+)
+from ..services.inspection_readiness_service import build_property_readiness_summary
 from ..services.jurisdiction_profile_service import resolve_operational_policy
 from ..services.policy_projection_service import build_property_compliance_brief
 from ..services.property_state_machine import sync_property_state
@@ -225,7 +233,12 @@ def _items_from_policy_brief(brief: dict[str, Any]) -> list[ChecklistItemOut]:
     blocking_items = brief.get("blocking_items") or []
 
     for raw in required_actions:
-        code = str(raw.get("code") or raw.get("rule_key") or raw.get("title") or "POLICY_ACTION").upper().replace(" ", "_")
+        code = str(
+            raw.get("code")
+            or raw.get("rule_key")
+            or raw.get("title")
+            or "POLICY_ACTION"
+        ).upper().replace(" ", "_")
         items.append(
             ChecklistItemOut(
                 category=str(raw.get("category") or "Policy"),
@@ -239,7 +252,12 @@ def _items_from_policy_brief(brief: dict[str, Any]) -> list[ChecklistItemOut]:
         )
 
     for raw in blocking_items:
-        code = str(raw.get("code") or raw.get("rule_key") or raw.get("title") or "POLICY_BLOCKER").upper().replace(" ", "_")
+        code = str(
+            raw.get("code")
+            or raw.get("rule_key")
+            or raw.get("title")
+            or "POLICY_BLOCKER"
+        ).upper().replace(" ", "_")
         if any(x.item_code == code for x in items):
             continue
         items.append(
@@ -311,7 +329,7 @@ def _merge_state(
     return out
 
 
-def _summarize_status(items: list[PropertyChecklistItem]) -> dict:
+def _summarize_status(items: list[PropertyChecklistItem]) -> dict[str, Any]:
     total = len(items)
     counts = {s: 0 for s in _ALLOWED_STATUS}
     for x in items:
@@ -452,7 +470,6 @@ def generate_checklist(
     base_items = _items_from_templates(prop, tmpl) if tmpl else _items_from_fallback(prop)
 
     policy_items: list[ChecklistItemOut] = []
-    policy_brief: dict[str, Any] = {}
     jurisdiction: dict[str, Any] = {}
 
     if include_policy:
@@ -463,7 +480,6 @@ def generate_checklist(
             county=getattr(prop, "county", None),
             state=prop.state or "MI",
         )
-        policy_brief = jurisdiction.get("brief") or {}
         policy_items = _items_from_policy_brief(jurisdiction)
 
     items = _dedupe_items(base_items + policy_items)
@@ -640,6 +656,11 @@ def compliance_status(
         org_id=p.org_id,
         property_id=property_id,
     )
+    completion = compute_compliance_status(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
 
     return {
         "property_id": property_id,
@@ -651,12 +672,27 @@ def compliance_status(
         ),
         "overall_status": readiness["overall_status"],
         "score_pct": readiness["score_pct"],
+        "completion_pct": readiness.get("completion_pct"),
+        "completion_projection_pct": readiness.get("completion_projection_pct"),
+        "posture": readiness.get("posture"),
         "readiness": readiness["readiness"],
         "counts": readiness["counts"],
         "blocking_items": readiness["blocking_items"],
         "warning_items": readiness["warning_items"],
         "recommended_actions": readiness["recommended_actions"],
         "coverage": readiness["coverage"],
+        "completion": {
+            "completion_pct": completion.completion_pct,
+            "completion_projection_pct": completion.completion_projection_pct,
+            "failed_count": completion.failed_count,
+            "blocked_count": completion.blocked_count,
+            "latest_inspection_passed": completion.latest_inspection_passed,
+            "latest_readiness_score": completion.latest_readiness_score,
+            "latest_readiness_status": completion.latest_readiness_status,
+            "latest_result_status": completion.latest_result_status,
+            "posture": completion.posture,
+            "is_compliant": completion.is_compliant,
+        },
     }
 
 
@@ -848,6 +884,29 @@ def property_compliance_brief(
         "evidence_links": jurisdiction.get("evidence_links", []),
     }
 
+
+@router.get("/property/{property_id}/inspection-template", response_model=dict)
+def property_inspection_template(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view inspection template",
+    )
+
+    return preview_property_inspection_template(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+
+
 @router.get("/property/{property_id}/inspection-readiness", response_model=dict)
 def property_inspection_readiness(
     property_id: int,
@@ -868,6 +927,131 @@ def property_inspection_readiness(
         org_id=p.org_id,
         property_id=property_id,
     )
+
+
+@router.get("/property/{property_id}/readiness-summary", response_model=dict)
+def property_readiness_summary(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view readiness summary",
+    )
+
+    return build_property_readiness_summary(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+
+
+@router.get("/property/{property_id}/completion-projection", response_model=dict)
+def property_completion_projection(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view compliance completion projection",
+    )
+
+    status = compute_compliance_status(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+
+    return {
+        "ok": True,
+        "property_id": property_id,
+        "completion_pct": status.completion_pct,
+        "completion_projection_pct": status.completion_projection_pct,
+        "failed_count": status.failed_count,
+        "blocked_count": status.blocked_count,
+        "latest_inspection_passed": status.latest_inspection_passed,
+        "latest_readiness_score": status.latest_readiness_score,
+        "latest_readiness_status": status.latest_readiness_status,
+        "latest_result_status": status.latest_result_status,
+        "posture": status.posture,
+        "is_compliant": status.is_compliant,
+    }
+
+
+@router.get("/property/{property_id}/failure-actions", response_model=dict)
+def property_failure_actions(
+    property_id: int,
+    inspection_id: int | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view failure-generated actions",
+    )
+
+    return build_failure_next_actions(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+        limit=limit,
+    )
+
+
+@router.post("/property/{property_id}/tasks/from-failures", response_model=dict)
+def create_tasks_from_failures(
+    property_id: int,
+    inspection_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    p=Depends(require_owner),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="create tasks from inspection failures",
+    )
+
+    try:
+        result = create_failure_tasks_from_inspection(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            inspection_id=inspection_id,
+        )
+        sync_property_state(db, org_id=p.org_id, property_id=property_id)
+        db.commit()
+        return {
+            **result,
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=property_id,
+                recompute=True,
+            ),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failure task generation failed: {e}")
 
 
 @router.post("/property/{property_id}/automation/run", response_model=dict)
@@ -952,6 +1136,53 @@ def create_tasks_from_policy(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"policy task generation failed: {e}")
+
+
+@router.post("/property/{property_id}/inspections/{inspection_id}/submit-form", response_model=dict)
+def submit_property_inspection_form(
+    property_id: int,
+    inspection_id: int,
+    raw_payload: dict[str, Any] | list[dict[str, Any]] = Body(...),
+    sync_checklist: bool = Query(default=True),
+    create_failure_tasks: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="submit inspection form",
+    )
+
+    try:
+        result = apply_inspection_form_results(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            property_id=property_id,
+            inspection_id=inspection_id,
+            raw_payload=raw_payload,
+            sync_checklist=sync_checklist,
+            create_failure_tasks=create_failure_tasks,
+        )
+        sync_property_state(db, org_id=p.org_id, property_id=property_id)
+        db.commit()
+        return {
+            **result,
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=property_id,
+                recompute=True,
+            ),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"inspection form submission failed: {e}")
 
 
 @router.patch("/checklist/{property_id}/items/{item_code}", response_model=ChecklistItemOut)

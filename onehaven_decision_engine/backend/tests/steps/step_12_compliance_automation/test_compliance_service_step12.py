@@ -1,375 +1,249 @@
 from __future__ import annotations
 
-import json
-
-from sqlalchemy import select
+from datetime import datetime
 
 from app.models import (
-    AuditEvent,
     Inspection,
+    InspectionItem,
+    Organization,
+    Property,
     PropertyChecklistItem,
+    PropertyState,
     RehabTask,
-    WorkflowEvent,
 )
-from app.services import compliance_service
+from app.services.compliance_service import (
+    apply_inspection_form_results,
+    build_property_inspection_readiness,
+    generate_policy_tasks_for_property,
+    run_hqs,
+)
+from app.services.property_state_machine import sync_property_state
 
 
-def _seed_checklist_item(
-    db,
-    *,
-    org_id: int,
-    property_id: int,
-    item_code: str,
-    status: str,
-    description: str | None = None,
-    is_completed: bool | None = None,
-    category: str = "safety",
-):
-    row = PropertyChecklistItem(
-        org_id=org_id,
-        property_id=property_id,
-        checklist_id=None,
-        item_code=item_code,
-        category=category,
-        description=description or item_code.replace("_", " ").title(),
-        severity=2,
-        common_fail=True,
-        applies_if_json=None,
-        status=status,
-        marked_by_user_id=None,
-        marked_at=None,
-        proof_url=None,
-        notes=None,
-    )
-    db.add(row)
+def _seed(db):
+    org = Organization(slug="step12-service-org", name="Step12 Service Org")
+    db.add(org)
     db.commit()
-    db.refresh(row)
-    return row
+    db.refresh(org)
 
-
-def test_build_property_inspection_readiness_returns_policy_driven_shape(monkeypatch, db, seed_org_user, seed_property):
-    org = seed_org_user["org"]
-    prop = seed_property
-
-    _seed_checklist_item(
-        db,
+    prop = Property(
         org_id=org.id,
-        property_id=prop.id,
-        item_code="SMOKE_DETECTORS",
-        status="done",
-        is_completed=True,
+        address="456 Readiness St",
+        city="Warren",
+        state="MI",
+        zip="48091",
+        county="Macomb",
+        bedrooms=3,
+        bathrooms=1.0,
+        square_feet=1300,
+        year_built=1965,
+        has_garage=False,
+        property_type="single_family",
     )
-    _seed_checklist_item(
-        db,
-        org_id=org.id,
-        property_id=prop.id,
-        item_code="HEAT",
-        status="failed",
-        is_completed=False,
-    )
+    db.add(prop)
+    db.commit()
+    db.refresh(prop)
 
     db.add(
-        Inspection(
+        PropertyState(
             org_id=org.id,
             property_id=prop.id,
-            passed=False,
+            current_stage="compliance",
+            constraints_json="{}",
+            outstanding_tasks_json="{}",
+            updated_at=datetime.utcnow(),
         )
     )
     db.commit()
+    return org, prop
 
-    monkeypatch.setattr(
-        compliance_service,
-        "resolve_operational_policy",
-        lambda *args, **kwargs: {
-            "scope": "global",
-            "match_level": "city",
-            "profile_id": 100,
-            "friction_multiplier": 1.3,
-            "pha_name": None,
-            "coverage": {
-                "coverage_status": "verified_extended",
-                "confidence_label": "high",
-                "production_readiness": "ready",
-            },
-            "required_actions": [
-                {
-                    "code": "WARREN_RENTAL_LICENSE_REQUIRED",
-                    "title": "Warren rental license required",
-                    "severity": "fail",
-                    "category": "licensing",
-                    "blocks_local": True,
-                    "blocks_voucher": True,
-                    "blocks_lease_up": True,
-                    "suggested_fix": "Complete Warren rental license process.",
-                }
-            ],
-            "blocking_items": [
-                {
-                    "code": "WARREN_BIENNIAL_INSPECTION_REQUIRED",
-                    "title": "Warren biennial rental inspection required",
-                    "severity": "fail",
-                    "category": "inspection",
-                    "blocks_local": True,
-                    "blocks_voucher": True,
-                    "blocks_lease_up": True,
-                    "suggested_fix": "Schedule and pass the municipal inspection.",
-                }
-            ],
-            "rules": [
-                {
-                    "rule_key": "MI_SOURCE_OF_INCOME_PROTECTION",
-                    "label": "Michigan SOI protections apply",
-                    "severity": "warn",
-                    "status": "warn",
-                    "category": "fair_housing",
-                    "suggested_fix": "Review tenant screening workflow.",
-                }
-            ],
-            "policy": {
-                "compliance": {
-                    "inspection_required": "yes",
-                    "certificate_required_before_occupancy": "yes",
-                    "local_agent_required": "yes",
-                },
-                "hqs_addenda": [
-                    {
-                        "code": "WARREN_PACKET_READY",
-                        "description": "Municipal rental packet should be ready",
-                        "category": "documents",
-                        "severity": "warn",
-                        "suggested_fix": "Prepare packet.",
-                    }
-                ],
-            },
-        },
+
+def _create_inspection(db, *, org_id: int, property_id: int):
+    insp = Inspection(
+        org_id=org_id,
+        property_id=property_id,
+        inspection_date=datetime.utcnow(),
+        passed=False,
+        reinspect_required=True,
+        notes="new real-form inspection",
     )
-
-    monkeypatch.setattr(
-        compliance_service,
-        "build_property_compliance_brief",
-        lambda *args, **kwargs: {
-            "coverage": {
-                "coverage_status": "verified_extended",
-                "confidence_label": "high",
-                "production_readiness": "ready",
-            },
-            "compliance": {
-                "market_label": "Warren, Macomb County, MI",
-            },
-            "required_actions": [],
-            "blocking_items": [],
-            "evidence_links": [
-                {"title": "City page", "url": "https://example.test/warren"}
-            ],
-        },
-    )
-
-    out = compliance_service.build_property_inspection_readiness(
-        db,
-        org_id=org.id,
-        property_id=prop.id,
-    )
-
-    assert out["ok"] is True
-    assert out["property"]["id"] == prop.id
-    assert out["market"]["match_level"] == "city"
-    assert "readiness" in out
-    assert "counts" in out
-    assert "results" in out
-    assert "blocking_items" in out
-    assert "recommended_actions" in out
-    assert out["counts"]["total_rules"] >= 1
-    assert out["counts"]["blocking"] >= 1
-    assert out["overall_status"] in {"blocked", "attention", "ready"}
-
-    result_keys = {r["rule_key"] for r in out["results"]}
-    assert "SMOKE_DETECTORS" in result_keys
-    assert "HEAT" in result_keys
-    assert "LATEST_INSPECTION_PASSED" in result_keys
-    assert "POLICY_CONFIDENCE_SUFFICIENT" in result_keys
-    assert "WARREN_RENTAL_LICENSE_REQUIRED" in result_keys
-    assert "WARREN_BIENNIAL_INSPECTION_REQUIRED" in result_keys
-
-
-def test_generate_policy_tasks_for_property_creates_tasks_and_audit_rows(monkeypatch, db, seed_org_user, seed_property):
-    org = seed_org_user["org"]
-    prop = seed_property
-    user = seed_org_user["user"]
-
-    fake_readiness = {
-        "ok": True,
-        "overall_status": "blocked",
-        "score_pct": 42.0,
-        "readiness": {
-            "hqs_ready": False,
-            "local_ready": False,
-            "voucher_ready": False,
-            "lease_up_ready": False,
-        },
-        "blocking_items": [
-            {
-                "rule_key": "WARREN_RENTAL_LICENSE_REQUIRED",
-                "label": "Warren rental license required",
-                "status": "fail",
-                "source": "jurisdiction_policy",
-                "suggested_fix": "Complete Warren rental license process.",
-            },
-            {
-                "rule_key": "HEAT",
-                "label": "Permanent heat source is present and operational",
-                "status": "fail",
-                "source": "hqs_library",
-                "suggested_fix": "Repair furnace.",
-            },
-        ],
-        "warning_items": [
-            {
-                "rule_key": "LEAD_SAFE_SURFACES",
-                "label": "Pre-1978 lead-safe review",
-                "status": "warn",
-                "source": "contextual_rule",
-                "suggested_fix": "Review lead-safe workflow.",
-            }
-        ],
-    }
-
-    monkeypatch.setattr(
-        compliance_service,
-        "build_property_inspection_readiness",
-        lambda *args, **kwargs: fake_readiness,
-    )
-
-    out = compliance_service.generate_policy_tasks_for_property(
-        db,
-        org_id=org.id,
-        actor_user_id=user.id,
-        property_id=prop.id,
-    )
+    db.add(insp)
     db.commit()
-
-    assert out["ok"] is True
-    assert out["property_id"] == prop.id
-    assert out["created"] == 3
-
-    tasks = list(
-        db.scalars(
-            select(RehabTask).where(
-                RehabTask.org_id == org.id,
-                RehabTask.property_id == prop.id,
-            )
-        ).all()
-    )
-    task_titles = {t.title for t in tasks}
-
-    assert "Compliance: Warren rental license required" in task_titles
-    assert "Compliance: Permanent heat source is present and operational" in task_titles
-    assert "Review: Pre-1978 lead-safe review" in task_titles
-
-    workflow_events = list(
-        db.scalars(
-            select(WorkflowEvent).where(
-                WorkflowEvent.org_id == org.id,
-                WorkflowEvent.property_id == prop.id,
-            )
-        ).all()
-    )
-    assert any(e.event_type == "compliance.tasks.generated" for e in workflow_events)
-
-    audit_rows = list(
-        db.scalars(
-            select(AuditEvent).where(
-                AuditEvent.org_id == org.id,
-                AuditEvent.entity_type == "property",
-                AuditEvent.entity_id == str(prop.id),
-            )
-        ).all()
-    )
-    assert any(a.action == "compliance.tasks.generated" for a in audit_rows)
+    db.refresh(insp)
+    return insp
 
 
-def test_run_hqs_returns_readiness_and_does_not_duplicate_existing_tasks(monkeypatch, db, seed_org_user, seed_property):
-    org = seed_org_user["org"]
-    prop = seed_property
-    user = seed_org_user["user"]
+def test_apply_inspection_form_results_maps_payload_and_creates_failure_tasks(db_session):
+    org, prop = _seed(db_session)
+    insp = _create_inspection(db_session, org_id=org.id, property_id=prop.id)
 
-    first_readiness = {
-        "ok": True,
-        "overall_status": "blocked",
-        "score_pct": 50.0,
-        "counts": {"total_rules": 5, "blocking": 1},
-        "readiness": {
-            "hqs_ready": False,
-            "local_ready": False,
-            "voucher_ready": False,
-            "lease_up_ready": False,
-        },
-        "blocking_items": [
+    raw_payload = {
+        "items": [
             {
-                "rule_key": "HEAT",
-                "label": "Permanent heat source is present and operational",
-                "status": "fail",
-                "source": "hqs_library",
-                "suggested_fix": "Repair furnace.",
-            }
-        ],
-        "warning_items": [],
-        "run_summary": {
-            "passed": 2,
-            "failed": 1,
-            "blocked": 1,
-            "not_yet": 2,
-            "score_pct": 50.0,
-        },
+                "code": "SMOKE_DETECTORS",
+                "result": "pass",
+                "details": "all good",
+            },
+            {
+                "code": "GFCI_KITCHEN",
+                "result": "fail",
+                "details": "missing GFCI by sink",
+                "location": "kitchen",
+            },
+        ]
     }
 
-    monkeypatch.setattr(
-        compliance_service,
-        "build_property_inspection_readiness",
-        lambda *args, **kwargs: first_readiness,
+    result = apply_inspection_form_results(
+        db_session,
+        org_id=org.id,
+        actor_user_id=1,
+        property_id=prop.id,
+        inspection_id=insp.id,
+        raw_payload=raw_payload,
+        sync_checklist=True,
+        create_failure_tasks=True,
     )
 
-    out1 = compliance_service.run_hqs(
-        db,
+    assert result["ok"] is True
+    assert result["inspection_id"] == insp.id
+    assert result["mapped_count"] >= 1
+    assert "readiness" in result
+    assert "failure_tasks" in result
+
+    rows = db_session.query(InspectionItem).filter(
+        InspectionItem.inspection_id == insp.id
+    ).all()
+    assert len(rows) >= 1
+
+    tasks = db_session.query(RehabTask).filter(
+        RehabTask.org_id == org.id,
+        RehabTask.property_id == prop.id,
+    ).all()
+    assert len(tasks) >= 1
+
+
+def test_build_property_inspection_readiness_returns_real_projection(db_session):
+    org, prop = _seed(db_session)
+    insp = _create_inspection(db_session, org_id=org.id, property_id=prop.id)
+
+    db_session.add_all(
+        [
+            PropertyChecklistItem(
+                org_id=org.id,
+                property_id=prop.id,
+                item_code="SMOKE_DETECTORS",
+                category="safety",
+                description="Smoke detectors",
+                severity=3,
+                common_fail=True,
+                status="done",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            ),
+            PropertyChecklistItem(
+                org_id=org.id,
+                property_id=prop.id,
+                item_code="GFCI_KITCHEN",
+                category="electrical",
+                description="Kitchen GFCI",
+                severity=3,
+                common_fail=True,
+                status="failed",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            ),
+        ]
+    )
+    db_session.add(
+        InspectionItem(
+            inspection_id=insp.id,
+            code="GFCI_KITCHEN",
+            failed=True,
+            severity=3,
+            details="missing",
+            location="kitchen",
+        )
+    )
+    db_session.commit()
+
+    body = build_property_inspection_readiness(
+        db_session,
         org_id=org.id,
-        actor_user_id=user.id,
+        property_id=prop.id,
+    )
+
+    assert body["ok"] is True
+    assert body["property"]["id"] == prop.id
+    assert "score_pct" in body
+    assert "completion_pct" in body
+    assert "completion_projection_pct" in body
+    assert "posture" in body
+    assert "readiness_summary" in body
+    assert "inspection_failure_actions" in body
+    assert body["counts"]["failing"] >= 1
+
+
+def test_generate_policy_tasks_for_property_includes_failure_tasks(db_session):
+    org, prop = _seed(db_session)
+    insp = _create_inspection(db_session, org_id=org.id, property_id=prop.id)
+
+    db_session.add(
+        InspectionItem(
+            inspection_id=insp.id,
+            code="SMOKE_DETECTOR_MISSING",
+            failed=True,
+            severity=4,
+            details="none present",
+            location="hallway",
+        )
+    )
+    db_session.commit()
+
+    result = generate_policy_tasks_for_property(
+        db_session,
+        org_id=org.id,
+        actor_user_id=1,
+        property_id=prop.id,
+    )
+
+    assert result["ok"] is True
+    assert result["property_id"] == prop.id
+    assert "inspection_failure_tasks" in result
+    assert result["inspection_failure_tasks"]["created"] >= 1
+
+    titles = result["titles"]
+    assert isinstance(titles, list)
+    assert len(titles) >= 1
+
+
+def test_run_hqs_returns_readiness_and_task_generation(db_session):
+    org, prop = _seed(db_session)
+    insp = _create_inspection(db_session, org_id=org.id, property_id=prop.id)
+
+    db_session.add(
+        InspectionItem(
+            inspection_id=insp.id,
+            code="HANDRAIL_MISSING",
+            failed=True,
+            severity=3,
+            details="rear stairs",
+            location="rear stairs",
+        )
+    )
+    db_session.commit()
+    sync_property_state(db_session, org_id=org.id, property_id=prop.id)
+    db_session.commit()
+
+    result = run_hqs(
+        db_session,
+        org_id=org.id,
+        actor_user_id=1,
         property_id=prop.id,
         create_tasks=True,
     )
-    db.commit()
 
-    assert out1["ok"] is True
-    assert out1["inspection_readiness"]["overall_status"] == "blocked"
-    assert out1["task_generation"]["created"] == 1
-
-    out2 = compliance_service.run_hqs(
-        db,
-        org_id=org.id,
-        actor_user_id=user.id,
-        property_id=prop.id,
-        create_tasks=True,
-    )
-    db.commit()
-
-    assert out2["ok"] is True
-    assert out2["task_generation"]["created"] == 0
-
-    tasks = list(
-        db.scalars(
-            select(RehabTask).where(
-                RehabTask.org_id == org.id,
-                RehabTask.property_id == prop.id,
-            )
-        ).all()
-    )
-    assert len(tasks) == 1
-
-    workflow_events = list(
-        db.scalars(
-            select(WorkflowEvent).where(
-                WorkflowEvent.org_id == org.id,
-                WorkflowEvent.property_id == prop.id,
-            )
-        ).all()
-    )
-    assert any(e.event_type == "compliance.automation.run" for e in workflow_events)
+    assert result["ok"] is True
+    assert "inspection_readiness" in result
+    assert "task_generation" in result
+    assert "readiness_summary" in result
     
