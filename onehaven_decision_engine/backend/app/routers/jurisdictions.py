@@ -5,14 +5,21 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, or_, desc, func
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_owner
 from ..db import get_db
-from ..models import JurisdictionRule, Property
 from ..domain.audit import emit_audit
 from ..domain.jurisdiction_defaults import michigan_global_defaults
+from ..models import JurisdictionRule, Property
+from ..policy_models import JurisdictionProfile
+from ..services.jurisdiction_completeness_service import (
+    profile_completeness_payload,
+    recompute_profile_and_coverage,
+)
+from ..services.jurisdiction_notification_service import notify_if_jurisdiction_stale
+from ..services.jurisdiction_refresh_service import refresh_jurisdiction_profile
 
 router = APIRouter(prefix="/jurisdictions", tags=["jurisdictions"])
 
@@ -26,16 +33,25 @@ def _norm_state(v: str) -> str:
     return s if len(s) == 2 else "MI"
 
 
+def _norm_county(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = v.strip().lower()
+    return s or None
+
+
+def _norm_text(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = v.strip()
+    return s or None
+
+
 def _has_col(model, name: str) -> bool:
-    """
-    True if SQLAlchemy model has this mapped attribute/column.
-    Works even if DB is behind, as long as model is consistent with mapper.
-    """
     return hasattr(model, name)
 
 
 def _row_to_dict(r: JurisdictionRule) -> dict:
-    # IMPORTANT: do not directly access columns that might not exist in DB/schema
     return {
         "id": r.id,
         "scope": "global" if r.org_id is None else "org",
@@ -50,11 +66,76 @@ def _row_to_dict(r: JurisdictionRule) -> dict:
         "fees_json": getattr(r, "fees_json", None),
         "processing_days": getattr(r, "processing_days", None),
         "tenant_waitlist_depth": getattr(r, "tenant_waitlist_depth", None),
-        # ✅ FIX: notes may not exist in your DB
         "notes": getattr(r, "notes", None),
         "updated_at": r.updated_at.isoformat() if getattr(r, "updated_at", None) else None,
         "created_at": r.created_at.isoformat() if getattr(r, "created_at", None) else None,
     }
+
+
+def _profile_query_for_scope(
+    db: Session,
+    *,
+    org_id: int,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    include_global: bool = True,
+):
+    q = select(JurisdictionProfile).where(JurisdictionProfile.state == state)
+
+    if include_global:
+        q = q.where(
+            (JurisdictionProfile.org_id == org_id)
+            | (JurisdictionProfile.org_id.is_(None))
+        )
+    else:
+        q = q.where(JurisdictionProfile.org_id == org_id)
+
+    if county is None:
+        q = q.where(JurisdictionProfile.county.is_(None))
+    else:
+        q = q.where(JurisdictionProfile.county == county)
+
+    if city is None:
+        q = q.where(JurisdictionProfile.city.is_(None))
+    else:
+        q = q.where(JurisdictionProfile.city == city)
+
+    return q.order_by(desc(JurisdictionProfile.org_id), desc(JurisdictionProfile.id))
+
+
+def _effective_profile(
+    db: Session,
+    *,
+    org_id: int,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+) -> JurisdictionProfile | None:
+    rows = list(
+        db.scalars(
+            _profile_query_for_scope(
+                db,
+                org_id=org_id,
+                state=state,
+                county=county,
+                city=city,
+                include_global=True,
+            )
+        ).all()
+    )
+    if not rows:
+        return None
+
+    rows.sort(
+        key=lambda r: (
+            0 if getattr(r, "org_id", None) == org_id else 1,
+            0 if getattr(r, "city", None) else 1,
+            0 if getattr(r, "county", None) else 1,
+            -(getattr(r, "id", 0) or 0),
+        )
+    )
+    return rows[0]
 
 
 @router.get("/rules", response_model=list[dict])
@@ -146,11 +227,9 @@ def upsert_rule(
     data["city"] = city
     data["state"] = state
 
-    # Never allow these from client
     for k in ["id", "org_id", "updated_at", "created_at", "scope"]:
         data.pop(k, None)
 
-    # ✅ CRITICAL FIX: if your table doesn't have notes, do not write it
     if not _has_col(JurisdictionRule, "notes"):
         data.pop("notes", None)
 
@@ -246,12 +325,6 @@ def seed_michigan_defaults(
     p=Depends(get_principal),
     _owner=Depends(require_owner),
 ):
-    """
-    Seeds GLOBAL (org_id NULL) defaults.
-    Idempotent: inserts missing city/state rows only.
-
-    ✅ FIX: do NOT insert columns that don't exist in your DB (e.g., notes).
-    """
     now = datetime.utcnow()
     created = 0
 
@@ -274,7 +347,6 @@ def seed_michigan_defaults(
         if exists:
             continue
 
-        # Build insert kwargs safely
         insert_kwargs = dict(
             org_id=None,
             city=city,
@@ -306,21 +378,18 @@ def coverage(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Shows which (city,state) pairs exist in your org's portfolio but lack an org-specific rule.
-    Also indicates whether a global fallback exists.
-    """
     state = _norm_state(state)
 
     pairs = db.execute(
-        select(func.lower(Property.city).label("city_lc"), Property.state)
+        select(func.lower(Property.city).label("city_lc"), Property.state, func.lower(Property.county).label("county_lc"))
         .where(Property.org_id == p.org_id, Property.state == state)
-        .group_by(func.lower(Property.city), Property.state)
+        .group_by(func.lower(Property.city), Property.state, func.lower(Property.county))
     ).all()
 
     rows = []
-    for city_lc, st in pairs:
+    for city_lc, st, county_lc in pairs:
         city = _norm_city(city_lc)
+        county = _norm_county(county_lc)
 
         org_rule = db.scalar(
             select(JurisdictionRule).where(
@@ -337,21 +406,132 @@ def coverage(
             )
         )
 
+        profile = _effective_profile(
+            db,
+            org_id=p.org_id,
+            state=st,
+            county=county,
+            city=county and _norm_county(city.lower()) is None and None or city.lower(),
+        )
+        if profile is None:
+            profile = _effective_profile(
+                db,
+                org_id=p.org_id,
+                state=st,
+                county=county,
+                city=(city or "").strip().lower() or None,
+            )
+
+        completeness = None
+        if profile is not None:
+            completeness = profile_completeness_payload(db, profile)
+
         provenance = "org" if org_rule else ("global" if global_rule else "missing")
         rows.append(
             {
                 "city": city,
+                "county": county,
                 "state": st,
                 "has_org_rule": bool(org_rule),
                 "has_global_fallback": bool(global_rule),
                 "provenance": provenance,
+                "jurisdiction_profile_id": getattr(profile, "id", None) if profile else None,
+                "jurisdiction_completeness_status": completeness.get("completeness_status") if completeness else None,
+                "jurisdiction_is_stale": completeness.get("is_stale") if completeness else None,
+                "jurisdiction_missing_categories": completeness.get("missing_categories") if completeness else [],
             }
         )
 
     missing = [r for r in rows if r["provenance"] == "missing"]
+    incomplete = [
+        r for r in rows if r.get("jurisdiction_completeness_status") not in {None, "complete"}
+    ]
+    stale = [r for r in rows if bool(r.get("jurisdiction_is_stale"))]
+
     return {
         "state": state,
         "total_pairs": len(rows),
         "missing_rules": len(missing),
+        "incomplete_jurisdictions": len(incomplete),
+        "stale_jurisdictions": len(stale),
         "rows": sorted(rows, key=lambda r: (r["provenance"], r["city"])),
     }
+
+
+@router.get("/{jurisdiction_profile_id}/completeness", response_model=dict)
+def get_jurisdiction_completeness(
+    jurisdiction_profile_id: int,
+    recompute: bool = Query(True),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+
+    if profile.org_id is not None and profile.org_id != p.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if recompute:
+        profile, coverage = recompute_profile_and_coverage(db, profile, commit=True)
+    else:
+        coverage = None
+
+    payload = profile_completeness_payload(db, profile)
+    return {
+        "ok": True,
+        "profile": payload,
+        "coverage": {
+            "id": getattr(coverage, "id", None),
+            "coverage_status": getattr(coverage, "coverage_status", None),
+            "production_readiness": getattr(coverage, "production_readiness", None),
+            "completeness_status": getattr(coverage, "completeness_status", None),
+            "is_stale": getattr(coverage, "is_stale", None),
+        }
+        if coverage is not None
+        else None,
+    }
+
+
+@router.post("/{jurisdiction_profile_id}/refresh", response_model=dict)
+def refresh_jurisdiction(
+    jurisdiction_profile_id: int,
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
+    p=Depends(require_owner),
+):
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+
+    if profile.org_id is not None and profile.org_id != p.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    result = refresh_jurisdiction_profile(
+        db,
+        jurisdiction_profile_id=int(jurisdiction_profile_id),
+        reviewer_user_id=p.user_id,
+        force=bool(force),
+    )
+    return result
+
+
+@router.post("/{jurisdiction_profile_id}/notify-stale", response_model=dict)
+def notify_stale_jurisdiction(
+    jurisdiction_profile_id: int,
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
+    p=Depends(require_owner),
+):
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+
+    if profile.org_id is not None and profile.org_id != p.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    return notify_if_jurisdiction_stale(
+        db,
+        profile=profile,
+        force=bool(force),
+    )

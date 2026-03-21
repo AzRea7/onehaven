@@ -4,14 +4,21 @@ from ..db import SessionLocal
 from ..services.geo_enrichment import enrich_property_geo
 from ..services.ingestion_run_execute import execute_source_sync
 from ..services.ingestion_scheduler_service import (
+    build_jurisdiction_refresh_payload,
     build_location_refresh_payload,
     build_runtime_payload,
     list_default_daily_markets,
+    list_jurisdictions_needing_refresh,
     list_properties_needing_location_refresh,
 )
 from ..services.ingestion_source_service import (
     ensure_default_manual_sources,
     list_sources,
+)
+from ..services.jurisdiction_notification_service import notify_stale_jurisdictions
+from ..services.jurisdiction_refresh_service import (
+    DEFAULT_JURISDICTION_STALE_DAYS,
+    refresh_jurisdiction_profile,
 )
 from ..workers.celery_app import celery_app
 
@@ -195,6 +202,104 @@ def refresh_stale_locations_task(
         db.close()
 
 
+@celery_app.task(name="jurisdiction.refresh_profile")
+def refresh_jurisdiction_profile_task(
+    jurisdiction_profile_id: int,
+    *,
+    reviewer_user_id: int | None = None,
+    force: bool = False,
+    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
+):
+    db = SessionLocal()
+    try:
+        result = refresh_jurisdiction_profile(
+            db,
+            jurisdiction_profile_id=int(jurisdiction_profile_id),
+            reviewer_user_id=reviewer_user_id,
+            force=bool(force),
+            stale_days=int(stale_days),
+        )
+        return result
+    finally:
+        db.close()
+
+
+@celery_app.task(name="jurisdiction.refresh_stale_profiles")
+def refresh_stale_jurisdictions_task(
+    org_id: int = 1,
+    *,
+    reviewer_user_id: int | None = None,
+    batch_size: int | None = None,
+    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
+):
+    db = SessionLocal()
+    try:
+        rows = list_jurisdictions_needing_refresh(
+            db,
+            org_id=int(org_id),
+            batch_size=batch_size,
+            stale_days=int(stale_days),
+        )
+
+        queued = 0
+        jurisdiction_profile_ids: list[int] = []
+        payloads: list[dict] = []
+
+        for row in rows:
+            jurisdiction_profile_id = int(getattr(row, "id"))
+            refresh_jurisdiction_profile_task.delay(
+                jurisdiction_profile_id,
+                reviewer_user_id=reviewer_user_id,
+                force=False,
+                stale_days=int(stale_days),
+            )
+            queued += 1
+            jurisdiction_profile_ids.append(jurisdiction_profile_id)
+            payloads.append(
+                build_jurisdiction_refresh_payload(
+                    org_id=getattr(row, "org_id", None),
+                    jurisdiction_profile_id=jurisdiction_profile_id,
+                    state=getattr(row, "state", None),
+                    county=getattr(row, "county", None),
+                    city=getattr(row, "city", None),
+                    pha_name=getattr(row, "pha_name", None),
+                    reason=getattr(row, "stale_reason", None),
+                    force=False,
+                    stale_days=int(stale_days),
+                )
+            )
+
+        return {
+            "ok": True,
+            "org_id": int(org_id),
+            "queued": queued,
+            "jurisdiction_profile_ids": jurisdiction_profile_ids,
+            "payloads": payloads,
+        }
+    finally:
+        db.close()
+
+
+@celery_app.task(name="jurisdiction.notify_stale_profiles")
+def notify_stale_jurisdictions_task(
+    org_id: int = 1,
+    *,
+    force: bool = False,
+    limit: int | None = None,
+):
+    db = SessionLocal()
+    try:
+        result = notify_stale_jurisdictions(
+            db,
+            org_id=int(org_id),
+            force=bool(force),
+            limit=limit,
+        )
+        return result
+    finally:
+        db.close()
+
+
 celery_app.conf.beat_schedule.setdefault(
     "ingestion-sync-due-hourly",
     {
@@ -216,5 +321,21 @@ celery_app.conf.beat_schedule.setdefault(
     {
         "task": "location.refresh_stale_properties",
         "schedule": 6 * 60 * 60,
+    },
+)
+
+celery_app.conf.beat_schedule.setdefault(
+    "jurisdiction-refresh-stale-profiles",
+    {
+        "task": "jurisdiction.refresh_stale_profiles",
+        "schedule": 12 * 60 * 60,
+    },
+)
+
+celery_app.conf.beat_schedule.setdefault(
+    "jurisdiction-notify-stale-profiles",
+    {
+        "task": "jurisdiction.notify_stale_profiles",
+        "schedule": 12 * 60 * 60,
     },
 )

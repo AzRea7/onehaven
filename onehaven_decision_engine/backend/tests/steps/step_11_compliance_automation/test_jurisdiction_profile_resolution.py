@@ -20,6 +20,10 @@ def _row(
     pha_name: str | None = None,
     policy_json: str = "{}",
     notes: str | None = None,
+    completeness_status: str | None = None,
+    stale_status: str | None = None,
+    required_categories_json: str | None = None,
+    category_coverage_json: str | None = None,
 ):
     return SimpleNamespace(
         id=id,
@@ -31,6 +35,10 @@ def _row(
         pha_name=pha_name,
         policy_json=policy_json,
         notes=notes,
+        completeness_status=completeness_status,
+        stale_status=stale_status,
+        required_categories_json=required_categories_json,
+        category_coverage_json=category_coverage_json,
     )
 
 
@@ -75,3 +83,42 @@ def test_resolve_profile_org_override_wins_on_same_specificity(monkeypatch):
     assert out["scope"] == "org"
     assert out["profile_id"] == 11
     assert out["friction_multiplier"] == 1.5
+
+
+def test_resolve_profile_exposes_completeness_and_stale_metadata(monkeypatch):
+    rows = [
+        _row(
+            id=21,
+            org_id=None,
+            state="MI",
+            county="wayne",
+            city="detroit",
+            friction_multiplier=1.25,
+            completeness_status="complete",
+            stale_status="fresh",
+            required_categories_json='["rental_registration","inspection","certificate_of_occupancy"]',
+            category_coverage_json='{"rental_registration":"verified","inspection":"verified","certificate_of_occupancy":"verified"}',
+        )
+    ]
+
+    monkeypatch.setattr(svc, "list_profiles", lambda db, org_id, include_global, state: rows)
+
+    out = svc.resolve_profile(
+        DummyDB(),
+        org_id=1,
+        city="Detroit",
+        county="Wayne",
+        state="MI",
+    )
+
+    assert out["matched"] is True
+    assert out["profile_id"] == 21
+    assert out["friction_multiplier"] == 1.25
+    assert out.get("completeness_status") == "complete"
+    assert out.get("stale_status") == "fresh"
+
+    required = out.get("required_categories") or []
+    coverage = out.get("category_coverage") or {}
+
+    assert "rental_registration" in required
+    assert coverage.get("inspection") == "verified"

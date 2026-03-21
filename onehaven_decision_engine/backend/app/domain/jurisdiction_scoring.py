@@ -1,11 +1,12 @@
-# onehaven_decision_engine/backend/app/domain/jurisdiction_scoring.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 import json
 
 from ..models import JurisdictionRule
+from ..policy_models import JurisdictionProfile
+from .jurisdiction_categories import compute_completeness_score, normalize_categories
 
 
 @dataclass(frozen=True)
@@ -20,8 +21,17 @@ class JurisdictionFrictionReason:
 @dataclass(frozen=True)
 class JurisdictionFriction:
     multiplier: float
-    reasons: list[str]                 # back-compat (human strings)
+    reasons: list[str]  # back-compat (human strings)
     reasons_trace: list[dict[str, Any]]  # new (structured)
+
+
+@dataclass(frozen=True)
+class JurisdictionCompleteness:
+    completeness_score: float
+    completeness_status: str
+    required_categories: list[str]
+    covered_categories: list[str]
+    missing_categories: list[str]
 
 
 def _push(
@@ -42,6 +52,103 @@ def _push(
             text=text,
         )
     )
+
+
+def _safe_json_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return value
+
+    if isinstance(value, tuple):
+        return list(value)
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return parsed
+            return []
+        except Exception:
+            return []
+
+    return []
+
+
+def compute_category_completeness(
+    *,
+    required_categories: Iterable[Any] | None,
+    covered_categories: Iterable[Any] | None,
+) -> JurisdictionCompleteness:
+    coverage = compute_completeness_score(required_categories, covered_categories)
+    return JurisdictionCompleteness(
+        completeness_score=coverage.completeness_score,
+        completeness_status=coverage.completeness_status,
+        required_categories=coverage.required_categories,
+        covered_categories=coverage.covered_categories,
+        missing_categories=coverage.missing_categories,
+    )
+
+
+def compute_profile_completeness(profile: Optional[JurisdictionProfile]) -> JurisdictionCompleteness:
+    if profile is None:
+        return compute_category_completeness(required_categories=[], covered_categories=[])
+
+    required = _safe_json_list(getattr(profile, "required_categories_json", None))
+    covered = _safe_json_list(getattr(profile, "covered_categories_json", None))
+
+    return compute_category_completeness(
+        required_categories=required,
+        covered_categories=covered,
+    )
+
+
+def compute_coverage_status_score(
+    *,
+    required_categories_json: str | None = None,
+    covered_categories_json: str | None = None,
+) -> JurisdictionCompleteness:
+    return compute_category_completeness(
+        required_categories=_safe_json_list(required_categories_json),
+        covered_categories=_safe_json_list(covered_categories_json),
+    )
+
+
+def derive_categories_from_rule(jr: Optional[JurisdictionRule]) -> list[str]:
+    """
+    Best-effort category derivation from legacy JurisdictionRule rows.
+
+    This lets older rule records participate in the new completeness layer.
+    """
+    if jr is None:
+        return []
+
+    categories: list[str] = []
+
+    if bool(getattr(jr, "rental_license_required", False)):
+        categories.extend(["rental_license", "registration"])
+
+    if getattr(jr, "inspection_authority", None) or getattr(jr, "inspection_frequency", None):
+        categories.append("inspection")
+
+    if getattr(jr, "tenant_waitlist_depth", None):
+        categories.append("section8")
+
+    try:
+        fps = json.loads(jr.typical_fail_points_json) if jr.typical_fail_points_json else []
+        if isinstance(fps, list) and fps:
+            categories.append("safety")
+            # crude but deterministic signal for older SE Michigan housing stock
+            if any("paint" in str(x).lower() for x in fps):
+                categories.append("lead")
+    except Exception:
+        pass
+
+    return normalize_categories(categories)
 
 
 def compute_friction(jr: Optional[JurisdictionRule]) -> JurisdictionFriction:
@@ -110,6 +217,17 @@ def compute_friction(jr: Optional[JurisdictionRule]) -> JurisdictionFriction:
             delta=delta,
             text="Biennial inspection cadence (moderate compliance friction).",
         )
+    elif freq == "periodic":
+        delta = -0.03
+        mult += delta
+        _push(
+            trace,
+            rule_field="inspection_frequency",
+            input_value=freq,
+            weight=1.0,
+            delta=delta,
+            text="Periodic inspection cadence (moderate compliance friction).",
+        )
     elif freq == "complaint":
         _push(
             trace,
@@ -146,6 +264,17 @@ def compute_friction(jr: Optional[JurisdictionRule]) -> JurisdictionFriction:
                 delta=delta,
                 text=f"Moderate processing (~{pdv} days).",
             )
+        elif pdv >= 10:
+            delta = -0.02
+            mult += delta
+            _push(
+                trace,
+                rule_field="processing_days",
+                input_value=pdv,
+                weight=1.0,
+                delta=delta,
+                text=f"Operational processing (~{pdv} days).",
+            )
 
     # Typical fail points count heuristic
     try:
@@ -160,6 +289,17 @@ def compute_friction(jr: Optional[JurisdictionRule]) -> JurisdictionFriction:
                 weight=1.0,
                 delta=delta,
                 text="Many typical fail points (reinspect likelihood).",
+            )
+        elif isinstance(fps, list) and len(fps) >= 4:
+            delta = -0.02
+            mult += delta
+            _push(
+                trace,
+                rule_field="typical_fail_points_json",
+                input_value=len(fps),
+                weight=1.0,
+                delta=delta,
+                text="Several typical fail points (moderate reinspection risk).",
             )
     except Exception:
         _push(

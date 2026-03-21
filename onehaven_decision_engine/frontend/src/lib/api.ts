@@ -150,6 +150,34 @@ export type IngestionRunDetail = {
   summary_json?: Record<string, any> | null;
 };
 
+export type JurisdictionRefreshPayload = {
+  state: string;
+  county?: string | null;
+  city?: string | null;
+  pha_name?: string | null;
+  org_scope?: boolean;
+  force?: boolean;
+  include_notifications?: boolean;
+};
+
+export type JurisdictionNotifyPayload = {
+  state: string;
+  county?: string | null;
+  city?: string | null;
+  pha_name?: string | null;
+  org_scope?: boolean;
+  reason?: string | null;
+};
+
+export type JurisdictionProfileRefreshPayload = {
+  state: string;
+  county?: string | null;
+  city?: string | null;
+  pha_name?: string | null;
+  org_scope?: boolean;
+  force?: boolean;
+};
+
 export type IngestionOverview = {
   sources_connected: number;
   sources_enabled: number;
@@ -1912,6 +1940,30 @@ export const api = {
       })}`,
       { method: "GET", cacheTtlMs: 0 },
     ),
+
+  refreshJurisdictionProfile: (profile_id: number, force: boolean = false) =>
+    request<any>(`/jurisdiction-profiles/${profile_id}/refresh`, {
+      method: "POST",
+      body: JSON.stringify({
+        force,
+      }),
+    }),
+
+  recomputeJurisdictionProfile: (profile_id: number, force: boolean = false) =>
+    request<any>(`/jurisdiction-profiles/${profile_id}/recompute`, {
+      method: "POST",
+      body: JSON.stringify({
+        force,
+      }),
+    }),
+
+  notifyStaleJurisdiction: (profile_id: number, force: boolean = false) =>
+    request<any>(`/jurisdiction-profiles/${profile_id}/notify-stale`, {
+      method: "POST",
+      body: JSON.stringify({
+        force,
+      }),
+    }),
 
   upsertJurisdictionProfile: (payload: {
     state: string;

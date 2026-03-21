@@ -5,6 +5,10 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.policy_models import PolicyAssertion, PolicySource
+from app.services.jurisdiction_completeness_service import (
+    profile_completeness_payload,
+    recompute_profile_and_coverage,
+)
 from app.services.policy_cleanup_service import (
     ARCHIVE_MARKER,
     archive_stale_market_sources,
@@ -82,7 +86,6 @@ def _market_sources_from_catalog(
 
     rows = q.order_by(PolicySource.id.asc()).all()
 
-    # Keep only the newest non-archived source row per URL
     by_url: dict[str, PolicySource] = {}
     for row in rows:
         if _is_archived_source(row):
@@ -152,6 +155,10 @@ def _issues_remaining(coverage_payload: dict, brief: dict) -> list[str]:
         issues.append("There are still unresolved stale/recheck assertions.")
     if brief.get("compliance", {}).get("certificate_required_before_occupancy") == "unknown":
         issues.append("Certificate-before-occupancy status is still unknown.")
+    if coverage_payload.get("completeness_status") != "complete":
+        issues.append("Jurisdiction category coverage is incomplete.")
+    if coverage_payload.get("is_stale"):
+        issues.append("Jurisdiction source freshness is stale.")
 
     return issues
 
@@ -174,6 +181,9 @@ def _unresolved_rule_gaps(coverage_payload: dict, brief: dict) -> list[str]:
     if brief.get("compliance", {}).get("certificate_required_before_occupancy") == "unknown":
         gaps.append("certificate_required_before_occupancy")
 
+    for missing_category in coverage_payload.get("missing_categories") or []:
+        gaps.append(f"category:{missing_category}")
+
     seen: set[str] = set()
     out: list[str] = []
     for gap in gaps:
@@ -195,10 +205,6 @@ def _stabilize_review_state(
     pha_name: Optional[str],
     archive_extracted_duplicates: bool,
 ) -> dict:
-    """
-    Run the review / supersede / cleanup passes in a stricter sequence so stale
-    churn collapses before coverage is computed.
-    """
     verify_1 = auto_verify_market_assertions(
         db,
         org_id=org_id,
@@ -227,7 +233,6 @@ def _stabilize_review_state(
         reviewer_user_id=reviewer_user_id,
         archive_extracted_duplicates=archive_extracted_duplicates,
     )
-    # One more pass after cleanup to collapse any remaining churn
     verify_2 = auto_verify_market_assertions(
         db,
         org_id=org_id,
@@ -319,6 +324,13 @@ def run_market_pipeline(
                 "url": src.url,
                 "created": len(created_ids),
                 "assertion_ids": created_ids,
+                "normalized_categories": sorted(
+                    {
+                        a.normalized_category
+                        for a in created
+                        if getattr(a, "normalized_category", None)
+                    }
+                ),
             }
         )
 
@@ -344,16 +356,7 @@ def run_market_pipeline(
         pha_name=pha,
         notes=f"Projected from verified assertions for {cty or cnty or st}.",
     )
-
-    coverage = upsert_coverage_status(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        notes=f"Coverage refreshed after market pipeline run for {cty or cnty or st}.",
-    )
+    profile, coverage = recompute_profile_and_coverage(db, profile, commit=True)
 
     coverage_payload = compute_coverage_status(
         db,
@@ -407,6 +410,7 @@ def run_market_pipeline(
             "pha_name": profile.pha_name,
             "friction_multiplier": profile.friction_multiplier,
             "notes": profile.notes,
+            "completeness": profile_completeness_payload(db, profile),
         },
         "coverage": {
             "id": coverage.id,
@@ -548,6 +552,13 @@ def repair_market(
                 "url": src.url,
                 "created": len(created_ids),
                 "assertion_ids": created_ids,
+                "normalized_categories": sorted(
+                    {
+                        a.normalized_category
+                        for a in created
+                        if getattr(a, "normalized_category", None)
+                    }
+                ),
             }
         )
 
@@ -584,16 +595,7 @@ def repair_market(
         pha_name=pha,
         notes=f"Repaired and projected from verified assertions for {cty or cnty or st}.",
     )
-
-    coverage = upsert_coverage_status(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        notes=f"Coverage refreshed after market repair for {cty or cnty or st}.",
-    )
+    profile, coverage = recompute_profile_and_coverage(db, profile, commit=True)
 
     coverage_payload = compute_coverage_status(
         db,
@@ -653,6 +655,7 @@ def repair_market(
             "pha_name": profile.pha_name,
             "friction_multiplier": profile.friction_multiplier,
             "notes": profile.notes,
+            "completeness": profile_completeness_payload(db, profile),
         },
         "coverage": {
             "id": coverage.id,

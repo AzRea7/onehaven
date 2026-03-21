@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_principal, require_owner
 from app.db import get_db
 from app.policy_models import PolicyAssertion, PolicySource
+from app.services.jurisdiction_completeness_service import profile_completeness_payload
 from app.services.policy_catalog import (
     catalog_for_market,
     catalog_mi_authoritative,
@@ -145,6 +146,7 @@ class MarketCleanupIn(BaseModel):
     archive_extracted_duplicates: bool = True
     focus: str = "se_mi_extended"
 
+
 class MarketRepairIn(BaseModel):
     state: str = "MI"
     county: Optional[str] = None
@@ -220,6 +222,7 @@ def _market_sources_for_catalog(
         q = q.filter((PolicySource.org_id == org_id) | (PolicySource.org_id.is_(None)))
 
     return q.order_by(PolicySource.id.asc()).all()
+
 
 @router.get("/catalog")
 def get_catalog(
@@ -378,6 +381,10 @@ def collect_source(
             "content_sha256": s.content_sha256,
             "raw_path": s.raw_path,
             "notes": s.notes,
+            "normalized_categories": _loads(getattr(s, "normalized_categories_json", None), []),
+            "freshness_status": getattr(s, "freshness_status", None),
+            "freshness_reason": getattr(s, "freshness_reason", None),
+            "last_verified_at": s.last_verified_at.isoformat() if getattr(s, "last_verified_at", None) else None,
         },
     }
 
@@ -435,6 +442,11 @@ def list_sources(
                 "content_sha256": s.content_sha256,
                 "raw_path": s.raw_path,
                 "notes": s.notes,
+                "normalized_categories": _loads(getattr(s, "normalized_categories_json", None), []),
+                "freshness_status": getattr(s, "freshness_status", None),
+                "freshness_reason": getattr(s, "freshness_reason", None),
+                "freshness_checked_at": s.freshness_checked_at.isoformat() if getattr(s, "freshness_checked_at", None) else None,
+                "last_verified_at": s.last_verified_at.isoformat() if getattr(s, "last_verified_at", None) else None,
             }
             for s in rows
         ]
@@ -476,6 +488,7 @@ def extract_market(
         state=payload.state,
         county=payload.county,
         city=payload.city,
+        pha_name=payload.pha_name,
         focus=payload.focus,
     )
 
@@ -495,6 +508,13 @@ def extract_market(
                 "source_id": src.id,
                 "url": src.url,
                 "created": len(created),
+                "normalized_categories": sorted(
+                    {
+                        getattr(a, "normalized_category", None)
+                        for a in created
+                        if getattr(a, "normalized_category", None)
+                    }
+                ),
             }
         )
 
@@ -556,6 +576,8 @@ def list_assertions(
     rule_key: Optional[str] = Query(None),
     rule_family: Optional[str] = Query(None),
     assertion_type: Optional[str] = Query(None),
+    normalized_category: Optional[str] = Query(None),
+    coverage_status: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     county: Optional[str] = Query(None),
     city: Optional[str] = Query(None),
@@ -583,6 +605,10 @@ def list_assertions(
         q = q.filter(PolicyAssertion.rule_family == rule_family)
     if assertion_type:
         q = q.filter(PolicyAssertion.assertion_type == assertion_type)
+    if normalized_category:
+        q = q.filter(PolicyAssertion.normalized_category == normalized_category)
+    if coverage_status:
+        q = q.filter(PolicyAssertion.coverage_status == coverage_status)
     if state:
         q = q.filter(PolicyAssertion.state == _norm_state(state))
     if county:
@@ -610,6 +636,9 @@ def list_assertions(
                 "rule_key": a.rule_key,
                 "rule_family": a.rule_family,
                 "assertion_type": a.assertion_type,
+                "normalized_category": getattr(a, "normalized_category", None),
+                "coverage_status": getattr(a, "coverage_status", None),
+                "source_freshness_status": getattr(a, "source_freshness_status", None),
                 "value": _loads(a.value_json, {}),
                 "confidence": float(a.confidence or 0.0),
                 "priority": a.priority,
@@ -659,7 +688,13 @@ def review_assertion(
 
     db.commit()
     db.refresh(a)
-    return {"ok": True, "id": a.id, "review_status": a.review_status}
+    return {
+        "ok": True,
+        "id": a.id,
+        "review_status": a.review_status,
+        "normalized_category": getattr(a, "normalized_category", None),
+        "coverage_status": getattr(a, "coverage_status", None),
+    }
 
 
 @router.post("/assertions/review/batch")
@@ -753,6 +788,8 @@ def create_verified_assertion_from_source(
             "rule_key": row.rule_key,
             "review_status": row.review_status,
             "confidence": row.confidence,
+            "normalized_category": getattr(row, "normalized_category", None),
+            "coverage_status": getattr(row, "coverage_status", None),
         },
     }
 
@@ -787,6 +824,7 @@ def build_profile_from_verified_assertions(
             "pha_name": row.pha_name,
             "policy": _loads(row.policy_json, {}),
             "notes": row.notes,
+            "completeness": profile_completeness_payload(db, row),
         },
     }
 
@@ -830,6 +868,8 @@ def build_profiles_all(
                 "friction_multiplier": row.friction_multiplier,
                 "production_readiness": coverage.get("production_readiness"),
                 "coverage_status": coverage.get("coverage_status"),
+                "completeness_status": coverage.get("completeness_status"),
+                "is_stale": coverage.get("is_stale"),
             }
         )
 
@@ -931,6 +971,13 @@ def refresh_coverage_status(
             "source_count": row.source_count,
             "fetch_failure_count": row.fetch_failure_count,
             "stale_warning_count": row.stale_warning_count,
+            "completeness_score": getattr(row, "completeness_score", None),
+            "completeness_status": getattr(row, "completeness_status", None),
+            "is_stale": getattr(row, "is_stale", None),
+            "stale_reason": getattr(row, "stale_reason", None),
+            "required_categories": _loads(getattr(row, "required_categories_json", None), []),
+            "covered_categories": _loads(getattr(row, "covered_categories_json", None), []),
+            "missing_categories": _loads(getattr(row, "missing_categories_json", None), []),
             "notes": row.notes,
         },
     }
@@ -985,6 +1032,8 @@ def seed_market(
             "id": row.id,
             "coverage_status": row.coverage_status,
             "production_readiness": row.production_readiness,
+            "completeness_status": getattr(row, "completeness_status", None),
+            "is_stale": getattr(row, "is_stale", None),
         },
     }
 
@@ -1042,6 +1091,7 @@ def extract_market_step(
         state=payload.state,
         county=payload.county,
         city=payload.city,
+        pha_name=payload.pha_name,
         focus=payload.focus,
     )
 
@@ -1061,6 +1111,13 @@ def extract_market_step(
                 "source_id": src.id,
                 "url": src.url,
                 "created": len(created),
+                "normalized_categories": sorted(
+                    {
+                        getattr(a, "normalized_category", None)
+                        for a in created
+                        if getattr(a, "normalized_category", None)
+                    }
+                ),
             }
         )
 
@@ -1147,6 +1204,7 @@ def build_market_step(
             "friction_multiplier": profile.friction_multiplier,
             "notes": profile.notes,
             "policy": _loads(profile.policy_json, {}),
+            "completeness": profile_completeness_payload(db, profile),
         },
         "coverage": {
             "id": coverage.id,
@@ -1154,6 +1212,8 @@ def build_market_step(
             "production_readiness": coverage.production_readiness,
             "verified_rule_count": coverage.verified_rule_count,
             "stale_warning_count": coverage.stale_warning_count,
+            "completeness_status": getattr(coverage, "completeness_status", None),
+            "is_stale": getattr(coverage, "is_stale", None),
         },
         "brief": brief,
     }

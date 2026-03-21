@@ -18,24 +18,18 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
-
     task_time_limit=int(getattr(settings, "agents_run_timeout_seconds", 120) or 120),
-
     timezone="UTC",
     enable_utc=True,
-
     task_default_queue=queue,
     task_default_routing_key=queue,
-
     imports=(
         "app.workers.agent_tasks",
         "app.tasks.ingestion_tasks",
     ),
-
     beat_schedule={
         "ingestion-sync-due-sources-every-15-minutes": {
             "task": "ingestion.sync_due_sources",
@@ -48,6 +42,14 @@ celery_app.conf.update(
         "location-refresh-stale-properties": {
             "task": "location.refresh_stale_properties",
             "schedule": float(max(300, int(settings.location_refresh_schedule_minutes) * 60)),
+        },
+        "jurisdiction-refresh-stale-profiles": {
+            "task": "jurisdiction.refresh_stale_profiles",
+            "schedule": 12 * 60 * 60.0,
+        },
+        "jurisdiction-notify-stale-profiles": {
+            "task": "jurisdiction.notify_stale_profiles",
+            "schedule": 12 * 60 * 60.0,
         },
     },
 )

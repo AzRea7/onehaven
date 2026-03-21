@@ -14,6 +14,8 @@ import {
   Crosshair,
   LocateFixed,
   AlertTriangle,
+  ShieldCheck,
+  Building2,
 } from "lucide-react";
 
 import { api } from "../lib/api";
@@ -208,6 +210,36 @@ function inferCounty(r: any) {
   return r?.county || r?.property?.county || null;
 }
 
+function inferJurisdiction(r: any) {
+  return (
+    r?.workflow?.jurisdiction ||
+    r?.constraints?.jurisdiction ||
+    r?.property_state?.constraints?.jurisdiction ||
+    null
+  );
+}
+
+function inferNextActions(r: any): any[] {
+  if (Array.isArray(r?.next_actions)) return r.next_actions;
+  if (Array.isArray(r?.workflow?.next_actions)) return r.workflow.next_actions;
+  if (Array.isArray(r?.outstanding_tasks?.next_actions)) {
+    return r.outstanding_tasks.next_actions;
+  }
+  if (Array.isArray(r?.property_state?.outstanding_tasks?.next_actions)) {
+    return r.property_state.outstanding_tasks.next_actions;
+  }
+  return [];
+}
+
+function inferGateStatus(r: any) {
+  return (
+    r?.workflow?.gate_status ||
+    r?.gate_status ||
+    r?.property_state?.gate_status ||
+    null
+  );
+}
+
 function inferLocationStatus(r: any): {
   label: string;
   pillClass: string;
@@ -249,9 +281,24 @@ function inferLocationStatus(r: any): {
   };
 }
 
+function jurisdictionPillClass(j: any) {
+  if (!j || !j.exists) return "oh-pill oh-pill-bad";
+  if (j.is_stale) return "oh-pill oh-pill-warn";
+  if (j.completeness_status === "complete") return "oh-pill oh-pill-good";
+  return "oh-pill oh-pill-warn";
+}
+
+function jurisdictionLabel(j: any) {
+  if (!j || !j.exists) return "Jurisdiction missing";
+  if (j.is_stale) return "Jurisdiction stale";
+  if (j.completeness_status === "complete") return "Jurisdiction complete";
+  return "Jurisdiction partial";
+}
+
 type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
 type FinancingFilter = "ALL" | "CASH" | "DSCR";
 type LocationFilter = "ALL" | "VERIFIED" | "PARTIAL" | "MISSING";
+type JurisdictionFilter = "ALL" | "COMPLETE" | "PARTIAL" | "STALE" | "MISSING";
 
 export default function Properties() {
   const [rows, setRows] = React.useState<Row[]>([]);
@@ -267,6 +314,8 @@ export default function Properties() {
   const [financing, setFinancing] = React.useState<FinancingFilter>("ALL");
   const [locationFilter, setLocationFilter] =
     React.useState<LocationFilter>("ALL");
+  const [jurisdictionFilter, setJurisdictionFilter] =
+    React.useState<JurisdictionFilter>("ALL");
 
   const abortRef = React.useRef<AbortController | null>(null);
 
@@ -302,11 +351,14 @@ export default function Properties() {
       const price = inferAskingPrice(r);
       const financingType = getFinancingType(price);
       const locationStatus = inferLocationStatus(r);
+      const jurisdiction = inferJurisdiction(r);
 
       const hay =
         `${p.address || ""} ${p.city || ""} ${p.state || ""} ${p.zip || ""} ${p.county || ""} ${
           inferNormalizedAddress(r) || ""
-        } ${inferLocationSource(r) || ""}`.toLowerCase();
+        } ${inferLocationSource(r) || ""} ${
+          jurisdiction?.completeness_status || ""
+        } ${jurisdiction?.stale_reason || ""}`.toLowerCase();
 
       if (needle && !hay.includes(needle)) return false;
       if (decision !== "ALL" && d !== decision) return false;
@@ -333,9 +385,36 @@ export default function Properties() {
         return false;
       }
 
+      if (jurisdictionFilter === "COMPLETE") {
+        if (!jurisdiction?.exists) return false;
+        if (jurisdiction?.is_stale) return false;
+        if (jurisdiction?.completeness_status !== "complete") return false;
+      }
+
+      if (jurisdictionFilter === "PARTIAL") {
+        if (!jurisdiction?.exists) return false;
+        if (jurisdiction?.is_stale) return false;
+        if (jurisdiction?.completeness_status === "complete") return false;
+      }
+
+      if (jurisdictionFilter === "STALE") {
+        if (!jurisdiction?.exists || !jurisdiction?.is_stale) return false;
+      }
+
+      if (jurisdictionFilter === "MISSING") {
+        if (jurisdiction?.exists) return false;
+      }
+
       return true;
     });
-  }, [rows, deferredQ, decision, financing, locationFilter]);
+  }, [
+    rows,
+    deferredQ,
+    decision,
+    financing,
+    locationFilter,
+    jurisdictionFilter,
+  ]);
 
   const counts = React.useMemo(() => {
     const c = { GOOD_DEAL: 0, REVIEW: 0, REJECT: 0 };
@@ -362,6 +441,23 @@ export default function Properties() {
       if (status === "Location verified") out.verified += 1;
       else if (status === "Location incomplete") out.missing += 1;
       else out.partial += 1;
+    }
+    return out;
+  }, [rows]);
+
+  const jurisdictionCounts = React.useMemo(() => {
+    const out = { complete: 0, partial: 0, stale: 0, missing: 0 };
+    for (const r of rows || []) {
+      const j = inferJurisdiction(r);
+      if (!j || !j.exists) {
+        out.missing += 1;
+      } else if (j.is_stale) {
+        out.stale += 1;
+      } else if (j.completeness_status === "complete") {
+        out.complete += 1;
+      } else {
+        out.partial += 1;
+      }
     }
     return out;
   }, [rows]);
@@ -483,6 +579,53 @@ export default function Properties() {
               </div>
             </Surface>
 
+            <Surface
+              title="Jurisdiction readiness"
+              subtitle="See whether each property has complete, fresh market rules before compliance work advances."
+            >
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Complete
+                  </div>
+                  <div className="mt-3 text-2xl font-semibold text-app-0">
+                    {jurisdictionCounts.complete}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    <Building2 className="h-3.5 w-3.5" />
+                    Partial
+                  </div>
+                  <div className="mt-3 text-2xl font-semibold text-app-0">
+                    {jurisdictionCounts.partial}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Stale
+                  </div>
+                  <div className="mt-3 text-2xl font-semibold text-app-0">
+                    {jurisdictionCounts.stale}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    <Crosshair className="h-3.5 w-3.5" />
+                    Missing
+                  </div>
+                  <div className="mt-3 text-2xl font-semibold text-app-0">
+                    {jurisdictionCounts.missing}
+                  </div>
+                </div>
+              </div>
+            </Surface>
+
             {err ? (
               <Surface tone="danger">
                 <div className="text-sm text-red-300">{err}</div>
@@ -496,7 +639,7 @@ export default function Properties() {
               }`}
             >
               <div className="mb-4 rounded-3xl border border-app bg-app-panel px-4 py-4">
-                <div className="grid gap-3 lg:grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr_auto]">
+                <div className="grid gap-3 lg:grid-cols-[1.15fr_0.7fr_0.7fr_0.8fr_0.8fr_auto]">
                   <label className="block">
                     <span className="oh-field-label">Search</span>
                     <div className="relative">
@@ -557,6 +700,25 @@ export default function Properties() {
                     </select>
                   </label>
 
+                  <label className="block">
+                    <span className="oh-field-label">Jurisdiction</span>
+                    <select
+                      value={jurisdictionFilter}
+                      onChange={(e) =>
+                        setJurisdictionFilter(
+                          e.target.value as JurisdictionFilter,
+                        )
+                      }
+                      className="oh-input"
+                    >
+                      <option value="ALL">All</option>
+                      <option value="COMPLETE">Complete</option>
+                      <option value="PARTIAL">Partial</option>
+                      <option value="STALE">Stale</option>
+                      <option value="MISSING">Missing</option>
+                    </select>
+                  </label>
+
                   <div className="flex items-end">
                     <button
                       onClick={refresh}
@@ -574,7 +736,7 @@ export default function Properties() {
                   {Array.from({ length: 6 }).map((_, i) => (
                     <div
                       key={i}
-                      className="oh-skeleton h-[150px] rounded-3xl"
+                      className="oh-skeleton h-[170px] rounded-3xl"
                     />
                   ))}
                 </div>
@@ -582,7 +744,7 @@ export default function Properties() {
                 <EmptyState
                   icon={Filter}
                   title="No properties matched"
-                  description="Try a broader search or change the classification, financing, or location filter."
+                  description="Try a broader search or change the classification, financing, location, or jurisdiction filter."
                 />
               ) : (
                 <div className="max-h-[980px] overflow-y-auto pr-1">
@@ -606,6 +768,10 @@ export default function Properties() {
                       const lat = inferLat(r);
                       const lng = inferLng(r);
                       const county = inferCounty(r);
+
+                      const jurisdiction = inferJurisdiction(r);
+                      const nextActions = inferNextActions(r);
+                      const gateStatus = inferGateStatus(r);
 
                       return (
                         <Link
@@ -652,6 +818,25 @@ export default function Properties() {
                                 <span className={locationStatus.pillClass}>
                                   {locationStatus.label}
                                 </span>
+                                <span
+                                  className={jurisdictionPillClass(
+                                    jurisdiction,
+                                  )}
+                                >
+                                  {jurisdictionLabel(jurisdiction)}
+                                </span>
+                                {gateStatus ? (
+                                  <span
+                                    className={
+                                      String(gateStatus).toUpperCase() ===
+                                      "OPEN"
+                                        ? "oh-pill oh-pill-good"
+                                        : "oh-pill oh-pill-warn"
+                                    }
+                                  >
+                                    gate {String(gateStatus).toLowerCase()}
+                                  </span>
+                                ) : null}
                               </div>
 
                               <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
@@ -666,9 +851,9 @@ export default function Properties() {
                                   </span>
                                 </div>
                                 <div className="mt-1 text-xs text-app-4">
-                                  Open the property to continue the next action
-                                  and move it toward compliant occupancy and
-                                  cashflow.
+                                  {nextActions.length > 0
+                                    ? `Next action: ${String(nextActions[0])}`
+                                    : "Open the property to continue the next action and move it toward compliant occupancy and cashflow."}
                                 </div>
                               </div>
 
@@ -715,6 +900,44 @@ export default function Properties() {
                                     {lat.toFixed(4)}, {lng.toFixed(4)}
                                   </div>
                                 ) : null}
+                              </div>
+
+                              <div className="mt-3 rounded-2xl border border-app px-4 py-3">
+                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                                  <ShieldCheck className="h-3.5 w-3.5" />
+                                  Jurisdiction workflow
+                                </div>
+
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <span
+                                    className={jurisdictionPillClass(
+                                      jurisdiction,
+                                    )}
+                                  >
+                                    {jurisdictionLabel(jurisdiction)}
+                                  </span>
+                                  {jurisdiction?.completeness_status ? (
+                                    <span className="oh-pill">
+                                      {jurisdiction.completeness_status}
+                                    </span>
+                                  ) : null}
+                                  {jurisdiction?.missing_categories?.length ? (
+                                    <span className="oh-pill oh-pill-warn">
+                                      missing{" "}
+                                      {jurisdiction.missing_categories.length}
+                                    </span>
+                                  ) : null}
+                                </div>
+
+                                <div className="mt-2 text-xs text-app-4">
+                                  {jurisdiction?.stale_reason
+                                    ? `Reason: ${jurisdiction.stale_reason}`
+                                    : jurisdiction?.gate_reason
+                                      ? `Gate reason: ${jurisdiction.gate_reason}`
+                                      : jurisdiction?.exists
+                                        ? "Jurisdiction coverage is attached to this property."
+                                        : "Jurisdiction profile has not been attached yet."}
+                                </div>
                               </div>
                             </div>
 

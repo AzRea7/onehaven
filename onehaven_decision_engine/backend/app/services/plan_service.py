@@ -1,20 +1,34 @@
-# backend/app/services/plan_service.py
 from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Plan, OrgSubscription, UsageLedger
+from app.models import OrgSubscription, Plan, UsageLedger
 
 
 DEFAULT_PLANS = {
-    "free": {"properties_max": 3, "agent_runs_per_day": 20, "external_calls_per_day": 50},
-    "starter": {"properties_max": 25, "agent_runs_per_day": 200, "external_calls_per_day": 500},
-    "pro": {"properties_max": 250, "agent_runs_per_day": 5000, "external_calls_per_day": 20000},
+    "free": {
+        "properties_max": 3,
+        "agent_runs_per_day": 20,
+        "external_calls_per_day": 50,
+        "jurisdiction_tasks_per_property": 10,
+    },
+    "starter": {
+        "properties_max": 25,
+        "agent_runs_per_day": 200,
+        "external_calls_per_day": 500,
+        "jurisdiction_tasks_per_property": 25,
+    },
+    "pro": {
+        "properties_max": 250,
+        "agent_runs_per_day": 5000,
+        "external_calls_per_day": 20000,
+        "jurisdiction_tasks_per_property": 100,
+    },
 }
 
 
@@ -86,4 +100,43 @@ def record_usage(db: Session, *, org_id: int, metric: str, units: int = 1, meta:
             created_at=datetime.utcnow(),
         )
     )
-    
+
+
+def jurisdiction_task_limit(db: Session, *, org_id: int) -> int:
+    limits = get_limits(db, org_id=org_id)
+    try:
+        return int(limits.get("jurisdiction_tasks_per_property", 0) or 0)
+    except Exception:
+        return 0
+
+
+def clip_jurisdiction_tasks_for_plan(
+    db: Session,
+    *,
+    org_id: int,
+    tasks: list[dict],
+) -> dict:
+    """
+    Optional helper for UI/service layers that want to avoid flooding lower-tier plans
+    with an excessive number of generated jurisdiction tasks.
+    """
+    cap = jurisdiction_task_limit(db, org_id=org_id)
+    if cap <= 0:
+        return {
+            "tasks": tasks,
+            "task_count": len(tasks),
+            "task_limit": cap,
+            "truncated": False,
+            "truncated_count": 0,
+        }
+
+    clipped = list(tasks[:cap])
+    truncated_count = max(0, len(tasks) - len(clipped))
+
+    return {
+        "tasks": clipped,
+        "task_count": len(clipped),
+        "task_limit": cap,
+        "truncated": truncated_count > 0,
+        "truncated_count": truncated_count,
+    }

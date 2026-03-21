@@ -1,0 +1,325 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Any, Iterable, Optional
+
+from ..domain.jurisdiction_categories import normalize_categories
+from ..policy_models import JurisdictionProfile
+
+
+TASK_PRIORITY_HIGH = "high"
+TASK_PRIORITY_MEDIUM = "medium"
+TASK_PRIORITY_LOW = "low"
+
+TASK_STATUS_TODO = "todo"
+
+
+@dataclass(frozen=True)
+class JurisdictionTask:
+    task_key: str
+    title: str
+    category: str
+    status: str
+    priority: str
+    reason: str
+    metadata: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_key": self.task_key,
+            "title": self.title,
+            "category": self.category,
+            "status": self.status,
+            "priority": self.priority,
+            "reason": self.reason,
+            "metadata": self.metadata,
+        }
+
+
+def _loads_json_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return value
+
+    if isinstance(value, tuple):
+        return list(value)
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+
+    return []
+
+
+def _scope_label(
+    *,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+) -> str:
+    if city and state:
+        return f"{city}, {state}"
+    if county and state:
+        return f"{county} County, {state}"
+    if pha_name:
+        return pha_name
+    if state:
+        return state
+    return "jurisdiction"
+
+
+def _missing_category_title(category: str) -> str:
+    mapping = {
+        "rental_license": "Verify rental license requirement",
+        "registration": "Verify rental registration requirement",
+        "inspection": "Confirm inspection workflow and cadence",
+        "section8": "Confirm Section 8 / PHA policy coverage",
+        "safety": "Validate safety compliance requirements",
+        "lead": "Validate lead-based paint requirements",
+        "permits": "Confirm permit and rehab approval requirements",
+        "zoning": "Confirm zoning / use restrictions",
+        "tax": "Confirm local tax obligations",
+        "utilities": "Confirm utility responsibility rules",
+        "occupancy": "Confirm occupancy / certificate rules",
+    }
+    return mapping.get(category, f"Verify {category.replace('_', ' ')} requirements")
+
+
+def _missing_category_reason(category: str, scope_label: str) -> str:
+    mapping = {
+        "rental_license": f"{scope_label} is missing verified rental license coverage.",
+        "registration": f"{scope_label} is missing rental registration coverage.",
+        "inspection": f"{scope_label} is missing inspection authority or cadence coverage.",
+        "section8": f"{scope_label} is missing verified PHA / Section 8 operational coverage.",
+        "safety": f"{scope_label} is missing safety-rule coverage.",
+        "lead": f"{scope_label} is missing lead-risk coverage.",
+        "permits": f"{scope_label} is missing permit workflow coverage.",
+        "zoning": f"{scope_label} is missing zoning coverage.",
+        "tax": f"{scope_label} is missing tax-rule coverage.",
+        "utilities": f"{scope_label} is missing utility coverage.",
+        "occupancy": f"{scope_label} is missing occupancy-rule coverage.",
+    }
+    return mapping.get(category, f"{scope_label} is missing {category.replace('_', ' ')} coverage.")
+
+
+def _priority_for_missing_category(category: str) -> str:
+    if category in {"rental_license", "inspection", "section8", "safety"}:
+        return TASK_PRIORITY_HIGH
+    if category in {"registration", "lead", "permits", "occupancy"}:
+        return TASK_PRIORITY_MEDIUM
+    return TASK_PRIORITY_LOW
+
+
+def build_missing_category_task(
+    *,
+    category: str,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    jurisdiction_profile_id: int | None = None,
+) -> JurisdictionTask:
+    scope_label = _scope_label(state=state, county=county, city=city, pha_name=pha_name)
+
+    return JurisdictionTask(
+        task_key=f"jurisdiction_missing_category:{category}",
+        title=_missing_category_title(category),
+        category="jurisdiction",
+        status=TASK_STATUS_TODO,
+        priority=_priority_for_missing_category(category),
+        reason=_missing_category_reason(category, scope_label),
+        metadata={
+            "task_type": "jurisdiction_missing_category",
+            "normalized_category": category,
+            "state": state,
+            "county": county,
+            "city": city,
+            "pha_name": pha_name,
+            "jurisdiction_profile_id": jurisdiction_profile_id,
+            "scope_label": scope_label,
+        },
+    )
+
+
+def build_refresh_task(
+    *,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    stale_reason: str | None,
+    pha_name: str | None = None,
+    jurisdiction_profile_id: int | None = None,
+) -> JurisdictionTask:
+    scope_label = _scope_label(state=state, county=county, city=city, pha_name=pha_name)
+    reason = (
+        f"{scope_label} jurisdiction data is stale."
+        if not stale_reason
+        else f"{scope_label} jurisdiction data is stale ({stale_reason})."
+    )
+
+    return JurisdictionTask(
+        task_key="jurisdiction_refresh_required",
+        title="Refresh jurisdiction policy sources",
+        category="jurisdiction",
+        status=TASK_STATUS_TODO,
+        priority=TASK_PRIORITY_HIGH,
+        reason=reason,
+        metadata={
+            "task_type": "jurisdiction_refresh_required",
+            "state": state,
+            "county": county,
+            "city": city,
+            "pha_name": pha_name,
+            "jurisdiction_profile_id": jurisdiction_profile_id,
+            "stale_reason": stale_reason,
+            "scope_label": scope_label,
+        },
+    )
+
+
+def build_completeness_review_task(
+    *,
+    completeness_status: str,
+    completeness_score: float,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    jurisdiction_profile_id: int | None = None,
+) -> JurisdictionTask:
+    scope_label = _scope_label(state=state, county=county, city=city, pha_name=pha_name)
+
+    if completeness_status == "missing":
+        title = "Build initial jurisdiction policy coverage"
+        priority = TASK_PRIORITY_HIGH
+    else:
+        title = "Complete jurisdiction policy coverage"
+        priority = TASK_PRIORITY_MEDIUM
+
+    return JurisdictionTask(
+        task_key="jurisdiction_completeness_review",
+        title=title,
+        category="jurisdiction",
+        status=TASK_STATUS_TODO,
+        priority=priority,
+        reason=(
+            f"{scope_label} jurisdiction coverage is {completeness_status} "
+            f"({round(float(completeness_score or 0.0) * 100)}% complete)."
+        ),
+        metadata={
+            "task_type": "jurisdiction_completeness_review",
+            "completeness_status": completeness_status,
+            "completeness_score": float(completeness_score or 0.0),
+            "state": state,
+            "county": county,
+            "city": city,
+            "pha_name": pha_name,
+            "jurisdiction_profile_id": jurisdiction_profile_id,
+            "scope_label": scope_label,
+        },
+    )
+
+
+def dedupe_tasks(tasks: Iterable[JurisdictionTask]) -> list[JurisdictionTask]:
+    seen: set[str] = set()
+    deduped: list[JurisdictionTask] = []
+
+    for task in tasks:
+        key = task.task_key
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(task)
+
+    return deduped
+
+
+def map_jurisdiction_tasks(
+    *,
+    completeness_status: str,
+    completeness_score: float,
+    missing_categories: Iterable[Any] | None,
+    is_stale: bool,
+    stale_reason: str | None,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    jurisdiction_profile_id: int | None = None,
+) -> list[JurisdictionTask]:
+    tasks: list[JurisdictionTask] = []
+
+    normalized_missing = normalize_categories(missing_categories)
+
+    if completeness_status in {"missing", "partial"}:
+        tasks.append(
+            build_completeness_review_task(
+                completeness_status=completeness_status,
+                completeness_score=completeness_score,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                jurisdiction_profile_id=jurisdiction_profile_id,
+            )
+        )
+
+    for category in normalized_missing:
+        tasks.append(
+            build_missing_category_task(
+                category=category,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                jurisdiction_profile_id=jurisdiction_profile_id,
+            )
+        )
+
+    if is_stale:
+        tasks.append(
+            build_refresh_task(
+                state=state,
+                county=county,
+                city=city,
+                stale_reason=stale_reason,
+                pha_name=pha_name,
+                jurisdiction_profile_id=jurisdiction_profile_id,
+            )
+        )
+
+    return dedupe_tasks(tasks)
+
+
+def map_profile_jurisdiction_tasks(profile: Optional[JurisdictionProfile]) -> list[JurisdictionTask]:
+    if profile is None:
+        return []
+
+    missing_categories = _loads_json_list(getattr(profile, "missing_categories_json", None))
+
+    return map_jurisdiction_tasks(
+        completeness_status=(getattr(profile, "completeness_status", None) or "missing").strip().lower(),
+        completeness_score=float(getattr(profile, "completeness_score", 0.0) or 0.0),
+        missing_categories=missing_categories,
+        is_stale=bool(getattr(profile, "is_stale", False)),
+        stale_reason=getattr(profile, "stale_reason", None),
+        state=getattr(profile, "state", None),
+        county=getattr(profile, "county", None),
+        city=getattr(profile, "city", None),
+        pha_name=getattr(profile, "pha_name", None),
+        jurisdiction_profile_id=getattr(profile, "id", None),
+    )
+
+
+def map_profile_jurisdiction_task_dicts(profile: Optional[JurisdictionProfile]) -> list[dict[str, Any]]:
+    return [task.to_dict() for task in map_profile_jurisdiction_tasks(profile)]

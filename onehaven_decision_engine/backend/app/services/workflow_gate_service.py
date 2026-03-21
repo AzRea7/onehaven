@@ -39,6 +39,11 @@ def build_workflow_summary(
     gate = tx.get("gate") or {}
     next_actions = state.get("next_actions") or []
     stage_completion_summary = state.get("stage_completion_summary") or {}
+    constraints = state.get("constraints") or {}
+    outstanding_tasks = state.get("outstanding_tasks") or {}
+
+    jurisdiction = constraints.get("jurisdiction") or {}
+    jurisdiction_tasks = outstanding_tasks.get("jurisdiction_tasks") or []
 
     rows: list[dict[str, Any]] = []
     completed_lookup = {
@@ -50,28 +55,39 @@ def build_workflow_summary(
     for stage in STAGES:
         rank = stage_rank(stage)
         meta = stage_meta(stage)
-        rows.append(
-            {
-                "key": stage,
-                "rank": rank,
-                "label": meta["label"],
-                "description": meta["description"],
-                "primary_action": meta["primary_action"],
-                "status": (
-                    "completed"
-                    if completed_lookup.get(stage, False) and rank < cur_rank
-                    else "current"
-                    if rank == cur_rank
-                    else "next"
-                    if nxt == stage
-                    else "locked"
-                ),
-                "is_completed": bool(completed_lookup.get(stage, False)),
-                "is_current": rank == cur_rank,
-                "is_next": nxt == stage,
-                "is_locked": rank > cur_rank and nxt != stage,
-            }
-        )
+        is_completed = bool(completed_lookup.get(stage, False))
+        is_current = rank == cur_rank
+        is_next = nxt == stage
+        is_locked = rank > cur_rank and nxt != stage
+
+        row = {
+            "key": stage,
+            "rank": rank,
+            "label": meta["label"],
+            "description": meta["description"],
+            "primary_action": meta["primary_action"],
+            "status": (
+                "completed"
+                if is_completed and rank < cur_rank
+                else "current"
+                if is_current
+                else "next"
+                if is_next
+                else "locked"
+            ),
+            "is_completed": is_completed,
+            "is_current": is_current,
+            "is_next": is_next,
+            "is_locked": is_locked,
+        }
+
+        if stage == "compliance":
+            row["jurisdiction_gate_ok"] = bool(jurisdiction.get("gate_ok", True))
+            row["jurisdiction_completeness_status"] = jurisdiction.get("completeness_status")
+            row["jurisdiction_is_stale"] = jurisdiction.get("is_stale")
+            row["jurisdiction_missing_categories"] = jurisdiction.get("missing_categories") or []
+
+        rows.append(row)
 
     primary_action: dict[str, Any]
     if next_actions:
@@ -109,8 +125,20 @@ def build_workflow_summary(
         "gate_status": state.get("gate_status"),
         "primary_action": primary_action,
         "next_actions": next_actions,
-        "constraints": state.get("constraints") or {},
-        "outstanding_tasks": state.get("outstanding_tasks") or {},
+        "constraints": constraints,
+        "outstanding_tasks": outstanding_tasks,
+        "jurisdiction": {
+            "exists": bool(jurisdiction.get("exists")),
+            "profile_id": jurisdiction.get("profile_id"),
+            "gate_ok": bool(jurisdiction.get("gate_ok", True)),
+            "gate_reason": jurisdiction.get("gate_reason"),
+            "completeness_status": jurisdiction.get("completeness_status"),
+            "completeness_score": jurisdiction.get("completeness_score"),
+            "missing_categories": jurisdiction.get("missing_categories") or [],
+            "is_stale": jurisdiction.get("is_stale"),
+            "stale_reason": jurisdiction.get("stale_reason"),
+            "tasks": jurisdiction_tasks,
+        },
         "stage_completion_summary": stage_completion_summary,
         "stages": rows,
         "catalog": stage_catalog(),

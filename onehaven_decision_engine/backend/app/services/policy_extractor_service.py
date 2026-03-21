@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.domain.jurisdiction_categories import normalize_category, normalize_categories
 from app.policy_models import PolicyAssertion, PolicySource
 
 
 def _dumps(v: Any) -> str:
     try:
-        return json.dumps(v, ensure_ascii=False)
+        return json.dumps(v, ensure_ascii=False, sort_keys=True)
     except Exception:
         return "{}"
 
@@ -85,6 +86,85 @@ def _source_rank_for(source: PolicySource) -> int:
     if "housing commission" in publisher or "dhcmi.org" in url:
         return 60
     return 100
+
+
+def _stale_after_for(rule_key: str, source: PolicySource, now: datetime) -> datetime:
+    url = (source.url or "").lower()
+
+    if "ecfr.gov" in url or "legislature.mi.gov" in url:
+        return now + timedelta(days=365)
+
+    if rule_key in {
+        "federal_hcv_regulations_anchor",
+        "federal_nspire_anchor",
+        "mi_statute_anchor",
+    }:
+        return now + timedelta(days=365)
+
+    if rule_key in {
+        "pha_administrator_changed",
+        "landlord_payment_timing_reference",
+        "pha_landlord_packet_required",
+        "hap_contract_and_tenancy_addendum_required",
+    }:
+        return now + timedelta(days=120)
+
+    return now + timedelta(days=180)
+
+
+def _normalized_category_for(rule_key: str) -> str | None:
+    mapping = {
+        "document_reference": None,
+        "federal_hcv_regulations_anchor": "section8",
+        "federal_nspire_anchor": "inspection",
+        "federal_notice_anchor": "section8",
+        "mi_statute_anchor": "safety",
+        "rental_registration_required": "registration",
+        "certificate_required_before_occupancy": "occupancy",
+        "inspection_program_exists": "inspection",
+        "property_maintenance_enforcement_anchor": "safety",
+        "building_safety_division_anchor": "safety",
+        "building_division_anchor": "permits",
+        "pha_admin_plan_anchor": "section8",
+        "pha_administrator_changed": "section8",
+        "pha_landlord_packet_required": "section8",
+        "mshda_program_anchor": "section8",
+        "hap_contract_and_tenancy_addendum_required": "section8",
+        "landlord_payment_timing_reference": "section8",
+    }
+    return normalize_category(mapping.get(rule_key))
+
+
+def _coverage_status_for(rule_key: str) -> str:
+    if rule_key == "document_reference":
+        return "candidate"
+    if rule_key.endswith("_anchor"):
+        return "candidate"
+    return "covered"
+
+
+def _refresh_source_category_metadata(source: PolicySource, created: list[PolicyAssertion], now: datetime) -> None:
+    categories = normalize_categories(
+        [a.normalized_category for a in created if getattr(a, "normalized_category", None)]
+    )
+    source.normalized_categories_json = _dumps(categories)
+    source.freshness_checked_at = now
+    source.last_verified_at = now if bool(getattr(source, "is_authoritative", False)) else source.last_verified_at
+
+    status_ok = source.http_status is not None and 200 <= int(source.http_status) < 400
+    if not status_ok:
+        source.freshness_status = "fetch_failed"
+        source.freshness_reason = "http_status_not_successful"
+    elif not source.retrieved_at:
+        source.freshness_status = "unknown"
+        source.freshness_reason = "missing_retrieved_at"
+    elif source.retrieved_at < (now - timedelta(days=180)):
+        source.freshness_status = "stale"
+        source.freshness_reason = "retrieved_at_older_than_180_days"
+    else:
+        source.freshness_status = "fresh"
+        source.freshness_reason = None
+
 
 def _maybe_add_warren_certificate_rule(
     created: list[PolicyAssertion],
@@ -162,6 +242,7 @@ def _haystack(source: PolicySource) -> str:
             str(source.title or ""),
             str(source.publisher or ""),
             str(source.notes or ""),
+            str(source.extracted_text or ""),
         ]
     ).lower()
 
@@ -204,6 +285,10 @@ def _add_assertion(
             priority=_priority_for(rule_key),
             source_rank=_source_rank_for(source),
             review_status="extracted",
+            normalized_category=_normalized_category_for(rule_key),
+            coverage_status=_coverage_status_for(rule_key),
+            source_freshness_status=getattr(source, "freshness_status", None),
+            stale_after=_stale_after_for(rule_key, source, now),
             extracted_at=now,
         )
     )
@@ -220,7 +305,8 @@ def extract_assertions_for_source(
     Conservative extraction:
     - remove prior extracted assertions for this exact source + scope
     - re-emit clean extracted suggestions
-    - inference is based on source metadata only (url/title/publisher/notes)
+    - inference is based on source metadata only (url/title/publisher/notes/text)
+    - attach normalized_category + coverage_status for downstream completeness
     """
     target_org_id = org_id if org_scope else None
     now = datetime.utcnow()
@@ -236,8 +322,6 @@ def extract_assertions_for_source(
     db.commit()
 
     url = (source.url or "").lower()
-    title = (source.title or "").lower()
-    publisher = (source.publisher or "").lower()
     text = _haystack(source)
 
     _add_assertion(
@@ -700,7 +784,7 @@ def extract_assertions_for_source(
             )
 
     # DHC / Detroit PHA
-    if "dhcmi.org" in url or "detroit housing commission" in publisher:
+    if "dhcmi.org" in url or "detroit housing commission" in (source.publisher or "").lower():
         _add_assertion(
             created,
             target_org_id=target_org_id,
@@ -773,6 +857,9 @@ def extract_assertions_for_source(
                 confidence=0.50,
             )
 
+    _refresh_source_category_metadata(source, created, now)
+
+    db.add(source)
     db.add_all(created)
     db.commit()
 

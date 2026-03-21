@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
+from .jurisdiction_categories import get_required_categories
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,24 @@ class JurisdictionDefault:
             "tenant_waitlist_depth": self.tenant_waitlist_depth,
             "notes": self.notes,
         }
+
+    def required_categories(self, *, include_section8: bool = True) -> list[str]:
+        """
+        Operational category baseline for completeness scoring.
+
+        This does not change existing seed behavior; it only exposes a stable
+        domain helper that later services can use while deriving
+        jurisdiction-profile completeness.
+        """
+        return get_required_categories(
+            state=self.state,
+            city=self.city,
+            rental_license_required=self.rental_license_required,
+            inspection_authority=self.inspection_authority,
+            inspection_frequency=self.inspection_frequency,
+            tenant_waitlist_depth=self.tenant_waitlist_depth,
+            include_section8=include_section8,
+        )
 
 
 def michigan_global_defaults() -> List[JurisdictionDefault]:
@@ -152,6 +172,42 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
             notes="Baseline default. Verify frequency by rental license type.",
         ),
     ]
+
+
+def jurisdiction_default_map() -> dict[tuple[str, str], JurisdictionDefault]:
+    """
+    Useful for services that need deterministic city/state lookup without
+    re-looping through the defaults list every time.
+    """
+    out: dict[tuple[str, str], JurisdictionDefault] = {}
+    for item in michigan_global_defaults():
+        out[(item.city.strip().lower(), item.state.strip().upper())] = item
+    return out
+
+
+def required_categories_for_city(
+    city: str | None,
+    state: str = "MI",
+    *,
+    include_section8: bool = True,
+) -> list[str]:
+    """
+    Convenience helper for completeness services.
+
+    Falls back to generic required-category logic when a city does not have an
+    explicit operational default entry yet.
+    """
+    key = ((city or "").strip().lower(), (state or "MI").strip().upper())
+    default = jurisdiction_default_map().get(key)
+
+    if default is not None:
+        return default.required_categories(include_section8=include_section8)
+
+    return get_required_categories(
+        state=state,
+        city=city,
+        include_section8=include_section8,
+    )
 
 
 # ------------------------------

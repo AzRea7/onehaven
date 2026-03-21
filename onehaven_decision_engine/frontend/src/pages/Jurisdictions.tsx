@@ -13,9 +13,14 @@ import {
   MapPinned,
   Search,
   ShieldCheck,
+  RefreshCcw,
+  BellRing,
+  Wrench,
+  Layers3,
 } from "lucide-react";
 
 type CoverageRow = {
+  id?: number | null;
   state: string;
   county?: string | null;
   city?: string | null;
@@ -33,6 +38,13 @@ type CoverageRow = {
   state_federal_core_ok?: boolean;
   pha_core_ok?: boolean;
   profile_id?: number | null;
+  completeness_status?: string | null;
+  completeness_score?: number | null;
+  is_stale?: boolean | null;
+  stale_reason?: string | null;
+  required_categories?: string[] | null;
+  covered_categories?: string[] | null;
+  missing_categories?: string[] | null;
 };
 
 type BriefOut = {
@@ -74,6 +86,23 @@ type ProfileRow = {
   pha_name?: string | null;
   notes?: string | null;
   policy?: Record<string, any> | null;
+  completeness?: {
+    completeness_status?: string | null;
+    completeness_score?: number | null;
+    is_stale?: boolean | null;
+    stale_reason?: string | null;
+    required_categories?: string[];
+    covered_categories?: string[];
+    missing_categories?: string[];
+  } | null;
+  tasks?: any[] | null;
+  required_categories?: string[] | null;
+  covered_categories?: string[] | null;
+  missing_categories?: string[] | null;
+  completeness_status?: string | null;
+  completeness_score?: number | null;
+  is_stale?: boolean | null;
+  stale_reason?: string | null;
 };
 
 type LegacyRuleRow = {
@@ -99,7 +128,9 @@ type MarketAction =
   | "coverage"
   | "cleanup"
   | "pipeline"
-  | "repair";
+  | "repair"
+  | "refreshJurisdiction"
+  | "notifyStale";
 
 function parseMaybeJsonArray(v: any): string[] {
   if (Array.isArray(v)) return v.map(String);
@@ -161,6 +192,23 @@ function confidenceTone(v?: string | null) {
   if (s === "high") return "good";
   if (s === "medium") return "warn";
   return "bad";
+}
+
+function completenessTone(v?: string | null) {
+  const s = norm(v);
+  if (s === "complete") return "good";
+  if (s === "partial") return "warn";
+  return "bad";
+}
+
+function staleTone(v?: boolean | null) {
+  return v ? "warn" : "good";
+}
+
+function scorePct(v?: number | null) {
+  const n = Number(v ?? 0);
+  if (!Number.isFinite(n)) return "0%";
+  return `${Math.round(n * 100)}%`;
 }
 
 function Badge({
@@ -286,6 +334,10 @@ function MarketCard({
       <div className="mt-3 flex flex-wrap gap-2">
         <Badge>verified {row.verified_rule_count ?? 0}</Badge>
         <Badge>sources {row.source_count ?? 0}</Badge>
+        <Badge tone={completenessTone(row.completeness_status)}>
+          {row.completeness_status || "missing"}
+        </Badge>
+        {row.is_stale ? <Badge tone="warn">stale</Badge> : null}
         {(row.fetch_failure_count ?? 0) > 0 ? (
           <Badge tone="bad">fetch fails {row.fetch_failure_count}</Badge>
         ) : null}
@@ -308,6 +360,8 @@ export default function Jurisdictions() {
   const [query, setQuery] = React.useState("");
   const [onlyReady, setOnlyReady] = React.useState(false);
   const [onlyWeak, setOnlyWeak] = React.useState(false);
+  const [onlyIncomplete, setOnlyIncomplete] = React.useState(false);
+  const [onlyStale, setOnlyStale] = React.useState(false);
 
   const [busy, setBusy] = React.useState(false);
   const [detailBusy, setDetailBusy] = React.useState(false);
@@ -358,6 +412,9 @@ export default function Jurisdictions() {
         row.coverage_status,
         row.production_readiness,
         row.confidence_label,
+        row.completeness_status,
+        row.stale_reason,
+        ...(row.missing_categories || []),
       ]
         .map((x) => norm(x))
         .join(" ");
@@ -370,10 +427,17 @@ export default function Jurisdictions() {
       ) {
         return false;
       }
+      if (
+        onlyIncomplete &&
+        ["complete"].includes(norm(row.completeness_status))
+      ) {
+        return false;
+      }
+      if (onlyStale && !row.is_stale) return false;
 
       return true;
     });
-  }, [coverageRows, query, onlyReady, onlyWeak]);
+  }, [coverageRows, query, onlyReady, onlyWeak, onlyIncomplete, onlyStale]);
 
   const selectedProfiles = React.useMemo(
     () =>
@@ -395,6 +459,22 @@ export default function Jurisdictions() {
   const selectedAssertions = React.useMemo(
     () => (Array.isArray(evidence?.assertions) ? evidence.assertions : []),
     [evidence],
+  );
+
+  const selectedProfile = React.useMemo(() => {
+    if (!selectedProfiles.length) return null;
+    const sorted = [...selectedProfiles].sort((a, b) => {
+      const aOrg = a.org_id ? 1 : 0;
+      const bOrg = b.org_id ? 1 : 0;
+      if (aOrg !== bOrg) return bOrg - aOrg;
+      return b.id - a.id;
+    });
+    return sorted[0];
+  }, [selectedProfiles]);
+
+  const jurisdictionTasks = React.useMemo(
+    () => (Array.isArray(selectedProfile?.tasks) ? selectedProfile?.tasks : []),
+    [selectedProfile],
   );
 
   async function refresh() {
@@ -422,6 +502,10 @@ export default function Jurisdictions() {
         const aReady = norm(a.production_readiness) === "ready" ? 1 : 0;
         const bReady = norm(b.production_readiness) === "ready" ? 1 : 0;
         if (aReady !== bReady) return bReady - aReady;
+
+        const aComplete = norm(a.completeness_status) === "complete" ? 1 : 0;
+        const bComplete = norm(b.completeness_status) === "complete" ? 1 : 0;
+        if (aComplete !== bComplete) return bComplete - aComplete;
 
         const aVerified = Number(a.verified_rule_count ?? 0);
         const bVerified = Number(b.verified_rule_count ?? 0);
@@ -532,6 +616,24 @@ export default function Jurisdictions() {
         setMessage(
           `Pipeline finished for ${titleCase(row.city || row.county || row.state)}.`,
         );
+      } else if (action === "refreshJurisdiction") {
+        if (!row.profile_id) {
+          throw new Error("No jurisdiction profile is attached to this market yet.");
+        }
+        result = await api.refreshJurisdictionProfile(row.profile_id, false);
+        setMessage(
+          `Jurisdiction refresh finished for ${titleCase(row.city || row.county || row.state)}.`,
+        );
+      } else if (action === "notifyStale") {
+        if (!row.profile_id) {
+          throw new Error("No jurisdiction profile is attached to this market yet.");
+        }
+        result = await api.notifyStaleJurisdiction(row.profile_id, false);
+        setMessage(
+          result?.created
+            ? `Stale notification created for ${titleCase(row.city || row.county || row.state)}.`
+            : `No new stale notification was created for ${titleCase(row.city || row.county || row.state)}.`,
+        );
       } else {
         result = await api.policyRepairMarket(payload);
         setMessage(
@@ -571,11 +673,15 @@ export default function Jurisdictions() {
     const weak = coverageRows.filter((r) =>
       ["low", "unknown", ""].includes(norm(r.confidence_label)),
     ).length;
+    const incomplete = coverageRows.filter(
+      (r) => norm(r.completeness_status) !== "complete",
+    ).length;
+    const stale = coverageRows.filter((r) => !!r.is_stale).length;
     const verifiedRules = coverageRows.reduce(
       (sum, r) => sum + Number(r.verified_rule_count ?? 0),
       0,
     );
-    return { total, ready, weak, verifiedRules };
+    return { total, ready, weak, verifiedRules, incomplete, stale };
   }, [coverageRows]);
 
   return (
@@ -584,7 +690,7 @@ export default function Jurisdictions() {
         <PageHero
           eyebrow="Compliance intelligence"
           title="Jurisdictions"
-          subtitle="A few-click control plane for market repair, evidence inspection, and coverage verification."
+          subtitle="A few-click control plane for market repair, evidence inspection, coverage verification, completeness tracking, and stale-state recovery."
           right={
             <div className="absolute inset-0 flex items-center justify-center pointer-events-auto overflow-visible">
               <div className="h-[180px] w-[180px] md:h-[200px] md:w-[200px] opacity-95">
@@ -605,7 +711,7 @@ export default function Jurisdictions() {
           }
         />
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
           <KpiCard
             title="Markets tracked"
             value={marketStats.total}
@@ -627,6 +733,20 @@ export default function Jurisdictions() {
             tone="warning"
           />
           <KpiCard
+            title="Incomplete"
+            value={marketStats.incomplete}
+            subtitle="category coverage gaps"
+            icon={Layers3}
+            tone="warning"
+          />
+          <KpiCard
+            title="Stale"
+            value={marketStats.stale}
+            subtitle="needs refresh / notify"
+            icon={BellRing}
+            tone="warning"
+          />
+          <KpiCard
             title="Verified rules"
             value={marketStats.verifiedRules}
             subtitle="across visible markets"
@@ -637,14 +757,14 @@ export default function Jurisdictions() {
 
         <Surface
           title="Search and focus"
-          subtitle="Filter market rows by city, county, state, readiness, or confidence."
+          subtitle="Filter market rows by city, county, state, readiness, confidence, completeness, and stale status."
         >
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
               <input
                 className="oh-input pl-10"
-                placeholder="Filter by city, county, state, readiness, or confidence…"
+                placeholder="Filter by city, county, state, readiness, confidence, completeness, or stale reason…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -667,6 +787,24 @@ export default function Jurisdictions() {
               />
               weak confidence only
             </label>
+
+            <label className="flex items-center gap-2 rounded-2xl border border-app bg-app-panel px-3 py-2 text-sm text-app-2">
+              <input
+                type="checkbox"
+                checked={onlyIncomplete}
+                onChange={(e) => setOnlyIncomplete(e.target.checked)}
+              />
+              incomplete only
+            </label>
+
+            <label className="flex items-center gap-2 rounded-2xl border border-app bg-app-panel px-3 py-2 text-sm text-app-2">
+              <input
+                type="checkbox"
+                checked={onlyStale}
+                onChange={(e) => setOnlyStale(e.target.checked)}
+              />
+              stale only
+            </label>
           </div>
 
           {message ? (
@@ -685,7 +823,7 @@ export default function Jurisdictions() {
         <div className="oh-jur-layout">
           <Surface
             title="Markets"
-            subtitle="Pick a market to inspect and repair."
+            subtitle="Pick a market to inspect, repair, refresh, or notify."
           >
             <div className="oh-jur-list space-y-3">
               {filteredRows.length === 0 ? (
@@ -729,24 +867,24 @@ export default function Jurisdictions() {
                       <span className="text-xs text-app-4">Loading…</span>
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        <Badge
-                          tone={readinessTone(selectedRow.production_readiness)}
-                        >
+                        <Badge tone={readinessTone(selectedRow.production_readiness)}>
                           {selectedRow.production_readiness || "unknown"}
                         </Badge>
-                        <Badge
-                          tone={confidenceTone(selectedRow.confidence_label)}
-                        >
+                        <Badge tone={confidenceTone(selectedRow.confidence_label)}>
                           {selectedRow.confidence_label || "low"} confidence
+                        </Badge>
+                        <Badge tone={completenessTone(selectedRow.completeness_status)}>
+                          {selectedRow.completeness_status || "missing"}
+                        </Badge>
+                        <Badge tone={staleTone(selectedRow.is_stale)}>
+                          {selectedRow.is_stale ? "stale" : "fresh"}
                         </Badge>
                       </div>
                     )
                   }
                 >
                   <div className="rounded-2xl border border-cyan-400/15 bg-cyan-500/8 p-3 text-sm text-cyan-100">
-                    Use the buttons below to refresh sources, run extraction,
-                    rebuild the profile, clean stale items, or repair the whole
-                    market.
+                    Use the buttons below to refresh sources, run extraction, rebuild the profile, clean stale items, refresh jurisdiction completeness, or create a stale notification when operator attention is needed.
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -778,6 +916,21 @@ export default function Jurisdictions() {
                       onClick={() => runMarketAction("coverage", selectedRow)}
                     />
                     <ActionButton
+                      label="Refresh jurisdiction"
+                      busy={
+                        marketBusy ===
+                        `refreshJurisdiction:${marketKey(selectedRow)}`
+                      }
+                      onClick={() =>
+                        runMarketAction("refreshJurisdiction", selectedRow)
+                      }
+                    />
+                    <ActionButton
+                      label="Notify stale"
+                      busy={marketBusy === `notifyStale:${marketKey(selectedRow)}`}
+                      onClick={() => runMarketAction("notifyStale", selectedRow)}
+                    />
+                    <ActionButton
                       label="Resolve stale items"
                       busy={marketBusy === `cleanup:${marketKey(selectedRow)}`}
                       onClick={() => runMarketAction("cleanup", selectedRow)}
@@ -788,9 +941,7 @@ export default function Jurisdictions() {
                       onClick={() => setSourcePackOpen(true)}
                     />
                     <ActionButton
-                      label={
-                        showSourceList ? "Hide source list" : "View source list"
-                      }
+                      label={showSourceList ? "Hide source list" : "View source list"}
                       onClick={() => setShowSourceList((v) => !v)}
                     />
                     <ActionButton
@@ -807,10 +958,7 @@ export default function Jurisdictions() {
                     <div className="rounded-2xl border border-app bg-app-muted p-4">
                       <div className="space-y-2">
                         <Row label="State" value={selectedRow.state || "MI"} />
-                        <Row
-                          label="County"
-                          value={titleCase(selectedRow.county)}
-                        />
+                        <Row label="County" value={titleCase(selectedRow.county)} />
                         <Row label="City" value={titleCase(selectedRow.city)} />
                         <Row label="PHA" value={selectedRow.pha_name || "—"} />
                         <Row
@@ -826,10 +974,7 @@ export default function Jurisdictions() {
 
                     <div className="rounded-2xl border border-app bg-app-muted p-4">
                       <div className="space-y-2">
-                        <Row
-                          label="Sources"
-                          value={selectedRow.source_count ?? 0}
-                        />
+                        <Row label="Sources" value={selectedRow.source_count ?? 0} />
                         <Row
                           label="Fetch failures"
                           value={selectedRow.fetch_failure_count ?? 0}
@@ -840,9 +985,7 @@ export default function Jurisdictions() {
                         />
                         <Row
                           label="Municipal core"
-                          value={
-                            selectedRow.municipal_core_ok ? "ok" : "missing"
-                          }
+                          value={selectedRow.municipal_core_ok ? "ok" : "missing"}
                         />
                         <Row
                           label="State/Federal core"
@@ -858,6 +1001,63 @@ export default function Jurisdictions() {
                     </div>
                   </div>
 
+                  <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div className="rounded-2xl border border-app bg-app-panel p-4">
+                      <SectionTitle title="Jurisdiction completeness" />
+                      <div className="mt-3 space-y-2">
+                        <Row
+                          label="Status"
+                          value={
+                            <Badge tone={completenessTone(selectedRow.completeness_status)}>
+                              {selectedRow.completeness_status || "missing"}
+                            </Badge>
+                          }
+                        />
+                        <Row
+                          label="Score"
+                          value={scorePct(selectedRow.completeness_score)}
+                        />
+                        <Row
+                          label="Freshness"
+                          value={
+                            <Badge tone={staleTone(selectedRow.is_stale)}>
+                              {selectedRow.is_stale ? "stale" : "fresh"}
+                            </Badge>
+                          }
+                        />
+                        <Row
+                          label="Reason"
+                          value={selectedRow.stale_reason || "—"}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-app bg-app-panel p-4">
+                      <SectionTitle title="Category coverage" />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {(selectedRow.required_categories || []).length ? (
+                          (selectedRow.required_categories || []).map((c) => (
+                            <Badge key={`req-${c}`}>{c}</Badge>
+                          ))
+                        ) : (
+                          <span className="text-sm text-app-4">No required categories recorded</span>
+                        )}
+                      </div>
+                      {!!(selectedRow.missing_categories || []).length && (
+                        <div className="mt-3">
+                          <div className="text-xs text-app-4">Missing</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {(selectedRow.missing_categories || []).map((c) => (
+                              <Badge key={`missing-${c}`} tone="bad">
+                                {c}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {brief?.explanation ? (
                     <div className="mt-4 rounded-2xl border border-app bg-app-panel p-4 text-sm leading-6 text-app-2">
                       {brief.explanation}
@@ -870,9 +1070,7 @@ export default function Jurisdictions() {
                     <Surface
                       title={`Source list (${selectedSources.length})`}
                       subtitle="Tracked source records for this market."
-                      actions={
-                        <Badge>{selectedRow.source_count ?? 0} tracked</Badge>
-                      }
+                      actions={<Badge>{selectedRow.source_count ?? 0} tracked</Badge>}
                     >
                       <div className="oh-jur-scroll space-y-2">
                         {selectedSources.length === 0 ? (
@@ -886,21 +1084,41 @@ export default function Jurisdictions() {
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                   <div className="text-sm font-medium text-app-0">
-                                    {s.title ||
-                                      s.publisher ||
-                                      s.url ||
-                                      `Source ${s.id}`}
+                                    {s.title || s.publisher || s.url || `Source ${s.id}`}
                                   </div>
                                   <div className="mt-1 text-xs text-app-4">
                                     {s.publisher || "Unknown publisher"} • HTTP{" "}
                                     {s.http_status ?? "—"}
                                   </div>
                                 </div>
-                                <Badge>{s.id}</Badge>
+                                <div className="flex flex-wrap gap-2">
+                                  <Badge>{s.id}</Badge>
+                                  {s.freshness_status ? (
+                                    <Badge
+                                      tone={
+                                        norm(s.freshness_status) === "fresh"
+                                          ? "good"
+                                          : norm(s.freshness_status) === "stale"
+                                            ? "warn"
+                                            : "bad"
+                                      }
+                                    >
+                                      {s.freshness_status}
+                                    </Badge>
+                                  ) : null}
+                                </div>
                               </div>
                               <div className="mt-2 break-all text-xs text-app-4">
                                 {s.url || "No URL"}
                               </div>
+                              {Array.isArray(s.normalized_categories) &&
+                              s.normalized_categories.length ? (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {s.normalized_categories.map((c: string) => (
+                                    <Badge key={`${s.id}-${c}`}>{c}</Badge>
+                                  ))}
+                                </div>
+                              ) : null}
                               {s.notes ? (
                                 <div className="mt-2 text-sm text-app-2">
                                   {s.notes}
@@ -918,17 +1136,12 @@ export default function Jurisdictions() {
                       title={`Assertions list (${selectedAssertions.length})`}
                       subtitle="Extracted and reviewed rule assertions."
                       actions={
-                        <Badge>
-                          {selectedRow.verified_rule_count ?? 0} verified
-                        </Badge>
+                        <Badge>{selectedRow.verified_rule_count ?? 0} verified</Badge>
                       }
                     >
                       <div className="oh-jur-scroll space-y-2">
                         {selectedAssertions.length === 0 ? (
-                          <EmptyState
-                            compact
-                            title="No assertions loaded yet"
-                          />
+                          <EmptyState compact title="No assertions loaded yet" />
                         ) : (
                           selectedAssertions.map((a: any) => (
                             <div
@@ -942,8 +1155,8 @@ export default function Jurisdictions() {
                                   </div>
                                   <div className="mt-1 text-xs text-app-4">
                                     {a.rule_family || "unknown family"} •{" "}
-                                    {a.assertion_type || "unknown type"} •
-                                    source {a.source_id ?? "—"}
+                                    {a.assertion_type || "unknown type"} • source{" "}
+                                    {a.source_id ?? "—"}
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
@@ -958,9 +1171,10 @@ export default function Jurisdictions() {
                                   >
                                     {a.review_status}
                                   </Badge>
-                                  <Badge>
-                                    {Number(a.confidence ?? 0).toFixed(2)}
-                                  </Badge>
+                                  {a.normalized_category ? (
+                                    <Badge>{a.normalized_category}</Badge>
+                                  ) : null}
+                                  <Badge>{Number(a.confidence ?? 0).toFixed(2)}</Badge>
                                 </div>
                               </div>
                               <pre className="oh-jur-code mt-3">
@@ -986,10 +1200,7 @@ export default function Jurisdictions() {
                   >
                     <div className="oh-jur-scroll space-y-2">
                       {(brief?.required_actions ?? []).length === 0 ? (
-                        <EmptyState
-                          compact
-                          title="No required actions returned"
-                        />
+                        <EmptyState compact title="No required actions returned" />
                       ) : (
                         (brief?.required_actions ?? []).map(
                           (item: any, idx: number) => (
@@ -1005,8 +1216,7 @@ export default function Jurisdictions() {
                                   "Untitled action"}
                               </div>
                               <div className="mt-1 text-xs text-app-4">
-                                {(
-                                  item?.category ||
+                                {(item?.category ||
                                   item?.severity ||
                                   "uncategorized"
                                 ).toString()}{" "}
@@ -1041,8 +1251,7 @@ export default function Jurisdictions() {
                                   "Untitled blocker"}
                               </div>
                               <div className="mt-1 text-xs text-red-200/70">
-                                {(
-                                  item?.category ||
+                                {(item?.category ||
                                   item?.severity ||
                                   "uncategorized"
                                 ).toString()}{" "}
@@ -1058,6 +1267,47 @@ export default function Jurisdictions() {
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                   <Surface
+                    title="Jurisdiction tasks"
+                    subtitle="Workflow-facing actions derived from completeness and rule coverage."
+                    actions={<Badge>{jurisdictionTasks.length} tasks</Badge>}
+                  >
+                    <div className="oh-jur-scroll space-y-2">
+                      {!jurisdictionTasks.length ? (
+                        <EmptyState
+                          compact
+                          title="No jurisdiction tasks returned"
+                          description="When completeness or stale-state requires work, tasks will show up here."
+                        />
+                      ) : (
+                        jurisdictionTasks.map((task: any, idx: number) => (
+                          <div
+                            key={`${task?.code || task?.key || task?.title || idx}`}
+                            className="rounded-2xl border border-app bg-app-panel p-3"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-app-0">
+                                  {task?.title || task?.label || "Untitled task"}
+                                </div>
+                                <div className="mt-1 text-xs text-app-4">
+                                  {(task?.category || task?.kind || "jurisdiction").toString()} •{" "}
+                                  {(task?.priority || "normal").toString()}
+                                </div>
+                              </div>
+                              <Wrench className="h-4 w-4 text-app-4" />
+                            </div>
+                            {task?.detail || task?.description ? (
+                              <div className="mt-2 text-sm text-app-2">
+                                {task?.detail || task?.description}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </Surface>
+
+                  <Surface
                     title="Resolved jurisdiction profiles"
                     subtitle="Explicit matched profile rows."
                   >
@@ -1068,34 +1318,68 @@ export default function Jurisdictions() {
                           title="No explicit jurisdiction profile rows matched this market"
                         />
                       ) : (
-                        selectedProfiles.map((p) => (
-                          <div
-                            key={p.id}
-                            className="rounded-2xl border border-app bg-app-panel p-3"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm font-medium text-app-0">
-                                Profile #{p.id}
+                        selectedProfiles.map((p) => {
+                          const completeness =
+                            p.completeness ||
+                            ({
+                              completeness_status: p.completeness_status,
+                              completeness_score: p.completeness_score,
+                              is_stale: p.is_stale,
+                              stale_reason: p.stale_reason,
+                              missing_categories: p.missing_categories,
+                            } as any);
+
+                          return (
+                            <div
+                              key={p.id}
+                              className="rounded-2xl border border-app bg-app-panel p-3"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-sm font-medium text-app-0">
+                                  Profile #{p.id}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  <Badge tone={p.org_id ? "warn" : "neutral"}>
+                                    {p.org_id ? "org override" : "global"}
+                                  </Badge>
+                                  <Badge
+                                    tone={completenessTone(completeness?.completeness_status)}
+                                  >
+                                    {completeness?.completeness_status || "missing"}
+                                  </Badge>
+                                  <Badge tone={staleTone(completeness?.is_stale)}>
+                                    {completeness?.is_stale ? "stale" : "fresh"}
+                                  </Badge>
+                                </div>
                               </div>
-                              <Badge tone={p.org_id ? "warn" : "neutral"}>
-                                {p.org_id ? "org override" : "global"}
-                              </Badge>
-                            </div>
-                            <div className="mt-2 text-xs text-app-4">
-                              friction: {p.friction_multiplier ?? "—"} • PHA:{" "}
-                              {p.pha_name || "—"}
-                            </div>
-                            {p.notes ? (
-                              <div className="mt-2 text-sm text-app-2">
-                                {p.notes}
+                              <div className="mt-2 text-xs text-app-4">
+                                friction: {p.friction_multiplier ?? "—"} • PHA:{" "}
+                                {p.pha_name || "—"} • completeness{" "}
+                                {scorePct(completeness?.completeness_score)}
                               </div>
-                            ) : null}
-                          </div>
-                        ))
+                              {!!(completeness?.missing_categories || []).length && (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {(completeness?.missing_categories || []).map((c: string) => (
+                                    <Badge key={`${p.id}-${c}`} tone="bad">
+                                      {c}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                              {p.notes ? (
+                                <div className="mt-2 text-sm text-app-2">
+                                  {p.notes}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   </Surface>
+                </div>
 
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                   <Surface
                     title="Legacy jurisdiction rules"
                     subtitle="Fallback-only legacy rule rows."
@@ -1127,18 +1411,44 @@ export default function Jurisdictions() {
                               </div>
                               <div className="mt-2 text-xs text-app-4">
                                 license: {String(!!r.rental_license_required)} •
-                                authority: {r.inspection_authority || "—"} •
-                                freq: {r.inspection_frequency || "—"}
+                                authority: {r.inspection_authority || "—"} • freq:{" "}
+                                {r.inspection_frequency || "—"}
                               </div>
                               <div className="mt-2 text-sm text-app-2">
-                                fail points:{" "}
-                                {failPoints.length
-                                  ? failPoints.join(", ")
-                                  : "—"}
+                                fail points: {failPoints.length ? failPoints.join(", ") : "—"}
                               </div>
                             </div>
                           );
                         })
+                      )}
+                    </div>
+                  </Surface>
+
+                  <Surface
+                    title="Evidence links"
+                    subtitle="Quick evidence references from the current brief."
+                  >
+                    <div className="oh-jur-scroll space-y-2">
+                      {(brief?.evidence_links ?? []).length === 0 ? (
+                        <EmptyState compact title="No evidence links returned" />
+                      ) : (
+                        (brief?.evidence_links ?? []).map((link: any, idx: number) => (
+                          <div
+                            key={`${link?.source_id || link?.url || idx}`}
+                            className="rounded-2xl border border-app bg-app-panel p-3"
+                          >
+                            <div className="text-sm font-medium text-app-0">
+                              {link?.title || link?.publisher || "Untitled source"}
+                            </div>
+                            <div className="mt-1 text-xs text-app-4">
+                              {link?.publisher || "Unknown publisher"} • HTTP{" "}
+                              {link?.http_status ?? "—"}
+                            </div>
+                            <div className="mt-2 break-all text-xs text-app-4">
+                              {link?.url || "No URL"}
+                            </div>
+                          </div>
+                        ))
                       )}
                     </div>
                   </Surface>

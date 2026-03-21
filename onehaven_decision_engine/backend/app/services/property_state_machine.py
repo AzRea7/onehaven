@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any, Optional
 
 from sqlalchemy import and_, desc, func, select
@@ -27,6 +27,8 @@ from ..models import (
     UnderwritingResult,
     Valuation,
 )
+from ..policy_models import JurisdictionProfile
+from .jurisdiction_task_mapper import map_profile_jurisdiction_task_dicts
 
 
 def _utcnow() -> datetime:
@@ -38,15 +40,6 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
         if v is None:
             return default
         return float(v)
-    except Exception:
-        return default
-
-
-def _safe_int(v: Any, default: int = 0) -> int:
-    try:
-        if v is None:
-            return default
-        return int(v)
     except Exception:
         return default
 
@@ -180,6 +173,52 @@ def _latest_underwriting(db: Session, *, org_id: int, property_id: int) -> Optio
         .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
         .limit(1)
     )
+
+
+def _latest_jurisdiction_profile(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+) -> Optional[JurisdictionProfile]:
+    city = (getattr(prop, "city", None) or "").strip().lower() or None
+    county = (getattr(prop, "county", None) or "").strip().lower() or None
+    state = (getattr(prop, "state", None) or "MI").strip().upper()
+
+    q = (
+        select(JurisdictionProfile)
+        .where(JurisdictionProfile.state == state)
+        .where(
+            (JurisdictionProfile.org_id == org_id)
+            | (JurisdictionProfile.org_id.is_(None))
+        )
+    )
+
+    rows = db.scalars(q.order_by(desc(JurisdictionProfile.id))).all()
+    scoped: list[JurisdictionProfile] = []
+
+    for row in rows:
+        row_city = (getattr(row, "city", None) or "").strip().lower() or None
+        row_county = (getattr(row, "county", None) or "").strip().lower() or None
+
+        if row_city is not None and row_city != city:
+            continue
+        if row_county is not None and row_county != county:
+            continue
+        scoped.append(row)
+
+    if not scoped:
+        return None
+
+    scoped.sort(
+        key=lambda r: (
+            0 if getattr(r, "org_id", None) == org_id else 1,
+            0 if getattr(r, "city", None) else 1,
+            0 if getattr(r, "county", None) else 1,
+            -(getattr(r, "id", 0) or 0),
+        )
+    )
+    return scoped[0]
 
 
 def _asking_price(prop: Optional[Property], deal: Optional[Deal]) -> Optional[float]:
@@ -486,6 +525,65 @@ def _valuation_summary(db: Session, *, org_id: int, property_id: int) -> dict[st
     }
 
 
+def _jurisdiction_summary(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+) -> dict[str, Any]:
+    profile = _latest_jurisdiction_profile(db, org_id=org_id, prop=prop)
+
+    if profile is None:
+        return {
+            "exists": False,
+            "profile_id": None,
+            "completeness_status": "missing",
+            "completeness_score": 0.0,
+            "missing_categories": [],
+            "is_stale": True,
+            "stale_reason": "missing_profile",
+            "required_categories": [],
+            "covered_categories": [],
+            "tasks": [],
+            "gate_ok": False,
+            "gate_reason": "missing_jurisdiction_profile",
+        }
+
+    required_categories = _safe_json_load(getattr(profile, "required_categories_json", None), [])
+    covered_categories = _safe_json_load(getattr(profile, "covered_categories_json", None), [])
+    missing_categories = _safe_json_load(getattr(profile, "missing_categories_json", None), [])
+
+    completeness_status = str(getattr(profile, "completeness_status", "missing") or "missing").strip().lower()
+    completeness_score = _safe_float(getattr(profile, "completeness_score", 0.0), 0.0)
+    is_stale = bool(getattr(profile, "is_stale", False))
+    stale_reason = getattr(profile, "stale_reason", None)
+
+    tasks = map_profile_jurisdiction_task_dicts(profile)
+
+    gate_ok = completeness_status == "complete" and not is_stale
+    if completeness_status != "complete":
+        gate_reason = "jurisdiction_incomplete"
+    elif is_stale:
+        gate_reason = "jurisdiction_stale"
+    else:
+        gate_reason = None
+
+    return {
+        "exists": True,
+        "profile_id": getattr(profile, "id", None),
+        "completeness_status": completeness_status,
+        "completeness_score": completeness_score,
+        "missing_categories": missing_categories if isinstance(missing_categories, list) else [],
+        "is_stale": is_stale,
+        "stale_reason": stale_reason,
+        "required_categories": required_categories if isinstance(required_categories, list) else [],
+        "covered_categories": covered_categories if isinstance(covered_categories, list) else [],
+        "tasks": tasks,
+        "gate_ok": gate_ok,
+        "gate_reason": gate_reason,
+    }
+
+
 def derive_stage_and_constraints(
     db: Session,
     *,
@@ -504,8 +602,11 @@ def derive_stage_and_constraints(
     lease = _lease_summary(db, org_id=org_id, property_id=property_id)
     cash = _cash_summary(db, org_id=org_id, property_id=property_id)
     valuation = _valuation_summary(db, org_id=org_id, property_id=property_id)
+    jurisdiction = _jurisdiction_summary(db, org_id=org_id, prop=prop)
 
-    decision_bucket = normalize_decision_bucket(getattr(uw, "decision", None) if uw is not None else getattr(deal, "decision", None))
+    decision_bucket = normalize_decision_bucket(
+        getattr(uw, "decision", None) if uw is not None else getattr(deal, "decision", None)
+    )
     asking_price = _asking_price(prop, deal)
 
     deal_complete = uw is not None and decision_bucket == "GOOD"
@@ -515,6 +616,7 @@ def derive_stage_and_constraints(
         and inspection["passed"]
         and checklist.blocked == 0
         and checklist.failed == 0
+        and jurisdiction["gate_ok"]
     )
     tenant_complete = compliance_complete and lease["active"]
     cash_complete = tenant_complete and cash["has_transactions"]
@@ -557,6 +659,16 @@ def derive_stage_and_constraints(
             blockers.append("rehab_open_tasks")
             next_actions.append(f"Complete rehab tasks ({rehab['open']} still open).")
 
+        if rehab_complete and not jurisdiction["exists"]:
+            blockers.append("missing_jurisdiction_profile")
+            next_actions.append("Create or project jurisdiction profile coverage for this property market.")
+        elif rehab_complete and jurisdiction["completeness_status"] != "complete":
+            blockers.append("jurisdiction_incomplete")
+            next_actions.append("Complete jurisdiction policy coverage before advancing compliance.")
+        elif rehab_complete and jurisdiction["is_stale"]:
+            blockers.append("jurisdiction_stale")
+            next_actions.append("Refresh stale jurisdiction policy sources before advancing compliance.")
+
         if rehab_complete and not inspection["exists"]:
             blockers.append("missing_inspection")
             next_actions.append("Schedule and record the first inspection.")
@@ -581,6 +693,11 @@ def derive_stage_and_constraints(
             blockers.append("missing_valuation")
             next_actions.append("Add a valuation snapshot for equity tracking.")
 
+    for task in jurisdiction["tasks"]:
+        title = str(task.get("title") or "").strip()
+        if title and title not in next_actions:
+            next_actions.append(title)
+
     gate = gate_for_next_stage(
         current_stage=current_stage,
         decision_bucket=decision_bucket,
@@ -591,6 +708,11 @@ def derive_stage_and_constraints(
         cash_complete=cash_complete,
         equity_complete=equity_complete,
     ).as_dict()
+
+    if current_stage == "compliance" and not jurisdiction["gate_ok"]:
+        gate["ok"] = False
+        gate["reason"] = jurisdiction["gate_reason"] or "jurisdiction_blocked"
+        gate["allowed_next_stage"] = None
 
     allowed_next = gate.get("allowed_next_stage")
     if allowed_next:
@@ -615,7 +737,11 @@ def derive_stage_and_constraints(
             "stage": "compliance",
             "label": stage_label("compliance"),
             "is_complete": compliance_complete,
-            "blockers": [x for x in blockers if "inspection" in x or "checklist" in x],
+            "blockers": [
+                x
+                for x in blockers
+                if "inspection" in x or "checklist" in x or x.startswith("jurisdiction_") or x == "missing_jurisdiction_profile"
+            ],
         },
         {
             "stage": "tenant",
@@ -662,18 +788,21 @@ def derive_stage_and_constraints(
         "lease": lease,
         "cash": cash,
         "valuation": valuation,
+        "jurisdiction": jurisdiction,
         "decision_reasons": _decision_reason_list(uw),
     }
 
     outstanding_tasks = {
         "blockers": blockers,
         "next_actions": next_actions,
+        "jurisdiction_tasks": jurisdiction["tasks"],
         "counts": {
             "rehab_open": rehab["open"],
             "rehab_blocked": rehab["blocked"],
             "inspection_open_failed_items": inspection["open_failed_items"],
             "checklist_blocked": checklist.blocked,
             "checklist_failed": checklist.failed,
+            "jurisdiction_missing_categories": len(jurisdiction["missing_categories"]),
         },
     }
 

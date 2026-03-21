@@ -16,6 +16,23 @@ type ProfileRow = {
   notes?: string | null;
   policy?: Record<string, any> | null;
   policy_json?: Record<string, any> | string | null;
+  completeness?: {
+    completeness_status?: string | null;
+    completeness_score?: number | null;
+    is_stale?: boolean | null;
+    stale_reason?: string | null;
+    required_categories?: string[];
+    covered_categories?: string[];
+    missing_categories?: string[];
+  } | null;
+  tasks?: any[] | null;
+  required_categories?: string[] | null;
+  covered_categories?: string[] | null;
+  missing_categories?: string[] | null;
+  completeness_status?: string | null;
+  completeness_score?: number | null;
+  is_stale?: boolean | null;
+  stale_reason?: string | null;
 };
 
 function pretty(v: any) {
@@ -50,6 +67,30 @@ function policyObject(row: ProfileRow): Record<string, any> {
     }
   }
   return {};
+}
+
+function completenessFromRow(row: ProfileRow) {
+  const c = row.completeness || {};
+  return {
+    completeness_status:
+      c.completeness_status || row.completeness_status || "missing",
+    completeness_score:
+      typeof c.completeness_score === "number"
+        ? c.completeness_score
+        : (row.completeness_score ?? 0),
+    is_stale:
+      typeof c.is_stale === "boolean" ? c.is_stale : Boolean(row.is_stale),
+    stale_reason: c.stale_reason || row.stale_reason || null,
+    required_categories: c.required_categories || row.required_categories || [],
+    covered_categories: c.covered_categories || row.covered_categories || [],
+    missing_categories: c.missing_categories || row.missing_categories || [],
+  };
+}
+
+function scorePct(v: any) {
+  const n = Number(v ?? 0);
+  if (!Number.isFinite(n)) return "0%";
+  return `${Math.round(n * 100)}%`;
 }
 
 function Badge({
@@ -107,6 +148,13 @@ function profileKey(
   return `${row.id}:${norm(row.state)}|${norm(row.county)}|${norm(row.city)}|${norm(row.pha_name)}`;
 }
 
+function completenessTone(v?: string | null) {
+  const s = norm(v);
+  if (s === "complete") return "good";
+  if (s === "partial") return "warn";
+  return "bad";
+}
+
 export default function JurisdictionProfiles() {
   const [includeGlobal, setIncludeGlobal] = React.useState(true);
   const [state, setState] = React.useState("MI");
@@ -146,6 +194,9 @@ export default function JurisdictionProfiles() {
   );
   const [notes, setNotes] = React.useState("");
   const [saveBusy, setSaveBusy] = React.useState(false);
+  const [recomputeBusyId, setRecomputeBusyId] = React.useState<number | null>(
+    null,
+  );
 
   const selected = React.useMemo(
     () => rows.find((r) => r.id === selectedId) ?? null,
@@ -156,6 +207,7 @@ export default function JurisdictionProfiles() {
     const q = norm(query);
     return rows.filter((r) => {
       if (!q) return true;
+      const completeness = completenessFromRow(r);
       const hay = [
         r.scope,
         inferScope(r),
@@ -164,6 +216,9 @@ export default function JurisdictionProfiles() {
         r.city,
         r.pha_name,
         r.notes,
+        completeness.completeness_status,
+        completeness.stale_reason,
+        ...(completeness.missing_categories || []),
       ]
         .map(norm)
         .join(" ");
@@ -177,7 +232,11 @@ export default function JurisdictionProfiles() {
     const global = rows.filter((r) => inferScope(r) === "global").length;
     const city = rows.filter((r) => !!r.city).length;
     const county = rows.filter((r) => !r.city && !!r.county).length;
-    return { total, org, global, city, county };
+    const incomplete = rows.filter(
+      (r) => completenessFromRow(r).completeness_status !== "complete",
+    ).length;
+    const stale = rows.filter((r) => completenessFromRow(r).is_stale).length;
+    return { total, org, global, city, county, incomplete, stale };
   }, [rows]);
 
   async function refresh() {
@@ -299,9 +358,25 @@ export default function JurisdictionProfiles() {
     }
   }
 
+  async function recomputeOne(r: ProfileRow) {
+    setError(null);
+    setRecomputeBusyId(r.id);
+    try {
+      await api.recomputeJurisdictionProfile(r.id);
+      await refresh();
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setRecomputeBusyId(null);
+    }
+  }
+
   React.useEffect(() => {
     refresh();
   }, [includeGlobal, state]);
+
+  const selectedCompleteness = selected ? completenessFromRow(selected) : null;
+  const selectedTasks = Array.isArray(selected?.tasks) ? selected?.tasks : [];
 
   return (
     <PageShell className="space-y-6">
@@ -337,7 +412,8 @@ export default function JurisdictionProfiles() {
             <div className="mt-1 text-sm text-white/65">
               Use the <span className="text-white">Jurisdictions</span> page
               for: Repair market, Run pipeline, Refresh sources, Refresh
-              coverage, Resolve stale items, and Manage source pack.
+              coverage, Resolve stale items, Refresh jurisdiction, and Notify
+              stale.
             </div>
           </div>
           <div>
@@ -357,7 +433,7 @@ export default function JurisdictionProfiles() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-7">
         <GlassCard>
           <div className="text-xs uppercase tracking-wider text-white/45">
             Profiles
@@ -402,6 +478,24 @@ export default function JurisdictionProfiles() {
             {stats.county}
           </div>
         </GlassCard>
+
+        <GlassCard>
+          <div className="text-xs uppercase tracking-wider text-white/45">
+            Incomplete
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-amber-100">
+            {stats.incomplete}
+          </div>
+        </GlassCard>
+
+        <GlassCard>
+          <div className="text-xs uppercase tracking-wider text-white/45">
+            Stale
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-amber-100">
+            {stats.stale}
+          </div>
+        </GlassCard>
       </div>
 
       <GlassCard>
@@ -436,7 +530,7 @@ export default function JurisdictionProfiles() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search city, county, scope, PHA, notes…"
+              placeholder="Search city, county, scope, PHA, notes, completeness, stale reason…"
               className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/35"
             />
           </div>
@@ -522,6 +616,7 @@ export default function JurisdictionProfiles() {
                 filteredRows.map((r) => {
                   const scope = inferScope(r);
                   const active = selectedId === r.id;
+                  const completeness = completenessFromRow(r);
 
                   return (
                     <button
@@ -553,7 +648,28 @@ export default function JurisdictionProfiles() {
                             {scope}
                           </Badge>
                           <Badge>friction {r.friction_multiplier ?? 1.0}</Badge>
+                          <Badge
+                            tone={completenessTone(
+                              completeness.completeness_status,
+                            )}
+                          >
+                            {completeness.completeness_status}
+                          </Badge>
                         </div>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Badge>
+                          {scorePct(completeness.completeness_score)}
+                        </Badge>
+                        {completeness.is_stale ? (
+                          <Badge tone="warn">stale</Badge>
+                        ) : null}
+                        {!!completeness.missing_categories.length && (
+                          <Badge tone="bad">
+                            missing {completeness.missing_categories.length}
+                          </Badge>
+                        )}
                       </div>
 
                       {r.notes ? (
@@ -582,6 +698,15 @@ export default function JurisdictionProfiles() {
                       {inferScope(selected)}
                     </Badge>
                     <Badge>id {selected.id}</Badge>
+                    {selectedCompleteness ? (
+                      <Badge
+                        tone={completenessTone(
+                          selectedCompleteness.completeness_status,
+                        )}
+                      >
+                        {selectedCompleteness.completeness_status}
+                      </Badge>
+                    ) : null}
                   </div>
                 ) : null
               }
@@ -603,9 +728,27 @@ export default function JurisdictionProfiles() {
                       label="Friction multiplier"
                       value={selected.friction_multiplier ?? 1.0}
                     />
+                    <Row
+                      label="Completeness score"
+                      value={scorePct(selectedCompleteness?.completeness_score)}
+                    />
+                    <Row
+                      label="Freshness"
+                      value={selectedCompleteness?.is_stale ? "stale" : "fresh"}
+                    />
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => recomputeOne(selected)}
+                      disabled={recomputeBusyId === selected.id}
+                      className="rounded-xl border border-cyan-400/25 bg-cyan-500/15 px-3 py-2 text-xs text-white hover:bg-cyan-500/20 disabled:opacity-60"
+                    >
+                      {recomputeBusyId === selected.id
+                        ? "Recomputing…"
+                        : "Recompute completeness"}
+                    </button>
+
                     {inferScope(selected) === "org" ? (
                       <button
                         onClick={() => loadIntoForm(selected)}
@@ -636,6 +779,96 @@ export default function JurisdictionProfiles() {
                   </div>
                   <div className="mt-2 text-sm text-white/75">
                     {selected.notes || "No notes recorded."}
+                  </div>
+
+                  {selectedCompleteness?.stale_reason ? (
+                    <>
+                      <div className="mt-4 text-xs uppercase tracking-wider text-white/45">
+                        Stale reason
+                      </div>
+                      <div className="mt-2 text-sm text-white/75">
+                        {selectedCompleteness.stale_reason}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="text-xs uppercase tracking-wider text-white/45">
+                    Covered categories
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(selectedCompleteness?.covered_categories || []).length ? (
+                      (selectedCompleteness?.covered_categories || []).map(
+                        (c) => (
+                          <Badge key={`covered-${c}`} tone="good">
+                            {c}
+                          </Badge>
+                        ),
+                      )
+                    ) : (
+                      <span className="text-sm text-white/55">
+                        None recorded
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="text-xs uppercase tracking-wider text-white/45">
+                    Missing categories
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(selectedCompleteness?.missing_categories || []).length ? (
+                      (selectedCompleteness?.missing_categories || []).map(
+                        (c) => (
+                          <Badge key={`missing-${c}`} tone="bad">
+                            {c}
+                          </Badge>
+                        ),
+                      )
+                    ) : (
+                      <span className="text-sm text-white/55">
+                        No missing categories
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="text-xs uppercase tracking-wider text-white/45">
+                    Jurisdiction tasks
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {!selectedTasks.length ? (
+                      <div className="text-sm text-white/55">
+                        No jurisdiction tasks surfaced for this profile.
+                      </div>
+                    ) : (
+                      selectedTasks.map((task: any, idx: number) => (
+                        <div
+                          key={`${task?.code || task?.key || task?.title || idx}`}
+                          className="rounded-xl border border-white/10 bg-black/20 p-3"
+                        >
+                          <div className="text-sm font-medium text-white">
+                            {task?.title || task?.label || "Untitled task"}
+                          </div>
+                          <div className="mt-1 text-xs text-white/50">
+                            {(
+                              task?.category ||
+                              task?.kind ||
+                              "jurisdiction"
+                            ).toString()}{" "}
+                            • {(task?.priority || "normal").toString()}
+                          </div>
+                          {task?.detail || task?.description ? (
+                            <div className="mt-2 text-sm text-white/70">
+                              {task?.detail || task?.description}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 

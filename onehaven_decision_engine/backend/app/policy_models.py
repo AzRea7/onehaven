@@ -5,22 +5,22 @@ from typing import Optional
 
 import sqlalchemy as sa
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
-    Index,
-    Boolean,
     func,
-    
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
+
 
 class PolicyCatalogEntry(Base):
     __tablename__ = "policy_catalog_entries"
@@ -47,23 +47,32 @@ class PolicyCatalogEntry(Base):
     is_override: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     baseline_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-    updated_at: Mapped[DateTime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
     )
 
+
 class JurisdictionProfile(Base):
     __tablename__ = "jurisdiction_profiles"
     __table_args__ = (
         UniqueConstraint("org_id", "state", "county", "city", name="uq_jp_scope_state_county_city"),
+        Index("ix_jp_scope_lookup", "state", "county", "city"),
+        Index("ix_jp_completeness_status", "completeness_status"),
+        Index("ix_jp_is_stale", "is_stale"),
+        Index("ix_jp_last_verified_at", "last_verified_at"),
+        Index("ix_jp_last_refresh_success_at", "last_refresh_success_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("organizations.id"), index=True, nullable=True
+        Integer,
+        ForeignKey("organizations.id"),
+        index=True,
+        nullable=True,
     )
 
     state: Mapped[str] = mapped_column(String(2), nullable=False, default="MI")
@@ -75,11 +84,42 @@ class JurisdictionProfile(Base):
     policy_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ---- Step 17 jurisdiction finalize foundation ----
+    completeness_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    completeness_status: Mapped[str] = mapped_column(String(40), nullable=False, default="missing")
+
+    required_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    covered_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    missing_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
+    category_norm_version: Mapped[str] = mapped_column(String(40), nullable=False, default="v1")
+
+    last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    stale_reason: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    authoritative_source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    freshest_source_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    oldest_source_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    source_freshness_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    last_refresh_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_refresh_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # -----------------------------------------------
+
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=sa.text("now()")
+        DateTime,
+        nullable=False,
+        server_default=sa.text("now()"),
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True, onupdate=datetime.utcnow
+        DateTime,
+        nullable=True,
+        onupdate=datetime.utcnow,
     )
 
 
@@ -107,7 +147,10 @@ class HqsAddendumRule(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("organizations.id"), index=True, nullable=False
+        Integer,
+        ForeignKey("organizations.id"),
+        index=True,
+        nullable=False,
     )
 
     jurisdiction_profile_id: Mapped[int] = mapped_column(
@@ -150,12 +193,17 @@ class PolicySource(Base):
     __table_args__ = (
         Index("ix_policy_sources_state_county_city", "state", "county", "city"),
         Index("ix_policy_sources_org_state", "org_id", "state"),
+        Index("ix_policy_sources_freshness_status", "freshness_status"),
+        Index("ix_policy_sources_last_verified_at", "last_verified_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     org_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("organizations.id"), index=True, nullable=True
+        Integer,
+        ForeignKey("organizations.id"),
+        index=True,
+        nullable=True,
     )
 
     state: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
@@ -179,8 +227,20 @@ class PolicySource(Base):
     extracted_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ---- Step 17 jurisdiction finalize foundation ----
+    normalized_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    freshness_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
+    freshness_reason: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    freshness_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    effective_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # -----------------------------------------------
+
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=sa.text("now()")
+        DateTime,
+        nullable=False,
+        server_default=sa.text("now()"),
     )
 
 
@@ -192,7 +252,10 @@ class PolicySourceVersion(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("policy_sources.id", ondelete="CASCADE"), index=True, nullable=False
+        Integer,
+        ForeignKey("policy_sources.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
     )
     retrieved_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -203,7 +266,9 @@ class PolicySourceVersion(Base):
     extracted_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=sa.text("now()")
+        DateTime,
+        nullable=False,
+        server_default=sa.text("now()"),
     )
 
 
@@ -216,16 +281,24 @@ class PolicyAssertion(Base):
         Index("ix_policy_assertions_rule_family", "rule_family"),
         Index("ix_policy_assertions_assertion_type", "assertion_type"),
         Index("ix_policy_assertions_stale_after", "stale_after"),
+        Index("ix_policy_assertions_normalized_category", "normalized_category"),
+        Index("ix_policy_assertions_coverage_status", "coverage_status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     org_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("organizations.id"), index=True, nullable=True
+        Integer,
+        ForeignKey("organizations.id"),
+        index=True,
+        nullable=True,
     )
 
     source_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("policy_sources.id", ondelete="SET NULL"), index=True, nullable=True
+        Integer,
+        ForeignKey("policy_sources.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
     )
 
     state: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
@@ -253,14 +326,24 @@ class PolicyAssertion(Base):
     verification_reason: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     stale_after: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     superseded_by_assertion_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("policy_assertions.id", ondelete="SET NULL"), nullable=True
+        Integer,
+        ForeignKey("policy_assertions.id", ondelete="SET NULL"),
+        nullable=True,
     )
+
+    # ---- Step 17 jurisdiction finalize foundation ----
+    normalized_category: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    coverage_status: Mapped[str] = mapped_column(String(40), nullable=False, default="candidate")
+    source_freshness_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    # -----------------------------------------------
 
     extracted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=sa.text("now()")
+        DateTime,
+        nullable=False,
+        server_default=sa.text("now()"),
     )
 
 
@@ -269,11 +352,16 @@ class JurisdictionCoverageStatus(Base):
     __table_args__ = (
         Index("ix_jurisdiction_coverage_scope", "state", "county", "city"),
         Index("ix_jurisdiction_coverage_status", "coverage_status", "production_readiness"),
+        Index("ix_jurisdiction_coverage_completeness_status", "completeness_status"),
+        Index("ix_jurisdiction_coverage_is_stale", "is_stale"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("organizations.id"), nullable=True, index=True
+        Integer,
+        ForeignKey("organizations.id"),
+        nullable=True,
+        index=True,
     )
 
     state: Mapped[str] = mapped_column(String(2), nullable=False, default="MI")
@@ -292,13 +380,36 @@ class JurisdictionCoverageStatus(Base):
     fetch_failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     stale_warning_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # ---- Step 17 jurisdiction finalize foundation ----
+    completeness_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    completeness_status: Mapped[str] = mapped_column(String(40), nullable=False, default="missing")
+
+    required_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    covered_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    missing_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
+    category_norm_version: Mapped[str] = mapped_column(String(40), nullable=False, default="v1")
+
+    last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    stale_reason: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+
+    freshest_source_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    oldest_source_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    source_freshness_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    # -----------------------------------------------
+
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=sa.text("now()")
+        DateTime,
+        nullable=False,
+        server_default=sa.text("now()"),
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True, onupdate=datetime.utcnow
+        DateTime,
+        nullable=True,
+        onupdate=datetime.utcnow,
     )
 
 

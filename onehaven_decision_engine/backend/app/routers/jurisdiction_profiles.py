@@ -14,13 +14,18 @@ from app.schemas import (
     JurisdictionProfileOut,
     JurisdictionProfileResolveOut,
 )
+from app.services.jurisdiction_completeness_service import (
+    profile_completeness_payload,
+    recompute_profile_and_coverage,
+)
 from app.services.jurisdiction_profile_service import (
+    _loads,  # ok to reuse internal helper here
     delete_profile,
     list_profiles,
     resolve_profile,
     upsert_profile,
-    _loads,  # ok to reuse internal helper here
 )
+from app.services.jurisdiction_task_mapper import map_profile_jurisdiction_task_dicts
 
 router = APIRouter(prefix="/jurisdiction-profiles", tags=["jurisdiction_profiles"])
 
@@ -42,16 +47,32 @@ def _row_to_out(r: JurisdictionProfile) -> JurisdictionProfileOut:
     )
 
 
-@router.get("", response_model=list[JurisdictionProfileOut])
+def _profile_admin_payload(db: Session, r: JurisdictionProfile) -> dict:
+    completeness = profile_completeness_payload(db, r)
+    return {
+        **_row_to_out(r).dict(),
+        "completeness": completeness,
+        "tasks": map_profile_jurisdiction_task_dicts(r),
+        "required_categories": completeness.get("required_categories", []),
+        "covered_categories": completeness.get("covered_categories", []),
+        "missing_categories": completeness.get("missing_categories", []),
+        "completeness_status": completeness.get("completeness_status"),
+        "completeness_score": completeness.get("completeness_score"),
+        "is_stale": completeness.get("is_stale"),
+        "stale_reason": completeness.get("stale_reason"),
+    }
+
+
+@router.get("", response_model=list[dict])
 def get_profiles(
     include_global: bool = Query(True),
     state: str = Query("MI"),
+    recompute: bool = Query(False),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
     rows = list_profiles(db, org_id=p.org_id, include_global=include_global, state=state)
 
-    # stable-ish ordering: scope, specificity, name
     def k(o: JurisdictionProfile):
         scope = 0 if o.org_id is None else 1
         spec = 2 if (o.city or "").strip() else (1 if (o.county or "").strip() else 0)
@@ -59,7 +80,17 @@ def get_profiles(
         return (scope, spec, name)
 
     rows.sort(key=k)
-    return [_row_to_out(r) for r in rows]
+
+    out: list[dict] = []
+    for r in rows:
+        if recompute:
+            r, _ = recompute_profile_and_coverage(db, r, commit=False)
+        out.append(_profile_admin_payload(db, r))
+
+    if recompute:
+        db.commit()
+
+    return out
 
 
 @router.get("/resolve", response_model=JurisdictionProfileResolveOut)
@@ -74,7 +105,27 @@ def resolve(
     return JurisdictionProfileResolveOut(**out)
 
 
-@router.post("", response_model=JurisdictionProfileOut)
+@router.get("/{profile_id}", response_model=dict)
+def get_profile_detail(
+    profile_id: int,
+    recompute: bool = Query(False),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    row = db.get(JurisdictionProfile, int(profile_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="profile not found")
+
+    if row.org_id is not None and row.org_id != p.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if recompute:
+        row, _ = recompute_profile_and_coverage(db, row, commit=True)
+
+    return _profile_admin_payload(db, row)
+
+
+@router.post("", response_model=dict)
 def upsert(
     payload: JurisdictionProfileIn,
     db: Session = Depends(get_db),
@@ -91,7 +142,55 @@ def upsert(
         policy=payload.policy,
         notes=payload.notes,
     )
-    return _row_to_out(row)
+    row, _ = recompute_profile_and_coverage(db, row, commit=True)
+    return _profile_admin_payload(db, row)
+
+
+@router.post("/{profile_id}/recompute", response_model=dict)
+def recompute_profile(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(require_owner),
+):
+    row = db.get(JurisdictionProfile, int(profile_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="profile not found")
+
+    if row.org_id is not None and row.org_id != p.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    row, coverage = recompute_profile_and_coverage(db, row, commit=True)
+    return {
+        "ok": True,
+        "profile": _profile_admin_payload(db, row),
+        "coverage": {
+            "id": getattr(coverage, "id", None),
+            "coverage_status": getattr(coverage, "coverage_status", None),
+            "production_readiness": getattr(coverage, "production_readiness", None),
+            "completeness_status": getattr(coverage, "completeness_status", None),
+            "is_stale": getattr(coverage, "is_stale", None),
+        },
+    }
+
+
+@router.get("/{profile_id}/tasks", response_model=dict)
+def get_profile_tasks(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    row = db.get(JurisdictionProfile, int(profile_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="profile not found")
+
+    if row.org_id is not None and row.org_id != p.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    return {
+        "ok": True,
+        "jurisdiction_profile_id": int(row.id),
+        "tasks": map_profile_jurisdiction_task_dicts(row),
+    }
 
 
 @router.delete("", response_model=dict)

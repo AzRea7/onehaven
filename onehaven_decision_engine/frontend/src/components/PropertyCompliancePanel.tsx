@@ -4,6 +4,7 @@ import {
   TriangleAlert,
   FileCheck2,
   Building2,
+  AlertTriangle,
 } from "lucide-react";
 import { api } from "../lib/api";
 import Surface from "./Surface";
@@ -35,6 +36,17 @@ type Brief = {
     production_readiness?: string | null;
   };
   explanation?: string | null;
+  required_actions?: any[];
+  blocking_items?: any[];
+  coverage?: {
+    completeness_status?: string | null;
+    completeness_score?: number | null;
+    is_stale?: boolean | null;
+    stale_reason?: string | null;
+    missing_categories?: string[] | null;
+    covered_categories?: string[] | null;
+    required_categories?: string[] | null;
+  };
 };
 
 function fmtBoolish(v: any) {
@@ -48,9 +60,20 @@ function badgeTone(v: any) {
   const s = String(v || "").toLowerCase();
   if (s === "verified" || s === "yes" || s === "ready" || s === "high")
     return "oh-pill oh-pill-good";
-  if (s === "partial" || s === "medium" || s === "unknown")
+  if (
+    s === "partial" ||
+    s === "medium" ||
+    s === "unknown" ||
+    s === "conditional"
+  )
     return "oh-pill oh-pill-warn";
-  if (s === "low" || s === "needs_review" || s === "no")
+  if (
+    s === "low" ||
+    s === "needs_review" ||
+    s === "no" ||
+    s === "missing" ||
+    s === "stale"
+  )
     return "oh-pill oh-pill-bad";
   return "oh-pill";
 }
@@ -111,6 +134,13 @@ export default function PropertyCompliancePanel({
 
   const c = brief?.compliance || {};
   const m = brief?.market || {};
+  const coverage = brief?.coverage || {};
+  const requiredActions = Array.isArray(brief?.required_actions)
+    ? brief?.required_actions
+    : [];
+  const blockingItems = Array.isArray(brief?.blocking_items)
+    ? brief?.blocking_items
+    : [];
 
   return (
     <Surface
@@ -217,6 +247,69 @@ export default function PropertyCompliancePanel({
             />
           </div>
 
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Field
+              label="Completeness status"
+              value={
+                <span className={badgeTone(coverage.completeness_status)}>
+                  {coverage.completeness_status || "—"}
+                </span>
+              }
+            />
+            <Field
+              label="Completeness score"
+              value={
+                coverage.completeness_score != null
+                  ? Number(coverage.completeness_score).toFixed(2)
+                  : "—"
+              }
+            />
+            <Field
+              label="Stale"
+              value={
+                <span
+                  className={badgeTone(coverage.is_stale ? "stale" : "ready")}
+                >
+                  {coverage.is_stale ? "Yes" : "No"}
+                </span>
+              }
+            />
+            <Field
+              label="Missing categories"
+              value={
+                Array.isArray(coverage.missing_categories)
+                  ? coverage.missing_categories.length
+                  : 0
+              }
+            />
+          </div>
+
+          {coverage.is_stale ||
+          (coverage.missing_categories || []).length > 0 ? (
+            <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-amber-100">
+                <AlertTriangle className="h-4 w-4" />
+                Jurisdiction warning
+              </div>
+              <div className="mt-2 text-sm leading-6 text-amber-50/90">
+                {coverage.is_stale
+                  ? `Jurisdiction data is stale${coverage.stale_reason ? `: ${coverage.stale_reason}` : "."}`
+                  : "Jurisdiction data is present but not fully complete."}
+              </div>
+
+              {Array.isArray(coverage.missing_categories) &&
+              coverage.missing_categories.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {coverage.missing_categories.map((item) => (
+                    <span key={item} className="oh-pill oh-pill-warn">
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {brief?.explanation ? (
             <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
@@ -228,6 +321,80 @@ export default function PropertyCompliancePanel({
               </div>
             </div>
           ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="text-sm font-semibold text-app-0">
+                Required actions
+              </div>
+
+              {requiredActions.length === 0 ? (
+                <div className="mt-3 text-sm text-app-4">
+                  No required actions returned.
+                </div>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {requiredActions.map((item: any, idx: number) => (
+                    <div
+                      key={`${item?.code || item?.key || item?.title || idx}`}
+                      className="rounded-2xl border border-app bg-app-muted px-3 py-3"
+                    >
+                      <div className="text-sm font-medium text-app-0">
+                        {item?.title ||
+                          item?.description ||
+                          item?.code ||
+                          item?.key ||
+                          "Untitled action"}
+                      </div>
+                      <div className="mt-1 text-xs text-app-4">
+                        {(
+                          item?.category ||
+                          item?.severity ||
+                          "uncategorized"
+                        ).toString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="text-sm font-semibold text-app-0">
+                Blocking items
+              </div>
+
+              {blockingItems.length === 0 ? (
+                <div className="mt-3 text-sm text-app-4">
+                  No blockers returned.
+                </div>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {blockingItems.map((item: any, idx: number) => (
+                    <div
+                      key={`${item?.code || item?.key || item?.title || idx}`}
+                      className="rounded-2xl border border-red-500/20 bg-red-500/[0.06] px-3 py-3"
+                    >
+                      <div className="text-sm font-medium text-red-200">
+                        {item?.title ||
+                          item?.description ||
+                          item?.code ||
+                          item?.key ||
+                          "Untitled blocker"}
+                      </div>
+                      <div className="mt-1 text-xs text-red-200/70">
+                        {(
+                          item?.category ||
+                          item?.severity ||
+                          "uncategorized"
+                        ).toString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
 
           {m?.pha_name ? (
             <div className="flex items-center gap-2 text-xs text-app-4">

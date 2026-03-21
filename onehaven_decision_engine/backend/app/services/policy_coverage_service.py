@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-from typing import Optional
+import json
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.policy_models import PolicyAssertion, PolicySource
+from app.domain.jurisdiction_categories import compute_completeness_score, normalize_categories
+from app.services.jurisdiction_completeness_service import (
+    collect_covered_categories_for_scope,
+    compute_scope_freshness_summary,
+)
+from app.policy_models import JurisdictionCoverageStatus, PolicyAssertion, PolicySource
 from app.services.policy_cleanup_service import ARCHIVE_MARKER
 from app.services.policy_catalog_admin_service import merged_catalog_for_market
-
-# IMPORTANT:
-# Adjust this import if your coverage ORM model lives elsewhere in your repo.
-# Example alternatives:
-# from app.models import PolicyCoverageStatus
-# from app.models import PolicyCoverage as PolicyCoverageStatus
-from app.policy_models import JurisdictionCoverageStatus
 
 
 IMPORTANT_RULE_KEYS = {
@@ -29,6 +28,21 @@ IMPORTANT_RULE_KEYS = {
     "pha_admin_plan_anchor",
     "pha_administrator_changed",
 }
+
+
+REQUIRED_CATEGORY_BASELINE = [
+    "registration",
+    "inspection",
+    "section8",
+    "safety",
+]
+
+
+def _dumps(v: Any) -> str:
+    try:
+        return json.dumps(v, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return "{}"
 
 
 def _norm_state(v: Optional[str]) -> str:
@@ -162,15 +176,6 @@ def _effective_stale_assertions(
     active_source_ids: set[int],
     verified_rule_keys: set[str],
 ) -> list[PolicyAssertion]:
-    """
-    Only count stale warnings that are still meaningfully unresolved.
-
-    Ignore:
-    - superseded assertions
-    - stale rows tied to inactive/archived sources
-    - stale rows for rule_keys that already have a verified winner
-    - stale rows for low-value non-operational rule keys
-    """
     out: list[PolicyAssertion] = []
 
     for a in assertions:
@@ -185,17 +190,31 @@ def _effective_stale_assertions(
 
         rule_key = (a.rule_key or "").strip()
 
-        # If this rule_key already has a verified winner, do not count its stale leftovers.
         if rule_key and rule_key in verified_rule_keys:
             continue
 
-        # Ignore low-signal leftovers such as generic document references.
         if rule_key and rule_key not in IMPORTANT_RULE_KEYS:
             continue
 
         out.append(a)
 
     return out
+
+
+def _required_categories_for_market(
+    *,
+    city: Optional[str],
+    county: Optional[str],
+    pha_name: Optional[str],
+) -> list[str]:
+    categories = list(REQUIRED_CATEGORY_BASELINE)
+    if city:
+        categories.extend(["occupancy", "permits"])
+    if pha_name:
+        categories.append("section8")
+    if county:
+        categories.append("registration")
+    return normalize_categories(categories)
 
 
 def compute_coverage_status(
@@ -343,6 +362,28 @@ def compute_coverage_status(
     else:
         coverage_status = "needs_review"
 
+    required_categories = _required_categories_for_market(
+        city=cty,
+        county=cnty,
+        pha_name=pha,
+    )
+    covered_categories = collect_covered_categories_for_scope(
+        db,
+        state=st,
+        county=cnty,
+        city=cty,
+    )
+    completeness = compute_completeness_score(
+        required_categories=required_categories,
+        covered_categories=covered_categories,
+    )
+    freshness = compute_scope_freshness_summary(
+        db,
+        state=st,
+        county=cnty,
+        city=cty,
+    )
+
     return {
         "state": st,
         "county": cnty,
@@ -361,6 +402,17 @@ def compute_coverage_status(
         "municipal_core_ok": municipal_core_ok,
         "state_federal_core_ok": state_federal_core_ok,
         "pha_core_ok": pha_core_ok,
+        "required_categories": completeness.required_categories,
+        "covered_categories": completeness.covered_categories,
+        "missing_categories": completeness.missing_categories,
+        "completeness_score": completeness.completeness_score,
+        "completeness_status": completeness.completeness_status,
+        "is_stale": freshness.is_stale,
+        "stale_reason": freshness.stale_reason,
+        "freshest_source_at": freshness.freshest_source_at.isoformat() if freshness.freshest_source_at else None,
+        "oldest_source_at": freshness.oldest_source_at.isoformat() if freshness.oldest_source_at else None,
+        "authoritative_source_count": freshness.authoritative_source_count,
+        "source_freshness_json": freshness.freshness_payload,
     }
 
 
@@ -419,18 +471,44 @@ def upsert_coverage_status(
 
     row.coverage_status = payload["coverage_status"]
     row.production_readiness = payload["production_readiness"]
-    row.confidence_label = payload["confidence_label"]
     row.verified_rule_count = payload["verified_rule_count"]
     row.source_count = payload["source_count"]
     row.fetch_failure_count = payload["fetch_failure_count"]
     row.stale_warning_count = payload["stale_warning_count"]
-    row.has_sources = payload["has_sources"]
-    row.has_extracted = payload["has_extracted"]
-    row.verified_rule_keys = payload["verified_rule_keys"]
-    row.municipal_core_ok = payload["municipal_core_ok"]
-    row.state_federal_core_ok = payload["state_federal_core_ok"]
-    row.pha_core_ok = payload["pha_core_ok"]
+    row.last_source_refresh_at = None if not payload["freshest_source_at"] else payload["freshest_source_at"]
+    row.last_reviewed_at = datetime.utcnow() if payload["verified_rule_count"] > 0 else row.last_reviewed_at
+
+    row.required_categories_json = _dumps(payload["required_categories"])
+    row.covered_categories_json = _dumps(payload["covered_categories"])
+    row.missing_categories_json = _dumps(payload["missing_categories"])
+    row.completeness_score = payload["completeness_score"]
+    row.completeness_status = payload["completeness_status"]
+    row.category_norm_version = "v1"
+    row.last_verified_at = datetime.utcnow() if payload["completeness_status"] == "complete" and not payload["is_stale"] else row.last_verified_at
+    row.is_stale = bool(payload["is_stale"])
+    row.stale_reason = payload["stale_reason"]
+    row.freshest_source_at = None
+    row.oldest_source_at = None
+    row.source_freshness_json = _dumps(payload["source_freshness_json"])
     row.notes = notes
+
+    # Back-compat assignments for repos that still have these columns.
+    if hasattr(row, "confidence_label"):
+        setattr(row, "confidence_label", payload["confidence_label"])
+    if hasattr(row, "has_sources"):
+        setattr(row, "has_sources", payload["has_sources"])
+    if hasattr(row, "has_extracted"):
+        setattr(row, "has_extracted", payload["has_extracted"])
+    if hasattr(row, "verified_rule_keys"):
+        setattr(row, "verified_rule_keys", payload["verified_rule_keys"])
+    if hasattr(row, "municipal_core_ok"):
+        setattr(row, "municipal_core_ok", payload["municipal_core_ok"])
+    if hasattr(row, "state_federal_core_ok"):
+        setattr(row, "state_federal_core_ok", payload["state_federal_core_ok"])
+    if hasattr(row, "pha_core_ok"):
+        setattr(row, "pha_core_ok", payload["pha_core_ok"])
+    if hasattr(row, "authoritative_source_count"):
+        setattr(row, "authoritative_source_count", payload["authoritative_source_count"])
 
     db.commit()
     db.refresh(row)

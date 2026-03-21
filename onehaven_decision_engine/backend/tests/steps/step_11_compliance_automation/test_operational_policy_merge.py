@@ -37,6 +37,14 @@ def test_resolve_operational_policy_merges_profile_and_projection(monkeypatch):
             ],
             "notes": "Warren special rules",
             "profile_id": 501,
+            "completeness_status": "partial",
+            "stale_status": "fresh",
+            "required_categories": ["rental_registration", "inspection", "source_of_income"],
+            "category_coverage": {
+                "rental_registration": "verified",
+                "inspection": "verified",
+                "source_of_income": "verified",
+            },
         },
     )
 
@@ -76,3 +84,9 @@ def test_resolve_operational_policy_merges_profile_and_projection(monkeypatch):
     assert "CITY_DEBT_CLEARANCE" in req_codes
     assert "SOURCE_OF_INCOME" in req_codes
     assert "NO_PO_BOX" in block_codes
+
+    assert out.get("completeness_status") == "partial"
+    assert out.get("stale_status") == "fresh"
+    assert "source_of_income" in (out.get("required_categories") or [])
+    assert (out.get("category_coverage") or {}).get("inspection") == "verified"
+    

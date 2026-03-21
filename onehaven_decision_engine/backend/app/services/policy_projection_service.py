@@ -6,13 +6,15 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.domain.jurisdiction_categories import normalize_categories
 from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
+from app.services.jurisdiction_completeness_service import recompute_profile_and_coverage
 from app.services.policy_coverage_service import compute_coverage_status
 
 
 def _dumps(v: Any) -> str:
     try:
-        return json.dumps(v, ensure_ascii=False)
+        return json.dumps(v, ensure_ascii=False, sort_keys=True)
     except Exception:
         return "{}"
 
@@ -184,6 +186,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
                 "title": "Register rental property with the local authority",
                 "category": "municipal_registration",
                 "severity": "required",
+                "normalized_category": "registration",
             }
         )
     if "inspection_program_exists" in keys:
@@ -193,6 +196,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
                 "title": "Schedule initial rental inspection",
                 "category": "municipal_inspection",
                 "severity": "required",
+                "normalized_category": "inspection",
             }
         )
     cert_rows = [a for a in assertions if a.rule_key == "certificate_required_before_occupancy"]
@@ -209,6 +213,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
                     "title": "Obtain required certificate/compliance approval before occupancy",
                     "category": "municipal_certificate",
                     "severity": "required",
+                    "normalized_category": "occupancy",
                 }
             )
             blockers.append(
@@ -217,15 +222,17 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
                     "title": "Do not move to lease-ready until certificate/compliance requirement is satisfied",
                     "category": "municipal_certificate",
                     "severity": "blocking",
+                    "normalized_category": "occupancy",
                 }
             )
         elif "conditional" in cert_statuses:
             actions.append(
                 {
                     "key": "check_certificate_before_occupancy_conditions",
-                    "title": "Check whether Warren certificate/city certification is required before occupancy",
+                    "title": "Check whether certificate/city certification is required before occupancy",
                     "category": "municipal_certificate",
                     "severity": "required_if_applicable",
+                    "normalized_category": "occupancy",
                 }
             )
 
@@ -236,6 +243,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
                 "title": "Prepare HAP contract and tenancy addendum if voucher strategy is used",
                 "category": "voucher_workflow",
                 "severity": "required_if_voucher",
+                "normalized_category": "section8",
             }
         )
     if "pha_landlord_packet_required" in keys:
@@ -245,6 +253,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
                 "title": "Prepare required landlord packet / PHA paperwork",
                 "category": "pha_workflow",
                 "severity": "required_if_voucher",
+                "normalized_category": "section8",
             }
         )
     if "pha_administrator_changed" in keys:
@@ -254,6 +263,7 @@ def _actions_and_blockers(assertions: list[PolicyAssertion]) -> tuple[list[dict]
                 "title": "Confirm current PHA administrator before relying on older process documents",
                 "category": "pha_workflow",
                 "severity": "warning",
+                "normalized_category": "section8",
             }
         )
 
@@ -435,6 +445,8 @@ def build_policy_summary(
                 "rule_key": a.rule_key,
                 "rule_family": fam,
                 "assertion_type": a.assertion_type,
+                "normalized_category": a.normalized_category,
+                "coverage_status": a.coverage_status,
                 "value": value,
                 "confidence": a.confidence,
                 "review_status": a.review_status,
@@ -453,9 +465,14 @@ def build_policy_summary(
                         "url": src.url,
                         "retrieved_at": src.retrieved_at.isoformat() if src.retrieved_at else None,
                         "http_status": src.http_status,
+                        "freshness_status": getattr(src, "freshness_status", None),
                     }
                 )
                 seen_source_ids.add(src.id)
+
+    normalized_categories = normalize_categories(
+        [r.get("normalized_category") for r in verified_rules if r.get("normalized_category")]
+    )
 
     return {
         "summary": "Built from verified policy assertions with conflict resolution and inheritance.",
@@ -474,6 +491,7 @@ def build_policy_summary(
         "blocking_items": blockers,
         "evidence_links": evidence_links,
         "source_ids": source_ids,
+        "normalized_categories": normalized_categories,
     }
 
 
@@ -512,6 +530,7 @@ def project_verified_assertions_to_profile(
         pha_name=pha,
     )
     friction = _score_friction(assertions)
+    covered_categories = normalize_categories(policy_json.get("normalized_categories") or [])
 
     existing = (
         db.query(JurisdictionProfile)
@@ -537,18 +556,23 @@ def project_verified_assertions_to_profile(
             friction_multiplier=friction,
             pha_name=pha,
             policy_json=_dumps(policy_json),
+            covered_categories_json=_dumps(covered_categories),
             notes=notes or "Projected from verified policy assertions.",
             updated_at=now,
         )
         db.add(row)
+        db.flush()
     else:
         row = existing
         row.friction_multiplier = friction
         row.pha_name = pha or row.pha_name
         row.policy_json = _dumps(policy_json)
+        row.covered_categories_json = _dumps(covered_categories)
         row.notes = notes or row.notes or "Projected from verified policy assertions."
         row.updated_at = now
 
+    db.flush()
+    recompute_profile_and_coverage(db, row, commit=False)
     db.commit()
     db.refresh(row)
     return row
@@ -613,6 +637,9 @@ def build_property_compliance_brief(
         ),
         "coverage_confidence": summary["coverage"]["confidence_label"],
         "production_readiness": summary["coverage"]["production_readiness"],
+        "completeness_status": summary["coverage"]["completeness_status"],
+        "missing_categories": summary["coverage"]["missing_categories"],
+        "is_stale": summary["coverage"]["is_stale"],
     }
 
     explanation_parts = []
@@ -635,15 +662,22 @@ def build_property_compliance_brief(
         explanation_parts.append("certificate/compliance approval appears required before occupancy")
     elif compliance["certificate_required_before_occupancy"] == "conditional":
         explanation_parts.append(
-            "certificate/compliance approval is required in certain Warren occupancy scenarios "
-            "(for example no-occupancy/vacancy reoccupancy or altered/changed-use cases)"
+            "certificate/compliance approval is required in certain occupancy scenarios"
         )
     elif compliance["certificate_required_before_occupancy"] == "unknown":
         explanation_parts.append("certificate-before-occupancy requirements are still under review")
 
-
     if compliance["pha_specific_workflow"]:
         explanation_parts.append("voucher / PHA workflow requirements may also apply")
+
+    if compliance["missing_categories"]:
+        explanation_parts.append(
+            "jurisdiction coverage is still missing "
+            + ", ".join(compliance["missing_categories"]).replace("_", " ")
+        )
+
+    if compliance["is_stale"]:
+        explanation_parts.append("some policy source evidence is stale and should be refreshed")
 
     explanation = (
         f"This property resolves to {compliance['market_label']}. "

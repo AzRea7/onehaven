@@ -5,6 +5,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.domain.jurisdiction_categories import normalize_category
 from app.policy_models import PolicyAssertion, PolicySource
 
 AUTO_VERIFY_RULE_KEYS = {
@@ -51,7 +52,11 @@ def _source_is_authoritative(src: Optional[PolicySource]) -> bool:
 
     url = (src.url or "").lower()
     publisher = (src.publisher or "").lower()
-    status_ok = src.http_status is not None and 200 <= int(src.http_status) < 400
+
+    try:
+        status_ok = src.http_status is not None and 200 <= int(src.http_status) < 400
+    except Exception:
+        status_ok = False
 
     if not status_ok:
         return False
@@ -126,6 +131,40 @@ def _confidence_for(rule_key: str, src: Optional[PolicySource]) -> float:
         return 0.90
 
     return 0.88
+
+
+def _category_for_verified(a: PolicyAssertion) -> str | None:
+    current = normalize_category(getattr(a, "normalized_category", None))
+    if current:
+        return current
+
+    by_rule = {
+        "rental_registration_required": "registration",
+        "inspection_program_exists": "inspection",
+        "certificate_required_before_occupancy": "occupancy",
+        "property_maintenance_enforcement_anchor": "safety",
+        "building_safety_division_anchor": "safety",
+        "building_division_anchor": "permits",
+        "pha_admin_plan_anchor": "section8",
+        "pha_administrator_changed": "section8",
+        "pha_landlord_packet_required": "section8",
+        "hap_contract_and_tenancy_addendum_required": "section8",
+        "federal_hcv_regulations_anchor": "section8",
+        "federal_nspire_anchor": "inspection",
+        "federal_notice_anchor": "section8",
+        "mi_statute_anchor": "safety",
+        "mshda_program_anchor": "section8",
+        "landlord_payment_timing_reference": "section8",
+    }
+    return normalize_category(by_rule.get(a.rule_key))
+
+
+def _coverage_status_for_verified(a: PolicyAssertion) -> str:
+    if (a.assertion_type or "").strip().lower() == "document_reference":
+        return "candidate"
+    if (a.rule_key or "").endswith("_anchor"):
+        return "verified"
+    return "covered"
 
 
 def _market_assertions(
@@ -233,6 +272,9 @@ def auto_verify_market_assertions(
         a.reviewed_by_user_id = reviewer_user_id
         a.reviewed_at = now
         a.stale_after = None
+        a.normalized_category = _category_for_verified(a)
+        a.coverage_status = _coverage_status_for_verified(a)
+        a.source_freshness_status = getattr(src, "freshness_status", None) if src else None
 
         auto_note = (
             f"Auto-verified for {market_label} from authoritative source: "
@@ -240,7 +282,6 @@ def auto_verify_market_assertions(
             if src
             else f"Auto-verified for {market_label} from authoritative source"
         )
-        # Overwrite market-specific stale/recheck notes instead of preserving old nonsense
         existing_note = (a.review_notes or "").strip()
         if "warren" in existing_note.lower() or "source_changed=" in existing_note.lower():
             a.review_notes = auto_note
@@ -307,6 +348,7 @@ def supersede_replaced_assertions(
             a.reviewed_by_user_id = reviewer_user_id
             a.reviewed_at = now
             a.stale_after = None
+            a.coverage_status = "superseded"
 
             existing_note = (a.review_notes or "").strip()
             extra = f"Superseded by verified assertion {winner.id}"
@@ -338,8 +380,7 @@ def cleanup_market_stale_assertions(
     - keep authoritative verified winners
     - supersede stale / needs_recheck rows when a verified winner exists
     - supersede extracted rows too when a verified winner exists
-    - optionally supersede older duplicate extracted rows, keeping only newest per
-      (rule_key, source_id, scope)
+    - optionally supersede older duplicate extracted rows
     """
 
     rows = _market_assertions(
@@ -384,6 +425,7 @@ def cleanup_market_stale_assertions(
                 a.reviewed_by_user_id = reviewer_user_id
                 a.reviewed_at = now
                 a.stale_after = None
+                a.coverage_status = "superseded"
 
                 extra = (
                     f"Resolved stale/recheck assertion during cleanup; "
@@ -431,6 +473,7 @@ def cleanup_market_stale_assertions(
                 a.reviewed_by_user_id = reviewer_user_id
                 a.reviewed_at = now
                 a.stale_after = None
+                a.coverage_status = "superseded"
 
                 extra = (
                     f"Archived duplicate extracted assertion during cleanup; "
