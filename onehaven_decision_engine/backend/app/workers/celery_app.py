@@ -53,6 +53,16 @@ def _beat_schedule() -> dict[str, dict]:
             "schedule": 15 * 60.0,
             "options": {"queue": queue, "routing_key": queue},
         },
+        "rent-refresh-budgeted-batch": {
+            "task": "rent.refresh_budgeted_batch",
+            "schedule": 24 * 60 * 60.0,
+            "options": {"queue": queue, "routing_key": queue},
+        },
+        "market-sync-daily-supported-markets": {
+            "task": "market_sync.daily_supported_markets",
+            "schedule": 24 * 60 * 60.0,
+            "options": {"queue": queue, "routing_key": queue},
+        },
         "ingestion-daily-market-refresh": {
             "task": "ingestion.daily_market_refresh",
             "schedule": 24 * 60 * 60.0,
@@ -124,6 +134,7 @@ celery_app.conf.update(
     imports=(
         "app.workers.agent_tasks",
         "app.tasks.ingestion_tasks",
+        "app.tasks.market_sync_tasks",
     ),
 
     # beat safety
@@ -247,4 +258,3 @@ def _task_failure(task_id=None, exception=None, args=None, kwargs=None, tracebac
         },
         level=logging.ERROR,
     )
-    

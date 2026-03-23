@@ -12,6 +12,10 @@ from ..config import settings
 from ..models import Property, RentAssumption
 from .rentcast_service import RentCastClient, persist_rentcast_comps_and_get_median
 
+from .rent_refresh_queue_service import (
+    publish_without_rent,
+    should_run_inline_rent_refresh,
+)
 
 def derive_photo_kind(url: str) -> str:
     u = (url or "").lower()
@@ -108,10 +112,16 @@ def canonical_listing_payload(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_post_import_actions() -> list[dict[str, str]]:
+    rent_label = (
+        "Refresh rent assumptions inline"
+        if should_run_inline_rent_refresh()
+        else "Queue budgeted rent refresh"
+    )
+
     return [
         {"key": "geo", "label": "Geocode and enrich location"},
         {"key": "risk", "label": "Update crime and zone risk"},
-        {"key": "rent", "label": "Refresh rent assumptions"},
+        {"key": "rent", "label": rent_label},
         {"key": "evaluate", "label": "Run underwriting"},
         {"key": "workflow", "label": "Refresh workflow gates"},
         {"key": "next_actions", "label": "Seed next actions"},
@@ -347,6 +357,7 @@ def execute_post_ingestion_pipeline(
         "geo_ok": False,
         "risk_ok": False,
         "rent_ok": False,
+        "rent_deferred": False,
         "evaluate_ok": False,
         "state_ok": False,
         "workflow_ok": False,
@@ -381,13 +392,23 @@ def execute_post_ingestion_pipeline(
         result["errors"].append(f"risk:{type(e).__name__}:{e}")
 
     try:
-        rent_res = refresh_property_rent_assumptions(
-            db,
-            org_id=int(org_id),
-            property_id=int(property_id),
-        )
-        result["rent_ok"] = bool(rent_res.get("ok"))
-        result["rent"] = rent_res
+        if should_run_inline_rent_refresh():
+            rent_res = refresh_property_rent_assumptions(
+                db,
+                org_id=int(org_id),
+                property_id=int(property_id),
+            )
+            result["rent_ok"] = bool(rent_res.get("ok"))
+            result["rent"] = rent_res
+        else:
+            result["rent_ok"] = False
+            result["rent_deferred"] = True
+            result["rent"] = {
+                "ok": False,
+                "skipped": True,
+                "reason": "deferred_budgeted_refresh",
+                "publish_without_rent": publish_without_rent(),
+            }
     except Exception as e:
         result["errors"].append(f"rent:{type(e).__name__}:{e}")
 
@@ -397,20 +418,21 @@ def execute_post_ingestion_pipeline(
 
         principal_shim = type("PrincipalShim", (), {"org_id": int(org_id), "user_id": actor_user_id})()
 
-        explain_res = explain_rent(
-            property_id=int(property_id),
-            strategy="section8",
-            payment_standard_pct=None,
-            persist=True,
-            db=db,
-            p=principal_shim,
-        )
-        result["rent_explain"] = {
-            "run_id": getattr(explain_res, "run_id", None),
-            "rent_used": getattr(explain_res, "rent_used", None),
-            "approved_rent_ceiling": getattr(explain_res, "approved_rent_ceiling", None),
-            "cap_reason": getattr(explain_res, "cap_reason", None),
-        }
+        if result.get("rent_ok"):
+            explain_res = explain_rent(
+                property_id=int(property_id),
+                strategy="section8",
+                payment_standard_pct=None,
+                persist=True,
+                db=db,
+                p=principal_shim,
+            )
+            result["rent_explain"] = {
+                "run_id": getattr(explain_res, "run_id", None),
+                "rent_used": getattr(explain_res, "rent_used", None),
+                "approved_rent_ceiling": getattr(explain_res, "approved_rent_ceiling", None),
+                "cap_reason": getattr(explain_res, "cap_reason", None),
+            }
 
         eval_res = evaluate_property_core(
             db,
@@ -455,7 +477,7 @@ def execute_post_ingestion_pipeline(
     oks = [
         bool(result.get("geo_ok")),
         bool(result.get("risk_ok")) or bool(result.get("risk", {}).get("skipped")),
-        bool(result.get("rent_ok")),
+        bool(result.get("rent_ok")) or bool(result.get("rent_deferred")),
         bool(result.get("evaluate_ok")),
         bool(result.get("state_ok")),
         bool(result.get("workflow_ok")),
@@ -473,6 +495,8 @@ def apply_pipeline_summary(summary: dict[str, Any], pipeline_res: dict[str, Any]
         summary["risk_scored"] = int(summary.get("risk_scored", 0) or 0) + 1
     if pipeline_res.get("rent_ok"):
         summary["rent_refreshed"] = int(summary.get("rent_refreshed", 0) or 0) + 1
+    if pipeline_res.get("rent_deferred"):
+        summary["rent_deferred"] = int(summary.get("rent_deferred", 0) or 0) + 1
     if pipeline_res.get("evaluate_ok"):
         summary["evaluated"] = int(summary.get("evaluated", 0) or 0) + 1
     if pipeline_res.get("state_ok"):

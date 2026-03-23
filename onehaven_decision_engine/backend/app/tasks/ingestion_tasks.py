@@ -22,6 +22,12 @@ from ..services.jurisdiction_refresh_service import (
 )
 from ..workers.celery_app import celery_app
 
+from ..config import settings
+from ..services.ingestion_enrichment_service import refresh_property_rent_assumptions
+from ..services.rent_refresh_queue_service import (
+    list_properties_for_budgeted_rent_refresh,
+    should_queue_rent_refresh_after_sync,
+)
 
 def _pipeline_outcome(summary_json: dict | None) -> dict:
     summary = dict(summary_json or {})
@@ -76,10 +82,28 @@ def sync_source_task(
             runtime_config=runtime_config or {},
         )
         summary = dict(getattr(run, "summary_json", None) or {})
+
+        post_sync_rent_queued = 0
+        post_sync_rent_property_ids: list[int] = []
+
+        if should_queue_rent_refresh_after_sync():
+            burst_limit = int(getattr(settings, "ingestion_post_sync_rent_budget", 5) or 5)
+            property_ids = list_properties_for_budgeted_rent_refresh(
+                db,
+                org_id=int(org_id),
+                limit=burst_limit,
+            )
+            for property_id in property_ids:
+                refresh_property_rent_task.delay(int(org_id), int(property_id))
+                post_sync_rent_queued += 1
+                post_sync_rent_property_ids.append(int(property_id))
+
         return {
             "ok": True,
             "run_id": getattr(run, "id", None),
             "status": getattr(run, "status", None),
+            "post_sync_rent_queued": post_sync_rent_queued,
+            "post_sync_rent_property_ids": post_sync_rent_property_ids,
             "summary_json": summary,
             "pipeline_outcome": _pipeline_outcome(summary),
         }
@@ -137,6 +161,62 @@ def daily_market_refresh_task():
     finally:
         db.close()
 
+@celery_app.task(name="rent.refresh_property")
+def refresh_property_rent_task(
+    org_id: int,
+    property_id: int,
+):
+    db = SessionLocal()
+    try:
+        result = refresh_property_rent_assumptions(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+        return {
+            "ok": bool(result.get("ok")),
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "result": result,
+        }
+    finally:
+        db.close()
+
+
+@celery_app.task(name="rent.refresh_budgeted_batch")
+def refresh_budgeted_rent_batch_task(
+    org_id: int = 1,
+    *,
+    limit: int | None = None,
+):
+    db = SessionLocal()
+    try:
+        effective_limit = int(
+            limit
+            or getattr(settings, "ingestion_daily_rent_refresh_limit", 25)
+            or 25
+        )
+
+        property_ids = list_properties_for_budgeted_rent_refresh(
+            db,
+            org_id=int(org_id),
+            limit=effective_limit,
+        )
+
+        queued = 0
+        for property_id in property_ids:
+            refresh_property_rent_task.delay(int(org_id), int(property_id))
+            queued += 1
+
+        return {
+            "ok": True,
+            "org_id": int(org_id),
+            "queued": queued,
+            "property_ids": property_ids,
+            "limit": effective_limit,
+        }
+    finally:
+        db.close()
 
 @celery_app.task(name="location.refresh_property")
 def refresh_property_location_task(

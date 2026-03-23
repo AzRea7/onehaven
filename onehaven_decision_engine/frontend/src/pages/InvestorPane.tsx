@@ -1,34 +1,40 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowUpRight,
-  Banknote,
-  ClipboardList,
-  Crosshair,
-  Filter,
-  GitBranch,
-  Home,
-  LocateFixed,
-  MapPinned,
-  RefreshCcw,
   Search,
-  ShieldAlert,
+  RefreshCcw,
+  SlidersHorizontal,
+  MapPin,
+  BedDouble,
+  Bath,
+  Ruler,
   Wallet,
-  AlertTriangle,
+  Banknote,
+  Landmark,
+  ShieldAlert,
+  Sparkles,
+  ArrowUpRight,
+  ImageOff,
+  Building2,
 } from "lucide-react";
 
-import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
 import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
-import Golem from "../components/Golem";
-import IngestionLaunchCard from "../components/IngestionLaunchCard";
-import IngestionRunsPanel from "../components/IngestionRunsPanel";
-import IngestionErrorsDrawer from "../components/IngestionErrorsDrawer";
-import { paneLabel } from "../components/PaneSwitcher";
+import { api } from "../lib/api";
 
 type Row = any;
+
+type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
+type FinancingFilter = "ALL" | "CASH" | "DSCR" | "UNKNOWN";
+type CompletenessFilter = "ALL" | "COMPLETE" | "PARTIAL" | "MISSING";
+type SortKey =
+  | "BEST_CASHFLOW"
+  | "LOWEST_PRICE"
+  | "HIGHEST_PRICE"
+  | "BEST_DSCR"
+  | "NEWEST";
 
 function money(v: any) {
   if (v == null || Number.isNaN(Number(v))) return "—";
@@ -44,6 +50,7 @@ function normalizeDecision(raw?: string) {
   const x = String(raw || "")
     .trim()
     .toUpperCase();
+
   if (["PASS", "GOOD_DEAL", "GOOD", "APPROVED", "APPROVE"].includes(x)) {
     return "GOOD_DEAL";
   }
@@ -51,6 +58,13 @@ function normalizeDecision(raw?: string) {
     return "REJECT";
   }
   return "REVIEW";
+}
+
+function decisionPillClass(raw?: string) {
+  const d = normalizeDecision(raw);
+  if (d === "GOOD_DEAL") return "oh-pill oh-pill-good";
+  if (d === "REVIEW") return "oh-pill oh-pill-warn";
+  return "oh-pill oh-pill-bad";
 }
 
 function resolvePropertyId(r: any) {
@@ -70,94 +84,39 @@ function resolvePropertyId(r: any) {
   return null;
 }
 
-function decisionPillClass(raw?: string) {
-  const d = normalizeDecision(raw);
-  if (d === "GOOD_DEAL") return "oh-pill oh-pill-good";
-  if (d === "REVIEW") return "oh-pill oh-pill-warn";
-  return "oh-pill oh-pill-bad";
+function inferProperty(r: any) {
+  return r?.property || r || {};
 }
 
-function normalizeStage(raw?: string) {
-  const x = String(raw || "")
-    .trim()
-    .toLowerCase();
-
-  if (
-    [
-      "deal",
-      "intake",
-      "sourcing",
-      "procurement",
-      "underwriting",
-      "discovered",
-      "shortlisted",
-      "underwritten",
-      "offer",
-    ].includes(x)
-  ) {
-    return "deal";
-  }
-  if (["rehab", "renovation", "construction", "acquired"].includes(x))
-    return "rehab";
-  if (
-    [
-      "compliance",
-      "inspection",
-      "licensing",
-      "compliance_readying",
-      "inspection_pending",
-    ].includes(x)
-  ) {
-    return "compliance";
-  }
-  if (["tenant", "voucher", "tenant_marketing", "tenant_screening"].includes(x))
-    return "tenant";
-  if (["lease", "leasing", "leased"].includes(x)) return "lease";
-  if (["management", "ops", "maintenance", "occupied", "turnover"].includes(x))
-    return "management";
-  if (["cash", "cashflow", "equity", "portfolio"].includes(x)) {
-    return "cash_equity";
-  }
-
-  return "deal";
+function inferAskingPrice(r: any) {
+  return (
+    numberOrNull(r?.asking_price) ??
+    numberOrNull(r?.deal?.asking_price) ??
+    numberOrNull(r?.deal?.price) ??
+    numberOrNull(r?.property?.price) ??
+    null
+  );
 }
 
-function stageLabel(raw?: string) {
-  const s = normalizeStage(raw);
-  if (s === "deal") return "Deal / Procurement";
-  if (s === "rehab") return "Rehab";
-  if (s === "compliance") return "Compliance";
-  if (s === "tenant") return "Tenant Placement";
-  if (s === "lease") return "Lease Activation";
-  if (s === "management") return "Management";
-  return "Cashflow / Equity";
+function inferMarketRent(r: any) {
+  return (
+    numberOrNull(r?.market_rent_estimate) ??
+    numberOrNull(r?.rent_assumption?.market_rent_estimate) ??
+    numberOrNull(r?.monthly_rent_estimate) ??
+    numberOrNull(r?.estimated_rent) ??
+    null
+  );
 }
 
-function stagePillClass(raw?: string) {
-  const s = normalizeStage(raw);
-  if (s === "cash_equity") return "oh-pill oh-pill-good";
-  if (s === "lease" || s === "management") return "oh-pill oh-pill-accent";
-  if (s === "tenant" || s === "compliance" || s === "rehab") {
-    return "oh-pill oh-pill-warn";
-  }
-  return "oh-pill";
-}
-
-function panePillClass(raw?: string) {
-  const x = String(raw || "")
-    .trim()
-    .toLowerCase();
-  if (x === "management") return "oh-pill oh-pill-good";
-  if (x === "tenants") return "oh-pill oh-pill-accent";
-  if (x === "compliance") return "oh-pill oh-pill-warn";
-  if (x === "acquisition") return "oh-pill oh-pill-accent";
-  return "oh-pill";
-}
-
-function getFinancingType(price?: number | null) {
-  if (price == null || !Number.isFinite(Number(price))) return "Unknown";
-  if (Number(price) < 75000) return "Cash";
-  return "DSCR";
+function inferMortgage(r: any) {
+  return (
+    numberOrNull(r?.estimated_mortgage) ??
+    numberOrNull(r?.mortgage_estimate) ??
+    numberOrNull(r?.monthly_mortgage_payment) ??
+    numberOrNull(r?.last_underwriting_result?.monthly_debt_service) ??
+    numberOrNull(r?.last_underwriting_result?.mortgage_payment) ??
+    null
+  );
 }
 
 function inferCashflow(r: any) {
@@ -172,24 +131,13 @@ function inferCashflow(r: any) {
   const n = numberOrNull(direct);
   if (n != null) return n;
 
-  const rent =
-    numberOrNull(r?.market_rent_estimate) ??
-    numberOrNull(r?.rent_assumption?.market_rent_estimate) ??
-    0;
-  const rehabOpen = numberOrNull(r?.rehab_open_cost) ?? 0;
-  if (rent > 0) return rent - rehabOpen / 12;
+  const rent = inferMarketRent(r) ?? 0;
+  const mortgage = inferMortgage(r) ?? 0;
+  const taxes = numberOrNull(r?.monthly_tax_estimate) ?? 0;
+  const insurance = numberOrNull(r?.monthly_insurance_estimate) ?? 0;
 
+  if (rent > 0) return rent - mortgage - taxes - insurance;
   return null;
-}
-
-function inferAskingPrice(r: any) {
-  return (
-    numberOrNull(r?.asking_price) ??
-    numberOrNull(r?.deal?.asking_price) ??
-    numberOrNull(r?.deal?.price) ??
-    numberOrNull(r?.property?.price) ??
-    null
-  );
 }
 
 function inferDscr(r: any) {
@@ -208,39 +156,8 @@ function inferCrime(r: any) {
   );
 }
 
-function inferStage(r: any) {
-  return (
-    r?.current_stage ||
-    r?.stage ||
-    r?.stage_label ||
-    r?.workflow?.current_stage ||
-    r?.property_state?.current_stage ||
-    r?.property?.current_stage ||
-    "deal"
-  );
-}
-
-function inferStageLabel(r: any) {
-  return (
-    r?.current_stage_label ||
-    r?.workflow?.current_stage_label ||
-    r?.property_state?.current_stage_label ||
-    stageLabel(inferStage(r))
-  );
-}
-
-function inferDecision(r: any) {
-  return normalizeDecision(
-    r?.normalized_decision ||
-      r?.classification ||
-      r?.latest_decision ||
-      r?.raw_decision ||
-      r?.last_underwriting_result?.decision,
-  );
-}
-
-function inferProperty(r: any) {
-  return r?.property || r || {};
+function inferCounty(r: any) {
+  return r?.county || r?.property?.county || null;
 }
 
 function inferLocationConfidence(r: any) {
@@ -249,10 +166,6 @@ function inferLocationConfidence(r: any) {
     numberOrNull(r?.property?.geocode_confidence) ??
     null
   );
-}
-
-function inferLocationSource(r: any) {
-  return r?.geocode_source || r?.property?.geocode_source || null;
 }
 
 function inferNormalizedAddress(r: any) {
@@ -267,107 +180,244 @@ function inferLng(r: any) {
   return numberOrNull(r?.lng) ?? numberOrNull(r?.property?.lng) ?? null;
 }
 
-function inferCounty(r: any) {
-  return r?.county || r?.property?.county || null;
+function getFinancingType(price?: number | null) {
+  if (price == null || !Number.isFinite(Number(price))) return "Unknown";
+  if (Number(price) < 75000) return "Cash";
+  return "DSCR";
 }
 
-function inferCurrentPane(r: any) {
-  return (
-    r?.current_pane ||
-    r?.workflow?.current_pane ||
-    r?.property_state?.current_pane ||
-    r?.pane?.current_pane ||
-    "investor"
-  );
+function inferCompleteness(r: any): "COMPLETE" | "PARTIAL" | "MISSING" {
+  const price = inferAskingPrice(r);
+  const rent = inferMarketRent(r);
+  const cashflow = inferCashflow(r);
+  const dscr = inferDscr(r);
+  const normalizedAddress = inferNormalizedAddress(r);
+  const lat = inferLat(r);
+  const lng = inferLng(r);
+
+  const strong =
+    price != null &&
+    rent != null &&
+    cashflow != null &&
+    dscr != null &&
+    normalizedAddress &&
+    lat != null &&
+    lng != null;
+
+  if (strong) return "COMPLETE";
+
+  const partialSignals = [
+    price != null,
+    rent != null,
+    cashflow != null,
+    dscr != null,
+    Boolean(normalizedAddress),
+    lat != null && lng != null,
+  ].filter(Boolean).length;
+
+  if (partialSignals >= 3) return "PARTIAL";
+  return "MISSING";
 }
 
-function inferSuggestedPane(r: any) {
-  return (
-    r?.suggested_pane ||
-    r?.workflow?.suggested_pane ||
-    r?.property_state?.suggested_pane ||
-    r?.pane?.suggested_pane ||
-    inferCurrentPane(r)
-  );
+function completenessPillClass(v: "COMPLETE" | "PARTIAL" | "MISSING") {
+  if (v === "COMPLETE") return "oh-pill oh-pill-good";
+  if (v === "PARTIAL") return "oh-pill oh-pill-warn";
+  return "oh-pill oh-pill-bad";
 }
 
-function inferRouteReason(r: any) {
+function completenessLabel(v: "COMPLETE" | "PARTIAL" | "MISSING") {
+  if (v === "COMPLETE") return "Enriched";
+  if (v === "PARTIAL") return "Partial";
+  return "Missing data";
+}
+
+function inferPhotoUrl(r: any) {
+  const candidates = [
+    r?.photo_url,
+    r?.thumbnail_url,
+    r?.cover_photo_url,
+    r?.hero_photo_url,
+    r?.property?.photo_url,
+    r?.property?.thumbnail_url,
+    r?.property?.cover_photo_url,
+    r?.property?.hero_photo_url,
+    Array.isArray(r?.photo_urls) ? r.photo_urls[0] : null,
+    Array.isArray(r?.property?.photo_urls) ? r.property.photo_urls[0] : null,
+    Array.isArray(r?.photos) ? r.photos[0] : null,
+    Array.isArray(r?.property?.photos) ? r.property.photos[0] : null,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) return value;
+    if (value && typeof value?.url === "string" && value.url.trim()) {
+      return value.url;
+    }
+  }
+
+  return null;
+}
+
+function metricTone(value: number | null | undefined) {
+  if (value == null) return "text-app-0";
+  if (value > 0) return "text-emerald-300";
+  if (value < 0) return "text-red-300";
+  return "text-app-0";
+}
+
+function safeDate(raw: any) {
+  const d = raw ? new Date(raw) : null;
+  return d && !Number.isNaN(d.getTime()) ? d : null;
+}
+
+function inferUpdatedAt(r: any) {
   return (
-    r?.route_reason ||
-    r?.workflow?.route_reason ||
-    r?.property_state?.route_reason ||
-    r?.pane?.route_reason ||
+    r?.updated_at ||
+    r?.last_synced_at ||
+    r?.last_enriched_at ||
+    r?.created_at ||
+    r?.property?.updated_at ||
     null
   );
 }
 
-function inferLocationStatus(r: any): {
-  label: string;
-  pillClass: string;
-  detail: string;
-} {
-  const lat = inferLat(r);
-  const lng = inferLng(r);
-  const normalizedAddress = inferNormalizedAddress(r);
-  const confidence = inferLocationConfidence(r);
+function relativeTime(raw: any) {
+  const date = safeDate(raw);
+  if (!date) return "Unknown";
 
-  if (lat == null || lng == null) {
-    return {
-      label: "Location incomplete",
-      pillClass: "oh-pill oh-pill-bad",
-      detail: "Missing usable coordinates",
-    };
-  }
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  const hours = Math.floor(diffMs / 3600000);
+  const days = Math.floor(diffMs / 86400000);
 
-  if (!normalizedAddress) {
-    return {
-      label: "Location partial",
-      pillClass: "oh-pill oh-pill-warn",
-      detail: "Coordinates found but normalization missing",
-    };
-  }
-
-  if (confidence != null && confidence < 0.7) {
-    return {
-      label: "Location approximate",
-      pillClass: "oh-pill oh-pill-warn",
-      detail: "Coordinates found with lower confidence",
-    };
-  }
-
-  return {
-    label: "Location verified",
-    pillClass: "oh-pill oh-pill-good",
-    detail: "Normalized and geocoded",
-  };
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
 }
 
-type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
-type FinancingFilter = "ALL" | "CASH" | "DSCR";
-type LocationFilter = "ALL" | "VERIFIED" | "PARTIAL" | "MISSING";
-type PaneFilter =
-  | "ALL"
-  | "investor"
-  | "acquisition"
-  | "compliance"
-  | "tenants"
-  | "management";
+function inferTags(r: any): string[] {
+  const tags = new Set<string>();
+
+  const financing = getFinancingType(inferAskingPrice(r));
+  const cashflow = inferCashflow(r);
+  const dscr = inferDscr(r);
+  const completeness = inferCompleteness(r);
+  const crime = inferCrime(r);
+
+  if (
+    normalizeDecision(r?.normalized_decision || r?.classification) ===
+    "GOOD_DEAL"
+  ) {
+    tags.add("Good deal");
+  }
+  if (financing === "Cash") tags.add("Cash");
+  if (financing === "DSCR") tags.add("DSCR");
+  if (cashflow != null && cashflow > 0) tags.add("Cash flow positive");
+  if (dscr != null && dscr >= 1.2) tags.add("Strong DSCR");
+  if (completeness === "COMPLETE") tags.add("Fully enriched");
+  if (crime != null && crime <= 30) tags.add("Lower crime");
+
+  const p = inferProperty(r);
+  if (p?.bedrooms != null && Number(p.bedrooms) >= 3) tags.add("3+ beds");
+  if (inferCounty(r)) tags.add(String(inferCounty(r)));
+
+  return Array.from(tags).slice(0, 5);
+}
+
+function sortRows(rows: Row[], sort: SortKey) {
+  const copy = [...rows];
+
+  copy.sort((a, b) => {
+    if (sort === "BEST_CASHFLOW") {
+      return (inferCashflow(b) ?? -Infinity) - (inferCashflow(a) ?? -Infinity);
+    }
+    if (sort === "LOWEST_PRICE") {
+      return (
+        (inferAskingPrice(a) ?? Infinity) - (inferAskingPrice(b) ?? Infinity)
+      );
+    }
+    if (sort === "HIGHEST_PRICE") {
+      return (
+        (inferAskingPrice(b) ?? -Infinity) - (inferAskingPrice(a) ?? -Infinity)
+      );
+    }
+    if (sort === "BEST_DSCR") {
+      return (inferDscr(b) ?? -Infinity) - (inferDscr(a) ?? -Infinity);
+    }
+
+    return (
+      (safeDate(inferUpdatedAt(b))?.getTime() ?? 0) -
+      (safeDate(inferUpdatedAt(a))?.getTime() ?? 0)
+    );
+  });
+
+  return copy;
+}
+
+function Photo({ url, alt }: { url: string | null; alt: string }) {
+  const [failed, setFailed] = React.useState(false);
+
+  if (!url || failed) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-app-muted text-app-4">
+        <div className="flex flex-col items-center gap-2">
+          <ImageOff className="h-6 w-6" />
+          <span className="text-xs">No photo</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={alt}
+      onError={() => setFailed(true)}
+      className="h-full w-full object-cover"
+      loading="lazy"
+    />
+  );
+}
+
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  valueClassName,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: React.ReactNode;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+      <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <div
+        className={`mt-2 text-base font-semibold ${valueClassName || "text-app-0"}`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
 
 export default function InvestorPane() {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [selectedRunId, setSelectedRunId] = React.useState<number | null>(null);
-  const [ingestionRefreshKey, setIngestionRefreshKey] = React.useState(0);
 
   const [q, setQ] = React.useState("");
   const deferredQ = React.useDeferredValue(q);
 
   const [decision, setDecision] = React.useState<DecisionFilter>("ALL");
   const [financing, setFinancing] = React.useState<FinancingFilter>("ALL");
-  const [locationFilter, setLocationFilter] =
-    React.useState<LocationFilter>("ALL");
-  const [paneFilter, setPaneFilter] = React.useState<PaneFilter>("ALL");
+  const [completeness, setCompleteness] =
+    React.useState<CompletenessFilter>("COMPLETE");
+  const [sort, setSort] = React.useState<SortKey>("BEST_CASHFLOW");
 
   const abortRef = React.useRef<AbortController | null>(null);
 
@@ -409,564 +459,431 @@ export default function InvestorPane() {
   const filtered = React.useMemo(() => {
     const needle = deferredQ.trim().toLowerCase();
 
-    return (rows || []).filter((r) => {
-      const p = inferProperty(r);
-      const d = inferDecision(r);
-      const price = inferAskingPrice(r);
-      const financingType = getFinancingType(price);
-      const locationStatus = inferLocationStatus(r);
-      const currentPane = String(inferCurrentPane(r)).toLowerCase();
+    const output = (rows || []).filter((r) => {
+      const resolvedId = resolvePropertyId(r);
+      if (!resolvedId) return false;
 
-      const hay =
-        `${p.address || ""} ${p.city || ""} ${p.state || ""} ${p.zip || ""} ${p.county || ""} ${
-          inferNormalizedAddress(r) || ""
-        } ${inferLocationSource(r) || ""} ${inferRouteReason(r) || ""}`.toLowerCase();
+      const p = inferProperty(r);
+      const d = normalizeDecision(
+        r?.normalized_decision ||
+          r?.classification ||
+          r?.latest_decision ||
+          r?.raw_decision ||
+          r?.last_underwriting_result?.decision,
+      );
+
+      const financingType = getFinancingType(inferAskingPrice(r));
+      const completenessValue = inferCompleteness(r);
+
+      const hay = [
+        p?.address,
+        p?.city,
+        p?.state,
+        p?.zip,
+        inferCounty(r),
+        inferNormalizedAddress(r),
+        ...inferTags(r),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
 
       if (needle && !hay.includes(needle)) return false;
       if (decision !== "ALL" && d !== decision) return false;
+
       if (financing === "CASH" && financingType !== "Cash") return false;
       if (financing === "DSCR" && financingType !== "DSCR") return false;
-      if (paneFilter !== "ALL" && currentPane !== paneFilter) return false;
+      if (financing === "UNKNOWN" && financingType !== "Unknown") return false;
 
-      if (
-        locationFilter === "VERIFIED" &&
-        locationStatus.label !== "Location verified"
-      ) {
-        return false;
-      }
-      if (
-        locationFilter === "PARTIAL" &&
-        locationStatus.label !== "Location partial" &&
-        locationStatus.label !== "Location approximate"
-      ) {
-        return false;
-      }
-      if (
-        locationFilter === "MISSING" &&
-        locationStatus.label !== "Location incomplete"
-      ) {
+      if (completeness !== "ALL" && completenessValue !== completeness) {
         return false;
       }
 
       return true;
     });
-  }, [rows, deferredQ, decision, financing, locationFilter, paneFilter]);
+
+    return sortRows(output, sort);
+  }, [rows, deferredQ, decision, financing, completeness, sort]);
 
   const counts = React.useMemo(() => {
-    const c: Record<"GOOD_DEAL" | "REVIEW" | "REJECT", number> = {
-      GOOD_DEAL: 0,
-      REVIEW: 0,
-      REJECT: 0,
+    const output = {
+      total: 0,
+      complete: 0,
+      good: 0,
+      review: 0,
+      reject: 0,
     };
+
     for (const r of rows || []) {
-      const d = inferDecision(r) as "GOOD_DEAL" | "REVIEW" | "REJECT";
-      c[d] += 1;
+      if (!resolvePropertyId(r)) continue;
+      output.total += 1;
+
+      if (inferCompleteness(r) === "COMPLETE") output.complete += 1;
+
+      const d = normalizeDecision(
+        r?.normalized_decision ||
+          r?.classification ||
+          r?.latest_decision ||
+          r?.raw_decision ||
+          r?.last_underwriting_result?.decision,
+      );
+
+      if (d === "GOOD_DEAL") output.good += 1;
+      else if (d === "REVIEW") output.review += 1;
+      else output.reject += 1;
     }
-    return c;
+
+    return output;
   }, [rows]);
-
-  const stageCounts = React.useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const r of filtered) {
-      const s = normalizeStage(inferStage(r));
-      out[s] = (out[s] || 0) + 1;
-    }
-    return out;
-  }, [filtered]);
-
-  const locationCounts = React.useMemo(() => {
-    const out = { verified: 0, partial: 0, missing: 0 };
-    for (const r of rows || []) {
-      const status = inferLocationStatus(r).label;
-      if (status === "Location verified") out.verified += 1;
-      else if (status === "Location incomplete") out.missing += 1;
-      else out.partial += 1;
-    }
-    return out;
-  }, [rows]);
-
-  function refreshIngestion() {
-    setIngestionRefreshKey((v) => v + 1);
-    refresh().catch(() => undefined);
-  }
 
   return (
     <PageShell>
       <div className="space-y-6">
         <PageHero
-          eyebrow="Investor pane"
-          title="Investor inventory"
-          subtitle="This is now the main investor workspace. Use it to search, shortlist mentally, inspect pane routing, and open the single-property workflow page."
-          right={
-            <div className="absolute inset-0 flex items-center justify-center overflow-visible pointer-events-auto">
-              <div className="h-[220px] w-[220px] translate-y-[-8px] opacity-95 md:h-[250px] md:w-[250px]">
-                <Golem className="h-full w-full" />
-              </div>
-            </div>
-          }
+          eyebrow="Investment inventory"
+          title="Investor marketplace"
+          subtitle="Search fully ingested properties, compare the investment numbers fast, and open a property only when it is worth a deeper review."
           actions={
             <>
               <button onClick={refresh} className="oh-btn oh-btn-secondary">
-                Refresh properties
+                <RefreshCcw className="h-4 w-4" />
+                Refresh inventory
               </button>
+
+              <Link to="/imports" className="oh-btn oh-btn-primary">
+                <Sparkles className="h-4 w-4" />
+                Sync inventory
+              </Link>
+
               <span className="oh-pill oh-pill-good">
-                good deal {counts.GOOD_DEAL}
+                enriched {counts.complete}
               </span>
-              <span className="oh-pill oh-pill-warn">
-                review {counts.REVIEW}
-              </span>
-              <span className="oh-pill oh-pill-bad">
-                reject {counts.REJECT}
+              <span className="oh-pill oh-pill-accent">
+                total {counts.total}
               </span>
             </>
           }
         />
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.28fr_0.92fr]">
-          <div className="space-y-6">
-            <Surface
-              title="Acquisition intake"
-              subtitle="Launch a focused intake run for southeast Michigan directly inside the investor workflow."
-            >
-              <IngestionLaunchCard
-                refreshKey={ingestionRefreshKey}
-                onQueued={refreshIngestion}
-              />
-            </Surface>
+        {err ? (
+          <Surface tone="danger">
+            <div className="text-sm text-red-300 break-all">{err}</div>
+          </Surface>
+        ) : null}
 
-            <Surface
-              title="Workflow progress"
-              subtitle="A cleaner step path from possible deal to tenant-occupied cashflow."
-            >
-              <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-                {[
-                  ["deal", "Deal / Procurement"],
-                  ["rehab", "Rehab"],
-                  ["compliance", "Compliance"],
-                  ["tenant", "Tenant Placement"],
-                  ["lease", "Lease Activation"],
-                  ["cash_equity", "Cashflow / Equity"],
-                ].map(([key, label]) => (
-                  <div
-                    key={key}
-                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
-                  >
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                      step
-                    </div>
-                    <div className="mt-2 text-sm font-semibold text-app-0">
-                      {label}
-                    </div>
-                    <div className="mt-3 text-2xl font-semibold text-app-0">
-                      {stageCounts[key] || 0}
-                    </div>
-                  </div>
-                ))}
+        <Surface
+          title="Browse opportunities"
+          subtitle={`${filtered.length} visible ${
+            filtered.length === 1 ? "property" : "properties"
+          }`}
+        >
+          <div className="mb-5 rounded-3xl border border-app bg-app-panel px-4 py-4">
+            <div className="grid gap-3 xl:grid-cols-[1.3fr_0.75fr_0.75fr_0.8fr_0.8fr_auto]">
+              <label className="block">
+                <span className="oh-field-label">Search</span>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Address, city, zip, county, tag"
+                    className="oh-input pl-10"
+                  />
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="oh-field-label">Decision</span>
+                <select
+                  value={decision}
+                  onChange={(e) =>
+                    setDecision(e.target.value as DecisionFilter)
+                  }
+                  className="oh-input"
+                >
+                  <option value="ALL">All</option>
+                  <option value="GOOD_DEAL">Good deal</option>
+                  <option value="REVIEW">Review</option>
+                  <option value="REJECT">Reject</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="oh-field-label">Financing</span>
+                <select
+                  value={financing}
+                  onChange={(e) =>
+                    setFinancing(e.target.value as FinancingFilter)
+                  }
+                  className="oh-input"
+                >
+                  <option value="ALL">All</option>
+                  <option value="CASH">Cash</option>
+                  <option value="DSCR">DSCR</option>
+                  <option value="UNKNOWN">Unknown</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="oh-field-label">Data quality</span>
+                <select
+                  value={completeness}
+                  onChange={(e) =>
+                    setCompleteness(e.target.value as CompletenessFilter)
+                  }
+                  className="oh-input"
+                >
+                  <option value="ALL">All</option>
+                  <option value="COMPLETE">Enriched only</option>
+                  <option value="PARTIAL">Partial only</option>
+                  <option value="MISSING">Missing only</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="oh-field-label">Sort</span>
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortKey)}
+                  className="oh-input"
+                >
+                  <option value="BEST_CASHFLOW">Best cash flow</option>
+                  <option value="BEST_DSCR">Best DSCR</option>
+                  <option value="LOWEST_PRICE">Lowest price</option>
+                  <option value="HIGHEST_PRICE">Highest price</option>
+                  <option value="NEWEST">Recently updated</option>
+                </select>
+              </label>
+
+              <div className="flex items-end">
+                <button
+                  onClick={refresh}
+                  className="oh-btn oh-btn-secondary w-full lg:w-auto"
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Apply
+                </button>
               </div>
-            </Surface>
-
-            <Surface
-              title="Location quality"
-              subtitle="Track which properties are ready for jurisdiction, risk, and rent workflows."
-            >
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                    <LocateFixed className="h-3.5 w-3.5" />
-                    Verified
-                  </div>
-                  <div className="mt-3 text-2xl font-semibold text-app-0">
-                    {locationCounts.verified}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    Partial
-                  </div>
-                  <div className="mt-3 text-2xl font-semibold text-app-0">
-                    {locationCounts.partial}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                    <Crosshair className="h-3.5 w-3.5" />
-                    Missing
-                  </div>
-                  <div className="mt-3 text-2xl font-semibold text-app-0">
-                    {locationCounts.missing}
-                  </div>
-                </div>
-              </div>
-            </Surface>
-
-            {err ? (
-              <Surface tone="danger">
-                <div className="text-sm text-red-300">{err}</div>
-              </Surface>
-            ) : null}
-
-            <Surface
-              title="Investor property list"
-              subtitle={`${filtered.length} visible ${
-                filtered.length === 1 ? "property" : "properties"
-              }`}
-            >
-              <div className="mb-4 rounded-3xl border border-app bg-app-panel px-4 py-4">
-                <div className="grid gap-3 lg:grid-cols-[1.15fr_0.7fr_0.7fr_0.8fr_0.8fr_auto]">
-                  <label className="block">
-                    <span className="oh-field-label">Search</span>
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
-                      <input
-                        value={q}
-                        onChange={(e) => setQ(e.target.value)}
-                        placeholder="Search address, city, county, zip, normalized location"
-                        className="oh-input pl-10"
-                      />
-                    </div>
-                  </label>
-
-                  <label className="block">
-                    <span className="oh-field-label">Classification</span>
-                    <select
-                      value={decision}
-                      onChange={(e) =>
-                        setDecision(e.target.value as DecisionFilter)
-                      }
-                      className="oh-input"
-                    >
-                      <option value="ALL">All</option>
-                      <option value="GOOD_DEAL">Good deal</option>
-                      <option value="REVIEW">Review</option>
-                      <option value="REJECT">Reject</option>
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="oh-field-label">Financing</span>
-                    <select
-                      value={financing}
-                      onChange={(e) =>
-                        setFinancing(e.target.value as FinancingFilter)
-                      }
-                      className="oh-input"
-                    >
-                      <option value="ALL">All</option>
-                      <option value="CASH">Cash</option>
-                      <option value="DSCR">DSCR</option>
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="oh-field-label">Location</span>
-                    <select
-                      value={locationFilter}
-                      onChange={(e) =>
-                        setLocationFilter(e.target.value as LocationFilter)
-                      }
-                      className="oh-input"
-                    >
-                      <option value="ALL">All</option>
-                      <option value="VERIFIED">Verified</option>
-                      <option value="PARTIAL">Partial / approximate</option>
-                      <option value="MISSING">Missing</option>
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="oh-field-label">Pane</span>
-                    <select
-                      value={paneFilter}
-                      onChange={(e) =>
-                        setPaneFilter(e.target.value as PaneFilter)
-                      }
-                      className="oh-input"
-                    >
-                      <option value="ALL">All panes</option>
-                      <option value="investor">Investor</option>
-                      <option value="acquisition">Acquisition</option>
-                      <option value="compliance">Compliance</option>
-                      <option value="tenants">Tenants</option>
-                      <option value="management">Management</option>
-                    </select>
-                  </label>
-
-                  <div className="flex items-end">
-                    <button
-                      onClick={refresh}
-                      className="oh-btn oh-btn-secondary w-full lg:w-auto"
-                    >
-                      <RefreshCcw className="h-4 w-4" />
-                      Refresh
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {loading ? (
-                <div className="grid gap-3">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="oh-skeleton h-[190px] rounded-3xl"
-                    />
-                  ))}
-                </div>
-              ) : !filtered.length ? (
-                <EmptyState
-                  icon={Filter}
-                  title="No properties matched"
-                  description="Try a broader search or change the classification, financing, location, or pane filter."
-                />
-              ) : (
-                <div className="max-h-[980px] overflow-y-auto pr-1">
-                  <div className="grid gap-4">
-                    {filtered.map((r: any) => {
-                      const resolvedId = resolvePropertyId(r);
-                      if (!resolvedId) return null;
-
-                      const p = inferProperty(r);
-                      const decisionTxt = inferDecision(r);
-                      const stage = inferStage(r);
-                      const stageTxt = inferStageLabel(r);
-
-                      const askingPrice = inferAskingPrice(r);
-                      const dscr = inferDscr(r);
-                      const crime = inferCrime(r);
-                      const cashflow = inferCashflow(r);
-
-                      const financingType = getFinancingType(askingPrice);
-
-                      const locationStatus = inferLocationStatus(r);
-                      const locationSource = inferLocationSource(r);
-                      const locationConfidence = inferLocationConfidence(r);
-                      const normalizedAddress = inferNormalizedAddress(r);
-                      const lat = inferLat(r);
-                      const lng = inferLng(r);
-                      const county = inferCounty(r);
-
-                      const currentPane = inferCurrentPane(r);
-                      const suggestedPane = inferSuggestedPane(r);
-                      const routeReason = inferRouteReason(r);
-                      const paneChanged =
-                        String(currentPane).toLowerCase() !==
-                        String(suggestedPane).toLowerCase();
-
-                      return (
-                        <Link
-                          key={resolvedId}
-                          to={`/properties/${resolvedId}`}
-                          className="group block rounded-3xl border border-app bg-app-panel px-5 py-5 shadow-soft hover:-translate-y-[1px] hover:border-app-strong hover:shadow-soft-lg"
-                        >
-                          <div className="grid gap-5 xl:grid-cols-[1.35fr_0.95fr]">
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="truncate text-lg font-semibold text-app-0">
-                                    {p.address || `Property #${resolvedId}`}
-                                  </div>
-                                  <div className="mt-1 truncate text-sm text-app-3">
-                                    {p.city
-                                      ? `${p.city}, ${p.state || ""} ${p.zip || ""}`
-                                      : "—"}
-                                    {county ? ` · ${county}` : ""}
-                                    {p.bedrooms != null
-                                      ? ` · ${p.bedrooms}bd`
-                                      : ""}
-                                    {p.bathrooms != null
-                                      ? ` · ${Number(p.bathrooms).toFixed(1)}ba`
-                                      : ""}
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center gap-2 text-app-4 group-hover:text-app-1">
-                                  <ArrowUpRight className="h-4 w-4" />
-                                </div>
-                              </div>
-
-                              <div className="mt-4 flex flex-wrap gap-2">
-                                <span
-                                  className={decisionPillClass(decisionTxt)}
-                                >
-                                  {decisionTxt.replace("_", " ")}
-                                </span>
-                                <span className={stagePillClass(stage)}>
-                                  {stageTxt}
-                                </span>
-                                <span className={panePillClass(currentPane)}>
-                                  {paneLabel(currentPane)}
-                                </span>
-                                <span className="oh-pill">{financingType}</span>
-                                <span className={locationStatus.pillClass}>
-                                  {locationStatus.label}
-                                </span>
-                              </div>
-
-                              <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <ClipboardList className="h-3.5 w-3.5" />
-                                  Workflow gate
-                                </div>
-                                <div className="mt-2 text-sm text-app-2">
-                                  Current stage:{" "}
-                                  <span className="font-semibold text-app-0">
-                                    {stageTxt}
-                                  </span>
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <span className={panePillClass(currentPane)}>
-                                    current pane {paneLabel(currentPane)}
-                                  </span>
-                                  <span
-                                    className={panePillClass(suggestedPane)}
-                                  >
-                                    target pane {paneLabel(suggestedPane)}
-                                  </span>
-                                  {paneChanged ? (
-                                    <span className="oh-pill oh-pill-warn">
-                                      move to next pane
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="mt-2 text-xs text-app-4">
-                                  {routeReason ||
-                                    "Open the property to continue the next action and move it toward the correct operating pane."}
-                                </div>
-                              </div>
-
-                              <div className="mt-3 rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <MapPinned className="h-3.5 w-3.5" />
-                                  Location automation
-                                </div>
-
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <span className={locationStatus.pillClass}>
-                                    {locationStatus.label}
-                                  </span>
-
-                                  {locationSource ? (
-                                    <span className="oh-pill">
-                                      source {locationSource}
-                                    </span>
-                                  ) : null}
-
-                                  {locationConfidence != null ? (
-                                    <span className="oh-pill">
-                                      confidence {locationConfidence.toFixed(2)}
-                                    </span>
-                                  ) : null}
-                                </div>
-
-                                <div className="mt-2 text-xs text-app-4">
-                                  {locationStatus.detail}
-                                </div>
-
-                                {normalizedAddress ? (
-                                  <div className="mt-2 text-sm text-app-2">
-                                    {normalizedAddress}
-                                  </div>
-                                ) : (
-                                  <div className="mt-2 text-sm text-app-4">
-                                    Normalized address not available yet
-                                  </div>
-                                )}
-
-                                {lat != null && lng != null ? (
-                                  <div className="mt-2 text-xs text-app-4">
-                                    {lat.toFixed(4)}, {lng.toFixed(4)}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-
-                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
-                              <div className="rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <Banknote className="h-3.5 w-3.5" />
-                                  Price
-                                </div>
-                                <div className="mt-2 text-base font-semibold text-app-0">
-                                  {money(askingPrice)}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <Home className="h-3.5 w-3.5" />
-                                  DSCR
-                                </div>
-                                <div className="mt-2 text-base font-semibold text-app-0">
-                                  {dscr != null ? dscr.toFixed(2) : "—"}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <ShieldAlert className="h-3.5 w-3.5" />
-                                  Crime
-                                </div>
-                                <div className="mt-2 text-base font-semibold text-app-0">
-                                  {crime != null ? crime.toFixed(1) : "—"}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <Wallet className="h-3.5 w-3.5" />
-                                  Cash flow est.
-                                </div>
-                                <div className="mt-2 text-base font-semibold text-app-0">
-                                  {money(cashflow)}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app px-4 py-3 sm:col-span-2">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <GitBranch className="h-3.5 w-3.5" />
-                                  Pane routing
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <span className={panePillClass(currentPane)}>
-                                    now {paneLabel(currentPane)}
-                                  </span>
-                                  <span
-                                    className={panePillClass(suggestedPane)}
-                                  >
-                                    next {paneLabel(suggestedPane)}
-                                  </span>
-                                </div>
-                                <div className="mt-2 text-xs text-app-4">
-                                  {routeReason ||
-                                    "Routing detail will be shown when workflow state is available."}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </Surface>
+            </div>
           </div>
 
-          <div className="space-y-6">
-            <IngestionRunsPanel
-              refreshKey={ingestionRefreshKey}
-              onSelectRun={setSelectedRunId}
+          <div className="mb-5 grid gap-3 md:grid-cols-4">
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                Good deal
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-app-0">
+                {counts.good}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                Review
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-app-0">
+                {counts.review}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                Rejected
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-app-0">
+                {counts.reject}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                Enriched
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-app-0">
+                {counts.complete}
+              </div>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+              {Array.from({ length: 9 }).map((_, i) => (
+                <div key={i} className="oh-skeleton h-[460px] rounded-3xl" />
+              ))}
+            </div>
+          ) : !filtered.length ? (
+            <EmptyState
+              icon={Building2}
+              title="No properties matched"
+              description="Try a broader search, switch the data-quality filter, or run a sync to pull in more enriched inventory."
             />
-          </div>
-        </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+              {filtered.map((r) => {
+                const resolvedId = resolvePropertyId(r);
+                if (!resolvedId) return null;
 
-        <IngestionErrorsDrawer
-          runId={selectedRunId}
-          onClose={() => setSelectedRunId(null)}
-        />
+                const p = inferProperty(r);
+                const address = p?.address || `Property #${resolvedId}`;
+                const city = p?.city || "—";
+                const state = p?.state || "";
+                const zip = p?.zip || "";
+                const beds = p?.bedrooms;
+                const baths = p?.bathrooms;
+                const sqft = p?.sqft ?? p?.square_feet ?? null;
+
+                const price = inferAskingPrice(r);
+                const rent = inferMarketRent(r);
+                const mortgage = inferMortgage(r);
+                const cashflow = inferCashflow(r);
+                const dscr = inferDscr(r);
+                const crime = inferCrime(r);
+                const county = inferCounty(r);
+                const financingType = getFinancingType(price);
+                const decisionTxt = normalizeDecision(
+                  r?.normalized_decision ||
+                    r?.classification ||
+                    r?.latest_decision ||
+                    r?.raw_decision ||
+                    r?.last_underwriting_result?.decision,
+                );
+                const completenessValue = inferCompleteness(r);
+                const photoUrl = inferPhotoUrl(r);
+                const locationConfidence = inferLocationConfidence(r);
+                const tags = inferTags(r);
+
+                return (
+                  <Link
+                    key={resolvedId}
+                    to={`/properties/${resolvedId}`}
+                    className="group block overflow-hidden rounded-3xl border border-app bg-app-panel shadow-soft transition hover:-translate-y-[1px] hover:border-app-strong hover:shadow-soft-lg"
+                  >
+                    <div className="relative h-52 overflow-hidden border-b border-app bg-app-muted">
+                      <Photo url={photoUrl} alt={address} />
+                      <div className="absolute left-3 top-3 flex flex-wrap gap-2">
+                        <span className={decisionPillClass(decisionTxt)}>
+                          {decisionTxt.replace("_", " ")}
+                        </span>
+                        <span
+                          className={completenessPillClass(completenessValue)}
+                        >
+                          {completenessLabel(completenessValue)}
+                        </span>
+                      </div>
+                      <div className="absolute right-3 top-3 rounded-full border border-black/10 bg-black/40 p-2 text-white backdrop-blur-sm group-hover:bg-black/55">
+                        <ArrowUpRight className="h-4 w-4" />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 px-5 py-5">
+                      <div>
+                        <div className="line-clamp-1 text-lg font-semibold text-app-0">
+                          {address}
+                        </div>
+                        <div className="mt-1 flex items-center gap-1 text-sm text-app-3">
+                          <MapPin className="h-3.5 w-3.5" />
+                          <span className="truncate">
+                            {city}
+                            {state ? `, ${state}` : ""} {zip}
+                            {county ? ` · ${county}` : ""}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <span className="oh-pill">{financingType}</span>
+                        {tags.map((tag) => (
+                          <span key={tag} className="oh-pill">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <MetricCard
+                          icon={Banknote}
+                          label="Price"
+                          value={money(price)}
+                        />
+                        <MetricCard
+                          icon={Wallet}
+                          label="Cash flow"
+                          value={money(cashflow)}
+                          valueClassName={metricTone(cashflow)}
+                        />
+                        <MetricCard
+                          icon={Landmark}
+                          label="Mortgage"
+                          value={money(mortgage)}
+                        />
+                        <MetricCard
+                          icon={Sparkles}
+                          label="DSCR"
+                          value={dscr != null ? dscr.toFixed(2) : "—"}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <MetricCard
+                          icon={Building2}
+                          label="Est. rent"
+                          value={money(rent)}
+                        />
+                        <MetricCard
+                          icon={ShieldAlert}
+                          label="Crime"
+                          value={crime != null ? crime.toFixed(1) : "—"}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3 rounded-2xl border border-app bg-app-muted px-4 py-3">
+                        <div>
+                          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                            <BedDouble className="h-3.5 w-3.5" />
+                            Beds
+                          </div>
+                          <div className="mt-2 text-sm font-semibold text-app-0">
+                            {beds ?? "—"}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                            <Bath className="h-3.5 w-3.5" />
+                            Baths
+                          </div>
+                          <div className="mt-2 text-sm font-semibold text-app-0">
+                            {baths != null ? Number(baths).toFixed(1) : "—"}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                            <Ruler className="h-3.5 w-3.5" />
+                            Sqft
+                          </div>
+                          <div className="mt-2 text-sm font-semibold text-app-0">
+                            {sqft != null ? Number(sqft).toLocaleString() : "—"}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between border-t border-app pt-3 text-xs text-app-4">
+                        <div>updated {relativeTime(inferUpdatedAt(r))}</div>
+                        <div>
+                          confidence{" "}
+                          {locationConfidence != null
+                            ? locationConfidence.toFixed(2)
+                            : "—"}
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </Surface>
       </div>
     </PageShell>
   );

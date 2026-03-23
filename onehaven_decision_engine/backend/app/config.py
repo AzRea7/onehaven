@@ -79,6 +79,46 @@ class Settings(BaseSettings):
     location_refresh_max_attempts: int = 3
     location_refresh_schedule_minutes: int = 12 * 60
 
+        # ---- Ingestion cost controls ----
+    ingestion_enable_inline_rent_refresh: bool = False
+    ingestion_publish_without_rent: bool = True
+    ingestion_queue_rent_refresh_after_sync: bool = True
+
+    # Small burst after each sync run for the best candidates only
+    ingestion_post_sync_rent_budget: int = 5
+
+    # Daily capped rent refresh budget
+    ingestion_daily_rent_refresh_limit: int = 25
+
+    # Only rent-refresh properties missing rent or stale
+    ingestion_rent_refresh_stale_after_hours: int = 24 * 7
+
+    # Optional quality gates before a property is shown in investor inventory
+    investor_require_address: bool = True
+    investor_require_price: bool = True
+    investor_require_geo: bool = False
+
+        # ---- Supported market sync / scalable regional coverage ----
+    # Phase 1: Southeast Michigan only
+    # Phase 2: Michigan statewide
+    # Phase 3: multi-state hot/warm/cold coverage
+    market_sync_daily_market_limit: int = 6
+    market_sync_default_limit_per_market: int = 250
+
+    # Use "all" for now. Later:
+    # - hot: sync only most important markets frequently
+    # - warm: less frequent
+    # - cold: rare backfill / on-demand expansion
+    market_sync_daily_tier_filter: str = "all"
+
+    # Future scalability toggle:
+    # when you add a DB-backed market catalog, this can switch lookup mode
+    market_catalog_backend: str = "static"
+
+    # Future cost controls:
+    # add per-market API budgets later instead of one global setting
+    market_sync_enable_statewide_expansion: bool = False
+
     # ---- Google Geocoding ----
     google_geocode_api_key: str | None = None
     google_geocode_base_url: str = "https://maps.googleapis.com/maps/api/geocode/json"
