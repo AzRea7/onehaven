@@ -1,7 +1,8 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import clsx from "clsx";
-import { Moon, Sun, Sparkles } from "lucide-react";
+import { Moon, Sparkles, Sun, User2 } from "lucide-react";
+import PaneSwitcher from "./PaneSwitcher";
 
 const NavLink = ({ to, label }: { to: string; label: string }) => {
   const loc = useLocation();
@@ -20,6 +21,57 @@ const NavLink = ({ to, label }: { to: string; label: string }) => {
   );
 };
 
+function inferHeaderContext(pathname: string) {
+  if (pathname.startsWith("/panes/compliance")) {
+    return {
+      label: "Compliance / S8",
+      activePane: "compliance",
+    };
+  }
+  if (pathname.startsWith("/panes/tenants")) {
+    return {
+      label: "Tenant placement",
+      activePane: "tenants",
+    };
+  }
+  if (pathname.startsWith("/panes/management")) {
+    return {
+      label: "Management",
+      activePane: "management",
+    };
+  }
+  if (pathname.startsWith("/properties/")) {
+    return {
+      label: "Property view",
+      activePane: null,
+    };
+  }
+  if (pathname.startsWith("/properties")) {
+    return {
+      label: "Investor",
+      activePane: "investor",
+    };
+  }
+  if (pathname.startsWith("/dashboard")) {
+    return {
+      label: "Portfolio",
+      activePane: null,
+    };
+  }
+  return {
+    label: "OneHaven",
+    activePane: null,
+  };
+}
+
+function inferActivePane(pathname: string) {
+  if (pathname.startsWith("/panes/compliance")) return "compliance";
+  if (pathname.startsWith("/panes/tenants")) return "tenants";
+  if (pathname.startsWith("/panes/management")) return "management";
+  if (pathname.startsWith("/properties")) return "investor";
+  return null;
+}
+
 export default function AppHeader({
   right,
   children,
@@ -31,64 +83,25 @@ export default function AppHeader({
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
 }) {
+  const location = useLocation();
+  const context = inferHeaderContext(location.pathname);
+  const activePane = inferActivePane(location.pathname) ?? context.activePane;
+
   return (
-    <header className="oh-app-header">
-      <div className="mx-auto max-w-[1320px] px-4 md:px-6 h-16 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <Link
-            to="/"
-            className="flex items-center gap-3 cursor-pointer select-none min-w-0"
-          >
-            <div className="oh-brand-mark">
-              <Sparkles className="h-4 w-4" />
-            </div>
-
-            <div className="leading-tight min-w-0">
-              <div className="text-app-0 font-semibold text-sm truncate">
-                OneHaven
-              </div>
-              <div className="text-app-4 text-[11px] -mt-[2px] truncate">
-                Investment OS
-              </div>
-            </div>
-          </Link>
-
-          <nav className="hidden lg:flex items-center gap-2 ml-3">
-            <NavLink to="/dashboard" label="Dashboard" />
-            <NavLink to="/properties" label="Properties" />
-            <NavLink to="/agents" label="Agents" />
-            <NavLink to="/jurisdictions" label="Jurisdictions" />
-            <NavLink to="/constitution" label="Constitution" />
-          </nav>
+    <header className="oh-app-header w-full border-b border-app bg-[color:var(--bg-elevated)]/95 backdrop-blur-xl">
+      <div className="w-full px-4 md:px-6 xl:px-8 py-4">
+        <div className="oh-app-header-row">
+          <div className="oh-header-block oh-header-nav">
+            <PaneSwitcher activePane={activePane} />
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          {onToggleTheme ? (
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              className="oh-icon-btn cursor-pointer"
-              aria-label="Toggle theme"
-              title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-            >
-              {theme === "dark" ? (
-                <Sun className="h-4 w-4" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
-            </button>
-          ) : null}
-
-          {right}
-          {children}
-
-          <Link
-            to="/deal-intake"
-            className="oh-btn oh-btn-primary cursor-pointer"
-          >
-            Deal Intake
-          </Link>
-        </div>
+        {(right || children) && (
+          <div className="mt-4 flex items-center justify-end gap-2">
+            {right}
+            {children}
+          </div>
+        )}
       </div>
     </header>
   );

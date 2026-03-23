@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import AppShell from "./components/AppShell";
 
 import Dashboard from "./pages/Dashboard";
-import Property from "./pages/Property";
 import PropertyView from "./pages/PropertyView";
 
 import Agents from "./pages/Agents";
@@ -15,6 +14,10 @@ import ImportsPage from "./pages/ImportsPage";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import PolicyReview from "./pages/PolicyReview";
+import InvestorPane from "./pages/InvestorPane";
+import CompliancePane from "./pages/CompliancePane";
+import TenantsPane from "./pages/TenantsPane";
+import ManagementPane from "./pages/ManagementPane";
 
 import { AuthGate } from "./lib/auth";
 
@@ -32,19 +35,19 @@ function LegacyPipelineRedirect() {
 }
 
 function LegacyComplianceRedirect() {
-  return <Navigate to="/dashboard" replace />;
+  return <Navigate to="/panes/compliance" replace />;
 }
 
 function LegacyRehabRedirect() {
-  return <Navigate to="/dashboard" replace />;
+  return <Navigate to="/panes/compliance" replace />;
 }
 
 function LegacyCashflowRedirect() {
-  return <Navigate to="/dashboard" replace />;
+  return <Navigate to="/panes/management" replace />;
 }
 
 function LegacyEquityRedirect() {
-  return <Navigate to="/dashboard" replace />;
+  return <Navigate to="/panes/management" replace />;
 }
 
 export default function App() {
@@ -69,7 +72,43 @@ export default function App() {
           path="/properties"
           element={
             <Protected>
-              <Property />
+              <InvestorPane />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/panes/investor"
+          element={
+            <Protected>
+              <InvestorPane />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/panes/compliance"
+          element={
+            <Protected>
+              <CompliancePane />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/panes/tenants"
+          element={
+            <Protected>
+              <TenantsPane />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/panes/management"
+          element={
+            <Protected>
+              <ManagementPane />
             </Protected>
           }
         />

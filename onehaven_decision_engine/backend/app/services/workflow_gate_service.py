@@ -11,7 +11,8 @@ from ..domain.workflow.stages import (
     stage_meta,
     stage_rank,
 )
-from ..services.property_state_machine import get_state_payload, get_transition_payload
+from .pane_routing_service import build_pane_context
+from .property_state_machine import get_state_payload, get_transition_payload
 
 
 def build_workflow_summary(
@@ -19,6 +20,7 @@ def build_workflow_summary(
     *,
     org_id: int,
     property_id: int,
+    principal: Any = None,
     recompute: bool = True,
 ) -> dict[str, Any]:
     state = get_state_payload(
@@ -42,12 +44,17 @@ def build_workflow_summary(
     constraints = state.get("constraints") or {}
     outstanding_tasks = state.get("outstanding_tasks") or {}
 
+    pane = build_pane_context(
+        current_stage=cur,
+        constraints=constraints,
+        principal=principal,
+        org_id=org_id,
+    )
+
     jurisdiction = constraints.get("jurisdiction") or {}
-    jurisdiction_tasks = outstanding_tasks.get("jurisdiction_tasks") or []
     readiness = constraints.get("readiness") or {}
     completion = constraints.get("completion") or {}
     inspection = constraints.get("inspection") or {}
-    inspection_failure_actions = outstanding_tasks.get("inspection_failure_actions") or []
 
     rows: list[dict[str, Any]] = []
     completed_lookup = {
@@ -64,47 +71,35 @@ def build_workflow_summary(
         is_next = nxt == stage
         is_locked = rank > cur_rank and nxt != stage
 
-        row = {
-            "key": stage,
-            "rank": rank,
-            "label": meta["label"],
-            "description": meta["description"],
-            "primary_action": meta["primary_action"],
-            "status": (
-                "completed"
-                if is_completed and rank < cur_rank
-                else "current"
-                if is_current
-                else "next"
-                if is_next
-                else "locked"
-            ),
-            "is_completed": is_completed,
-            "is_current": is_current,
-            "is_next": is_next,
-            "is_locked": is_locked,
-        }
+        rows.append(
+            {
+                "key": stage,
+                "rank": rank,
+                "label": meta["label"],
+                "description": meta["description"],
+                "primary_action": meta["primary_action"],
+                "status": (
+                    "completed"
+                    if is_completed and rank < cur_rank
+                    else "current"
+                    if is_current
+                    else "next"
+                    if is_next
+                    else "locked"
+                ),
+                "is_completed": is_completed,
+                "is_current": is_current,
+                "is_next": is_next,
+                "is_locked": is_locked,
+            }
+        )
 
-        if stage == "compliance":
-            row["jurisdiction_gate_ok"] = bool(jurisdiction.get("gate_ok", True))
-            row["jurisdiction_completeness_status"] = jurisdiction.get("completeness_status")
-            row["jurisdiction_is_stale"] = jurisdiction.get("is_stale")
-            row["jurisdiction_missing_categories"] = jurisdiction.get("missing_categories") or []
-            row["inspection_readiness_status"] = readiness.get("status")
-            row["inspection_result_status"] = readiness.get("result_status")
-            row["inspection_posture"] = completion.get("posture")
-            row["latest_inspection_passed"] = completion.get("latest_inspection_passed")
-            row["compliance_failed_count"] = completion.get("failed_count")
-            row["compliance_blocked_count"] = completion.get("blocked_count")
-            row["open_failed_items"] = inspection.get("open_failed_items")
-
-        rows.append(row)
-
-    primary_action: dict[str, Any]
     if next_actions:
         primary_action = {
             "stage": cur,
             "stage_label": stage_label(cur),
+            "pane": pane["current_pane"],
+            "pane_label": pane["current_pane_label"],
             "title": next_actions[0],
             "kind": "next_action",
         }
@@ -113,6 +108,8 @@ def build_workflow_summary(
         primary_action = {
             "stage": allowed,
             "stage_label": stage_label(allowed),
+            "pane": pane["current_pane"],
+            "pane_label": pane["current_pane_label"],
             "title": f"Advance to {stage_label(allowed)}",
             "kind": "advance",
         }
@@ -120,6 +117,8 @@ def build_workflow_summary(
         primary_action = {
             "stage": cur,
             "stage_label": stage_label(cur),
+            "pane": pane["current_pane"],
+            "pane_label": pane["current_pane_label"],
             "title": "Workflow blocked",
             "kind": "blocked",
         }
@@ -131,6 +130,16 @@ def build_workflow_summary(
         "current_stage_rank": cur_rank,
         "next_stage": nxt,
         "next_stage_label": stage_label(nxt) if nxt else None,
+        "current_pane": pane["current_pane"],
+        "current_pane_label": pane["current_pane_label"],
+        "suggested_pane": pane["suggested_pane"],
+        "suggested_pane_label": pane["suggested_pane_label"],
+        "visible_pane": pane["visible_pane"],
+        "visible_pane_label": pane["visible_pane_label"],
+        "is_current_pane_visible": pane["is_current_pane_visible"],
+        "allowed_panes": pane["allowed_panes"],
+        "allowed_pane_labels": pane["allowed_pane_labels"],
+        "route_reason": pane["route_reason"],
         "normalized_decision": state.get("normalized_decision"),
         "gate": gate,
         "gate_status": state.get("gate_status"),
@@ -148,7 +157,6 @@ def build_workflow_summary(
             "missing_categories": jurisdiction.get("missing_categories") or [],
             "is_stale": jurisdiction.get("is_stale"),
             "stale_reason": jurisdiction.get("stale_reason"),
-            "tasks": jurisdiction_tasks,
         },
         "compliance": {
             "inspection_readiness_status": readiness.get("status"),
@@ -166,10 +174,10 @@ def build_workflow_summary(
             "blocked_count": completion.get("blocked_count"),
             "latest_readiness_score": completion.get("latest_readiness_score"),
             "open_failed_items": inspection.get("open_failed_items"),
-            "failure_actions": inspection_failure_actions,
         },
         "stage_completion_summary": stage_completion_summary,
         "stages": rows,
         "catalog": stage_catalog(),
+        "pane_catalog": pane["catalog"],
         "updated_at": state.get("updated_at"),
     }

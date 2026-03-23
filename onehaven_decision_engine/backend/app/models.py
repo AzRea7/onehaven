@@ -1229,6 +1229,38 @@ class ExternalBudgetLedger(Base):
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
+class OrgLock(Base):
+    __tablename__ = "org_locks"
+    __table_args__ = (
+        UniqueConstraint("org_id", "lock_key", name="uq_org_locks_org_lock_key"),
+        Index("ix_org_locks_org_lock_key", "org_id", "lock_key"),
+        Index("ix_org_locks_expires_at", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    org_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    lock_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    owner_token: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    acquired_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
 
 class AgentRunDeadletter(Base):
     __tablename__ = "agent_run_deadletters"

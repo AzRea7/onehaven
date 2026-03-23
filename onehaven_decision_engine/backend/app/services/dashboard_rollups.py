@@ -69,6 +69,9 @@ def compute_rollups(
     q: Optional[str] = None,
     stage: Optional[str] = None,
     decision: Optional[str] = None,
+    pane: Optional[str] = None,
+    status: Optional[str] = None,
+    assigned_user_id: Optional[int] = None,
     only_red_zone: bool = False,
     exclude_red_zone: bool = False,
     min_crime_score: Optional[float] = None,
@@ -90,16 +93,31 @@ def compute_rollups(
         stmt = stmt.where(
             func.lower(
                 func.concat(
-                    Property.address,
+                    func.coalesce(Property.address, ""),
                     " ",
-                    Property.city,
+                    func.coalesce(Property.city, ""),
                     " ",
-                    Property.state,
+                    func.coalesce(Property.state, ""),
                     " ",
-                    Property.zip,
+                    func.coalesce(Property.zip, ""),
                 )
             ).like(like)
         )
+
+    if assigned_user_id is not None:
+        candidate_columns = [
+            "assigned_user_id",
+            "owner_user_id",
+            "manager_user_id",
+            "agent_user_id",
+            "acquisition_user_id",
+        ]
+        clauses = []
+        for col_name in candidate_columns:
+            if hasattr(Property, col_name):
+                clauses.append(getattr(Property, col_name) == assigned_user_id)
+        if clauses:
+            stmt = stmt.where(func.coalesce(*clauses))
 
     if only_red_zone:
         stmt = stmt.where(Property.is_red_zone.is_(True))
@@ -127,6 +145,7 @@ def compute_rollups(
     decision_counts: dict[str, int] = defaultdict(int)
     stage_counts: dict[str, int] = defaultdict(int)
     county_counts: dict[str, int] = defaultdict(int)
+    pane_counts: dict[str, int] = defaultdict(int)
 
     total_asking = 0.0
     total_cashflow = 0.0
@@ -138,15 +157,23 @@ def compute_rollups(
 
     wanted_decision = normalize_decision_bucket(decision) if decision else None
     wanted_stage = (stage or "").strip().lower() or None
+    wanted_pane = (pane or "").strip().lower() or None
+    wanted_status = (status or "").strip().lower() or None
 
     for prop in props:
         state_payload = get_state_payload(db, org_id=org_id, property_id=int(prop.id), recompute=True)
-        current_stage = str(state_payload.get("current_stage") or "deal")
+        current_stage = str(state_payload.get("current_stage") or "discovered")
+        current_pane = str(state_payload.get("current_pane") or "investor")
         normalized_decision = str(state_payload.get("normalized_decision") or "REVIEW")
+        gate_status = str(state_payload.get("gate_status") or "OPEN").lower()
 
         if wanted_decision and normalized_decision != wanted_decision:
             continue
         if wanted_stage and current_stage != wanted_stage:
+            continue
+        if wanted_pane and current_pane != wanted_pane:
+            continue
+        if wanted_status and wanted_status not in {current_stage, normalized_decision.lower(), gate_status}:
             continue
 
         deal_row = _latest_deal(db, org_id=org_id, property_id=int(prop.id))
@@ -158,6 +185,7 @@ def compute_rollups(
 
         decision_counts[normalized_decision] += 1
         stage_counts[current_stage] += 1
+        pane_counts[current_pane] += 1
         county_counts[str(getattr(prop, "county", None) or "unknown")] += 1
 
         if asking_price is not None:
@@ -179,13 +207,17 @@ def compute_rollups(
                 "asking_price": asking_price,
                 "normalized_decision": normalized_decision,
                 "current_stage": current_stage,
+                "current_pane": current_pane,
+                "current_pane_label": state_payload.get("current_pane_label"),
                 "gate_status": state_payload.get("gate_status"),
                 "projected_monthly_cashflow": projected_cashflow,
                 "dscr": dscr_value,
                 "crime_score": getattr(prop, "crime_score", None),
                 "crime_label": state_payload.get("constraints", {}).get("crime_label"),
+                "route_reason": state_payload.get("route_reason"),
                 "stage_completion_summary": state_payload.get("stage_completion_summary"),
                 "next_actions": state_payload.get("next_actions") or [],
+                "blockers": (state_payload.get("outstanding_tasks") or {}).get("blockers") or [],
             }
         )
 
@@ -202,6 +234,9 @@ def compute_rollups(
             "q": q,
             "stage": wanted_stage,
             "decision": wanted_decision,
+            "pane": wanted_pane,
+            "status": wanted_status,
+            "assigned_user_id": assigned_user_id,
             "only_red_zone": only_red_zone,
             "exclude_red_zone": exclude_red_zone,
             "min_crime_score": min_crime_score,
@@ -245,9 +280,11 @@ def compute_rollups(
         "buckets": {
             "decisions": {k: int(v) for k, v in decision_counts.items()},
             "stages": {k: int(v) for k, v in stage_counts.items()},
+            "panes": {k: int(v) for k, v in pane_counts.items()},
             "counties": {k: int(v) for k, v in county_counts.items()},
         },
         "stage_counts": {k: int(v) for k, v in stage_counts.items()},
+        "pane_counts": {k: int(v) for k, v in pane_counts.items()},
         "charts": {
             "decision_mix": [
                 {"key": key, "label": key.title(), "value": int(value)}
@@ -256,6 +293,10 @@ def compute_rollups(
             "stage_mix": [
                 {"key": key, "label": key.title(), "value": int(value)}
                 for key, value in sorted(stage_counts.items(), key=lambda item: item[0])
+            ],
+            "pane_mix": [
+                {"key": key, "label": key.title(), "value": int(value)}
+                for key, value in sorted(pane_counts.items(), key=lambda item: item[0])
             ],
             "county_mix": [
                 {"key": key, "label": key, "value": int(value)}
@@ -271,6 +312,10 @@ def compute_rollups(
                 {"key": key, "label": key.title(), "count": int(value)}
                 for key, value in sorted(stage_counts.items(), key=lambda item: item[0])
             ],
+            "pane_mix": [
+                {"key": key, "label": key.title(), "count": int(value)}
+                for key, value in sorted(pane_counts.items(), key=lambda item: item[0])
+            ],
             "county_mix": [
                 {"key": key, "label": key, "count": int(value)}
                 for key, value in sorted(county_counts.items(), key=lambda item: (-item[1], item[0]))[:10]
@@ -282,7 +327,7 @@ def compute_rollups(
             "cashflow": sorted(rows, key=lambda r: _safe_float(r.get("projected_monthly_cashflow")), reverse=True)[:10],
             "equity": [],
             "rehab_backlog": [],
-            "compliance_attention": [r for r in rows if r["current_stage"] == "compliance"][:10],
+            "compliance_attention": [r for r in rows if r["current_pane"] == "compliance"][:10],
         },
         "rows": rows[: int(limit)],
         "properties": rows[: int(limit)],

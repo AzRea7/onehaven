@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
+from ..domain.workflow.panes import pane_catalog
 from ..domain.workflow.stages import clamp_stage, stage_catalog, stage_gte
 from ..models import Property, WorkflowEvent
 from ..schemas import PropertyStateUpsert, WorkflowEventCreate, WorkflowEventOut
@@ -34,6 +35,7 @@ def _must_get_property(db: Session, *, org_id: int, property_id: int) -> Propert
 def workflow_catalog():
     return {
         "stages": stage_catalog(),
+        "panes": pane_catalog(),
         "decision_states": ["GOOD", "REVIEW", "REJECT"],
     }
 
@@ -111,10 +113,12 @@ def upsert_state(
                         db,
                         org_id=p.org_id,
                         property_id=payload.property_id,
+                        principal=p,
                         recompute=False,
                     ),
                 },
             )
+
         row.current_stage = requested
 
     row.constraints_json = json.dumps(existing_constraints)
@@ -129,7 +133,13 @@ def upsert_state(
 
     return {
         "state": get_state_payload(db, org_id=p.org_id, property_id=payload.property_id, recompute=True),
-        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=payload.property_id, recompute=False),
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=payload.property_id,
+            principal=p,
+            recompute=False,
+        ),
     }
 
 
@@ -143,7 +153,13 @@ def get_state(
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
     return {
         "state": get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=recompute),
-        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            principal=p,
+            recompute=False,
+        ),
     }
 
 
@@ -156,7 +172,13 @@ def get_transition(
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
     return {
         "transition": get_transition_payload(db, org_id=p.org_id, property_id=property_id),
-        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            principal=p,
+            recompute=False,
+        ),
     }
 
 
@@ -182,7 +204,13 @@ def advance(
                 "allowed_next_stage": gate.get("allowed_next_stage"),
                 "constraints": tx.get("constraints") or {},
                 "next_actions": tx.get("next_actions") or [],
-                "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
+                "workflow": build_workflow_summary(
+                    db,
+                    org_id=p.org_id,
+                    property_id=property_id,
+                    principal=p,
+                    recompute=False,
+                ),
             },
         )
 
@@ -195,5 +223,11 @@ def advance(
         "advanced_to": gate.get("allowed_next_stage"),
         "advanced_to_label": gate.get("allowed_next_stage_label"),
         "state": get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=True),
-        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False),
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            principal=p,
+            recompute=False,
+        ),
     }

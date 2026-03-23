@@ -1,22 +1,17 @@
 import React from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  BarChart3,
   Building2,
-  FileCheck2,
   Gavel,
-  GitBranch,
-  Hammer,
-  Landmark,
   LayoutDashboard,
   LogOut,
   MapPinned,
-  ShieldCheck,
   Sparkles,
   User2,
   Users2,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
+import AppHeader from "./AppHeader";
 
 type ThemeMode = "light" | "dark";
 
@@ -99,7 +94,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="oh-sidebar-inner flex h-screen min-h-0 flex-col overflow-hidden px-4 py-4">
               <NavLink
                 to="/dashboard"
-                className="oh-sidebar-brand shrink-0 rounded-2xl border border-app bg-app-panel px-3 py-3 shadow-soft"
+                className="oh-sidebar-brand shrink-0 rounded-[24px] border border-app bg-app-panel px-4 py-4 shadow-soft"
               >
                 <div className="oh-brand-mark">
                   <Sparkles className="h-4 w-4" />
@@ -125,7 +120,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       <SideLink
                         to="/properties"
                         icon={<Building2 className="h-4 w-4" />}
-                        label="Properties"
+                        label="Investor"
                       />
                       <SideLink
                         to="/agents"
@@ -144,14 +139,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       />
                     </div>
                   </div>
-                </div>
-              </div>
 
-              <div className="mt-4 shrink-0 border-t border-app pt-4">
-                <div className="space-y-3">
-                  <div className="rounded-2xl border border-app bg-app-panel px-4 py-4 shadow-soft">
+                  <div className="rounded-[24px] border border-app bg-app-panel px-4 py-4 shadow-soft">
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-app bg-app-muted text-app-2">
+                      <div className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-app bg-app-muted text-app-2">
                         <User2 className="h-4 w-4" />
                       </div>
 
@@ -169,7 +160,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     </div>
 
                     <div className="mt-4 grid gap-2 text-xs">
-                      <div className="flex items-center justify-between gap-3 rounded-xl border border-app bg-app-muted px-3 py-2">
+                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-app bg-app-muted px-3 py-2">
                         <span className="text-app-4">Role</span>
                         <span className="font-medium uppercase tracking-[0.12em] text-app-1">
                           {displayRole}
@@ -178,54 +169,45 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-app bg-app-panel px-4 py-4 shadow-soft">
+                  <div className="rounded-[24px] border border-app bg-app-panel px-4 py-4 shadow-soft">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                      Appearance
+                      Navigation model
                     </div>
-                    <div className="mt-3 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setTheme("dark")}
-                        className={[
-                          "oh-btn cursor-pointer",
-                          theme === "dark"
-                            ? "oh-btn-primary"
-                            : "oh-btn-secondary",
-                        ].join(" ")}
-                      >
-                        Dark
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setTheme("light")}
-                        className={[
-                          "oh-btn cursor-pointer",
-                          theme === "light"
-                            ? "oh-btn-primary"
-                            : "oh-btn-secondary",
-                        ].join(" ")}
-                      >
-                        Light
-                      </button>
+                    <div className="mt-2 text-sm font-semibold text-app-0">
+                      Workflow-first navigation
+                    </div>
+                    <div className="mt-2 text-xs leading-relaxed text-app-4">
+                      The header now carries the pane progression bar so moving
+                      between modes feels like advancing the property through
+                      one operating lifecycle instead of switching between
+                      separate pages.
                     </div>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => logout()}
-                    disabled={loading}
-                    className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-red-700 bg-red-600 px-4 text-sm font-semibold text-white shadow-lg shadow-red-900/25 transition hover:bg-red-700 hover:border-red-800 active:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    {loading ? "Signing out…" : "Logout"}
-                  </button>
                 </div>
+              </div>
+
+              <div className="mt-4 shrink-0 border-t border-app pt-4">
+                <button
+                  type="button"
+                  onClick={() => logout()}
+                  disabled={loading}
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-red-700 bg-red-600 px-4 text-sm font-semibold text-white shadow-lg shadow-red-900/25 transition hover:bg-red-700 hover:border-red-800 active:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <LogOut className="h-4 w-4" />
+                  {loading ? "Signing out…" : "Logout"}
+                </button>
               </div>
             </div>
           </aside>
 
           <div className="oh-shell-main min-w-0">
-            <main className="oh-main">{children}</main>
+            <AppHeader
+              theme={theme}
+              onToggleTheme={() =>
+                setTheme((prev) => (prev === "dark" ? "light" : "dark"))
+              }
+            />
+            <main className="oh-main w-full">{children}</main>
           </div>
         </div>
       )}

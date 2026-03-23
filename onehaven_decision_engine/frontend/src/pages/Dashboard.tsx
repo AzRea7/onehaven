@@ -1,21 +1,14 @@
 import React from "react";
 import {
-  BriefcaseBusiness,
-  ClipboardCheck,
-  Hammer,
-  Landmark,
-  PieChart,
-  ShieldCheck,
-  Users,
-  Wallet,
-  Home,
-  RefreshCcw,
   AlertTriangle,
-  LocateFixed,
-  Activity,
   BadgeDollarSign,
+  ClipboardCheck,
+  Landmark,
+  LocateFixed,
+  RefreshCcw,
+  Wallet,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
 import Surface from "../components/Surface";
@@ -23,54 +16,51 @@ import KpiCard from "../components/KpiCard";
 import EmptyState from "../components/EmptyState";
 import { api } from "../lib/api";
 import Golem from "../components/Golem";
+import PaneSwitcher from "../components/PaneSwitcher";
+import PaneSummaryCards from "../components/PaneSummaryCards";
 
-type RollupPayload = {
+type PaneOverviewPayload = {
   ok?: boolean;
-  kpis?: {
-    total_homes?: number;
-    good_deals?: number;
-    review_deals?: number;
-    rejected_deals?: number;
-    active_leases?: number;
-    cashflow_positive_homes?: number;
-    homes_with_valuation?: number;
-    red_zone_count?: number;
-    total_estimated_value?: number;
-    total_loan_balance?: number;
-    total_estimated_equity?: number;
-    rehab_open_cost_estimate?: number;
-    net_cash_window?: number;
-    avg_crime_score?: number | null;
-    avg_dscr?: number | null;
-    avg_cashflow_estimate?: number | null;
-  };
-  counts?: {
-    deals?: number;
-    rehab_tasks_total?: number;
-    rehab_tasks_open?: number;
-    transactions_window?: number;
-    valuations?: number;
-    properties?: number;
-  };
-  series?: {
-    cash_by_month?: Array<{
-      label: string;
-      income?: number;
-      expense?: number;
-      capex?: number;
-      net?: number;
-    }>;
-    decision_mix?: Array<{ key: string; label: string; count: number }>;
-    workflow_mix?: Array<{ key: string; label: string; count: number }>;
-    county_mix?: Array<{ key: string; label: string; count: number }>;
-  };
-  leaderboards?: {
-    good_deals?: any[];
-    cashflow?: any[];
-    equity?: any[];
-    rehab_backlog?: any[];
-    compliance_attention?: any[];
-  };
+  panes?: Array<{
+    pane: string;
+    pane_label?: string;
+    count?: number;
+    kpis?: Record<string, any>;
+    top_blockers?: Array<{ blocker?: string; count?: number }>;
+    top_actions?: Array<{ action?: string }>;
+  }>;
+  allowed_panes?: string[];
+};
+
+type PaneDashboardPayload = {
+  ok?: boolean;
+  pane?: string;
+  pane_label?: string;
+  allowed_panes?: string[];
+  kpis?: Record<string, any>;
+  blockers?: Array<{ blocker?: string; count?: number }>;
+  recent_actions?: Array<{
+    property_id?: number;
+    address?: string;
+    city?: string;
+    stage?: string;
+    action?: string;
+  }>;
+  recommended_next_actions?: Array<{
+    property_id?: number;
+    address?: string;
+    city?: string;
+    stage?: string;
+    action?: string;
+  }>;
+  stale_items?: Array<{
+    property_id?: number;
+    address?: string;
+    city?: string;
+    stage?: string;
+    reasons?: string[];
+  }>;
+  count?: number;
 };
 
 function money(v?: number | null) {
@@ -88,214 +78,16 @@ function num(v?: number | null, digits = 2) {
   return n.toFixed(digits);
 }
 
-function resolvePropertyId(row: any): number | null {
-  const candidates = [
-    row?.id,
-    row?.property_id,
-    row?.property?.id,
-    row?.propertyId,
-    row?.property?.property_id,
-  ];
-
-  for (const value of candidates) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
-  return null;
-}
-
-function GraphBars({
-  items,
-  emptyLabel,
-  valueKey = "count",
-}: {
-  items?: Array<{ label: string; count?: number; net?: number }>;
-  emptyLabel: string;
-  valueKey?: "count" | "net";
-}) {
-  const rows = Array.isArray(items) ? items : [];
-  const max =
-    rows.length > 0
-      ? Math.max(
-          ...rows.map((r) =>
-            Math.abs(Number(valueKey === "count" ? r.count || 0 : r.net || 0)),
-          ),
-          1,
-        )
-      : 1;
-
-  if (!rows.length) return <EmptyState compact title={emptyLabel} />;
-
-  return (
-    <div className="space-y-3">
-      {rows.map((row) => {
-        const raw = Number(
-          valueKey === "count" ? row.count || 0 : row.net || 0,
-        );
-        const width = Math.max(8, (Math.abs(raw) / max) * 100);
-        const isNegative = raw < 0;
-
-        return (
-          <div key={row.label} className="space-y-1">
-            <div className="flex items-center justify-between gap-4 text-xs">
-              <span className="truncate text-app-3">{row.label}</span>
-              <span className="font-semibold text-app-1">
-                {valueKey === "count" ? raw : money(raw)}
-              </span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-app-muted">
-              <div
-                className={`h-full rounded-full ${
-                  isNegative ? "bg-red-400/70" : "bg-[var(--accent)]"
-                }`}
-                style={{ width: `${width}%` }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function Leaderboard({
-  rows,
-  metricLabel,
-  metricGetter,
-  emptyLabel,
-}: {
-  rows?: any[];
-  metricLabel: string;
-  metricGetter: (row: any) => React.ReactNode;
-  emptyLabel: string;
-}) {
-  const items = Array.isArray(rows) ? rows : [];
-  if (!items.length) return <EmptyState compact title={emptyLabel} />;
-
-  return (
-    <div className="space-y-2">
-      {items.slice(0, 6).map((row, idx) => {
-        const propertyId = resolvePropertyId(row);
-        const title =
-          row?.address ||
-          row?.property?.address ||
-          `Property #${propertyId ?? "—"}`;
-        const city = row?.city || row?.property?.city || "";
-        const state = row?.state || row?.property?.state || "";
-        const stageLabel = row?.stage_label || row?.property?.stage_label || "";
-
-        const content = (
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-app-0">
-                {title}
-              </div>
-              <div className="mt-1 truncate text-xs text-app-4">
-                {[
-                  city && state ? `${city}, ${state}` : city || state,
-                  stageLabel,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[11px] uppercase tracking-widest text-app-4">
-                {metricLabel}
-              </div>
-              <div className="text-sm font-semibold text-app-0">
-                {metricGetter(row)}
-              </div>
-            </div>
-          </div>
-        );
-
-        if (!propertyId) {
-          return (
-            <div
-              key={`leaderboard-${idx}`}
-              className="block rounded-2xl border border-app bg-app-panel px-4 py-3 opacity-70"
-            >
-              {content}
-            </div>
-          );
-        }
-
-        return (
-          <Link
-            key={propertyId}
-            to={`/properties/${propertyId}`}
-            className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
-          >
-            {content}
-          </Link>
-        );
-      })}
-    </div>
-  );
-}
-
-function SectionCard({
-  title,
-  subtitle,
-  icon,
-  value,
-  tone = "default",
-}: {
-  title: string;
-  subtitle: string;
-  icon: React.ReactNode;
-  value: React.ReactNode;
-  tone?: "default" | "good" | "warn" | "bad";
-}) {
-  const toneCls =
-    tone === "good"
-      ? "border-emerald-400/20"
-      : tone === "warn"
-        ? "border-yellow-300/20"
-        : tone === "bad"
-          ? "border-red-400/20"
-          : "border-app";
-
-  return (
-    <div className={`rounded-3xl border ${toneCls} bg-app-panel p-5`}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="rounded-2xl border border-app bg-app-muted p-2 text-app-1">
-          {icon}
-        </div>
-        <div className="text-right">
-          <div className="text-2xl font-semibold text-app-0">{value}</div>
-        </div>
-      </div>
-      <div className="mt-4 text-sm font-semibold text-app-0">{title}</div>
-      <div className="mt-1 text-xs text-app-4">{subtitle}</div>
-    </div>
-  );
-}
-
-function StatTile({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: React.ReactNode;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-3xl border border-app bg-app-panel p-5">
-      <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
-        {icon}
-        {label}
-      </div>
-      <div className="mt-2 text-3xl font-semibold text-app-0">{value}</div>
-    </div>
-  );
-}
-
 export default function Dashboard() {
-  const [data, setData] = React.useState<RollupPayload | null>(null);
+  const [searchParams] = useSearchParams();
+  const pane = (searchParams.get("pane") || "").trim().toLowerCase();
+
+  const [overview, setOverview] = React.useState<PaneOverviewPayload | null>(
+    null,
+  );
+  const [paneData, setPaneData] = React.useState<PaneDashboardPayload | null>(
+    null,
+  );
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [lastSync, setLastSync] = React.useState<number | null>(null);
@@ -303,8 +95,16 @@ export default function Dashboard() {
   const refresh = React.useCallback(async () => {
     try {
       setLoading(true);
-      const out = await api.get<RollupPayload>("/ops/control-plane");
-      setData(out);
+
+      const [overviewOut, paneOut] = await Promise.all([
+        api.get<PaneOverviewPayload>("/dashboard/panes"),
+        pane
+          ? api.get<PaneDashboardPayload>(`/dashboard/panes/${pane}`)
+          : Promise.resolve(null),
+      ]);
+
+      setOverview(overviewOut);
+      setPaneData(paneOut);
       setErr(null);
       setLastSync(Date.now());
     } catch (e: any) {
@@ -312,40 +112,25 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pane]);
 
   React.useEffect(() => {
     refresh();
   }, [refresh]);
 
-  const kpis = data?.kpis || {};
-  const counts = data?.counts || {};
-  const totalHomes = Number(kpis.total_homes || 0);
-  const decisionMix = Array.isArray(data?.series?.decision_mix)
-    ? data?.series?.decision_mix
-    : [];
-  const workflowMix = Array.isArray(data?.series?.workflow_mix)
-    ? data?.series?.workflow_mix
-    : [];
-  const complianceAttention = Array.isArray(
-    data?.leaderboards?.compliance_attention,
-  )
-    ? data!.leaderboards!.compliance_attention!
-    : [];
-
-  const stageValue = (key: string) =>
-    Number(workflowMix.find((x) => x.key === key)?.count || 0);
-
-  const verifiedWorkflowCount =
-    stageValue("cash_equity") + stageValue("management") + stageValue("lease");
+  const activePaneLabel = paneData?.pane_label || (pane ? pane : "Portfolio");
 
   return (
     <PageShell>
       <div className="space-y-6">
         <PageHero
           eyebrow="OneHaven"
-          title="Investment dashboard"
-          subtitle="The dashboard now acts as the portfolio command surface: decisions, workflow stages, cashflow, equity, compliance attention, and risk concentration all live here instead of behind drilldown pages."
+          title={pane ? `${activePaneLabel} dashboard` : "Portfolio dashboard"}
+          subtitle={
+            pane
+              ? "This dashboard is filtered into one operating mode so the user sees the correct queue, blockers, and next actions for that pane."
+              : "The dashboard now acts as the portfolio command surface: pane summaries, blockers, stale items, and recommended next actions all live here."
+          }
           right={
             <div className="absolute inset-0 flex items-center justify-center overflow-visible pointer-events-auto">
               <div className="h-[220px] w-[220px] translate-y-[-8px] opacity-95 md:h-[250px] md:w-[250px]">
@@ -371,310 +156,248 @@ export default function Dashboard() {
           }
         />
 
+        <PaneSwitcher
+          activePane={pane || undefined}
+          allowedPanes={paneData?.allowed_panes || overview?.allowed_panes}
+        />
+
         {err ? (
           <Surface tone="danger">
             <div className="text-sm text-red-300">{err}</div>
           </Surface>
         ) : null}
 
-        <Surface
-          title="Portfolio snapshot"
-          subtitle="High-signal rollups first so the dashboard stays portfolio-first and absorbs the old drilldown summaries."
-        >
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <KpiCard
-              title="Homes"
-              value={totalHomes}
-              subtitle={`${Number(counts.deals || 0)} tracked deals`}
-              icon={Home}
-              tone="accent"
-            />
-            <KpiCard
-              title="Good deals"
-              value={Number(kpis.good_deals || 0)}
-              subtitle={`${Number(kpis.review_deals || 0)} review · ${Number(
-                kpis.rejected_deals || 0,
-              )} reject`}
-              icon={ShieldCheck}
-              tone="success"
-            />
-            <KpiCard
-              title="Cashflow"
-              value={money(kpis.net_cash_window)}
-              subtitle={`${Number(kpis.cashflow_positive_homes || 0)} positive homes`}
-              icon={Wallet}
-              tone={
-                Number(kpis.net_cash_window || 0) >= 0 ? "success" : "danger"
-              }
-            />
-            <KpiCard
-              title="Equity"
-              value={money(kpis.total_estimated_equity)}
-              subtitle={`${Number(kpis.homes_with_valuation || 0)} valued homes`}
-              icon={Landmark}
-              tone="accent"
-            />
-            <KpiCard
-              title="Rehab backlog"
-              value={money(kpis.rehab_open_cost_estimate)}
-              subtitle={`${Number(counts.rehab_tasks_open || 0)} open rehab tasks`}
-              icon={Hammer}
-              tone="warning"
-            />
-          </div>
-        </Surface>
+        {!pane ? (
+          <>
+            <Surface
+              title="Pane summaries"
+              subtitle="Each pane has its own dashboard contract, but this top-level dashboard shows the portfolio at mode level."
+            >
+              <PaneSummaryCards panes={overview?.panes} />
+            </Surface>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-          <Surface
-            title="Decision mix"
-            subtitle="The simplified three-way classification for investors now lives directly on the dashboard."
-            actions={
-              <Link to="/properties" className="oh-btn oh-btn-secondary">
-                Review inventory
-              </Link>
-            }
-          >
-            <GraphBars
-              items={decisionMix}
-              emptyLabel={
-                loading ? "Loading decisions…" : "No decision data yet."
-              }
-            />
-          </Surface>
-
-          <Surface
-            title="Workflow stages"
-            subtitle="Properties grouped by the real business workflow instead of a separate pipeline drilldown."
-          >
-            <GraphBars
-              items={workflowMix}
-              emptyLabel={
-                loading ? "Loading workflow…" : "No workflow data yet."
-              }
-            />
-          </Surface>
-        </div>
-
-        <Surface
-          title="Section 8 workflow control"
-          subtitle="These categories match the operating flow from potential property to occupied cashflow asset."
-        >
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
-            <SectionCard
-              title="Deal / Procurement"
-              subtitle="Source, ingest, classify, and decide"
-              icon={<BriefcaseBusiness className="h-5 w-5" />}
-              value={stageValue("deal")}
-            />
-            <SectionCard
-              title="Rehab"
-              subtitle="Scope, tasks, budget, execution"
-              icon={<Hammer className="h-5 w-5" />}
-              value={stageValue("rehab")}
-              tone="warn"
-            />
-            <SectionCard
-              title="Compliance"
-              subtitle="Inspection, licensing, readiness"
-              icon={<ClipboardCheck className="h-5 w-5" />}
-              value={stageValue("compliance")}
-              tone="warn"
-            />
-            <SectionCard
-              title="Tenant"
-              subtitle="Placement and voucher readiness"
-              icon={<Users className="h-5 w-5" />}
-              value={stageValue("tenant")}
-            />
-            <SectionCard
-              title="Lease / Management"
-              subtitle="Occupancy activation and operations"
-              icon={<PieChart className="h-5 w-5" />}
-              value={stageValue("lease") + stageValue("management")}
-            />
-            <SectionCard
-              title="Cashflow / Equity"
-              subtitle="Income and long-term value"
-              icon={<Wallet className="h-5 w-5" />}
-              value={stageValue("cash_equity")}
-              tone="good"
-            />
-          </div>
-        </Surface>
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-          <StatTile
-            label="Compliance attention"
-            value={complianceAttention.length}
-            icon={<AlertTriangle className="h-3.5 w-3.5" />}
-          />
-          <StatTile
-            label="Red-zone flags"
-            value={Number(kpis.red_zone_count || 0)}
-            icon={<ShieldCheck className="h-3.5 w-3.5" />}
-          />
-          <StatTile
-            label="Active leases"
-            value={Number(kpis.active_leases || 0)}
-            icon={<Activity className="h-3.5 w-3.5" />}
-          />
-          <StatTile
-            label="Lease / cash-ready"
-            value={verifiedWorkflowCount}
-            icon={<LocateFixed className="h-3.5 w-3.5" />}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <Surface
-            title="Best opportunities"
-            subtitle="Highest-quality surviving deals right now."
-          >
-            <Leaderboard
-              rows={data?.leaderboards?.good_deals}
-              metricLabel="class"
-              metricGetter={(row) =>
-                `${row.classification || row.latest_decision || "—"}${
-                  row.dscr != null ? ` · ${num(row.dscr)}` : ""
-                }`
-              }
-              emptyLabel={
-                loading ? "Loading opportunities…" : "No opportunities yet."
-              }
-            />
-          </Surface>
-
-          <Surface
-            title="Cashflow leaders"
-            subtitle="Highest estimated monthly contribution."
-          >
-            <Leaderboard
-              rows={data?.leaderboards?.cashflow}
-              metricLabel="cashflow"
-              metricGetter={(row) =>
-                money(row.cashflow_estimate ?? row.property_net_cash_window)
-              }
-              emptyLabel={
-                loading ? "Loading cashflow…" : "No cashflow rows yet."
-              }
-            />
-          </Surface>
-
-          <Surface
-            title="Equity leaders"
-            subtitle="Properties carrying the strongest balance-sheet value."
-          >
-            <Leaderboard
-              rows={data?.leaderboards?.equity}
-              metricLabel="equity"
-              metricGetter={(row) => money(row.estimated_equity)}
-              emptyLabel={loading ? "Loading equity…" : "No equity rows yet."}
-            />
-          </Surface>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <Surface
-            title="Compliance attention queue"
-            subtitle="Properties needing compliance review now surface directly on the dashboard instead of a separate compliance drilldown."
-            actions={
-              <Link to="/properties" className="oh-btn oh-btn-secondary">
-                Open properties
-              </Link>
-            }
-          >
-            <Leaderboard
-              rows={data?.leaderboards?.compliance_attention}
-              metricLabel="attention"
-              metricGetter={(row) =>
-                row?.issue_count != null
-                  ? `${row.issue_count} issues`
-                  : row?.status || row?.readiness || "review"
-              }
-              emptyLabel={
-                loading
-                  ? "Loading compliance queue…"
-                  : "No compliance attention rows yet."
-              }
-            />
-          </Surface>
-
-          <Surface
-            title="Cash trend"
-            subtitle="Monthly net trend for the current portfolio slice."
-          >
-            <GraphBars
-              items={data?.series?.cash_by_month}
-              valueKey="net"
-              emptyLabel={
-                loading ? "Loading trend…" : "No transaction trend yet."
-              }
-            />
-          </Surface>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <Surface
-            title="County concentration"
-            subtitle="Where current inventory is clustering."
-          >
-            <GraphBars
-              items={data?.series?.county_mix}
-              emptyLabel={
-                loading ? "Loading county mix…" : "No county data yet."
-              }
-            />
-          </Surface>
-
-          <Surface
-            title="Portfolio operating quality"
-            subtitle="These metrics absorb the useful trust/cash/equity signal summaries that used to be spread across separate pages."
-          >
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="rounded-3xl border border-app bg-app-panel p-5">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
-                  <BadgeDollarSign className="h-3.5 w-3.5" />
-                  Avg DSCR
-                </div>
-                <div className="mt-2 text-3xl font-semibold text-app-0">
-                  {num(kpis.avg_dscr)}
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-app bg-app-panel p-5">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
-                  <Wallet className="h-3.5 w-3.5" />
-                  Avg cashflow est.
-                </div>
-                <div className="mt-2 text-3xl font-semibold text-app-0">
-                  {money(kpis.avg_cashflow_estimate)}
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-app bg-app-panel p-5">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Avg crime score
-                </div>
-                <div className="mt-2 text-3xl font-semibold text-app-0">
-                  {kpis.avg_crime_score != null
-                    ? num(kpis.avg_crime_score, 1)
-                    : "—"}
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-app bg-app-panel p-5">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
-                  <Landmark className="h-3.5 w-3.5" />
-                  Total value
-                </div>
-                <div className="mt-2 text-3xl font-semibold text-app-0">
-                  {money(kpis.total_estimated_value)}
-                </div>
-              </div>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+              <KpiCard
+                title="Visible panes"
+                value={
+                  Array.isArray(overview?.panes) ? overview!.panes!.length : 0
+                }
+                subtitle="workspace modes currently available"
+                icon={Landmark}
+                tone="accent"
+              />
+              <KpiCard
+                title="Investor"
+                value={Number(
+                  overview?.panes?.find((x) => x.pane === "investor")?.count ||
+                    0,
+                )}
+                subtitle="discovery and underwriting"
+                icon={Wallet}
+                tone="success"
+              />
+              <KpiCard
+                title="Compliance"
+                value={Number(
+                  overview?.panes?.find((x) => x.pane === "compliance")
+                    ?.count || 0,
+                )}
+                subtitle="rehab and readiness workload"
+                icon={ClipboardCheck}
+                tone="warning"
+              />
+              <KpiCard
+                title="Management"
+                value={Number(
+                  overview?.panes?.find((x) => x.pane === "management")
+                    ?.count || 0,
+                )}
+                subtitle="occupied and turnover operations"
+                icon={LocateFixed}
+                tone="accent"
+              />
             </div>
-          </Surface>
-        </div>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+              <Surface title="Properties" subtitle="Visible in this pane">
+                <div className="text-3xl font-semibold text-app-0">
+                  {Number(paneData?.kpis?.total_properties || 0)}
+                </div>
+              </Surface>
+              <Surface title="Blockers" subtitle="Properties with blockers">
+                <div className="text-3xl font-semibold text-app-0">
+                  {Number(paneData?.kpis?.with_blockers || 0)}
+                </div>
+              </Surface>
+              <Surface
+                title="Stale items"
+                subtitle="Needs attention or refresh"
+              >
+                <div className="text-3xl font-semibold text-app-0">
+                  {Number(paneData?.kpis?.stale_count || 0)}
+                </div>
+              </Surface>
+              <Surface
+                title="Next actions"
+                subtitle="Immediate actionable rows"
+              >
+                <div className="text-3xl font-semibold text-app-0">
+                  {Number(paneData?.kpis?.with_next_actions || 0)}
+                </div>
+              </Surface>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+              <Surface
+                title="Top blockers"
+                subtitle="Most common issues slowing this pane down."
+              >
+                {loading ? (
+                  <div className="oh-skeleton h-[220px] rounded-3xl" />
+                ) : !(paneData?.blockers || []).length ? (
+                  <EmptyState compact title="No blockers found." />
+                ) : (
+                  <div className="space-y-3">
+                    {paneData?.blockers?.slice(0, 8).map((row, idx) => (
+                      <div
+                        key={`${row.blocker}-${idx}`}
+                        className="rounded-2xl border border-app bg-app-panel px-4 py-3"
+                      >
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="text-sm font-medium text-app-0">
+                            {String(row.blocker || "unknown").replace(
+                              /_/g,
+                              " ",
+                            )}
+                          </div>
+                          <div className="text-sm font-semibold text-app-1">
+                            {Number(row.count || 0)}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Surface>
+
+              <Surface
+                title="Recommended next actions"
+                subtitle="Action list already normalized for this pane."
+              >
+                {loading ? (
+                  <div className="oh-skeleton h-[220px] rounded-3xl" />
+                ) : !(paneData?.recommended_next_actions || []).length ? (
+                  <EmptyState compact title="No recommended actions yet." />
+                ) : (
+                  <div className="space-y-3">
+                    {paneData?.recommended_next_actions
+                      ?.slice(0, 8)
+                      .map((row, idx) => (
+                        <Link
+                          key={`${row.property_id}-${idx}`}
+                          to={
+                            row.property_id
+                              ? `/properties/${row.property_id}`
+                              : "/properties"
+                          }
+                          className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
+                        >
+                          <div className="text-sm font-semibold text-app-0">
+                            {row.address ||
+                              `Property #${row.property_id ?? "—"}`}
+                          </div>
+                          <div className="mt-1 text-xs text-app-4">
+                            {[row.city, row.stage].filter(Boolean).join(" · ")}
+                          </div>
+                          <div className="mt-2 text-sm text-app-2">
+                            {row.action}
+                          </div>
+                        </Link>
+                      ))}
+                  </div>
+                )}
+              </Surface>
+
+              <Surface
+                title="Stale items"
+                subtitle="Rows that need refresh, cleanup, or manual review."
+              >
+                {loading ? (
+                  <div className="oh-skeleton h-[220px] rounded-3xl" />
+                ) : !(paneData?.stale_items || []).length ? (
+                  <EmptyState compact title="No stale rows." />
+                ) : (
+                  <div className="space-y-3">
+                    {paneData?.stale_items?.slice(0, 8).map((row, idx) => (
+                      <Link
+                        key={`${row.property_id}-${idx}`}
+                        to={
+                          row.property_id
+                            ? `/properties/${row.property_id}`
+                            : "/properties"
+                        }
+                        className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
+                      >
+                        <div className="text-sm font-semibold text-app-0">
+                          {row.address || `Property #${row.property_id ?? "—"}`}
+                        </div>
+                        <div className="mt-1 text-xs text-app-4">
+                          {[row.city, row.stage].filter(Boolean).join(" · ")}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(row.reasons || []).slice(0, 3).map((reason) => (
+                            <span key={reason} className="oh-pill oh-pill-warn">
+                              {reason.replace(/_/g, " ")}
+                            </span>
+                          ))}
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </Surface>
+            </div>
+
+            <Surface
+              title="Pane operating quality"
+              subtitle="Shared metrics stay visible while the dashboard is scoped to one mode."
+            >
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="rounded-3xl border border-app bg-app-panel p-5">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
+                    <BadgeDollarSign className="h-3.5 w-3.5" />
+                    Avg DSCR
+                  </div>
+                  <div className="mt-2 text-3xl font-semibold text-app-0">
+                    {num(paneData?.kpis?.avg_dscr)}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-app bg-app-panel p-5">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
+                    <Wallet className="h-3.5 w-3.5" />
+                    Avg cashflow est.
+                  </div>
+                  <div className="mt-2 text-3xl font-semibold text-app-0">
+                    {money(paneData?.kpis?.avg_cashflow_estimate)}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-app bg-app-panel p-5">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    With blockers
+                  </div>
+                  <div className="mt-2 text-3xl font-semibold text-app-0">
+                    {Number(paneData?.kpis?.with_blockers || 0)}
+                  </div>
+                </div>
+              </div>
+            </Surface>
+          </>
+        )}
       </div>
     </PageShell>
   );

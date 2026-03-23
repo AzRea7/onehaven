@@ -19,8 +19,18 @@ import TenantPipeline from "../components/TenantPipeline";
 import Surface from "../components/Surface";
 import KpiCard from "../components/KpiCard";
 import EmptyState from "../components/EmptyState";
+import { paneLabel } from "../components/PaneSwitcher";
 
-import { ExternalLink, Hammer, RefreshCcw, Sparkles } from "lucide-react";
+import {
+  ExternalLink,
+  Hammer,
+  RefreshCcw,
+  Sparkles,
+  ArrowRightLeft,
+  GitBranch,
+  Layers3,
+  MoveRight,
+} from "lucide-react";
 
 const tabs = [
   "Deal",
@@ -34,12 +44,12 @@ const tabs = [
 type Tab = (typeof tabs)[number];
 
 const TAB_TO_STAGE: Record<Tab, string> = {
-  Deal: "deal",
+  Deal: "discovered",
   Rehab: "rehab",
-  Compliance: "compliance",
-  Tenant: "tenant",
-  Lease: "lease",
-  "Cash / Equity": "cash_equity",
+  Compliance: "compliance_readying",
+  Tenant: "tenant_marketing",
+  Lease: "leased",
+  "Cash / Equity": "occupied",
 };
 
 function money(v: any) {
@@ -91,12 +101,18 @@ function normalizeStage(raw?: string) {
       "acquisition",
       "procurement",
       "underwriting",
+      "discovered",
+      "shortlisted",
+      "underwritten",
+      "offer",
     ].includes(x)
   ) {
     return "deal";
   }
+
   if (
     [
+      "acquired",
       "rehab",
       "rehab_plan",
       "rehab_exec",
@@ -106,15 +122,35 @@ function normalizeStage(raw?: string) {
   ) {
     return "rehab";
   }
-  if (["compliance", "inspection", "licensing"].includes(x)) {
+
+  if (
+    [
+      "compliance",
+      "inspection",
+      "licensing",
+      "compliance_readying",
+      "inspection_pending",
+    ].includes(x)
+  ) {
     return "compliance";
   }
-  if (["tenant", "voucher"].includes(x)) {
+
+  if (
+    ["tenant", "voucher", "tenant_marketing", "tenant_screening"].includes(x)
+  ) {
     return "tenant";
   }
-  if (["lease", "leasing", "management", "ops"].includes(x)) {
+
+  if (["lease", "leasing", "leased"].includes(x)) {
     return "lease";
   }
+
+  if (
+    ["management", "ops", "maintenance", "occupied", "turnover"].includes(x)
+  ) {
+    return "cash_equity";
+  }
+
   if (["cash", "equity", "cashflow", "portfolio", "cash_equity"].includes(x)) {
     return "cash_equity";
   }
@@ -141,7 +177,26 @@ function isTabUnlocked(tab: Tab, currentStage: string | null | undefined) {
 }
 
 function prettyStage(stage: string | null | undefined) {
-  const s = normalizeStage(stage || "");
+  const raw = String(stage || "")
+    .trim()
+    .toLowerCase();
+  const s = normalizeStage(raw);
+
+  if (raw === "discovered") return "Discovered";
+  if (raw === "shortlisted") return "Shortlisted";
+  if (raw === "underwritten") return "Underwritten";
+  if (raw === "offer") return "Offer";
+  if (raw === "acquired") return "Acquired";
+  if (raw === "rehab") return "Rehab";
+  if (raw === "compliance_readying") return "Compliance Readying";
+  if (raw === "inspection_pending") return "Inspection Pending";
+  if (raw === "tenant_marketing") return "Tenant Marketing";
+  if (raw === "tenant_screening") return "Tenant Screening";
+  if (raw === "leased") return "Leased";
+  if (raw === "occupied") return "Occupied";
+  if (raw === "turnover") return "Turnover";
+  if (raw === "maintenance") return "Maintenance";
+
   if (s === "deal") return "Deal / Procurement";
   if (s === "rehab") return "Rehab";
   if (s === "compliance") return "Compliance";
@@ -160,6 +215,58 @@ function classificationTone(classification: string) {
   if (classification === "GOOD_DEAL") return "good";
   if (classification === "REVIEW") return "warn";
   return "bad";
+}
+
+function paneTone(pane?: string) {
+  const x = String(pane || "")
+    .trim()
+    .toLowerCase();
+  if (x === "management") return "good";
+  if (x === "tenants") return "accent";
+  if (x === "compliance") return "warn";
+  if (x === "acquisition") return "accent";
+  if (x === "admin") return "neutral";
+  return "neutral";
+}
+
+function inferCurrentPane(workflow: any, ops: any) {
+  return (
+    workflow?.current_pane ||
+    workflow?.workflow?.current_pane ||
+    ops?.current_pane ||
+    ops?.workflow?.current_pane ||
+    "investor"
+  );
+}
+
+function inferSuggestedPane(workflow: any, ops: any) {
+  return (
+    workflow?.suggested_pane ||
+    workflow?.workflow?.suggested_pane ||
+    ops?.suggested_pane ||
+    ops?.workflow?.suggested_pane ||
+    inferCurrentPane(workflow, ops)
+  );
+}
+
+function inferRouteReason(workflow: any, ops: any) {
+  return (
+    workflow?.route_reason ||
+    workflow?.workflow?.route_reason ||
+    ops?.route_reason ||
+    ops?.workflow?.route_reason ||
+    null
+  );
+}
+
+function inferAllowedPanes(workflow: any, ops: any) {
+  const value =
+    workflow?.allowed_panes ||
+    workflow?.workflow?.allowed_panes ||
+    ops?.allowed_panes ||
+    ops?.workflow?.allowed_panes ||
+    [];
+  return Array.isArray(value) ? value : [];
 }
 
 const Badge = React.memo(function Badge({
@@ -553,7 +660,7 @@ export default function PropertyView() {
   }, [hasValidPropertyId, loadAll]);
 
   React.useEffect(() => {
-    const currentStage = workflow?.current_stage || ops?.stage || "deal";
+    const currentStage = workflow?.current_stage || ops?.stage || "discovered";
     if (!isTabUnlocked(tab, currentStage)) {
       if (isTabUnlocked("Cash / Equity", currentStage)) setTab("Cash / Equity");
       else if (isTabUnlocked("Lease", currentStage)) setTab("Lease");
@@ -708,10 +815,24 @@ export default function PropertyView() {
   const heroSub =
     `${p?.city ?? "—"}, ${p?.state ?? "—"} ${p?.zip ?? ""}`.trim();
 
-  const stage = normalizeStage(workflow?.current_stage || ops?.stage || "deal");
-  const stageLabel = prettyStage(
-    workflow?.current_stage_label || ops?.stage_label || stage,
-  );
+  const currentStageRaw =
+    workflow?.current_stage ||
+    workflow?.current_stage_label ||
+    ops?.stage ||
+    "discovered";
+  const stage = normalizeStage(currentStageRaw);
+  const stageLabel =
+    workflow?.current_stage_label ||
+    ops?.current_stage_label ||
+    ops?.stage_label ||
+    prettyStage(currentStageRaw);
+
+  const currentPane = inferCurrentPane(workflow, ops);
+  const suggestedPane = inferSuggestedPane(workflow, ops);
+  const routeReason = inferRouteReason(workflow, ops);
+  const allowedPanes = inferAllowedPanes(workflow, ops);
+  const paneChanged =
+    String(currentPane).toLowerCase() !== String(suggestedPane).toLowerCase();
 
   const cp = ops?.checklist_progress || {};
   const insp = ops?.inspection || {};
@@ -749,6 +870,7 @@ export default function PropertyView() {
         title: workflow.primary_action.title,
         detail:
           workflow?.transition_gate?.blocked_reason ||
+          workflow?.route_reason ||
           "This is the next workflow action currently expected for this property.",
         kind: workflow?.primary_action?.kind || "workflow",
         priority: workflow?.transition_gate?.ok ? "high" : "medium",
@@ -877,7 +999,6 @@ export default function PropertyView() {
   );
   const crimeScore = numberOrNull(geo?.crime_score ?? p?.crime_score);
 
-  const currentStageRaw = workflow?.current_stage || ops?.stage || "deal";
   const checklistTotal = checklistItems.length;
   const checklistDone = checklistItems.filter(
     (item: any) => String(item?.status || "").toLowerCase() === "done",
@@ -951,6 +1072,74 @@ export default function PropertyView() {
         }
       />
 
+
+      <Surface
+        title="Pane routing"
+        subtitle="This property now carries a pane-aware workflow identity, so the page shows where it is, where it is going next, and why."
+      >
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div className="rounded-2xl border border-app bg-app-muted p-4">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Layers3 className="h-3.5 w-3.5" />
+                Current stage
+              </div>
+              <div className="mt-2 text-base font-semibold text-app-0">
+                {stageLabel}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-muted p-4">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <GitBranch className="h-3.5 w-3.5" />
+                Current pane
+              </div>
+              <div className="mt-2">
+                <Badge tone={paneTone(currentPane) as any}>
+                  {paneLabel(String(currentPane))}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-muted p-4">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <MoveRight className="h-3.5 w-3.5" />
+                Target pane
+              </div>
+              <div className="mt-2">
+                <Badge tone={paneTone(suggestedPane) as any}>
+                  {paneLabel(String(suggestedPane))}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-muted p-4">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <ArrowRightLeft className="h-3.5 w-3.5" />
+                Routing state
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {paneChanged ? (
+                  <Badge tone="warn">move to next pane</Badge>
+                ) : (
+                  <Badge tone="good">pane aligned</Badge>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-panel p-4">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+              Route reason
+            </div>
+            <div className="mt-2 text-sm text-app-2 leading-relaxed">
+              {routeReason ||
+                "Routing reason is not available yet. Refresh the property state after workflow or checklist changes."}
+            </div>
+          </div>
+        </div>
+      </Surface>
+
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
         <Surface padding="md">
           <div className="text-xs uppercase tracking-widest text-app-4">
@@ -971,6 +1160,14 @@ export default function PropertyView() {
               {classification.replace("_", " ")}
             </Badge>
             <Badge>{stageLabel}</Badge>
+            <Badge tone={paneTone(currentPane) as any}>
+              {paneLabel(String(currentPane))}
+            </Badge>
+            {paneChanged ? (
+              <Badge tone={paneTone(suggestedPane) as any}>
+                next {paneLabel(String(suggestedPane))}
+              </Badge>
+            ) : null}
             <Badge>Score: {r?.score ?? "—"}</Badge>
             <Badge>DSCR: {dscr != null ? dscr.toFixed(2) : "—"}</Badge>
             {tenantSummary?.occupancy_status ? (
@@ -1010,13 +1207,18 @@ export default function PropertyView() {
               This property stays gated by workflow stage until the next step is
               completed.
             </div>
+            {routeReason ? (
+              <div className="mt-3 text-xs text-app-3">
+                Route reason: {routeReason}
+              </div>
+            ) : null}
           </div>
         </Surface>
 
         <div className="space-y-4">
           <StageProgress
             workflow={workflow}
-            currentStage={stage}
+            currentStage={currentStageRaw}
             currentStageLabel={stageLabel}
             onAdvance={advanceWorkflow}
             busy={!!busy}
@@ -1228,7 +1430,7 @@ export default function PropertyView() {
       <Surface padding="sm">
         <div className="flex gap-2 flex-wrap">
           {tabs.map((t) => {
-            const unlocked = isTabUnlocked(t, stage);
+            const unlocked = isTabUnlocked(t, currentStageRaw);
             const active = tab === t;
 
             return (
@@ -1265,13 +1467,35 @@ export default function PropertyView() {
         title="Workflow gate"
         subtitle="This property moves through deal, rehab, compliance, tenant, lease, and cash/equity in sequence."
       >
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-5">
           <div className="rounded-2xl border border-app bg-app-muted p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
               Current stage
             </div>
             <div className="mt-2 text-base font-semibold text-app-0">
               {prettyStage(currentStageRaw)}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted p-4">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+              Current pane
+            </div>
+            <div className="mt-2">
+              <Badge tone={paneTone(currentPane) as any}>
+                {paneLabel(String(currentPane))}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted p-4">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+              Target pane
+            </div>
+            <div className="mt-2">
+              <Badge tone={paneTone(suggestedPane) as any}>
+                {paneLabel(String(suggestedPane))}
+              </Badge>
             </div>
           </div>
 
@@ -1286,15 +1510,6 @@ export default function PropertyView() {
 
           <div className="rounded-2xl border border-app bg-app-muted p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-              Rehab blockers
-            </div>
-            <div className="mt-2 text-base font-semibold text-app-0">
-              {openRehabCount}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-app bg-app-muted p-4">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
               Lease status
             </div>
             <div className="mt-2 text-base font-semibold text-app-0">
@@ -1302,6 +1517,12 @@ export default function PropertyView() {
             </div>
           </div>
         </div>
+
+        {routeReason ? (
+          <div className="mt-4 rounded-2xl border border-app bg-app-panel p-4 text-sm text-app-2">
+            {routeReason}
+          </div>
+        ) : null}
       </Surface>
 
       {tab === "Deal" && (
@@ -1434,11 +1655,19 @@ export default function PropertyView() {
             </Surface>
           </div>
 
-          <Surface title="Workflow gate">
+          <Surface title="Deal gate">
             <div className="text-sm text-app-3 leading-relaxed">
-              This property stays in the acquisition stage until the deal case
-              is strong enough to move forward. Once the economics and readiness
-              are acceptable, advance it into rehab.
+              This property stays in the acquisition/investor path until the
+              economics and readiness are strong enough to move forward. Once it
+              clears that gate, it routes into the next pane automatically.
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Badge tone={paneTone(currentPane) as any}>
+                now {paneLabel(String(currentPane))}
+              </Badge>
+              <Badge tone={paneTone(suggestedPane) as any}>
+                next {paneLabel(String(suggestedPane))}
+              </Badge>
             </div>
           </Surface>
         </div>
@@ -1660,6 +1889,14 @@ export default function PropertyView() {
             <div className="text-sm text-app-3 leading-relaxed">
               Tenant placement only comes after compliance readiness. Use this
               stage to move from ready unit to approved occupant.
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Badge tone={paneTone(currentPane) as any}>
+                now {paneLabel(String(currentPane))}
+              </Badge>
+              <Badge tone={paneTone(suggestedPane) as any}>
+                next {paneLabel(String(suggestedPane))}
+              </Badge>
             </div>
           </Surface>
         </div>

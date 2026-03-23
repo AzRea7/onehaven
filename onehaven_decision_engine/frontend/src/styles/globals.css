@@ -426,6 +426,98 @@ body {
   min-height: 150px;
 }
 
+.oh-app-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.oh-app-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.oh-header-block {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--bg-panel-strong) 92%, transparent);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(14px);
+}
+
+.oh-header-nav {
+  width: 100%;
+  max-width: 980px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem;
+}
+
+.oh-pane-switcher {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.2rem;
+  border-radius: 18px;
+  background: transparent;
+}
+
+.oh-pane-tab {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  padding: 0.9rem 1.1rem;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 700;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.oh-pane-tab:hover {
+  background: var(--bg-muted);
+  color: var(--text-1);
+  border-color: var(--border);
+}
+
+.oh-pane-tab-active {
+  background: linear-gradient(135deg, rgba(124, 92, 255, 0.95), rgba(124, 92, 255, 0.78));
+  color: #ffffff;
+  border-color: rgba(124, 92, 255, 0.95);
+  box-shadow: 0 10px 28px rgba(124, 92, 255, 0.28);
+}
+
+@media (max-width: 768px) {
+  .oh-header-nav {
+    max-width: 100%;
+    padding: 0.45rem;
+  }
+
+  .oh-pane-switcher {
+    gap: 0.35rem;
+  }
+
+  .oh-pane-tab {
+    min-height: 46px;
+    padding: 0.8rem 0.75rem;
+    font-size: 0.88rem;
+  }
+}
+
 .oh-empty-state-icon {
   display: inline-flex;
   height: 3rem;

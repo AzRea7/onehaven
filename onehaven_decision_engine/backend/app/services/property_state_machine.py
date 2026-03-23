@@ -15,6 +15,7 @@ from ..domain.workflow.stages import (
     gate_for_next_stage,
     stage_label,
 )
+from .pane_routing_service import build_pane_context
 from ..models import (
     Deal,
     Inspection,
@@ -135,7 +136,7 @@ def ensure_state_row(db: Session, *, org_id: int, property_id: int) -> PropertyS
     row = PropertyState(
         org_id=org_id,
         property_id=property_id,
-        current_stage="deal",
+        current_stage="discovered",
         constraints_json=_json_dumps({}),
         outstanding_tasks_json=_json_dumps({}),
         updated_at=now,
@@ -635,8 +636,19 @@ def derive_stage_and_constraints(
     )
     asking_price = _asking_price(prop, deal)
 
-    deal_complete = uw is not None and decision_bucket == "GOOD"
-    rehab_complete = deal_complete and rehab["is_complete"]
+    deal_exists = deal is not None or uw is not None
+    underwriting_complete = uw is not None
+
+    acquired_complete = bool(
+        (deal is not None and (getattr(deal, "purchase_price", None) is not None or getattr(deal, "closing_date", None) is not None))
+        or lease["exists"]
+        or cash["has_transactions"]
+        or valuation["exists"]
+        or rehab["has_plan"]
+    )
+
+    offer_ready = bool(underwriting_complete and decision_bucket == "GOOD" and not acquired_complete)
+    rehab_complete = bool(acquired_complete and rehab["is_complete"])
 
     compliance_complete = bool(
         rehab_complete
@@ -649,100 +661,130 @@ def derive_stage_and_constraints(
         and completion.latest_inspection_passed
     )
 
-    tenant_complete = compliance_complete and lease["active"]
-    cash_complete = tenant_complete and cash["has_transactions"]
-    equity_complete = cash_complete and valuation["exists"]
+    lease_exists = bool(lease["exists"])
+    tenant_complete = bool(compliance_complete and lease["active"])
+    cash_complete = bool(tenant_complete and cash["has_transactions"])
+    occupied_complete = bool(tenant_complete and cash_complete)
 
-    if not deal_complete:
-        current_stage = "deal"
-    elif not rehab_complete:
+    turnover_active = bool(acquired_complete and lease_exists and not lease["active"] and not tenant_complete)
+
+    if not deal_exists:
+        current_stage = "discovered"
+    elif not underwriting_complete:
+        current_stage = "shortlisted"
+    elif not offer_ready and not acquired_complete:
+        current_stage = "underwritten"
+    elif offer_ready and not acquired_complete:
+        current_stage = "offer"
+    elif acquired_complete and not rehab["has_plan"] and not rehab_complete:
+        current_stage = "acquired"
+    elif acquired_complete and not rehab_complete:
         current_stage = "rehab"
-    elif not compliance_complete:
-        current_stage = "compliance"
-    elif not tenant_complete:
-        current_stage = "tenant"
-    elif not cash_complete:
-        current_stage = "cash"
+    elif rehab_complete and not inspection["exists"]:
+        current_stage = "compliance_readying"
+    elif rehab_complete and not compliance_complete:
+        current_stage = "inspection_pending"
+    elif turnover_active:
+        current_stage = "turnover"
+    elif compliance_complete and not lease_exists:
+        current_stage = "tenant_marketing"
+    elif compliance_complete and lease_exists and not lease["active"]:
+        current_stage = "tenant_screening"
+    elif tenant_complete and not cash_complete:
+        current_stage = "leased"
+    elif occupied_complete and (
+        (rehab.get("blocked", 0) > 0)
+        or (inspection.get("open_failed_items", 0) > 0)
+    ):
+        current_stage = "maintenance"
+    elif occupied_complete:
+        current_stage = "occupied"
     else:
-        current_stage = "equity"
+        current_stage = "tenant_marketing"
 
     blockers: list[str] = []
     next_actions: list[str] = []
 
-    if uw is None:
+    if not underwriting_complete:
         blockers.append("missing_underwriting")
-        next_actions.append("Run underwriting evaluation for the deal.")
+        next_actions.append("Run underwriting evaluation for the property.")
     elif decision_bucket == "REVIEW":
         blockers.append("decision_review")
-        next_actions.append("Review underwriting assumptions and either approve or reject the deal.")
+        next_actions.append("Review underwriting assumptions and decide whether this property should move to offer.")
     elif decision_bucket == "REJECT":
         blockers.append("decision_reject")
-        next_actions.append("Deal is currently rejected. Update assumptions only if you want to re-underwrite.")
+        next_actions.append("Property is currently rejected. Update assumptions only if you want to re-underwrite.")
 
-    if decision_bucket == "GOOD":
-        if not rehab["has_plan"]:
-            blockers.append("missing_rehab_plan")
-            next_actions.append("Create rehab scope and rehab tasks.")
-        elif rehab["blocked"] > 0:
-            blockers.append("rehab_blocked")
-            next_actions.append(f"Resolve rehab blockers ({rehab['blocked']} blocked tasks).")
-        elif rehab["open"] > 0:
-            blockers.append("rehab_open_tasks")
-            next_actions.append(f"Complete rehab tasks ({rehab['open']} still open).")
+    if underwriting_complete and decision_bucket == "GOOD" and not acquired_complete:
+        next_actions.append("Track or create active offer / acquisition execution details.")
 
-        if rehab_complete and not jurisdiction["exists"]:
-            blockers.append("missing_jurisdiction_profile")
-            next_actions.append("Create or project jurisdiction profile coverage for this property market.")
-        elif rehab_complete and jurisdiction["completeness_status"] != "complete":
-            blockers.append("jurisdiction_incomplete")
-            next_actions.append("Complete jurisdiction policy coverage before advancing compliance.")
-        elif rehab_complete and jurisdiction["is_stale"]:
-            blockers.append("jurisdiction_stale")
-            next_actions.append("Refresh stale jurisdiction policy sources before advancing compliance.")
+    if acquired_complete and not rehab["has_plan"]:
+        blockers.append("missing_rehab_plan")
+        next_actions.append("Create rehab scope and rehab tasks for the acquired property.")
 
-        if rehab_complete and not inspection["exists"]:
-            blockers.append("missing_inspection")
-            next_actions.append("Schedule and record the first inspection.")
+    if acquired_complete and rehab["blocked"] > 0:
+        blockers.append("rehab_blocked")
+        next_actions.append(f"Resolve rehab blockers ({rehab['blocked']} blocked tasks).")
+    elif acquired_complete and rehab["open"] > 0:
+        blockers.append("rehab_open_tasks")
+        next_actions.append(f"Complete rehab tasks ({rehab['open']} still open).")
 
-        if rehab_complete and not completion.latest_inspection_passed:
-            blockers.append("latest_inspection_not_passed")
-            next_actions.append("Address failed inspection findings and pass the latest inspection.")
+    if rehab_complete and not jurisdiction["exists"]:
+        blockers.append("missing_jurisdiction_profile")
+        next_actions.append("Create or resolve jurisdiction profile coverage for this property market.")
+    elif rehab_complete and jurisdiction["completeness_status"] != "complete":
+        blockers.append("jurisdiction_incomplete")
+        next_actions.append("Complete jurisdiction policy coverage before advancing compliance.")
+    elif rehab_complete and jurisdiction["is_stale"]:
+        blockers.append("jurisdiction_stale")
+        next_actions.append("Refresh stale jurisdiction policy coverage before advancing compliance.")
 
-        if rehab_complete and inspection["open_failed_items"] > 0:
-            blockers.append("inspection_open_failures")
-            next_actions.append(
-                f"Resolve failed inspection items ({inspection['open_failed_items']} still open)."
-            )
+    if rehab_complete and not inspection["exists"]:
+        blockers.append("missing_inspection")
+        next_actions.append("Schedule and record the first inspection.")
+    elif rehab_complete and not completion.latest_inspection_passed:
+        blockers.append("latest_inspection_not_passed")
+        next_actions.append("Address failed inspection findings and pass the latest inspection.")
 
-        if rehab_complete and completion.failed_count > 0:
-            blockers.append("compliance_failed_items")
-            next_actions.append(f"Resolve compliance failed items ({completion.failed_count} remaining).")
+    if rehab_complete and inspection["open_failed_items"] > 0:
+        blockers.append("inspection_open_failures")
+        next_actions.append(
+            f"Resolve failed inspection items ({inspection['open_failed_items']} still open)."
+        )
 
-        if rehab_complete and completion.blocked_count > 0:
-            blockers.append("compliance_blocked_items")
-            next_actions.append(f"Resolve blocked compliance items ({completion.blocked_count} remaining).")
+    if rehab_complete and completion.failed_count > 0:
+        blockers.append("compliance_failed_items")
+        next_actions.append(f"Resolve compliance failed items ({completion.failed_count} remaining).")
 
-        if rehab_complete and completion.latest_readiness_status in {"critical", "needs_work", "unknown"}:
-            blockers.append("inspection_readiness_not_sufficient")
-            next_actions.append(
-                f"Improve inspection readiness (current status: {completion.latest_readiness_status}, score: {completion.latest_readiness_score})."
-            )
+    if rehab_complete and completion.blocked_count > 0:
+        blockers.append("compliance_blocked_items")
+        next_actions.append(f"Resolve blocked compliance items ({completion.blocked_count} remaining).")
 
-        if rehab_complete and completion.posture in {"critical_failures", "needs_remediation", "not_ready"}:
-            blockers.append("compliance_posture_blocked")
-            next_actions.append(f"Resolve compliance posture blockers ({completion.posture}).")
+    if rehab_complete and completion.latest_readiness_status in {"critical", "needs_work", "unknown"}:
+        blockers.append("inspection_readiness_not_sufficient")
+        next_actions.append(
+            f"Improve inspection readiness (current status: {completion.latest_readiness_status}, score: {completion.latest_readiness_score})."
+        )
 
-        if compliance_complete and not lease["active"]:
-            blockers.append("missing_active_lease")
-            next_actions.append("Create or activate the lease for the selected tenant.")
+    if compliance_complete and not lease_exists:
+        blockers.append("missing_tenant_pipeline")
+        next_actions.append("Start tenant marketing or match the property to an eligible tenant.")
 
-        if tenant_complete and not cash["has_transactions"]:
-            blockers.append("missing_cash_transactions")
-            next_actions.append("Record first income and expense transactions for the property.")
+    if compliance_complete and lease_exists and not lease["active"]:
+        blockers.append("tenant_pipeline_in_progress")
+        next_actions.append("Complete screening and activate the lease.")
 
-        if cash_complete and not valuation["exists"]:
-            blockers.append("missing_valuation")
-            next_actions.append("Add a valuation snapshot for equity tracking.")
+    if tenant_complete and not cash["has_transactions"]:
+        blockers.append("missing_cash_transactions")
+        next_actions.append("Record first income and expense transactions for the property.")
+
+    if occupied_complete and not valuation["exists"]:
+        blockers.append("missing_valuation")
+        next_actions.append("Add a valuation snapshot for equity tracking.")
+
+    if turnover_active:
+        blockers.append("turnover_active")
+        next_actions.append("Route turnover through compliance or investor review depending on the blocker profile.")
 
     for action in failure_actions.get("recommended_actions") or []:
         title = str(action.get("title") or "").strip()
@@ -757,75 +799,38 @@ def derive_stage_and_constraints(
     gate = gate_for_next_stage(
         current_stage=current_stage,
         decision_bucket=decision_bucket,
-        deal_complete=deal_complete,
+        deal_exists=deal_exists,
+        underwriting_complete=underwriting_complete,
+        offer_ready=offer_ready,
+        acquired_complete=acquired_complete,
         rehab_complete=rehab_complete,
+        inspection_exists=bool(inspection["exists"]),
         compliance_complete=compliance_complete,
+        lease_exists=lease_exists,
         tenant_complete=tenant_complete,
         cash_complete=cash_complete,
-        equity_complete=equity_complete,
+        occupied_complete=occupied_complete,
+        turnover_active=turnover_active,
     ).as_dict()
-
-    if current_stage == "compliance":
-        if not jurisdiction["gate_ok"]:
-            gate["ok"] = False
-            gate["reason"] = jurisdiction["gate_reason"] or "jurisdiction_blocked"
-            gate["allowed_next_stage"] = None
-        elif not completion.is_compliant:
-            gate["ok"] = False
-            gate["reason"] = completion.posture or "inspection_grade_compliance_blocked"
-            gate["allowed_next_stage"] = None
 
     allowed_next = gate.get("allowed_next_stage")
     gate["allowed_next_stage_label"] = stage_label(allowed_next) if allowed_next else None
 
     stage_completion_summary = [
-        {
-            "stage": "deal",
-            "label": stage_label("deal"),
-            "is_complete": deal_complete,
-            "blockers": [x for x in blockers if x.startswith("missing_underwriting") or x.startswith("decision_")],
-        },
-        {
-            "stage": "rehab",
-            "label": stage_label("rehab"),
-            "is_complete": rehab_complete,
-            "blockers": [x for x in blockers if x.startswith("missing_rehab") or x.startswith("rehab_")],
-        },
-        {
-            "stage": "compliance",
-            "label": stage_label("compliance"),
-            "is_complete": compliance_complete,
-            "blockers": [
-                x
-                for x in blockers
-                if (
-                    "inspection" in x
-                    or "checklist" in x
-                    or "compliance_" in x
-                    or x.startswith("jurisdiction_")
-                    or x == "missing_jurisdiction_profile"
-                    or x == "latest_inspection_not_passed"
-                )
-            ],
-        },
-        {
-            "stage": "tenant",
-            "label": stage_label("tenant"),
-            "is_complete": tenant_complete,
-            "blockers": [x for x in blockers if "lease" in x or "tenant" in x],
-        },
-        {
-            "stage": "cash",
-            "label": stage_label("cash"),
-            "is_complete": cash_complete,
-            "blockers": [x for x in blockers if "cash" in x],
-        },
-        {
-            "stage": "equity",
-            "label": stage_label("equity"),
-            "is_complete": equity_complete,
-            "blockers": [x for x in blockers if "valuation" in x or "equity" in x],
-        },
+        {"stage": "discovered", "label": stage_label("discovered"), "is_complete": deal_exists, "blockers": [] if deal_exists else ["not_shortlisted"]},
+        {"stage": "shortlisted", "label": stage_label("shortlisted"), "is_complete": underwriting_complete, "blockers": ["missing_underwriting"] if not underwriting_complete else []},
+        {"stage": "underwritten", "label": stage_label("underwritten"), "is_complete": offer_ready or acquired_complete, "blockers": ["offer_not_ready"] if underwriting_complete and not (offer_ready or acquired_complete) else []},
+        {"stage": "offer", "label": stage_label("offer"), "is_complete": acquired_complete, "blockers": ["not_acquired"] if offer_ready and not acquired_complete else []},
+        {"stage": "acquired", "label": stage_label("acquired"), "is_complete": acquired_complete, "blockers": ["not_acquired"] if not acquired_complete else []},
+        {"stage": "rehab", "label": stage_label("rehab"), "is_complete": rehab_complete, "blockers": [x for x in blockers if x.startswith("rehab_") or x == "missing_rehab_plan"]},
+        {"stage": "compliance_readying", "label": stage_label("compliance_readying"), "is_complete": bool(rehab_complete and (inspection["exists"] or compliance_complete)), "blockers": [x for x in blockers if x.startswith("jurisdiction_") or x == "missing_jurisdiction_profile"]},
+        {"stage": "inspection_pending", "label": stage_label("inspection_pending"), "is_complete": compliance_complete, "blockers": [x for x in blockers if "inspection" in x or "compliance_" in x]},
+        {"stage": "tenant_marketing", "label": stage_label("tenant_marketing"), "is_complete": lease_exists or tenant_complete or turnover_active, "blockers": [x for x in blockers if x == "missing_tenant_pipeline"]},
+        {"stage": "tenant_screening", "label": stage_label("tenant_screening"), "is_complete": tenant_complete or turnover_active, "blockers": [x for x in blockers if x == "tenant_pipeline_in_progress"]},
+        {"stage": "leased", "label": stage_label("leased"), "is_complete": tenant_complete, "blockers": [x for x in blockers if "lease" in x or "tenant" in x]},
+        {"stage": "occupied", "label": stage_label("occupied"), "is_complete": occupied_complete, "blockers": [x for x in blockers if "cash" in x]},
+        {"stage": "turnover", "label": stage_label("turnover"), "is_complete": not turnover_active, "blockers": [x for x in blockers if x == "turnover_active"]},
+        {"stage": "maintenance", "label": stage_label("maintenance"), "is_complete": bool(occupied_complete and rehab.get("blocked", 0) == 0 and inspection.get("open_failed_items", 0) == 0), "blockers": [x for x in blockers if x in {"rehab_blocked", "inspection_open_failures"}]},
     ]
 
     completed_count = sum(1 for row in stage_completion_summary if row["is_complete"])
@@ -841,12 +846,17 @@ def derive_stage_and_constraints(
         "asking_price": asking_price,
         "crime_score": getattr(prop, "crime_score", None),
         "crime_label": normalize_crime_label(getattr(prop, "crime_score", None)),
-        "deal_complete": deal_complete,
+        "deal_exists": deal_exists,
+        "underwriting_complete": underwriting_complete,
+        "offer_ready": offer_ready,
+        "acquired_complete": acquired_complete,
         "rehab_complete": rehab_complete,
         "compliance_complete": compliance_complete,
+        "lease_exists": lease_exists,
         "tenant_complete": tenant_complete,
         "cash_complete": cash_complete,
-        "equity_complete": equity_complete,
+        "occupied_complete": occupied_complete,
+        "turnover_active": turnover_active,
         "checklist": checklist.as_dict(),
         "inspection": inspection,
         "rehab": rehab,
@@ -873,6 +883,21 @@ def derive_stage_and_constraints(
         "completion_projection": completion_info,
     }
 
+    pane = build_pane_context(
+        current_stage=current_stage,
+        constraints=constraints,
+        org_id=org_id,
+    )
+
+    constraints["pane"] = {
+        "current_pane": pane["current_pane"],
+        "current_pane_label": pane["current_pane_label"],
+        "suggested_pane": pane["suggested_pane"],
+        "suggested_pane_label": pane["suggested_pane_label"],
+        "route_reason": pane["route_reason"],
+        "turnover_target": pane["turnover_target"],
+    }
+
     outstanding_tasks = {
         "blockers": blockers,
         "next_actions": next_actions,
@@ -896,6 +921,13 @@ def derive_stage_and_constraints(
         "current_stage": current_stage,
         "suggested_stage": current_stage,
         "current_stage_label": stage_label(current_stage),
+        "current_pane": pane["current_pane"],
+        "current_pane_label": pane["current_pane_label"],
+        "suggested_pane": pane["suggested_pane"],
+        "suggested_pane_label": pane["suggested_pane_label"],
+        "route_reason": pane["route_reason"],
+        "allowed_panes": pane["allowed_panes"],
+        "allowed_pane_labels": pane["allowed_pane_labels"],
         "normalized_decision": decision_bucket,
         "decision_bucket": decision_bucket,
         "constraints": constraints,
@@ -953,6 +985,13 @@ def get_state_payload(
         "current_stage": derived["current_stage"],
         "suggested_stage": derived["suggested_stage"],
         "current_stage_label": derived["current_stage_label"],
+        "current_pane": derived["current_pane"],
+        "current_pane_label": derived["current_pane_label"],
+        "suggested_pane": derived["suggested_pane"],
+        "suggested_pane_label": derived["suggested_pane_label"],
+        "route_reason": derived["route_reason"],
+        "allowed_panes": derived["allowed_panes"],
+        "allowed_pane_labels": derived["allowed_pane_labels"],
         "normalized_decision": derived["normalized_decision"],
         "decision_bucket": derived["decision_bucket"],
         "gate": derived["gate"],
@@ -979,6 +1018,8 @@ def get_transition_payload(
         "property_id": property_id,
         "current_stage": state["current_stage"],
         "current_stage_label": state["current_stage_label"],
+        "current_pane": state["current_pane"],
+        "current_pane_label": state["current_pane_label"],
         "decision_bucket": state["decision_bucket"],
         "gate": state["gate"],
         "gate_status": state["gate_status"],

@@ -662,13 +662,30 @@ class JurisdictionProfileResolveOut(BaseModel):
 # --------------------
 # Workflow State (NEW)
 # --------------------
-WorkflowStage = Literal[
-    "deal",
-    "rehab",
+PaneKey = Literal[
+    "acquisition",
+    "investor",
     "compliance",
-    "tenant",
-    "cash",
-    "equity",
+    "tenants",
+    "management",
+    "admin",
+]
+
+WorkflowStage = Literal[
+    "discovered",
+    "shortlisted",
+    "underwritten",
+    "offer",
+    "acquired",
+    "rehab",
+    "compliance_readying",
+    "inspection_pending",
+    "tenant_marketing",
+    "tenant_screening",
+    "leased",
+    "occupied",
+    "turnover",
+    "maintenance",
 ]
 
 
@@ -677,6 +694,12 @@ class WorkflowStateOut(BaseModel):
     current_stage: WorkflowStage
     suggested_stage: WorkflowStage
     current_stage_label: str
+
+    current_pane: PaneKey
+    current_pane_label: str
+    suggested_pane: PaneKey
+    suggested_pane_label: str
+    route_reason: Optional[str] = None
 
     normalized_decision: Literal["GOOD", "REVIEW", "REJECT"]
     gate_status: Literal["OPEN", "BLOCKED"]
@@ -687,9 +710,27 @@ class WorkflowStateOut(BaseModel):
     next_actions: List[str] = Field(default_factory=list)
     stage_completion_summary: Dict[str, Any] = Field(default_factory=dict)
 
+    allowed_panes: List[PaneKey] = Field(default_factory=list)
+    allowed_pane_labels: List[str] = Field(default_factory=list)
+
     updated_at: Optional[str] = None
     last_transitioned_at: Optional[str] = None
-    stage_order: List[str] = Field(default_factory=lambda: ["deal", "rehab", "compliance", "tenant", "cash", "equity"])
+    stage_order: List[str] = Field(default_factory=lambda: [
+        "discovered",
+        "shortlisted",
+        "underwritten",
+        "offer",
+        "acquired",
+        "rehab",
+        "compliance_readying",
+        "inspection_pending",
+        "tenant_marketing",
+        "tenant_screening",
+        "leased",
+        "occupied",
+        "turnover",
+        "maintenance",
+    ])
 
 
 class WorkflowDecisionIn(BaseModel):
@@ -705,6 +746,29 @@ class WorkflowAcquisitionIn(BaseModel):
     term_years: Optional[int] = Field(default=None, ge=1, le=50)
     down_payment_pct: Optional[float] = Field(default=None, ge=0, le=1)
 
+
+class WorkflowEventCreate(BaseModel):
+    property_id: Optional[int] = None
+    event_type: str
+    payload: Optional[dict[str, Any]] = None
+
+
+class WorkflowEventOut(BaseModel):
+    id: int
+    org_id: int
+    property_id: Optional[int] = None
+    actor_user_id: Optional[int] = None
+    event_type: str
+    payload_json: Optional[str] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PropertyStateUpsert(BaseModel):
+    property_id: int
+    current_stage: Optional[str] = None
+    constraints: Optional[dict[str, Any]] = None
+    outstanding_tasks: Optional[dict[str, Any]] = None
 
 # --------------------
 # Rehab
@@ -1052,29 +1116,6 @@ class AuditEventOut(BaseModel):
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
-
-class WorkflowEventCreate(BaseModel):
-    property_id: Optional[int] = None
-    event_type: str
-    payload: Optional[dict[str, Any]] = None
-
-
-class WorkflowEventOut(BaseModel):
-    id: int
-    org_id: int
-    property_id: Optional[int] = None
-    actor_user_id: Optional[int] = None
-    event_type: str
-    payload_json: Optional[str] = None
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class PropertyStateUpsert(BaseModel):
-    property_id: int
-    current_stage: Optional[str] = None
-    constraints: Optional[dict[str, Any]] = None
-    outstanding_tasks: Optional[dict[str, Any]] = None
 
 class PropertyUpdate(BaseModel):
     address: Optional[str] = None

@@ -3,18 +3,18 @@ import { Link } from "react-router-dom";
 import {
   ArrowUpRight,
   Banknote,
+  ClipboardList,
+  Crosshair,
+  Filter,
+  GitBranch,
   Home,
+  LocateFixed,
+  MapPinned,
+  RefreshCcw,
   Search,
   ShieldAlert,
   Wallet,
-  RefreshCcw,
-  Filter,
-  ClipboardList,
-  MapPinned,
-  Crosshair,
-  LocateFixed,
   AlertTriangle,
-  GitBranch,
 } from "lucide-react";
 
 import { api } from "../lib/api";
@@ -26,7 +26,7 @@ import Golem from "../components/Golem";
 import IngestionLaunchCard from "../components/IngestionLaunchCard";
 import IngestionRunsPanel from "../components/IngestionRunsPanel";
 import IngestionErrorsDrawer from "../components/IngestionErrorsDrawer";
-import PaneSwitcher, { paneLabel } from "../components/PaneSwitcher";
+import { paneLabel } from "../components/PaneSwitcher";
 
 type Row = any;
 
@@ -92,6 +92,7 @@ function normalizeStage(raw?: string) {
       "discovered",
       "shortlisted",
       "underwritten",
+      "offer",
     ].includes(x)
   ) {
     return "deal";
@@ -352,7 +353,7 @@ type PaneFilter =
   | "tenants"
   | "management";
 
-export default function Property() {
+export default function InvestorPane() {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -493,9 +494,9 @@ export default function Property() {
     <PageShell>
       <div className="space-y-6">
         <PageHero
-          eyebrow="Portfolio inventory"
-          title="Properties"
-          subtitle="This is the property list view. Use it to scan inventory, filter by pane, and open the single-property page to work the actual stage and next-pane workflow."
+          eyebrow="Investor pane"
+          title="Investor inventory"
+          subtitle="This is now the main investor workspace. Use it to search, shortlist mentally, inspect pane routing, and open the single-property workflow page."
           right={
             <div className="absolute inset-0 flex items-center justify-center overflow-visible pointer-events-auto">
               <div className="h-[220px] w-[220px] translate-y-[-8px] opacity-95 md:h-[250px] md:w-[250px]">
@@ -521,15 +522,11 @@ export default function Property() {
           }
         />
 
-        <PaneSwitcher
-          activePane={paneFilter === "ALL" ? undefined : paneFilter}
-        />
-
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.28fr_0.92fr]">
           <div className="space-y-6">
             <Surface
               title="Acquisition intake"
-              subtitle="Launch a focused intake run for southeast Michigan directly inside the property workflow."
+              subtitle="Launch a focused intake run for southeast Michigan directly inside the investor workflow."
             >
               <IngestionLaunchCard
                 refreshKey={ingestionRefreshKey}
@@ -612,7 +609,7 @@ export default function Property() {
             ) : null}
 
             <Surface
-              title="Property list"
+              title="Investor property list"
               subtitle={`${filtered.length} visible ${
                 filtered.length === 1 ? "property" : "properties"
               }`}

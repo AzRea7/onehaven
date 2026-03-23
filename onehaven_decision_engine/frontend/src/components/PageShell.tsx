@@ -18,10 +18,7 @@ export default function PageShell({
 }) {
   return (
     <section
-      className={clsx(
-        "mx-auto w-full max-w-[1320px] px-4 py-5 sm:px-5 lg:px-8 lg:py-8",
-        className,
-      )}
+      className={clsx("mx-auto w-full px-4 md:px-6 xl:px-8 py-6", className)}
     >
       {title || subtitle || right ? (
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
