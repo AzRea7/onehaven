@@ -1,4 +1,3 @@
-# backend/app/config.py
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,7 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ---- App ----
-    app_env: str = "local"  # local|dev|prod
+    app_env: str = "local"
     database_url: str = "sqlite:///./onehaven.db"
 
     # ---- CORS ----
@@ -43,7 +42,7 @@ class Settings(BaseSettings):
 
     # ---- Rent calibration ----
     rent_calibration_alpha: float = 0.20
-    rent_calibration_apha: float | None = None  # back-compat typo
+    rent_calibration_apha: float | None = None
     rent_calibration_min_mult: float = 0.70
     rent_calibration_max_mult: float = 1.30
     default_payment_standard_pct: float = 1.10
@@ -59,65 +58,54 @@ class Settings(BaseSettings):
     # ---- Geocoding / location automation ----
     geocoding_enabled: bool = True
     geocode_default_country_code: str = "US"
-
-    # comma-separated priority order; keep simple for env usage
     geocode_provider_order: str = "google,nominatim"
-
     geocode_cache_enabled: bool = True
     geocode_cache_ttl_hours: int = 24 * 30
     geocode_stale_after_hours: int = 24 * 14
-
     geocode_timeout_seconds: int = 12
     geocode_min_confidence: float = 0.55
     geocode_allow_fallback_providers: bool = True
     geocode_fail_open: bool = True
-
     geocode_refresh_on_ingestion: bool = True
     geocode_refresh_missing_only: bool = False
-
     location_refresh_batch_size: int = 250
     location_refresh_max_attempts: int = 3
     location_refresh_schedule_minutes: int = 12 * 60
 
-        # ---- Ingestion cost controls ----
+    # ---- Ingestion cost controls ----
     ingestion_enable_inline_rent_refresh: bool = False
     ingestion_publish_without_rent: bool = True
     ingestion_queue_rent_refresh_after_sync: bool = True
-
-    # Small burst after each sync run for the best candidates only
     ingestion_post_sync_rent_budget: int = 5
-
-    # Daily capped rent refresh budget
     ingestion_daily_rent_refresh_limit: int = 25
-
-    # Only rent-refresh properties missing rent or stale
     ingestion_rent_refresh_stale_after_hours: int = 24 * 7
 
-    # Optional quality gates before a property is shown in investor inventory
+    # ---- Investor inventory filters ----
     investor_require_address: bool = True
     investor_require_price: bool = True
     investor_require_geo: bool = False
+    investor_inventory_enabled: bool = True
+    investor_inventory_default_limit: int = 200
 
-        # ---- Supported market sync / scalable regional coverage ----
-    # Phase 1: Southeast Michigan only
-    # Phase 2: Michigan statewide
-    # Phase 3: multi-state hot/warm/cold coverage
+    # strict buy box to reduce wasted RentCast calls
+    investor_buy_box_max_price: int = 200_000
+    investor_buy_box_max_units: int = 4
+    investor_buy_box_property_types: str = "single_family,multi_family"
+
+    # ---- Supported market sync / scalable regional coverage ----
     market_sync_daily_market_limit: int = 6
-    market_sync_default_limit_per_market: int = 250
-
-    # Use "all" for now. Later:
-    # - hot: sync only most important markets frequently
-    # - warm: less frequent
-    # - cold: rare backfill / on-demand expansion
+    market_sync_default_limit_per_market: int = 125
     market_sync_daily_tier_filter: str = "all"
-
-    # Future scalability toggle:
-    # when you add a DB-backed market catalog, this can switch lookup mode
     market_catalog_backend: str = "static"
-
-    # Future cost controls:
-    # add per-market API budgets later instead of one global setting
     market_sync_enable_statewide_expansion: bool = False
+
+    # ---- Provider fetch hardening ----
+    ingestion_provider_page_limit: int = 50
+    ingestion_provider_max_pages_per_shard: int = 3
+    ingestion_execution_lock_ttl_seconds: int = 60 * 60 * 3
+    ingestion_completion_lock_ttl_seconds: int = 60 * 60 * 24 * 14
+    daily_sync_lock_ttl_seconds: int = 60 * 60 * 2
+    dispatch_dedupe_ttl_seconds: int = 60 * 60 * 36
 
     # ---- Google Geocoding ----
     google_geocode_api_key: str | None = None
@@ -128,16 +116,15 @@ class Settings(BaseSettings):
     nominatim_user_agent: str = "onehaven-location-automation/1.0"
     nominatim_email: str | None = None
 
-    # ---- OpenCage (optional secondary provider) ----
+    # ---- OpenCage ----
     opencage_api_key: str | None = None
     opencage_base_url: str = "https://api.opencagedata.com/geocode/v1/json"
 
     # ---- SaaS Auth / tenancy ----
-    auth_mode: str = "dev"  # dev|jwt
+    auth_mode: str = "dev"
     dev_auto_provision: bool = True
     dev_auto_verify_email: bool = True
     allow_local_auth_bypass: bool = False
-
     dev_header_org_slug: str = "X-Org-Slug"
     dev_header_user_email: str = "X-User-Email"
     dev_header_user_role: str = "X-User-Role"
@@ -160,6 +147,11 @@ class Settings(BaseSettings):
     # ---- Celery ----
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
+    celery_queue: str = "celery"
+    celery_task_always_eager: bool = False
+    celery_task_eager_propagates: bool = True
+    celery_worker_max_tasks_per_child: int = 200
+    celery_beat_schedule_filename: str = "celerybeat-schedule"
 
     # ---- Agent runtime limits ----
     agents_max_runs_per_property_per_hour: int = 6

@@ -1,4 +1,3 @@
-# backend/app/workers/celery_app.py
 from __future__ import annotations
 
 import json
@@ -99,23 +98,20 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 
-    # safer worker behavior for background jobs
     task_acks_late=True,
     task_acks_on_failure_or_timeout=False,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
 
-    # runtime hygiene
-    task_time_limit=int(getattr(settings, "agents_run_timeout_seconds", 120) or 120),
-    task_soft_time_limit=int(getattr(settings, "agents_run_timeout_seconds", 120) or 120),
+    task_time_limit=int(getattr(settings, "agents_run_timeout_seconds", 180) or 180),
+    task_soft_time_limit=int(getattr(settings, "agents_run_timeout_seconds", 180) or 180),
     worker_max_tasks_per_child=int(
         getattr(settings, "celery_worker_max_tasks_per_child", 200) or 200
     ),
     worker_send_task_events=True,
     task_send_sent_event=True,
 
-    # routing stability
     task_default_queue=queue,
     task_default_routing_key=queue,
     task_routes={
@@ -124,20 +120,19 @@ celery_app.conf.update(
         "jurisdiction.*": {"queue": queue, "routing_key": queue},
         "risk.*": {"queue": queue, "routing_key": queue},
         "agent.*": {"queue": queue, "routing_key": queue},
+        "market_sync.*": {"queue": queue, "routing_key": queue},
+        "rent.*": {"queue": queue, "routing_key": queue},
     },
 
-    # stable eager mode for tests if enabled
     task_always_eager=bool(getattr(settings, "celery_task_always_eager", False)),
     task_eager_propagates=bool(getattr(settings, "celery_task_eager_propagates", True)),
 
-    # imports
     imports=(
         "app.workers.agent_tasks",
         "app.tasks.ingestion_tasks",
         "app.tasks.market_sync_tasks",
     ),
 
-    # beat safety
     beat_scheduler="celery.beat:PersistentScheduler",
     beat_schedule_filename=str(
         getattr(settings, "celery_beat_schedule_filename", "celerybeat-schedule")
@@ -189,72 +184,61 @@ def _beat_init(sender=None, **kwargs):
         worker_log,
         {
             "event": "beat_init",
-            "beat_schedule_keys": sorted(list(_beat_schedule().keys())),
             "sender": str(sender) if sender else None,
+            "beat_schedule_keys": sorted(list((_beat_schedule() or {}).keys())),
         },
     )
 
 
 @task_prerun.connect
-def _task_prerun(task_id=None, task=None, args=None, kwargs=None, **rest):
+def _task_prerun(task_id=None, task=None, args=None, kwargs=None, **extra):
     _emit(
         task_log,
         {
-            "event": "task_start",
+            "event": "task_prerun",
             "task_id": task_id,
             "task_name": getattr(task, "name", None),
-            "job_type": getattr(task, "name", None),
-            "args_len": len(args or ()),
-            "kwargs_keys": sorted(list((kwargs or {}).keys())),
-            "outcome": "running",
         },
     )
 
 
 @task_postrun.connect
-def _task_postrun(task_id=None, task=None, args=None, kwargs=None, retval=None, state=None, **rest):
+def _task_postrun(task_id=None, task=None, retval=None, state=None, **extra):
     _emit(
         task_log,
         {
-            "event": "task_end",
+            "event": "task_postrun",
             "task_id": task_id,
             "task_name": getattr(task, "name", None),
-            "job_type": getattr(task, "name", None),
             "state": state,
-            "outcome": "success" if str(state).upper() == "SUCCESS" else str(state).lower(),
         },
     )
 
 
 @task_retry.connect
-def _task_retry(request=None, reason=None, einfo=None, **rest):
+def _task_retry(request=None, reason=None, einfo=None, **extra):
     _emit(
         task_log,
         {
             "event": "task_retry",
             "task_id": getattr(request, "id", None),
             "task_name": getattr(request, "task", None),
-            "job_type": getattr(request, "task", None),
-            "outcome": "retry",
-            "error_class": type(reason).__name__ if reason else None,
-            "error": str(reason) if reason else None,
+            "reason": str(reason) if reason else None,
         },
         level=logging.WARNING,
     )
 
 
 @task_failure.connect
-def _task_failure(task_id=None, exception=None, args=None, kwargs=None, traceback=None, einfo=None, sender=None, **rest):
+def _task_failure(task_id=None, exception=None, args=None, kwargs=None, traceback=None, einfo=None, sender=None, **extra):
     _emit(
         task_log,
         {
             "event": "task_failure",
             "task_id": task_id,
-            "task_name": getattr(sender, "name", None) if sender else None,
-            "job_type": getattr(sender, "name", None) if sender else None,
-            "outcome": "failed",
-            "error_class": type(exception).__name__ if exception else None,
-            "error": str(exception) if exception else None,
+            "task_name": getattr(sender, "name", None),
+            "exception": str(exception) if exception else None,
         },
         level=logging.ERROR,
     )
+    

@@ -8,7 +8,7 @@ from ..services.market_sync_service import (
     build_city_dispatch_plan,
     build_daily_dispatch_plan,
 )
-from ..tasks.ingestion_tasks import sync_source_task
+from .ingestion_tasks import sync_source_task
 
 
 """
@@ -97,4 +97,3 @@ def sync_supported_city_task(
         return plan
     finally:
         db.close()
-        

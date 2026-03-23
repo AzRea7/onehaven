@@ -537,6 +537,7 @@ body {
   border-radius: var(--radius-xl);
   background: color-mix(in srgb, var(--bg-panel-strong) 96%, transparent);
   padding: 1rem 1rem;
+  margin-bottom: 1rem;
   box-shadow: var(--shadow-glow);
   backdrop-filter: blur(14px);
 }

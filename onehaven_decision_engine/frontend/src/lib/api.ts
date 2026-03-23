@@ -1,3 +1,4 @@
+// frontend/src/lib/api.ts
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 
 type AuthContext = {
@@ -13,6 +14,25 @@ export type Principal = {
   email: string;
   role: string;
   plan_code?: string | null;
+};
+
+export type SupportedMarket = {
+  slug: string;
+  label: string;
+  state: string;
+  county?: string | null;
+  city?: string | null;
+  zip_codes?: string[];
+  coverage_tier?: string | null;
+  priority?: number | null;
+  is_active?: boolean;
+  sync_limit?: number | null;
+  sync_every_hours?: number | null;
+  min_price?: number | null;
+  max_price?: number | null;
+  property_types?: string[] | null;
+  max_units?: number | null;
+  notes?: string | null;
 };
 
 export type PolicyMarketPayload = {
@@ -209,6 +229,12 @@ export type IngestionSyncLaunchPayload = {
   execute_inline?: boolean;
 };
 
+type ApiRequestOptions = {
+  cacheTtlMs?: number;
+  signal?: AbortSignal;
+  params?: Record<string, any>;
+};
+
 export function getOrgSlug(): string {
   const env = (import.meta as any).env || {};
   const envOrg = (env.VITE_ORG_SLUG as string | undefined)?.trim();
@@ -299,12 +325,30 @@ function cacheKey(method: string, path: string, body?: any) {
 
 function qs(params: Record<string, any>) {
   const sp = new URLSearchParams();
+
   Object.entries(params).forEach(([k, v]) => {
     if (v === undefined || v === null || v === "") return;
+
+    if (Array.isArray(v)) {
+      v.forEach((item) => {
+        if (item === undefined || item === null || item === "") return;
+        sp.append(k, String(item));
+      });
+      return;
+    }
+
     sp.set(k, String(v));
   });
+
   const s = sp.toString();
   return s ? `?${s}` : "";
+}
+
+function appendParamsToPath(path: string, params?: Record<string, any>) {
+  if (!params || Object.keys(params).length === 0) return path;
+  const suffix = qs(params);
+  if (!suffix) return path;
+  return path.includes("?") ? `${path}&${suffix.slice(1)}` : `${path}${suffix}`;
 }
 
 function isValidId(value: any): value is number {
@@ -355,6 +399,7 @@ async function request<T>(
     | (RequestInit & {
         cacheTtlMs?: number;
         signal?: AbortSignal;
+        params?: Record<string, any>;
       })
     | undefined,
 ): Promise<T> {
@@ -362,8 +407,10 @@ async function request<T>(
   const method = (init?.method || "GET").toUpperCase();
   const ttl = init?.cacheTtlMs ?? (method === "GET" ? 4_000 : 0);
 
+  const finalPath = appendParamsToPath(path, init?.params);
+
   const bodyKey = typeof init?.body === "string" ? init.body : undefined;
-  const key = cacheKey(method, path, bodyKey);
+  const key = cacheKey(method, finalPath, bodyKey);
 
   if (method === "GET" && ttl > 0) {
     const hit = memCache.get(key);
@@ -392,11 +439,11 @@ async function request<T>(
     }
 
     const isAuthBootstrap =
-      path.startsWith("/auth/login") ||
-      path.startsWith("/auth/register") ||
-      path.startsWith("/auth/logout") ||
-      path.startsWith("/auth/orgs") ||
-      path.startsWith("/auth/select-org");
+      finalPath.startsWith("/auth/login") ||
+      finalPath.startsWith("/auth/register") ||
+      finalPath.startsWith("/auth/logout") ||
+      finalPath.startsWith("/auth/orgs") ||
+      finalPath.startsWith("/auth/select-org");
 
     if (auth.orgSlug && !isAuthBootstrap) {
       headers["X-Org-Slug"] = auth.orgSlug;
@@ -404,7 +451,7 @@ async function request<T>(
     if (auth.devEmail) headers["X-User-Email"] = auth.devEmail;
     if (auth.devRole) headers["X-User-Role"] = auth.devRole;
 
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${API_BASE}${finalPath}`, {
       ...init,
       credentials: "include",
       headers,
@@ -414,7 +461,7 @@ async function request<T>(
     if (!res.ok) {
       const text = await res.text();
 
-      if (res.status === 401 && path.startsWith("/auth/me")) {
+      if (res.status === 401 && finalPath.startsWith("/auth/me")) {
         return null as any as T;
       }
 
@@ -450,6 +497,7 @@ async function requestArray<T = any>(
     | (RequestInit & {
         cacheTtlMs?: number;
         signal?: AbortSignal;
+        params?: Record<string, any>;
       })
     | undefined,
 ): Promise<T[]> {
@@ -457,15 +505,15 @@ async function requestArray<T = any>(
   return asArray<T>(data);
 }
 
+
+
 export const api = {
-  get: <T = any>(
-    path: string,
-    init?: { cacheTtlMs?: number; signal?: AbortSignal },
-  ) =>
+  get: <T = any>(path: string, init?: ApiRequestOptions) =>
     request<T>(path, {
       method: "GET",
       cacheTtlMs: init?.cacheTtlMs ?? 0,
       signal: init?.signal,
+      params: init?.params,
     }),
 
   post: <T = any>(
@@ -504,14 +552,12 @@ export const api = {
       signal: init?.signal,
     }),
 
-  delete: <T = any>(
-    path: string,
-    init?: { cacheTtlMs?: number; signal?: AbortSignal },
-  ) =>
+  delete: <T = any>(path: string, init?: ApiRequestOptions) =>
     request<T>(path, {
       method: "DELETE",
       cacheTtlMs: init?.cacheTtlMs,
       signal: init?.signal,
+      params: init?.params,
     }),
 
   authRegister: (payload: {
@@ -545,6 +591,33 @@ export const api = {
   authSelectOrg: (orgSlug: string) =>
     request<any>(`/auth/select-org${qs({ org_slug: orgSlug })}`, {
       method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  supportedMarkets: (signal?: AbortSignal) =>
+    requestArray<SupportedMarket>(`/markets/supported`, {
+      method: "GET",
+      cacheTtlMs: 3_000,
+      signal,
+    }),
+
+  marketCoverage: (city: string, state: string = "MI", signal?: AbortSignal) =>
+    request<any>(`/markets/coverage`, {
+      method: "GET",
+      cacheTtlMs: 0,
+      signal,
+      params: { city, state },
+    }),
+
+  syncSupportedCity: (
+    city: string,
+    state: string = "MI",
+    signal?: AbortSignal,
+  ) =>
+    request<any>(`/markets/sync-city`, {
+      method: "POST",
+      signal,
+      params: { city, state },
       body: JSON.stringify({}),
     }),
 

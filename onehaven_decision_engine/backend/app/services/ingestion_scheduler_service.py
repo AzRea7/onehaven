@@ -1,4 +1,3 @@
-# backend/app/services/ingestion_scheduler_service.py
 from __future__ import annotations
 
 import logging
@@ -21,17 +20,9 @@ from .jurisdiction_refresh_service import (
     list_jurisdictions_needing_refresh as _list_jurisdictions_needing_refresh,
 )
 from .locks_service import LockResult, acquire_lock, get_lock
+from .market_catalog_service import list_active_supported_markets
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_DAILY_MARKETS: list[dict[str, Any]] = [
-    {"state": "MI", "county": "wayne", "city": "detroit"},
-    {"state": "MI", "county": "wayne", "city": "dearborn"},
-    {"state": "MI", "county": "oakland", "city": "pontiac"},
-    {"state": "MI", "county": "oakland", "city": "southfield"},
-    {"state": "MI", "county": "macomb", "city": "warren"},
-    {"state": "MI", "county": "macomb", "city": "sterling heights"},
-]
 
 DEFAULT_DAILY_SYNC_LOCK_TTL_SECONDS = 60 * 60 * 2
 DEFAULT_DISPATCH_DEDUPE_TTL_SECONDS = 60 * 60 * 36
@@ -52,7 +43,9 @@ def build_lock_owner(*, prefix: str = "scheduler") -> str:
 
 
 def list_default_daily_markets() -> list[dict[str, Any]]:
-    return [dict(x) for x in DEFAULT_DAILY_MARKETS]
+    markets = list_active_supported_markets()
+    limit = int(getattr(settings, "market_sync_daily_market_limit", 6) or 6)
+    return [dict(x) for x in markets[: max(1, limit)]]
 
 
 def compute_next_daily_sync(now: datetime | None = None) -> datetime:
@@ -67,7 +60,10 @@ def build_runtime_payload(*, state: str | None, county: str | None, city: str | 
     payload = {
         "trigger_type": "daily_refresh",
         "state": (state or "MI").strip(),
-        "limit": 250,
+        "limit": int(getattr(settings, "market_sync_default_limit_per_market", 125) or 125),
+        "max_price": int(getattr(settings, "investor_buy_box_max_price", 200_000) or 200_000),
+        "max_units": int(getattr(settings, "investor_buy_box_max_units", 4) or 4),
+        "property_types": ["single_family", "multi_family"],
     }
     if county:
         payload["county"] = county.strip()
@@ -254,130 +250,50 @@ def dispatch_daily_sync_for_org(
     *,
     org_id: int,
     enqueue_sync: Callable[[int, int, str, dict[str, Any]], Any],
-    now: datetime | None = None,
-    owner: str | None = None,
-    markets: list[dict[str, Any]] | None = None,
-    lock_ttl_seconds: int | None = None,
-    dedupe_ttl_seconds: int | None = None,
 ) -> dict[str, Any]:
-    now = now or _utcnow()
-    owner = owner or build_lock_owner(prefix="daily-sync")
-    lock_ttl_seconds = int(lock_ttl_seconds or DEFAULT_DAILY_SYNC_LOCK_TTL_SECONDS)
-    dedupe_ttl_seconds = int(dedupe_ttl_seconds or DEFAULT_DISPATCH_DEDUPE_TTL_SECONDS)
-    markets = markets or list_default_daily_markets()
+    ensure_default_manual_sources(db, org_id=int(org_id))
+    sources = [s for s in list_sources(db, org_id=int(org_id)) if bool(getattr(s, "is_enabled", False))]
+    markets = list_default_daily_markets()
 
-    scheduler_lock = acquire_lock(
+    owner = build_lock_owner(prefix="daily_sync")
+    lock = acquire_lock(
         db,
         org_id=int(org_id),
         lock_key=daily_sync_lock_key(int(org_id)),
         owner=owner,
-        ttl_seconds=lock_ttl_seconds,
-        now=now,
+        ttl_seconds=int(getattr(settings, "daily_sync_lock_ttl_seconds", DEFAULT_DAILY_SYNC_LOCK_TTL_SECONDS)),
     )
-    db.commit()
+    if not lock.acquired:
+        return {"ok": False, "reason": "daily_sync_lock_not_acquired", "org_id": int(org_id)}
 
-    if not scheduler_lock.acquired:
-        _emit(
-            {
-                "event": "daily_sync_skipped_locked",
-                "job_type": "daily_sync",
-                "org_id": int(org_id),
-                "outcome": "skipped_locked",
-                "lock_key": scheduler_lock.lock_key,
-                "holder": scheduler_lock.holder,
-                "expires_at": scheduler_lock.expires_at.isoformat() if scheduler_lock.expires_at else None,
-            }
-        )
-        return {
-            "ok": True,
-            "org_id": int(org_id),
-            "status": "skipped_locked",
-            "lock": {
-                "acquired": scheduler_lock.acquired,
-                "lock_key": scheduler_lock.lock_key,
-                "holder": scheduler_lock.holder,
-                "expires_at": scheduler_lock.expires_at.isoformat() if scheduler_lock.expires_at else None,
-                "stale": scheduler_lock.stale,
-            },
-            "queued": 0,
-            "skipped": 0,
-            "results": [],
-        }
-
-    ensure_default_manual_sources(db, org_id=int(org_id))
-    sources = [
-        s
-        for s in list_sources(db, org_id=int(org_id))
-        if bool(getattr(s, "is_enabled", False))
-    ]
-
-    day_key = now.date().isoformat()
+    day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     queued = 0
-    skipped = 0
     results: list[dict[str, Any]] = []
 
-    _emit(
-        {
-            "event": "daily_sync_dispatch_start",
-            "job_type": "daily_sync",
-            "org_id": int(org_id),
-            "lock_key": scheduler_lock.lock_key,
-            "outcome": "running",
-            "source_count": len(sources),
-            "market_count": len(markets),
-        }
-    )
+    for market in markets:
+        city = str(market.get("city") or "").strip().lower()
+        matching_sources = [
+            s for s in sources
+            if city and city in str((getattr(s, "config_json", {}) or {}).get("city") or "").strip().lower()
+        ]
 
-    for source in sources:
-        source_id = int(getattr(source, "id"))
-        source_key = _source_key(source)
-
-        for market in markets:
-            dedupe_key = _dispatch_dedupe_key(
+        for source in matching_sources:
+            source_key = _source_key(source)
+            dispatch_key = _dispatch_dedupe_key(
                 org_id=int(org_id),
                 day_key=day_key,
                 source_key=source_key,
                 market=market,
             )
-            dedupe_lock = acquire_lock(
+
+            acquire = acquire_lock(
                 db,
                 org_id=int(org_id),
-                lock_key=dedupe_key,
+                lock_key=dispatch_key,
                 owner=owner,
-                ttl_seconds=dedupe_ttl_seconds,
-                now=now,
+                ttl_seconds=int(getattr(settings, "dispatch_dedupe_ttl_seconds", DEFAULT_DISPATCH_DEDUPE_TTL_SECONDS)),
             )
-            db.commit()
-
-            if not dedupe_lock.acquired:
-                skipped += 1
-                _emit(
-                    {
-                        "event": "daily_sync_dispatch_duplicate_skip",
-                        "job_type": "daily_sync",
-                        "org_id": int(org_id),
-                        "source": source_key,
-                        "source_id": source_id,
-                        "lock_key": dedupe_key,
-                        "outcome": "skipped_duplicate",
-                        "holder": dedupe_lock.holder,
-                        "state": market.get("state"),
-                        "county": market.get("county"),
-                        "city": market.get("city"),
-                    }
-                )
-                results.append(
-                    {
-                        "queued": False,
-                        "reason": "duplicate_for_day",
-                        "source_id": source_id,
-                        "source_key": source_key,
-                        "market": dict(market),
-                        "lock_key": dedupe_key,
-                        "holder": dedupe_lock.holder,
-                        "expires_at": dedupe_lock.expires_at.isoformat() if dedupe_lock.expires_at else None,
-                    }
-                )
+            if not acquire.acquired:
                 continue
 
             payload = build_runtime_payload(
@@ -390,101 +306,26 @@ def dispatch_daily_sync_for_org(
                 source=source,
                 market=market,
                 day_key=day_key,
-                dispatch_key=dedupe_key,
+                dispatch_key=dispatch_key,
             )
 
-            enqueue_sync(int(org_id), source_id, "daily_refresh", payload)
+            task = enqueue_sync(int(org_id), int(source.id), "daily_refresh", payload)
             queued += 1
-            _emit(
-                {
-                    "event": "daily_sync_enqueued",
-                    "job_type": "daily_sync",
-                    "org_id": int(org_id),
-                    "source": source_key,
-                    "source_id": source_id,
-                    "lock_key": dedupe_key,
-                    "outcome": "queued",
-                    "state": market.get("state"),
-                    "county": market.get("county"),
-                    "city": market.get("city"),
-                }
-            )
             results.append(
                 {
-                    "queued": True,
-                    "reason": "enqueued",
-                    "source_id": source_id,
-                    "source_key": source_key,
-                    "market": dict(market),
-                    "runtime_payload": payload,
-                    "lock_key": dedupe_key,
+                    "source_id": int(source.id),
+                    "source_slug": getattr(source, "slug", None),
+                    "city": market.get("city"),
+                    "county": market.get("county"),
+                    "state": market.get("state"),
+                    "task_id": str(getattr(task, "id", None)),
                 }
             )
-
-    _emit(
-        {
-            "event": "daily_sync_dispatch_complete",
-            "job_type": "daily_sync",
-            "org_id": int(org_id),
-            "queued": queued,
-            "skipped": skipped,
-            "source_count": len(sources),
-            "market_count": len(markets),
-            "outcome": "completed",
-        }
-    )
 
     return {
         "ok": True,
         "org_id": int(org_id),
-        "status": "dispatched",
-        "lock": {
-            "acquired": scheduler_lock.acquired,
-            "lock_key": scheduler_lock.lock_key,
-            "holder": scheduler_lock.holder,
-            "expires_at": scheduler_lock.expires_at.isoformat() if scheduler_lock.expires_at else None,
-            "stale": scheduler_lock.stale,
-        },
         "queued": queued,
-        "skipped": skipped,
         "results": results,
-    }
-
-
-def dispatch_daily_sync_for_all_orgs(
-    db: Session,
-    *,
-    enqueue_sync: Callable[[int, int, str, dict[str, Any]], Any],
-    org_ids: list[int] | None = None,
-    now: datetime | None = None,
-    owner: str | None = None,
-    markets: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    now = now or _utcnow()
-    owner = owner or build_lock_owner(prefix="daily-sync")
-    org_ids = org_ids or list_org_ids_with_enabled_sources(db)
-
-    per_org: list[dict[str, Any]] = []
-    total_queued = 0
-    total_skipped = 0
-
-    for org_id in org_ids:
-        result = dispatch_daily_sync_for_org(
-            db,
-            org_id=int(org_id),
-            enqueue_sync=enqueue_sync,
-            now=now,
-            owner=owner,
-            markets=markets,
-        )
-        total_queued += int(result.get("queued", 0) or 0)
-        total_skipped += int(result.get("skipped", 0) or 0)
-        per_org.append(result)
-
-    return {
-        "ok": True,
-        "org_count": len(org_ids),
-        "queued": total_queued,
-        "skipped": total_skipped,
-        "results": per_org,
+        "markets": markets,
     }

@@ -87,10 +87,10 @@ DEFAULT_SOURCES = [
 
 
 def compute_next_scheduled_at(source: IngestionSource) -> Optional[datetime]:
-    if not source.is_enabled:
+    if not bool(getattr(source, "is_enabled", False)):
         return None
-    mins = int(source.sync_interval_minutes or 1440)
-    base = source.last_synced_at or _utcnow()
+    mins = int(getattr(source, "sync_interval_minutes", None) or 1440)
+    base = getattr(source, "last_synced_at", None) or _utcnow()
     return base + timedelta(minutes=mins)
 
 
@@ -208,7 +208,8 @@ def ensure_default_manual_sources(db: Session, *, org_id: int) -> list[Ingestion
                 changed = True
 
             if changed:
-                existing.updated_at = _utcnow()
+                if hasattr(existing, "updated_at"):
+                    existing.updated_at = _utcnow()
                 db.add(existing)
 
         out.append(existing)
@@ -267,16 +268,16 @@ def create_source(db: Session, *, org_id: int, payload) -> IngestionSource:
         slug=payload.slug,
         display_name=payload.display_name,
         source_type=payload.source_type,
-        is_enabled=payload.is_enabled,
+        is_enabled=getattr(payload, "is_enabled", True),
         status=_derive_status(
             provider=payload.provider,
-            credentials_json=payload.credentials_json or {},
+            credentials_json=getattr(payload, "credentials_json", None) or {},
         ),
-        base_url=payload.base_url,
-        schedule_cron=payload.schedule_cron,
-        sync_interval_minutes=payload.sync_interval_minutes,
-        config_json=payload.config_json or {},
-        credentials_json=payload.credentials_json or {},
+        base_url=getattr(payload, "base_url", None),
+        schedule_cron=getattr(payload, "schedule_cron", None),
+        sync_interval_minutes=getattr(payload, "sync_interval_minutes", None),
+        config_json=getattr(payload, "config_json", None) or {},
+        credentials_json=getattr(payload, "credentials_json", None) or {},
         cursor_json={},
     )
     row.next_scheduled_at = compute_next_scheduled_at(row)
@@ -303,6 +304,7 @@ def create_source(db: Session, *, org_id: int, payload) -> IngestionSource:
 def update_source(db: Session, *, row: IngestionSource, payload) -> IngestionSource:
     for field in [
         "display_name",
+        "source_type",
         "is_enabled",
         "base_url",
         "schedule_cron",
@@ -310,9 +312,10 @@ def update_source(db: Session, *, row: IngestionSource, payload) -> IngestionSou
         "config_json",
         "credentials_json",
     ]:
-        value = getattr(payload, field, None)
-        if value is not None:
-            setattr(row, field, value)
+        if hasattr(payload, field):
+            value = getattr(payload, field)
+            if value is not None:
+                setattr(row, field, value)
 
     incoming_status = getattr(payload, "status", None)
     if incoming_status is not None:
@@ -322,7 +325,10 @@ def update_source(db: Session, *, row: IngestionSource, payload) -> IngestionSou
         provider=row.provider,
         credentials_json=row.credentials_json or {},
     )
-    row.updated_at = _utcnow()
+
+    if hasattr(row, "updated_at"):
+        row.updated_at = _utcnow()
+
     row.next_scheduled_at = compute_next_scheduled_at(row)
 
     db.add(row)

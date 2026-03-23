@@ -7,12 +7,14 @@ from ..services.ingestion_scheduler_service import (
     build_jurisdiction_refresh_payload,
     build_location_refresh_payload,
     build_runtime_payload,
-    list_default_daily_markets,
+    dispatch_daily_sync_for_org,
     list_jurisdictions_needing_refresh,
+    list_org_ids_with_enabled_sources,
     list_properties_needing_location_refresh,
 )
 from ..services.ingestion_source_service import (
     ensure_default_manual_sources,
+    get_source,
     list_sources,
 )
 from ..services.jurisdiction_notification_service import notify_stale_jurisdictions
@@ -28,6 +30,7 @@ from ..services.rent_refresh_queue_service import (
     list_properties_for_budgeted_rent_refresh,
     should_queue_rent_refresh_after_sync,
 )
+
 
 def _pipeline_outcome(summary_json: dict | None) -> dict:
     summary = dict(summary_json or {})
@@ -68,8 +71,6 @@ def sync_source_task(
 ):
     db = SessionLocal()
     try:
-        from ..services.ingestion_source_service import get_source
-
         source = get_source(db, org_id=int(org_id), source_id=int(source_id))
         if source is None:
             return {"ok": False, "error": "source_not_found", "source_id": source_id}
@@ -115,7 +116,7 @@ def sync_source_task(
 def sync_due_sources_task():
     db = SessionLocal()
     try:
-        org_ids = [1]
+        org_ids = list_org_ids_with_enabled_sources(db) or [1]
         queued = 0
         for org_id in org_ids:
             ensure_default_manual_sources(db, org_id=int(org_id))
@@ -133,33 +134,28 @@ def sync_due_sources_task():
 def daily_market_refresh_task():
     db = SessionLocal()
     try:
-        org_ids = [1]
+        org_ids = list_org_ids_with_enabled_sources(db) or [1]
         queued = 0
-        markets = list_default_daily_markets()
+        runs: list[dict] = []
+
         for org_id in org_ids:
-            ensure_default_manual_sources(db, org_id=int(org_id))
-            sources = [
-                s
-                for s in list_sources(db, org_id=int(org_id))
-                if bool(getattr(s, "is_enabled", False))
-            ]
-            for market in markets:
-                for source in sources:
-                    payload = build_runtime_payload(
-                        state=market.get("state"),
-                        county=market.get("county"),
-                        city=market.get("city"),
-                    )
-                    sync_source_task.delay(
-                        int(org_id),
-                        int(source.id),
-                        "daily_refresh",
-                        payload,
-                    )
-                    queued += 1
-        return {"ok": True, "queued": queued, "markets": markets}
+            result = dispatch_daily_sync_for_org(
+                db,
+                org_id=int(org_id),
+                enqueue_sync=lambda _org_id, _source_id, _trigger_type, _payload: sync_source_task.delay(
+                    int(_org_id),
+                    int(_source_id),
+                    _trigger_type,
+                    _payload,
+                ),
+            )
+            queued += int(result.get("queued", 0) or 0)
+            runs.append(result)
+
+        return {"ok": True, "queued": queued, "runs": runs}
     finally:
         db.close()
+
 
 @celery_app.task(name="rent.refresh_property")
 def refresh_property_rent_task(
@@ -212,210 +208,97 @@ def refresh_budgeted_rent_batch_task(
             "ok": True,
             "org_id": int(org_id),
             "queued": queued,
-            "property_ids": property_ids,
-            "limit": effective_limit,
-        }
-    finally:
-        db.close()
-
-@celery_app.task(name="location.refresh_property")
-def refresh_property_location_task(
-    org_id: int,
-    property_id: int,
-    force: bool = False,
-):
-    db = SessionLocal()
-    try:
-        result = enrich_property_geo(
-            db,
-            org_id=int(org_id),
-            property_id=int(property_id),
-            force=bool(force),
-        )
-        return {
-            "ok": bool(result.get("ok")),
-            "property_id": int(property_id),
-            "org_id": int(org_id),
-            "force": bool(force),
-            "result": result,
+            "property_ids": [int(x) for x in property_ids],
         }
     finally:
         db.close()
 
 
 @celery_app.task(name="location.refresh_stale_properties")
-def refresh_stale_locations_task(
-    org_id: int = 1,
-    *,
-    force: bool = False,
-    batch_size: int | None = None,
-):
+def refresh_stale_locations_task(org_id: int = 1, force: bool = False, batch_size: int | None = None):
     db = SessionLocal()
     try:
+        payload = build_location_refresh_payload(force=force, batch_size=batch_size)
         rows = list_properties_needing_location_refresh(
             db,
             org_id=int(org_id),
-            batch_size=batch_size,
+            batch_size=int(payload["batch_size"]),
         )
-
-        queued = 0
+        refreshed = 0
         property_ids: list[int] = []
+
         for row in rows:
-            property_id = int(getattr(row, "id"))
-            refresh_property_location_task.delay(
-                int(org_id),
-                property_id,
-                bool(force),
+            result = enrich_property_geo(
+                db,
+                org_id=int(org_id),
+                property_id=int(row.id),
+                force=bool(payload["force"]),
             )
-            queued += 1
-            property_ids.append(property_id)
+            if bool(result.get("ok")):
+                refreshed += 1
+                property_ids.append(int(row.id))
 
         return {
             "ok": True,
             "org_id": int(org_id),
-            "queued": queued,
+            "requested_batch_size": int(payload["batch_size"]),
+            "refreshed": refreshed,
             "property_ids": property_ids,
-            "force": bool(force),
-            "payload": build_location_refresh_payload(force=force, batch_size=batch_size),
         }
-    finally:
-        db.close()
-
-
-@celery_app.task(name="jurisdiction.refresh_profile")
-def refresh_jurisdiction_profile_task(
-    jurisdiction_profile_id: int,
-    *,
-    reviewer_user_id: int | None = None,
-    force: bool = False,
-    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
-):
-    db = SessionLocal()
-    try:
-        result = refresh_jurisdiction_profile(
-            db,
-            jurisdiction_profile_id=int(jurisdiction_profile_id),
-            reviewer_user_id=reviewer_user_id,
-            force=bool(force),
-            stale_days=int(stale_days),
-        )
-        return result
     finally:
         db.close()
 
 
 @celery_app.task(name="jurisdiction.refresh_stale_profiles")
 def refresh_stale_jurisdictions_task(
-    org_id: int = 1,
-    *,
-    reviewer_user_id: int | None = None,
-    batch_size: int | None = None,
+    org_id: int | None = None,
     stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
 ):
     db = SessionLocal()
     try:
         rows = list_jurisdictions_needing_refresh(
             db,
-            org_id=int(org_id),
-            batch_size=batch_size,
-            stale_days=int(stale_days),
+            org_id=org_id,
+            stale_days=stale_days,
         )
-
-        queued = 0
-        jurisdiction_profile_ids: list[int] = []
-        payloads: list[dict] = []
+        refreshed = 0
+        ids: list[int] = []
 
         for row in rows:
-            jurisdiction_profile_id = int(getattr(row, "id"))
-            refresh_jurisdiction_profile_task.delay(
-                jurisdiction_profile_id,
-                reviewer_user_id=reviewer_user_id,
+            payload = build_jurisdiction_refresh_payload(
+                org_id=getattr(row, "org_id", None),
+                jurisdiction_profile_id=int(row.id),
+                state=getattr(row, "state", None),
+                county=getattr(row, "county", None),
+                city=getattr(row, "city", None),
+                pha_name=getattr(row, "pha_name", None),
+                reason="stale_scheduler_refresh",
                 force=False,
-                stale_days=int(stale_days),
+                stale_days=stale_days,
             )
-            queued += 1
-            jurisdiction_profile_ids.append(jurisdiction_profile_id)
-            payloads.append(
-                build_jurisdiction_refresh_payload(
-                    org_id=getattr(row, "org_id", None),
-                    jurisdiction_profile_id=jurisdiction_profile_id,
-                    state=getattr(row, "state", None),
-                    county=getattr(row, "county", None),
-                    city=getattr(row, "city", None),
-                    pha_name=getattr(row, "pha_name", None),
-                    reason=getattr(row, "stale_reason", None),
-                    force=False,
-                    stale_days=int(stale_days),
-                )
-            )
+            result = refresh_jurisdiction_profile(db, payload=payload)
+            if bool(result.get("ok")):
+                refreshed += 1
+                ids.append(int(row.id))
 
-        return {
-            "ok": True,
-            "org_id": int(org_id),
-            "queued": queued,
-            "jurisdiction_profile_ids": jurisdiction_profile_ids,
-            "payloads": payloads,
-        }
+        return {"ok": True, "refreshed": refreshed, "jurisdiction_profile_ids": ids}
     finally:
         db.close()
 
 
 @celery_app.task(name="jurisdiction.notify_stale_profiles")
 def notify_stale_jurisdictions_task(
-    org_id: int = 1,
-    *,
-    force: bool = False,
-    limit: int | None = None,
+    org_id: int | None = None,
+    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
 ):
     db = SessionLocal()
     try:
         result = notify_stale_jurisdictions(
             db,
-            org_id=int(org_id),
-            force=bool(force),
-            limit=limit,
+            org_id=org_id,
+            stale_days=stale_days,
         )
-        return result
+        return {"ok": True, "result": result}
     finally:
         db.close()
-
-
-celery_app.conf.beat_schedule.setdefault(
-    "ingestion-sync-due-hourly",
-    {
-        "task": "ingestion.sync_due_sources",
-        "schedule": 60 * 60,
-    },
-)
-
-celery_app.conf.beat_schedule.setdefault(
-    "ingestion-daily-market-refresh",
-    {
-        "task": "ingestion.daily_market_refresh",
-        "schedule": 24 * 60 * 60,
-    },
-)
-
-celery_app.conf.beat_schedule.setdefault(
-    "location-refresh-stale-properties",
-    {
-        "task": "location.refresh_stale_properties",
-        "schedule": 6 * 60 * 60,
-    },
-)
-
-celery_app.conf.beat_schedule.setdefault(
-    "jurisdiction-refresh-stale-profiles",
-    {
-        "task": "jurisdiction.refresh_stale_profiles",
-        "schedule": 12 * 60 * 60,
-    },
-)
-
-celery_app.conf.beat_schedule.setdefault(
-    "jurisdiction-notify-stale-profiles",
-    {
-        "task": "jurisdiction.notify_stale_profiles",
-        "schedule": 12 * 60 * 60,
-    },
-)
+        

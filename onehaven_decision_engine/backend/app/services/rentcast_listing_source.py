@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 import httpx
 
+from ..config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,7 +21,6 @@ class RentCastListingFetchResult:
 
 class RentCastListingSource:
     provider = "rentcast"
-
     SALE_LISTINGS_URL = "https://api.rentcast.io/v1/listings/sale"
 
     def _get_api_key(self, credentials: dict[str, Any]) -> str:
@@ -27,6 +28,7 @@ class RentCastListingSource:
             (credentials or {}).get("api_key")
             or os.getenv("RENTCAST_INGESTION_API_KEY")
             or os.getenv("RENTCAST_API_KEY")
+            or getattr(settings, "rentcast_api_key", None)
             or ""
         ).strip()
         if not key:
@@ -99,6 +101,14 @@ class RentCastListingSource:
 
         return raw.replace(" ", "_")
 
+    def _to_provider_property_type(self, value: str) -> str | None:
+        norm = self._normalize_property_type(value)
+        if norm == "single_family":
+            return "Single Family"
+        if norm == "multi_family":
+            return "Multi Family"
+        return None
+
     def _coerce_zip_codes(self, config: dict[str, Any]) -> list[str]:
         out: list[str] = []
 
@@ -125,28 +135,6 @@ class RentCastListingSource:
 
         return deduped
 
-    def _coerce_price_buckets(self, config: dict[str, Any]) -> list[tuple[float | None, float | None]]:
-        raw = config.get("price_buckets")
-        out: list[tuple[float | None, float | None]] = []
-
-        if isinstance(raw, list):
-            for item in raw:
-                if isinstance(item, (list, tuple)) and len(item) == 2:
-                    lo = self._safe_float(item[0], None)
-                    hi = self._safe_float(item[1], None)
-                    out.append((lo, hi))
-
-        if out:
-            return out
-
-        min_price = self._safe_float(config.get("min_price"), None)
-        max_price = self._safe_float(config.get("max_price"), None)
-
-        if min_price is not None or max_price is not None:
-            return [(min_price, max_price)]
-
-        return [(None, None)]
-
     def _coerce_photo_rows(self, raw: Any) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         if not raw:
@@ -156,9 +144,8 @@ class RentCastListingSource:
             for item in raw:
                 if isinstance(item, str):
                     url = item.strip()
-                    if not url:
-                        continue
-                    out.append({"url": url, "kind": "unknown"})
+                    if url:
+                        out.append({"url": url, "kind": "unknown"})
                     continue
 
                 if isinstance(item, dict):
@@ -179,7 +166,6 @@ class RentCastListingSource:
                         or item.get("type")
                         or "unknown"
                     ).strip() or "unknown"
-
                     out.append({"url": url, "kind": kind})
 
         return out
@@ -272,222 +258,109 @@ class RentCastListingSource:
             "approved_rent_ceiling": None,
             "inventory_count": None,
             "photos": photos,
-            "raw": item,
+            "source": "rentcast",
+            "raw_json": item,
         }
 
-    def _extract_items(self, payload: Any) -> tuple[list[dict[str, Any]], str]:
-        if isinstance(payload, list):
-            return [x for x in payload if isinstance(x, dict)], "list"
-
-        if not isinstance(payload, dict):
-            return [], "non_dict"
-
-        candidate_keys = [
-            "results",
-            "items",
-            "rows",
-            "data",
-            "listings",
-            "saleListings",
-            "properties",
-            "records",
-        ]
-
-        for key in candidate_keys:
-            value = payload.get(key)
-            if isinstance(value, list):
-                return [x for x in value if isinstance(x, dict)], key
-
-        nested = payload.get("data")
-        if isinstance(nested, dict):
-            for key in candidate_keys:
-                value = nested.get(key)
-                if isinstance(value, list):
-                    return [x for x in value if isinstance(x, dict)], f"data.{key}"
-
-        for key, value in payload.items():
-            if isinstance(value, list) and value and all(isinstance(x, dict) for x in value):
-                return [x for x in value if isinstance(x, dict)], key
-
-        return [], "empty"
-
-    def _base_request_values(self, *, config: dict[str, Any], cursor: dict[str, Any]) -> dict[str, Any]:
-        city = self._normalize_optional_text(config.get("city"))
-        state = self._normalize_optional_text(config.get("state")) or "MI"
-        limit = self._safe_int(config.get("limit"), 100) or 100
-        page = self._safe_int((cursor or {}).get("page"), 1) or 1
-        min_bedrooms = self._safe_float(config.get("min_bedrooms"), None)
-        min_bathrooms = self._safe_float(config.get("min_bathrooms"), None)
-        property_type = self._normalize_optional_text(config.get("property_type"))
-
-        if limit < 1:
-            limit = 1
-
-        return {
-            "city": city,
-            "state": state,
-            "limit": limit,
-            "page": page,
-            "min_bedrooms": min_bedrooms,
-            "min_bathrooms": min_bathrooms,
-            "property_type": property_type,
-        }
-
-    def _build_params_for_shard(
-        self,
-        *,
-        config: dict[str, Any],
-        cursor: dict[str, Any],
-        zip_code: str | None,
-        min_price: float | None,
-        max_price: float | None,
-    ) -> dict[str, Any]:
-        base = self._base_request_values(config=config, cursor=cursor)
-
+    def _build_query_params(self, config: dict[str, Any], page: int, limit: int) -> dict[str, Any]:
         params: dict[str, Any] = {
-            "limit": base["limit"],
-            "page": base["page"],
+            "page": max(1, int(page)),
+            "limit": max(1, min(int(limit), 500)),
+            "status": "Active",
         }
 
-        if base["city"]:
-            params["city"] = base["city"]
-        if base["state"]:
-            params["state"] = base["state"]
+        state = self._normalize_optional_text(config.get("state")) or "MI"
+        city = self._normalize_optional_text(config.get("city"))
+        county = self._normalize_optional_text(config.get("county"))
+        zip_codes = self._coerce_zip_codes(config)
 
-        if zip_code:
-            params["zipCode"] = zip_code
+        params["state"] = state
+        if city:
+            params["city"] = city
+        elif county:
+            params["county"] = county
 
+        if zip_codes:
+            params["zipCode"] = ",".join(zip_codes)
+
+        min_price = self._safe_int(config.get("min_price"), None)
+        max_price = self._safe_int(config.get("max_price"), None)
         if min_price is not None:
-            params["minPrice"] = int(min_price)
+            params["minPrice"] = min_price
         if max_price is not None:
-            params["maxPrice"] = int(max_price)
-        if base["min_bedrooms"] is not None:
-            params["minBeds"] = int(base["min_bedrooms"])
-        if base["min_bathrooms"] is not None:
-            params["minBaths"] = float(base["min_bathrooms"])
-        if base["property_type"]:
-            params["propertyType"] = base["property_type"]
+            params["maxPrice"] = max_price
+
+        min_beds = self._safe_int(config.get("min_bedrooms") or config.get("min_beds"), None)
+        min_baths = self._safe_float(config.get("min_bathrooms") or config.get("min_baths"), None)
+        if min_beds is not None:
+            params["minBeds"] = min_beds
+        if min_baths is not None:
+            params["minBaths"] = min_baths
+
+        max_units = self._safe_int(config.get("max_units"), None)
+        if max_units is not None:
+            params["maxUnits"] = max_units
+
+        property_types = config.get("property_types")
+        if isinstance(property_types, str):
+            property_types = [x.strip() for x in property_types.split(",") if x.strip()]
+
+        provider_types: list[str] = []
+        for item in property_types or []:
+            mapped = self._to_provider_property_type(str(item))
+            if mapped:
+                provider_types.append(mapped)
+
+        if provider_types:
+            params["propertyType"] = ",".join(sorted(set(provider_types)))
+        else:
+            single_property_type = self._normalize_optional_text(config.get("property_type"))
+            if single_property_type:
+                mapped = self._to_provider_property_type(single_property_type)
+                if mapped:
+                    params["propertyType"] = mapped
 
         return params
 
-    def _fetch_one(
-        self,
-        *,
-        client: httpx.Client,
-        params: dict[str, Any],
-    ) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
-        res = client.get(self.SALE_LISTINGS_URL, params=params)
-        res.raise_for_status()
-        payload = res.json()
-
-        items, extracted_from = self._extract_items(payload)
-
-        if not items:
-            logger.warning(
-                "rentcast_sale_listings_empty_results",
-                extra={
-                    "event": "rentcast_sale_listings_empty_results",
-                    "params": params,
-                    "payload_type": type(payload).__name__,
-                    "payload_keys": list(payload.keys()) if isinstance(payload, dict) else None,
-                    "extracted_from": extracted_from,
-                },
-            )
-
-        rows: list[dict[str, Any]] = []
-        for item in items:
-            row = self._to_canonical_row(item)
-            if not row["external_record_id"]:
-                continue
-            if not row["address"]:
-                continue
-            rows.append(row)
-
-        return rows, len(items), payload
-
-    def fetch_incremental(
+    def load_rows_page(
         self,
         *,
         credentials: dict[str, Any],
-        config: dict[str, Any],
-        cursor: dict[str, Any],
-    ) -> dict[str, Any]:
-        api_key = self._get_api_key(credentials)
+        runtime_config: dict[str, Any],
+        cursor: dict[str, Any] | None,
+    ) -> RentCastListingFetchResult:
+        api_key = self._get_api_key(credentials or {})
+        config = dict(runtime_config or {})
 
-        zip_codes = self._coerce_zip_codes(config)
-        price_buckets = self._coerce_price_buckets(config)
+        page = self._safe_int((cursor or {}).get("page"), 1) or 1
+        limit = self._safe_int(config.get("limit"), getattr(settings, "ingestion_provider_page_limit", 50)) or 50
 
-        # If no ZIPs provided, still run one city/state shard.
-        zip_shards = zip_codes if zip_codes else [None]
+        params = self._build_query_params(config, page, limit)
 
-        # Keep provider-side search bounded.
-        pages_per_shard = self._safe_int(config.get("pages_per_shard"), 1) or 1
-        pages_per_shard = max(1, min(3, pages_per_shard))
+        logger.info("rentcast_fetch params=%s", params)
 
-        requested_limit = self._safe_int(config.get("limit"), 100) or 100
-        current_page = self._safe_int((cursor or {}).get("page"), 1) or 1
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(
+                self.SALE_LISTINGS_URL,
+                params=params,
+                headers=self._headers(api_key),
+            )
+            response.raise_for_status()
+            payload = response.json()
 
-        rows_out: list[dict[str, Any]] = []
-        seen_ids: set[str] = set()
-        total_raw_count = 0
+        raw_rows: list[dict[str, Any]]
+        if isinstance(payload, list):
+            raw_rows = [x for x in payload if isinstance(x, dict)]
+        elif isinstance(payload, dict):
+            raw_rows = [x for x in payload.get("listings", []) if isinstance(x, dict)]
+        else:
+            raw_rows = []
 
-        # Cursor for next call:
-        # we keep advancing the base page if at least one shard looked "full".
-        should_advance = False
+        rows = [self._to_canonical_row(item) for item in raw_rows]
+        next_cursor = {"page": page + 1} if len(raw_rows) >= int(limit) else {}
 
-        with httpx.Client(timeout=30.0, headers=self._headers(api_key)) as client:
-            for zip_code in zip_shards:
-                for (bucket_min, bucket_max) in price_buckets:
-                    for page_offset in range(pages_per_shard):
-                        shard_cursor = {"page": current_page + page_offset}
-                        params = self._build_params_for_shard(
-                            config=config,
-                            cursor=shard_cursor,
-                            zip_code=zip_code,
-                            min_price=bucket_min,
-                            max_price=bucket_max,
-                        )
-
-                        rows, raw_count, payload = self._fetch_one(client=client, params=params)
-                        total_raw_count += raw_count
-
-                        if raw_count >= requested_limit:
-                            should_advance = True
-
-                        for row in rows:
-                            ext_id = str(row.get("external_record_id") or "").strip()
-                            if not ext_id:
-                                continue
-                            if ext_id in seen_ids:
-                                continue
-                            seen_ids.add(ext_id)
-                            rows_out.append(row)
-
-                        # Early stop once we already have a healthy provider batch.
-                        if len(rows_out) >= requested_limit:
-                            break
-
-                        # If this shard page came back small, deeper paging in this shard
-                        # is unlikely to help much, so stop this shard early.
-                        if raw_count < requested_limit:
-                            break
-
-                    if len(rows_out) >= requested_limit:
-                        break
-                if len(rows_out) >= requested_limit:
-                    break
-
-        next_cursor = {"page": current_page + 1} if should_advance else {"page": current_page}
-
-        result = RentCastListingFetchResult(
-            rows=rows_out,
+        return RentCastListingFetchResult(
+            rows=rows,
             next_cursor=next_cursor,
-            raw_count=total_raw_count,
+            raw_count=len(raw_rows),
         )
-
-        return {
-            "rows": result.rows,
-            "next_cursor": result.next_cursor,
-            "raw_count": result.raw_count,
-        }
-    

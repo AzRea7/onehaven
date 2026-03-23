@@ -32,8 +32,12 @@ Future scaling:
 """
 
 
+def _norm_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 def _normalize_tier_limit(raw: str | None) -> str:
-    value = str(raw or "").strip().lower()
+    value = _norm_text(raw)
     return value if value in {"hot", "warm", "cold"} else "all"
 
 
@@ -42,7 +46,7 @@ def get_daily_market_limit() -> int:
 
 
 def get_default_market_limit_per_sync() -> int:
-    return int(getattr(settings, "market_sync_default_limit_per_market", 250) or 250)
+    return int(getattr(settings, "market_sync_default_limit_per_market", 125) or 125)
 
 
 def list_selected_daily_markets() -> list[dict[str, Any]]:
@@ -74,6 +78,42 @@ def get_enabled_sources_for_org(db: Session, *, org_id: int):
     ]
 
 
+def _source_matches_market(source: Any, market: dict[str, Any]) -> bool:
+    config = dict(getattr(source, "config_json", None) or {})
+
+    source_market_slug = _norm_text(config.get("market_slug"))
+    market_slug = _norm_text(market.get("slug"))
+    if source_market_slug and market_slug and source_market_slug == market_slug:
+        return True
+
+    source_city = _norm_text(config.get("city"))
+    market_city = _norm_text(market.get("city"))
+    source_state = _norm_text(config.get("state") or "MI")
+    market_state = _norm_text(market.get("state") or "MI")
+
+    if source_city and market_city and source_city == market_city and source_state == market_state:
+        return True
+
+    source_slug = _norm_text(getattr(source, "slug", ""))
+    if market_slug and market_slug in source_slug:
+        return True
+
+    return False
+
+
+def _matching_sources_for_market(sources: list[Any], market: dict[str, Any]) -> list[Any]:
+    exact = [source for source in sources if _source_matches_market(source, market)]
+    if exact:
+        return exact
+
+    # Fallback only if exact match is unavailable.
+    return [
+        source
+        for source in sources
+        if _norm_text(getattr(source, "provider", "")) == "rentcast"
+    ]
+
+
 def build_daily_dispatch_plan(db: Session, *, org_id: int) -> list[dict[str, Any]]:
     markets = list_selected_daily_markets()
     sources = get_enabled_sources_for_org(db, org_id=int(org_id))
@@ -81,7 +121,9 @@ def build_daily_dispatch_plan(db: Session, *, org_id: int) -> list[dict[str, Any
     dispatches: list[dict[str, Any]] = []
     for market in markets:
         runtime_config = build_market_runtime_payload(market)
-        for source in sources:
+        matched_sources = _matching_sources_for_market(sources, market)
+
+        for source in matched_sources:
             dispatches.append(
                 {
                     "market": market,
@@ -115,6 +157,7 @@ def build_city_dispatch_plan(
 
     sources = get_enabled_sources_for_org(db, org_id=int(org_id))
     runtime_config = build_market_runtime_payload(market)
+    matched_sources = _matching_sources_for_market(sources, market)
 
     dispatches = [
         {
@@ -125,7 +168,7 @@ def build_city_dispatch_plan(
             "trigger_type": "manual_market_sync",
             "runtime_config": runtime_config,
         }
-        for source in sources
+        for source in matched_sources
     ]
 
     return {
