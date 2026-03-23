@@ -17,6 +17,7 @@ from sqlalchemy import (
     func,
     JSON,
     Index,
+    BigInteger,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -198,6 +199,100 @@ class Property(Base):
         viewonly=True,
     )
 
+class PropertyInventorySnapshot(Base):
+    __tablename__ = "property_inventory_snapshots"
+    __table_args__ = (
+        UniqueConstraint("org_id", "property_id", name="uq_property_inventory_snapshots_org_property"),
+        Index("ix_property_inventory_snapshots_org_stage", "org_id", "current_stage"),
+        Index("ix_property_inventory_snapshots_org_pane", "org_id", "current_pane"),
+        Index("ix_property_inventory_snapshots_org_decision", "org_id", "normalized_decision"),
+        Index("ix_property_inventory_snapshots_org_county", "org_id", "county"),
+        Index("ix_property_inventory_snapshots_org_city", "org_id", "city"),
+        Index("ix_property_inventory_snapshots_org_state", "org_id", "state"),
+        Index("ix_property_inventory_snapshots_org_enriched", "org_id", "is_fully_enriched"),
+        Index("ix_property_inventory_snapshots_org_updated", "org_id", "snapshot_updated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    normalized_address: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    state: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    zip: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+
+    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lng: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    geocode_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    crime_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    offender_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    is_red_zone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    property_type: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    bedrooms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    bathrooms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    square_feet: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    asking_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    market_rent_estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    approved_rent_ceiling: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    section8_fmr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    projected_monthly_cashflow: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    dscr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    current_stage: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    current_stage_label: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    current_pane: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    current_pane_label: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    normalized_decision: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    gate_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    route_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    completeness: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    is_fully_enriched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    blockers_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    next_actions_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    snapshot_updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship("Property", viewonly=True)
+
+
+class PaneSummarySnapshot(Base):
+    __tablename__ = "pane_summary_snapshots"
+    __table_args__ = (
+        UniqueConstraint("org_id", "scope_hash", "pane_key", name="uq_pane_summary_snapshots_org_scope_pane"),
+        Index("ix_pane_summary_snapshots_org_pane", "org_id", "pane_key"),
+        Index("ix_pane_summary_snapshots_org_updated", "org_id", "snapshot_updated_at"),
+        Index("ix_pane_summary_snapshots_org_scope", "org_id", "scope_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    scope_hash: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    pane_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+
+    state_filter: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    county_filter: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    city_filter: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    q_filter: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    assigned_user_id_filter: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    property_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    kpis_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    top_blockers_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    top_actions_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    snapshot_updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 class GeocodeCache(Base):
     __tablename__ = "geocode_cache"

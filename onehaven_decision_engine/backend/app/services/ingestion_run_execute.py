@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import socket
+import time
 from typing import Any
 
 from sqlalchemy import desc, select
@@ -462,6 +463,18 @@ def _load_rows_page(
     return result.rows, dict(result.next_cursor or {}), int(result.raw_count or 0)
 
 
+def _append_property_error(summary: dict[str, Any], *, property_id: int | None, external_record_id: str | None, reason: str) -> None:
+    errors = list(summary.get("property_errors") or [])
+    errors.append(
+        {
+            "property_id": property_id,
+            "external_record_id": external_record_id,
+            "reason": reason,
+        }
+    )
+    summary["property_errors"] = errors[:200]
+
+
 def execute_source_sync(
     db: Session,
     *,
@@ -470,6 +483,8 @@ def execute_source_sync(
     trigger_type: str = "manual",
     runtime_config: dict[str, Any] | None = None,
 ):
+    run_t0 = time.perf_counter()
+
     runtime_config = _normalize_runtime_config(runtime_config)
     runtime_config["trigger_type"] = str(trigger_type or "manual")
 
@@ -491,6 +506,19 @@ def execute_source_sync(
         idempotency_key=idempotency_key,
     )
 
+    _emit(
+        {
+            "event": "ingestion_sync_start",
+            "org_id": int(org_id),
+            "source_id": int(getattr(source, "id")),
+            "provider": str(getattr(source, "provider", "") or ""),
+            "trigger_type": str(trigger_type),
+            "provider_fetch_limit": provider_fetch_limit,
+            "runtime_config": runtime_config,
+            "idempotency_key": idempotency_key,
+        }
+    )
+
     execution_lock = acquire_ingestion_execution_lock(
         db,
         org_id=int(org_id),
@@ -499,6 +527,15 @@ def execute_source_sync(
         ttl_seconds=int(getattr(settings, "ingestion_execution_lock_ttl_seconds", DEFAULT_EXECUTION_LOCK_TTL_SECONDS)),
     )
     if not execution_lock.acquired:
+        _emit(
+            {
+                "event": "ingestion_sync_skipped_locked",
+                "org_id": int(org_id),
+                "source_id": int(getattr(source, "id")),
+                "idempotency_key": idempotency_key,
+            },
+            level=logging.WARNING,
+        )
         return start_run(
             db,
             org_id=int(org_id),
@@ -515,6 +552,14 @@ def execute_source_sync(
         key=idempotency_key,
     ):
         release_lock(db, org_id=int(org_id), lock_key=f"ingestion:source:{int(getattr(source, 'id'))}", owner=lock_owner)
+        _emit(
+            {
+                "event": "ingestion_sync_skipped_duplicate_dataset",
+                "org_id": int(org_id),
+                "source_id": int(getattr(source, "id")),
+                "idempotency_key": idempotency_key,
+            }
+        )
         return start_run(
             db,
             org_id=int(org_id),
@@ -547,6 +592,14 @@ def execute_source_sync(
         "filtered_out": 0,
         "filter_reason_counts": {},
         "normal_path": True,
+        "pages_scanned": 0,
+        "page_stats": [],
+        "timings_ms": {
+            "provider_load_total": 0.0,
+            "db_upsert_total": 0.0,
+            "post_pipeline_total": 0.0,
+            "run_total": 0.0,
+        },
     }
 
     try:
@@ -555,6 +608,9 @@ def execute_source_sync(
         pages_scanned = 0
 
         while cursor and pages_scanned < max_pages:
+            page_t0 = time.perf_counter()
+
+            provider_t0 = time.perf_counter()
             rows, next_cursor, raw_count = _load_rows_page(
                 source,
                 trigger_type=str(trigger_type),
@@ -562,19 +618,62 @@ def execute_source_sync(
                 cursor=cursor,
                 provider_fetch_limit=provider_fetch_limit,
             )
+            provider_ms = round((time.perf_counter() - provider_t0) * 1000, 2)
+            summary["timings_ms"]["provider_load_total"] = round(
+                float(summary["timings_ms"].get("provider_load_total", 0.0) or 0.0) + provider_ms,
+                2,
+            )
+
             pages_scanned += 1
+            summary["pages_scanned"] = pages_scanned
+
+            page_stat = {
+                "page_number": pages_scanned,
+                "cursor_in": dict(cursor or {}),
+                "cursor_out": dict(next_cursor or {}),
+                "raw_count": int(raw_count or 0),
+                "rows_returned": len(rows),
+                "provider_ms": provider_ms,
+                "imported": 0,
+                "duplicates_skipped": 0,
+                "invalid_rows": 0,
+                "filtered_out": 0,
+                "pipeline_failures": 0,
+            }
+
+            _emit(
+                {
+                    "event": "ingestion_page_loaded",
+                    "org_id": int(org_id),
+                    "source_id": int(getattr(source, "id")),
+                    "page_number": pages_scanned,
+                    "raw_count": int(raw_count or 0),
+                    "rows_returned": len(rows),
+                    "provider_ms": provider_ms,
+                }
+            )
 
             for raw in rows:
                 summary["records_seen"] += 1
 
                 payload = canonical_listing_payload(raw)
+                external_record_id = str(payload.get("external_record_id") or "").strip() or None
+
                 if not _is_valid_payload(payload):
                     summary["invalid_rows"] += 1
+                    page_stat["invalid_rows"] += 1
+                    _append_property_error(
+                        summary,
+                        property_id=None,
+                        external_record_id=external_record_id,
+                        reason="invalid_payload",
+                    )
                     continue
 
                 reason = _filter_reason(payload, runtime_config)
                 if reason:
                     summary["filtered_out"] += 1
+                    page_stat["filtered_out"] += 1
                     summary["filter_reason_counts"][reason] = int(summary["filter_reason_counts"].get(reason, 0)) + 1
                     continue
 
@@ -586,6 +685,7 @@ def execute_source_sync(
                 )
                 if external_link is not None:
                     summary["duplicates_skipped"] += 1
+                    page_stat["duplicates_skipped"] += 1
                     continue
 
                 fingerprint = build_property_fingerprint(
@@ -604,6 +704,7 @@ def execute_source_sync(
                     zip_code=payload["zip"],
                 )
 
+                db_t0 = time.perf_counter()
                 prop, prop_created = _upsert_property(db, org_id=int(org_id), payload=payload)
                 deal, deal_created = _upsert_deal(db, org_id=int(org_id), property_id=int(prop.id), payload=payload)
                 rent, rent_created = _upsert_rent_assumption(db, org_id=int(org_id), property_id=int(prop.id), payload=payload)
@@ -627,8 +728,14 @@ def execute_source_sync(
                     raw_json=payload.get("raw_json") or payload,
                     fingerprint=fingerprint,
                 )
+                db_upsert_ms = round((time.perf_counter() - db_t0) * 1000, 2)
+                summary["timings_ms"]["db_upsert_total"] = round(
+                    float(summary["timings_ms"].get("db_upsert_total", 0.0) or 0.0) + db_upsert_ms,
+                    2,
+                )
 
                 summary["records_imported"] += 1
+                page_stat["imported"] += 1
                 summary["properties_created"] += 1 if prop_created else 0
                 summary["properties_updated"] += 1 if (not prop_created and prop_before is not None) else 0
                 summary["deals_created"] += 1 if deal_created else 0
@@ -637,6 +744,7 @@ def execute_source_sync(
                 summary["photos_upserted"] += int(photos_added)
 
                 try:
+                    pipeline_t0 = time.perf_counter()
                     pipeline_summary = execute_post_ingestion_pipeline(
                         db,
                         org_id=int(org_id),
@@ -644,15 +752,50 @@ def execute_source_sync(
                         actor_user_id=None,
                         emit_events=False,
                     )
+                    pipeline_ms = round((time.perf_counter() - pipeline_t0) * 1000, 2)
+                    summary["timings_ms"]["post_pipeline_total"] = round(
+                        float(summary["timings_ms"].get("post_pipeline_total", 0.0) or 0.0) + pipeline_ms,
+                        2,
+                    )
+
                     if isinstance(pipeline_summary, dict):
-                        apply_pipeline_summary(summary, pipeline_summary)
+                        apply_pipeline_summary(summary, pipeline_summary, int(prop.id))
+                        if pipeline_summary.get("errors"):
+                            page_stat["pipeline_failures"] += 1
+
+                    _emit(
+                        {
+                            "event": "ingestion_property_pipeline_complete",
+                            "org_id": int(org_id),
+                            "source_id": int(getattr(source, "id")),
+                            "property_id": int(prop.id),
+                            "external_record_id": external_record_id,
+                            "prop_created": bool(prop_created),
+                            "deal_created": bool(deal_created),
+                            "rent_created": bool(rent_created),
+                            "photos_added": int(photos_added),
+                            "db_upsert_ms": db_upsert_ms,
+                            "pipeline_ms": pipeline_ms,
+                            "pipeline_partial": bool((pipeline_summary or {}).get("partial")) if isinstance(pipeline_summary, dict) else None,
+                            "pipeline_errors": list((pipeline_summary or {}).get("errors") or []) if isinstance(pipeline_summary, dict) else [],
+                        }
+                    )
                 except Exception as exc:
+                    page_stat["pipeline_failures"] += 1
                     logger.exception("post_ingestion_pipeline_failed property_id=%s", getattr(prop, "id", None))
                     summary.setdefault("post_import_failures", 0)
                     summary["post_import_failures"] = int(summary.get("post_import_failures", 0)) + 1
                     summary.setdefault("post_import_errors", [])
-                    summary["post_import_errors"].append(str(exc))
+                    summary["post_import_errors"].append(
+                        {
+                            "property_id": int(getattr(prop, "id", 0) or 0),
+                            "external_record_id": external_record_id,
+                            "errors": [str(exc)],
+                        }
+                    )
 
+            page_stat["page_total_ms"] = round((time.perf_counter() - page_t0) * 1000, 2)
+            summary["page_stats"].append(page_stat)
             cursor = dict(next_cursor or {})
 
         source.cursor_json = cursor or {}
@@ -665,16 +808,41 @@ def execute_source_sync(
             ttl_seconds=int(getattr(settings, "ingestion_completion_lock_ttl_seconds", DEFAULT_COMPLETION_LOCK_TTL_SECONDS)),
         )
 
+        summary["timings_ms"]["run_total"] = round((time.perf_counter() - run_t0) * 1000, 2)
+
         _set_run_summary(run, summary)
         _set_run_status(run, "completed")
         finish_run(db, run, status="completed", summary_json=summary)
+
+        _emit(
+            {
+                "event": "ingestion_sync_completed",
+                "org_id": int(org_id),
+                "source_id": int(getattr(source, "id")),
+                "run_id": int(getattr(run, "id")),
+                "summary": summary,
+            }
+        )
         return run
 
     except Exception as exc:
         logger.exception("execute_source_sync_failed")
+        summary["timings_ms"]["run_total"] = round((time.perf_counter() - run_t0) * 1000, 2)
         _set_run_summary(run, {**summary, "error": str(exc)})
         _set_run_status(run, "failed")
         finish_run(db, run, status="failed", summary_json={**summary, "error": str(exc)})
+
+        _emit(
+            {
+                "event": "ingestion_sync_failed",
+                "org_id": int(org_id),
+                "source_id": int(getattr(source, "id")),
+                "run_id": int(getattr(run, "id")),
+                "error": str(exc),
+                "summary": summary,
+            },
+            level=logging.ERROR,
+        )
         raise
     finally:
         release_lock(
@@ -683,3 +851,4 @@ def execute_source_sync(
             lock_key=f"ingestion:source:{int(getattr(source, 'id'))}",
             owner=lock_owner,
         )
+        

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections import defaultdict
 from typing import Any, Optional
 
@@ -16,6 +18,8 @@ from ..domain.workflow.panes import (
 from ..models import Deal, Property, UnderwritingResult
 from ..services.dashboard_rollups import compute_rollups
 from ..services.property_state_machine import get_state_payload
+
+log = logging.getLogger("onehaven.panes")
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
@@ -452,53 +456,17 @@ def _build_kpis_for_pane(pane: str, rows: list[dict[str, Any]]) -> dict[str, Any
             "stale_count": 0,
         }
         if pane == "investor":
-            base.update(
-                {
-                    "good_candidates": 0,
-                    "review_candidates": 0,
-                    "avg_cashflow_estimate": 0.0,
-                }
-            )
+            base.update({"good_candidates": 0, "review_candidates": 0, "avg_cashflow_estimate": 0.0})
         elif pane == "acquisition":
-            base.update(
-                {
-                    "offer_stage_count": 0,
-                    "acquired_stage_count": 0,
-                    "blocked_acquisitions": 0,
-                }
-            )
+            base.update({"offer_stage_count": 0, "acquired_stage_count": 0, "blocked_acquisitions": 0})
         elif pane == "compliance":
-            base.update(
-                {
-                    "inspection_pending_count": 0,
-                    "failed_items_total": 0,
-                    "jurisdiction_stale_count": 0,
-                }
-            )
+            base.update({"inspection_pending_count": 0, "failed_items_total": 0, "jurisdiction_stale_count": 0})
         elif pane == "tenants":
-            base.update(
-                {
-                    "marketing_count": 0,
-                    "screening_count": 0,
-                    "leased_count": 0,
-                }
-            )
+            base.update({"marketing_count": 0, "screening_count": 0, "leased_count": 0})
         elif pane == "management":
-            base.update(
-                {
-                    "occupied_count": 0,
-                    "turnover_count": 0,
-                    "maintenance_count": 0,
-                }
-            )
+            base.update({"occupied_count": 0, "turnover_count": 0, "maintenance_count": 0})
         elif pane == "admin":
-            base.update(
-                {
-                    "org_property_count": 0,
-                    "pane_count": len(PANES),
-                    "blocked_items_total": 0,
-                }
-            )
+            base.update({"org_property_count": 0, "pane_count": len(PANES), "blocked_items_total": 0})
         return base
 
     with_blockers = sum(1 for row in rows if row.get("blockers"))
@@ -576,7 +544,6 @@ def _filter_rows_for_pane(
     jurisdiction: Optional[str],
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-
     wanted_jurisdiction = _normalize_status(jurisdiction)
 
     for row in rows:
@@ -614,31 +581,18 @@ def _filter_rows_for_pane(
     return out
 
 
-def build_pane_dashboard(
+def _build_rows_for_scope(
     db: Session,
     *,
     org_id: int,
-    pane: str,
-    principal: Any = None,
     state: Optional[str] = None,
     county: Optional[str] = None,
     city: Optional[str] = None,
-    jurisdiction: Optional[str] = None,
-    status: Optional[str] = None,
-    assigned_user_id: Optional[int] = None,
     q: Optional[str] = None,
-    limit: int = 200,
-) -> dict[str, Any]:
-    pane_key = clamp_pane(pane)
-    allowed = allowed_panes_for_principal(principal)
-    if pane_key not in allowed and pane_key != "admin":
-        return {
-            "ok": False,
-            "pane": pane_key,
-            "pane_label": pane_label(pane_key),
-            "error": "pane_not_allowed",
-            "allowed_panes": allowed,
-        }
+    assigned_user_id: Optional[int] = None,
+    max_scan: int = 1000,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    scope_t0 = time.perf_counter()
 
     stmt = _base_property_stmt(
         org_id=org_id,
@@ -649,13 +603,23 @@ def build_pane_dashboard(
         assigned_user_id=assigned_user_id,
     )
 
-    props = list(db.scalars(stmt.limit(max(int(limit), 500))).all())
+    query_t0 = time.perf_counter()
+    props = list(db.scalars(stmt.limit(max_scan)).all())
+    query_ms = round((time.perf_counter() - query_t0) * 1000, 2)
 
-    raw_rows: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    skipped_errors = 0
+
+    build_t0 = time.perf_counter()
     for prop in props:
         try:
-            state_payload = get_state_payload(db, org_id=org_id, property_id=int(prop.id), recompute=True)
-            raw_rows.append(
+            state_payload = get_state_payload(
+                db,
+                org_id=org_id,
+                property_id=int(prop.id),
+                recompute=False,
+            )
+            rows.append(
                 _build_row(
                     db,
                     org_id=org_id,
@@ -664,7 +628,50 @@ def build_pane_dashboard(
                 )
             )
         except Exception:
+            skipped_errors += 1
+            log.exception(
+                "pane_scope_row_build_failed",
+                extra={"org_id": org_id, "property_id": int(getattr(prop, "id", 0) or 0)},
+            )
             continue
+
+    build_ms = round((time.perf_counter() - build_t0) * 1000, 2)
+    total_ms = round((time.perf_counter() - scope_t0) * 1000, 2)
+
+    meta = {
+        "query_rows": len(props),
+        "returned_rows": len(rows),
+        "skipped_errors": skipped_errors,
+        "query_ms": query_ms,
+        "build_ms": build_ms,
+        "total_ms": total_ms,
+    }
+    return rows, meta
+
+
+def _build_pane_response(
+    *,
+    pane_key: str,
+    principal: Any,
+    raw_rows: list[dict[str, Any]],
+    state: Optional[str],
+    county: Optional[str],
+    city: Optional[str],
+    jurisdiction: Optional[str],
+    status: Optional[str],
+    assigned_user_id: Optional[int],
+    q: Optional[str],
+    limit: int,
+) -> dict[str, Any]:
+    allowed = allowed_panes_for_principal(principal)
+    if pane_key not in allowed and pane_key != "admin":
+        return {
+            "ok": False,
+            "pane": pane_key,
+            "pane_label": pane_label(pane_key),
+            "error": "pane_not_allowed",
+            "allowed_panes": allowed,
+        }
 
     pane_rows = _filter_rows_for_pane(
         raw_rows,
@@ -714,14 +721,8 @@ def build_pane_dashboard(
             county_mix[_safe_str(row.get("county"), "unknown")] += 1
 
         response["advanced"] = {
-            "stage_mix": [
-                {"key": key, "value": value}
-                for key, value in sorted(stage_mix.items(), key=lambda item: item[0])
-            ],
-            "county_breakdown": [
-                {"key": key, "value": value}
-                for key, value in sorted(county_mix.items(), key=lambda item: (-item[1], item[0]))
-            ],
+            "stage_mix": [{"key": key, "value": value} for key, value in sorted(stage_mix.items(), key=lambda item: item[0])],
+            "county_breakdown": [{"key": key, "value": value} for key, value in sorted(county_mix.items(), key=lambda item: (-item[1], item[0]))],
             "leaderboards": {
                 "cashflow": sorted(
                     pane_rows,
@@ -739,6 +740,75 @@ def build_pane_dashboard(
     return response
 
 
+def build_pane_dashboard(
+    db: Session,
+    *,
+    org_id: int,
+    pane: str,
+    principal: Any = None,
+    state: Optional[str] = None,
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    jurisdiction: Optional[str] = None,
+    status: Optional[str] = None,
+    assigned_user_id: Optional[int] = None,
+    q: Optional[str] = None,
+    limit: int = 200,
+) -> dict[str, Any]:
+    pane_key = clamp_pane(pane)
+    t0 = time.perf_counter()
+
+    raw_rows, scope_meta = _build_rows_for_scope(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        q=q,
+        assigned_user_id=assigned_user_id,
+        max_scan=max(int(limit) * 5, 500),
+    )
+
+    response = _build_pane_response(
+        pane_key=pane_key,
+        principal=principal,
+        raw_rows=raw_rows,
+        state=state,
+        county=county,
+        city=city,
+        jurisdiction=jurisdiction,
+        status=status,
+        assigned_user_id=assigned_user_id,
+        q=q,
+        limit=limit,
+    )
+
+    total_ms = round((time.perf_counter() - t0) * 1000, 2)
+    log.info(
+        "build_pane_dashboard_complete",
+        extra={
+            "org_id": org_id,
+            "pane": pane_key,
+            "count": response.get("count", 0),
+            "limit": limit,
+            "state": state,
+            "county": county,
+            "city": city,
+            "jurisdiction": jurisdiction,
+            "status": status,
+            "assigned_user_id": assigned_user_id,
+            "q": q,
+            "scope_query_rows": scope_meta["query_rows"],
+            "scope_returned_rows": scope_meta["returned_rows"],
+            "scope_skipped_errors": scope_meta["skipped_errors"],
+            "scope_query_ms": scope_meta["query_ms"],
+            "scope_build_ms": scope_meta["build_ms"],
+            "total_ms": total_ms,
+        },
+    )
+    return response
+
+
 def build_all_pane_summaries(
     db: Session,
     *,
@@ -753,17 +823,29 @@ def build_all_pane_summaries(
     q: Optional[str] = None,
     limit: int = 100,
 ) -> dict[str, Any]:
+    t0 = time.perf_counter()
     allowed = allowed_panes_for_principal(principal)
+
+    raw_rows, scope_meta = _build_rows_for_scope(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        q=q,
+        assigned_user_id=assigned_user_id,
+        max_scan=max(int(limit) * 8, 800),
+    )
 
     panes: list[dict[str, Any]] = []
     for pane in PANES:
         if pane not in allowed and pane != "admin":
             continue
-        summary = build_pane_dashboard(
-            db,
-            org_id=org_id,
-            pane=pane,
+
+        summary = _build_pane_response(
+            pane_key=pane,
             principal=principal,
+            raw_rows=raw_rows,
             state=state,
             county=county,
             city=city,
@@ -773,6 +855,7 @@ def build_all_pane_summaries(
             q=q,
             limit=limit,
         )
+
         panes.append(
             {
                 "pane": pane,
@@ -783,6 +866,30 @@ def build_all_pane_summaries(
                 "top_actions": summary.get("recommended_next_actions", [])[:3],
             }
         )
+
+    total_ms = round((time.perf_counter() - t0) * 1000, 2)
+    log.info(
+        "build_all_pane_summaries_complete",
+        extra={
+            "org_id": org_id,
+            "allowed_pane_count": len(allowed),
+            "pane_count": len(panes),
+            "limit": limit,
+            "state": state,
+            "county": county,
+            "city": city,
+            "jurisdiction": jurisdiction,
+            "status": status,
+            "assigned_user_id": assigned_user_id,
+            "q": q,
+            "scope_query_rows": scope_meta["query_rows"],
+            "scope_returned_rows": scope_meta["returned_rows"],
+            "scope_skipped_errors": scope_meta["skipped_errors"],
+            "scope_query_ms": scope_meta["query_ms"],
+            "scope_build_ms": scope_meta["build_ms"],
+            "total_ms": total_ms,
+        },
+    )
 
     return {
         "ok": True,

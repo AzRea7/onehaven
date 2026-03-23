@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Optional
@@ -33,6 +34,8 @@ from ..policy_models import JurisdictionProfile
 from .inspection_failure_task_service import build_failure_next_actions
 from .inspection_readiness_service import build_property_readiness_summary
 from .jurisdiction_task_mapper import map_profile_jurisdiction_task_dicts
+
+log = logging.getLogger("onehaven.state_machine")
 
 
 def _utcnow() -> datetime:
@@ -192,10 +195,7 @@ def _latest_jurisdiction_profile(
     q = (
         select(JurisdictionProfile)
         .where(JurisdictionProfile.state == state)
-        .where(
-            (JurisdictionProfile.org_id == org_id)
-            | (JurisdictionProfile.org_id.is_(None))
-        )
+        .where((JurisdictionProfile.org_id == org_id) | (JurisdictionProfile.org_id.is_(None)))
     )
 
     rows = db.scalars(q.order_by(desc(JurisdictionProfile.id))).all()
@@ -338,11 +338,7 @@ def _inspection_summary(db: Session, *, org_id: int, property_id: int) -> dict[s
         except Exception:
             latest_date = str(insp.inspection_date)
 
-    readiness = build_property_readiness_summary(
-        db,
-        org_id=org_id,
-        property_id=property_id,
-    )
+    readiness = build_property_readiness_summary(db, org_id=org_id, property_id=property_id)
     readiness_data = readiness.get("readiness") or {}
     raw = readiness.get("raw") or {}
 
@@ -692,10 +688,7 @@ def derive_stage_and_constraints(
         current_stage = "tenant_screening"
     elif tenant_complete and not cash_complete:
         current_stage = "leased"
-    elif occupied_complete and (
-        (rehab.get("blocked", 0) > 0)
-        or (inspection.get("open_failed_items", 0) > 0)
-    ):
+    elif occupied_complete and ((rehab.get("blocked", 0) > 0) or (inspection.get("open_failed_items", 0) > 0)):
         current_stage = "maintenance"
     elif occupied_complete:
         current_stage = "occupied"
@@ -748,9 +741,7 @@ def derive_stage_and_constraints(
 
     if rehab_complete and inspection["open_failed_items"] > 0:
         blockers.append("inspection_open_failures")
-        next_actions.append(
-            f"Resolve failed inspection items ({inspection['open_failed_items']} still open)."
-        )
+        next_actions.append(f"Resolve failed inspection items ({inspection['open_failed_items']} still open).")
 
     if rehab_complete and completion.failed_count > 0:
         blockers.append("compliance_failed_items")
@@ -939,6 +930,108 @@ def derive_stage_and_constraints(
     }
 
 
+def _build_snapshot_payload(
+    *,
+    property_id: int,
+    state: dict[str, Any],
+    updated_at: Optional[datetime],
+    last_transitioned_at: Optional[datetime],
+) -> dict[str, Any]:
+    return {
+        "property_id": property_id,
+        "current_stage": state["current_stage"],
+        "suggested_stage": state["suggested_stage"],
+        "current_stage_label": state["current_stage_label"],
+        "current_pane": state["current_pane"],
+        "current_pane_label": state["current_pane_label"],
+        "suggested_pane": state["suggested_pane"],
+        "suggested_pane_label": state["suggested_pane_label"],
+        "route_reason": state["route_reason"],
+        "allowed_panes": state["allowed_panes"],
+        "allowed_pane_labels": state["allowed_pane_labels"],
+        "normalized_decision": state["normalized_decision"],
+        "decision_bucket": state["decision_bucket"],
+        "gate": state["gate"],
+        "gate_status": state["gate_status"],
+        "constraints": state["constraints"],
+        "outstanding_tasks": state["outstanding_tasks"],
+        "next_actions": state["next_actions"],
+        "stage_completion_summary": state["stage_completion_summary"],
+        "updated_at": updated_at.isoformat() if updated_at is not None else None,
+        "last_transitioned_at": last_transitioned_at.isoformat() if last_transitioned_at is not None else None,
+        "stage_order": list(STAGES),
+    }
+
+
+def _attach_snapshot_to_constraints(state: dict[str, Any]) -> dict[str, Any]:
+    constraints = dict(state["constraints"] or {})
+    constraints["_state_snapshot"] = {
+        "suggested_stage": state["suggested_stage"],
+        "current_stage_label": state["current_stage_label"],
+        "current_pane": state["current_pane"],
+        "current_pane_label": state["current_pane_label"],
+        "suggested_pane": state["suggested_pane"],
+        "suggested_pane_label": state["suggested_pane_label"],
+        "route_reason": state["route_reason"],
+        "allowed_panes": state["allowed_panes"],
+        "allowed_pane_labels": state["allowed_pane_labels"],
+        "normalized_decision": state["normalized_decision"],
+        "decision_bucket": state["decision_bucket"],
+        "gate": state["gate"],
+        "gate_status": state["gate_status"],
+        "stage_completion_summary": state["stage_completion_summary"],
+        "stage_order": list(STAGES),
+    }
+    return constraints
+
+
+def _payload_from_row_snapshot(
+    row: PropertyState,
+    *,
+    property_id: int,
+) -> Optional[dict[str, Any]]:
+    constraints = _safe_json_load(getattr(row, "constraints_json", None), {})
+    outstanding = _safe_json_load(getattr(row, "outstanding_tasks_json", None), {})
+
+    if not isinstance(constraints, dict):
+        constraints = {}
+    if not isinstance(outstanding, dict):
+        outstanding = {}
+
+    snapshot = constraints.get("_state_snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+
+    current_stage = clamp_stage(getattr(row, "current_stage", None))
+    updated_at = getattr(row, "updated_at", None)
+    last_transitioned_at = getattr(row, "last_transitioned_at", None)
+
+    return {
+        "property_id": property_id,
+        "current_stage": current_stage,
+        "suggested_stage": snapshot.get("suggested_stage") or current_stage,
+        "current_stage_label": snapshot.get("current_stage_label") or stage_label(current_stage),
+        "current_pane": snapshot.get("current_pane"),
+        "current_pane_label": snapshot.get("current_pane_label"),
+        "suggested_pane": snapshot.get("suggested_pane"),
+        "suggested_pane_label": snapshot.get("suggested_pane_label"),
+        "route_reason": snapshot.get("route_reason"),
+        "allowed_panes": snapshot.get("allowed_panes") or [],
+        "allowed_pane_labels": snapshot.get("allowed_pane_labels") or [],
+        "normalized_decision": snapshot.get("normalized_decision") or constraints.get("decision_bucket") or "REVIEW",
+        "decision_bucket": snapshot.get("decision_bucket") or constraints.get("decision_bucket") or "REVIEW",
+        "gate": snapshot.get("gate") or {},
+        "gate_status": snapshot.get("gate_status") or "BLOCKED",
+        "constraints": constraints,
+        "outstanding_tasks": outstanding,
+        "next_actions": outstanding.get("next_actions") or [],
+        "stage_completion_summary": snapshot.get("stage_completion_summary") or {},
+        "updated_at": updated_at.isoformat() if updated_at is not None else None,
+        "last_transitioned_at": last_transitioned_at.isoformat() if last_transitioned_at is not None else None,
+        "stage_order": snapshot.get("stage_order") or list(STAGES),
+    }
+
+
 def sync_property_state(db: Session, *, org_id: int, property_id: int) -> PropertyState:
     state = derive_stage_and_constraints(db, org_id=org_id, property_id=property_id)
     row = ensure_state_row(db, org_id=org_id, property_id=property_id)
@@ -947,7 +1040,7 @@ def sync_property_state(db: Session, *, org_id: int, property_id: int) -> Proper
     old_stage = clamp_stage(getattr(row, "current_stage", None))
 
     row.current_stage = new_stage
-    row.constraints_json = _json_dumps(state["constraints"])
+    row.constraints_json = _json_dumps(_attach_snapshot_to_constraints(state))
     row.outstanding_tasks_json = _json_dumps(state["outstanding_tasks"])
     row.updated_at = _utcnow()
 
@@ -966,44 +1059,44 @@ def get_state_payload(
     property_id: int,
     recompute: bool = True,
 ) -> dict[str, Any]:
-    row: Optional[PropertyState] = None
+    row: Optional[PropertyState]
+
     if recompute:
         row = sync_property_state(db, org_id=org_id, property_id=property_id)
-    else:
-        row = ensure_state_row(db, org_id=org_id, property_id=property_id)
+        constraints = _safe_json_load(getattr(row, "constraints_json", None), {})
+        outstanding = _safe_json_load(getattr(row, "outstanding_tasks_json", None), {})
+        snapshot = derive_stage_and_constraints(db, org_id=org_id, property_id=property_id)
+        snapshot["constraints"] = constraints if isinstance(constraints, dict) else snapshot["constraints"]
+        snapshot["outstanding_tasks"] = outstanding if isinstance(outstanding, dict) else snapshot["outstanding_tasks"]
+        return _build_snapshot_payload(
+            property_id=property_id,
+            state=snapshot,
+            updated_at=getattr(row, "updated_at", None),
+            last_transitioned_at=getattr(row, "last_transitioned_at", None),
+        )
 
-    if row is None:
-        raise ValueError("property state not available")
+    row = ensure_state_row(db, org_id=org_id, property_id=property_id)
+    payload = _payload_from_row_snapshot(row, property_id=property_id)
+    if payload is not None:
+        return payload
 
-    derived = derive_stage_and_constraints(db, org_id=org_id, property_id=property_id)
+    log.info(
+        "property_state_snapshot_missing_or_legacy",
+        extra={"org_id": org_id, "property_id": property_id},
+    )
 
-    updated_at = getattr(row, "updated_at", None)
-    last_transitioned_at = getattr(row, "last_transitioned_at", None)
+    row = sync_property_state(db, org_id=org_id, property_id=property_id)
+    payload = _payload_from_row_snapshot(row, property_id=property_id)
+    if payload is not None:
+        return payload
 
-    return {
-        "property_id": property_id,
-        "current_stage": derived["current_stage"],
-        "suggested_stage": derived["suggested_stage"],
-        "current_stage_label": derived["current_stage_label"],
-        "current_pane": derived["current_pane"],
-        "current_pane_label": derived["current_pane_label"],
-        "suggested_pane": derived["suggested_pane"],
-        "suggested_pane_label": derived["suggested_pane_label"],
-        "route_reason": derived["route_reason"],
-        "allowed_panes": derived["allowed_panes"],
-        "allowed_pane_labels": derived["allowed_pane_labels"],
-        "normalized_decision": derived["normalized_decision"],
-        "decision_bucket": derived["decision_bucket"],
-        "gate": derived["gate"],
-        "gate_status": derived["gate_status"],
-        "constraints": derived["constraints"],
-        "outstanding_tasks": derived["outstanding_tasks"],
-        "next_actions": derived["next_actions"],
-        "stage_completion_summary": derived["stage_completion_summary"],
-        "updated_at": updated_at.isoformat() if updated_at is not None else None,
-        "last_transitioned_at": last_transitioned_at.isoformat() if last_transitioned_at is not None else None,
-        "stage_order": list(STAGES),
-    }
+    snapshot = derive_stage_and_constraints(db, org_id=org_id, property_id=property_id)
+    return _build_snapshot_payload(
+        property_id=property_id,
+        state=snapshot,
+        updated_at=getattr(row, "updated_at", None),
+        last_transitioned_at=getattr(row, "last_transitioned_at", None),
+    )
 
 
 def get_transition_payload(

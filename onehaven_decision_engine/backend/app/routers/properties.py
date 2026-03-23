@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,7 +24,6 @@ from ..models import (
     Property,
     PropertyChecklist,
     PropertyChecklistItem,
-    PropertyState,
     RehabTask,
     RentAssumption,
     Transaction,
@@ -54,6 +55,7 @@ from ..services.property_state_machine import (
 from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/properties", tags=["properties"])
+log = logging.getLogger("onehaven.properties")
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
@@ -109,6 +111,10 @@ def _maybe_geo_enrich_property(db: Session, *, org_id: int, property_id: int, fo
     except RuntimeError:
         return {"ok": False, "error": "geo_enrichment_runtime_error"}
     except Exception as e:
+        log.exception(
+            "property_geo_enrich_failed",
+            extra={"org_id": org_id, "property_id": property_id, "force": force},
+        )
         return {"ok": False, "error": str(e)}
 
 
@@ -333,11 +339,35 @@ def _photo_gallery_for_property(db: Session, *, org_id: int, property_id: int) -
     }
 
 
-def _build_property_list_item(db: Session, *, org_id: int, prop: Property) -> dict[str, Any]:
+def _build_property_list_item(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+    recompute_state: bool = False,
+) -> dict[str, Any]:
+    """
+    Cheap list-item builder for inventory/dashboard reads.
+
+    Important:
+    - Defaults to recompute_state=False so list endpoints do not trigger expensive
+      workflow/state recomputation across hundreds of properties.
+    - Detail endpoints can still explicitly recompute when needed.
+    """
     deal = _latest_deal(db, org_id=org_id, property_id=int(prop.id))
     uw = _latest_underwriting(db, org_id=org_id, property_id=int(prop.id))
-    state_payload = get_state_payload(db, org_id=org_id, property_id=int(prop.id), recompute=True)
-    workflow = build_workflow_summary(db, org_id=org_id, property_id=int(prop.id), recompute=False)
+    state_payload = get_state_payload(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+        recompute=bool(recompute_state),
+    )
+    workflow = build_workflow_summary(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+        recompute=False,
+    )
 
     prop_payload = PropertyOut.model_validate(prop, from_attributes=True).model_dump()
 
@@ -392,10 +422,12 @@ def list_properties(
     min_offender_count: Optional[int] = Query(default=None),
     max_offender_count: Optional[int] = Query(default=None),
     sort: Optional[str] = Query(default=None),
-    limit: int = Query(default=500, ge=1, le=5000),
+    limit: int = Query(default=100, ge=1, le=1000),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
+    req_t0 = time.perf_counter()
+
     stmt = (
         select(Property)
         .where(Property.org_id == p.org_id)
@@ -463,21 +495,69 @@ def list_properties(
     else:
         stmt = stmt.order_by(desc(Property.id))
 
+    query_t0 = time.perf_counter()
     rows = db.scalars(stmt.limit(limit)).unique().all()
+    query_ms = round((time.perf_counter() - query_t0) * 1000, 2)
 
     wanted_stage = (stage or "").strip().lower() or None
     wanted_decision = normalize_decision_bucket(decision) if decision else None
 
     out: list[dict] = []
+    skipped_errors = 0
+    skipped_stage = 0
+    skipped_decision = 0
+
+    build_t0 = time.perf_counter()
     for prop in rows:
-        item = _build_property_list_item(db, org_id=p.org_id, prop=prop)
+        try:
+            item = _build_property_list_item(
+                db,
+                org_id=p.org_id,
+                prop=prop,
+                recompute_state=False,
+            )
 
-        if wanted_stage and str(item.get("current_workflow_stage") or "").lower() != wanted_stage:
-            continue
-        if wanted_decision and str(item.get("normalized_decision") or "").upper() != wanted_decision:
+            if wanted_stage and str(item.get("current_workflow_stage") or "").lower() != wanted_stage:
+                skipped_stage += 1
+                continue
+            if wanted_decision and str(item.get("normalized_decision") or "").upper() != wanted_decision:
+                skipped_decision += 1
+                continue
+
+            out.append(item)
+        except Exception:
+            skipped_errors += 1
+            log.exception(
+                "properties_list_item_build_failed",
+                extra={"org_id": p.org_id, "property_id": int(getattr(prop, "id", 0) or 0)},
+            )
             continue
 
-        out.append(item)
+    build_ms = round((time.perf_counter() - build_t0) * 1000, 2)
+    total_ms = round((time.perf_counter() - req_t0) * 1000, 2)
+
+    log.info(
+        "properties_list_complete",
+        extra={
+            "org_id": p.org_id,
+            "state": state,
+            "city": city,
+            "county": county,
+            "q": q,
+            "stage": stage,
+            "decision": decision,
+            "sort": sort,
+            "limit": limit,
+            "query_rows": len(rows),
+            "returned_rows": len(out),
+            "skipped_errors": skipped_errors,
+            "skipped_stage": skipped_stage,
+            "skipped_decision": skipped_decision,
+            "query_ms": query_ms,
+            "build_ms": build_ms,
+            "total_ms": total_ms,
+        },
+    )
 
     return out
 
