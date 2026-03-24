@@ -17,8 +17,8 @@ type PaneSummary = {
   pane_label?: string;
   count?: number;
   kpis?: Record<string, any>;
-  top_blockers?: Array<{ blocker?: string; count?: number }>;
-  top_actions?: Array<{ action?: string }>;
+  blockers?: Array<{ blocker?: string; count?: number }>;
+  next_actions?: Array<{ action?: string }>;
 };
 
 function iconForPane(pane?: string) {
@@ -43,14 +43,14 @@ function hrefForPane(pane?: string) {
   switch (pane) {
     case "investor":
       return "/panes/investor";
+    case "acquisition":
+      return "/panes/acquisition";
     case "compliance":
       return "/panes/compliance";
     case "tenants":
       return "/panes/tenants";
     case "management":
       return "/panes/management";
-    case "acquisition":
-      return "/dashboard?pane=acquisition";
     case "admin":
       return "/dashboard?pane=admin";
     default:
@@ -70,8 +70,8 @@ export default function PaneSummaryCards({
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {rows.map((pane) => {
-        const blocker = pane.top_blockers?.[0];
-        const action = pane.top_actions?.[0]?.action;
+        const blocker = pane.blockers?.[0];
+        const action = pane.next_actions?.[0]?.action;
 
         return (
           <Link

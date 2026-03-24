@@ -16,10 +16,20 @@ from ..domain.workflow.panes import (
     pane_label,
 )
 from ..models import Deal, Property, UnderwritingResult
-from ..services.dashboard_rollups import compute_rollups
 from ..services.property_state_machine import get_state_payload
 
 log = logging.getLogger("onehaven.panes")
+
+
+STANDARD_FILTER_KEYS = (
+    "org",
+    "city",
+    "county",
+    "assigned_user",
+    "status",
+    "stage",
+    "urgency",
+)
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
@@ -54,6 +64,27 @@ def _normalize_status(value: Optional[str]) -> Optional[str]:
         return None
     raw = str(value).strip().lower()
     return raw or None
+
+
+def _standard_filters(
+    *,
+    org_id: int,
+    city: Optional[str] = None,
+    county: Optional[str] = None,
+    assigned_user: Optional[int] = None,
+    status: Optional[str] = None,
+    stage: Optional[str] = None,
+    urgency: Optional[str] = None,
+) -> dict[str, Any]:
+    return {
+        "org": int(org_id),
+        "city": _safe_str(city) or None,
+        "county": _safe_str(county) or None,
+        "assigned_user": assigned_user,
+        "status": _normalize_status(status),
+        "stage": _normalize_status(stage),
+        "urgency": _normalize_status(urgency),
+    }
 
 
 def _infer_plan_name(principal: Any) -> str:
@@ -112,6 +143,25 @@ def _asking_price(prop: Property, deal: Optional[Deal]) -> Optional[float]:
     return None
 
 
+def _derive_urgency(
+    *,
+    gate_status: Optional[str],
+    blockers: list[Any],
+    jurisdiction_is_stale: bool,
+    failed_count: int,
+    blocked_count: int,
+) -> str:
+    gate = _normalize_status(gate_status)
+
+    if gate == "blocked" or blocked_count > 0:
+        return "critical"
+    if failed_count > 0 or len(blockers) >= 3:
+        return "high"
+    if jurisdiction_is_stale or len(blockers) > 0:
+        return "medium"
+    return "low"
+
+
 def _base_property_stmt(
     *,
     org_id: int,
@@ -119,7 +169,7 @@ def _base_property_stmt(
     county: Optional[str] = None,
     city: Optional[str] = None,
     q: Optional[str] = None,
-    assigned_user_id: Optional[int] = None,
+    assigned_user: Optional[int] = None,
 ) -> Any:
     stmt = select(Property).where(Property.org_id == org_id)
 
@@ -146,7 +196,7 @@ def _base_property_stmt(
             ).like(like)
         )
 
-    if assigned_user_id is not None:
+    if assigned_user is not None:
         candidate_columns = [
             "assigned_user_id",
             "owner_user_id",
@@ -157,7 +207,7 @@ def _base_property_stmt(
         clauses = []
         for col_name in candidate_columns:
             if hasattr(Property, col_name):
-                clauses.append(getattr(Property, col_name) == assigned_user_id)
+                clauses.append(getattr(Property, col_name) == assigned_user)
         if clauses:
             stmt = stmt.where(or_(*clauses))
 
@@ -165,67 +215,40 @@ def _base_property_stmt(
 
 
 def _property_matches_status(
-    state_payload: dict[str, Any],
+    row: dict[str, Any],
     *,
-    pane: str,
     status: Optional[str],
 ) -> bool:
     if not status:
         return True
 
-    raw = _normalize_status(status)
-    stage = _safe_str(state_payload.get("current_stage")).lower()
-    gate_status = _safe_str(state_payload.get("gate_status")).lower()
-    decision = _safe_str(state_payload.get("normalized_decision")).lower()
+    wanted = _normalize_status(status)
+    current_stage = _safe_str(row.get("current_stage")).lower()
+    gate_status = _safe_str(row.get("gate_status")).lower()
+    decision = _safe_str(row.get("normalized_decision")).lower()
+    pane = _safe_str(row.get("current_pane")).lower()
 
-    if raw in {stage, gate_status, decision}:
+    return wanted in {current_stage, gate_status, decision, pane}
+
+
+def _property_matches_stage(
+    row: dict[str, Any],
+    *,
+    stage: Optional[str],
+) -> bool:
+    if not stage:
         return True
+    return _safe_str(row.get("current_stage")).lower() == _normalize_status(stage)
 
-    pane_status_map = {
-        "investor": {
-            "saved": {"discovered"},
-            "shortlisted": {"shortlisted"},
-            "underwritten": {"underwritten"},
-            "review": {"underwritten"},
-            "good": {"underwritten", "offer"},
-            "rejected": set(),
-        },
-        "acquisition": {
-            "offer": {"offer"},
-            "acquired": {"acquired"},
-            "blocked": set(),
-        },
-        "compliance": {
-            "rehab": {"rehab"},
-            "readying": {"compliance_readying"},
-            "inspection": {"inspection_pending"},
-            "blocked": set(),
-        },
-        "tenants": {
-            "marketing": {"tenant_marketing"},
-            "screening": {"tenant_screening"},
-            "leased": {"leased"},
-        },
-        "management": {
-            "occupied": {"occupied"},
-            "turnover": {"turnover"},
-            "maintenance": {"maintenance"},
-        },
-        "admin": {
-            "all": set(),
-        },
-    }
 
-    mapped = pane_status_map.get(pane, {})
-    if raw in mapped and stage in mapped[raw]:
+def _property_matches_urgency(
+    row: dict[str, Any],
+    *,
+    urgency: Optional[str],
+) -> bool:
+    if not urgency:
         return True
-
-    if pane == "investor" and raw == "rejected" and decision == "reject":
-        return True
-    if raw == "blocked" and gate_status == "blocked":
-        return True
-
-    return False
+    return _safe_str(row.get("urgency")).lower() == _normalize_status(urgency)
 
 
 def _property_matches_pane(
@@ -254,6 +277,18 @@ def _build_row(
     inspection = constraints.get("inspection") or {}
     rehab = constraints.get("rehab") or {}
     counts = (state_payload.get("outstanding_tasks") or {}).get("counts") or {}
+    blockers = (state_payload.get("outstanding_tasks") or {}).get("blockers") or []
+    failed_count = _safe_int(completion.get("failed_count"), 0)
+    blocked_count = _safe_int(completion.get("blocked_count"), 0)
+    jurisdiction_is_stale = bool(jurisdiction.get("is_stale"))
+
+    urgency = _derive_urgency(
+        gate_status=state_payload.get("gate_status"),
+        blockers=blockers,
+        jurisdiction_is_stale=jurisdiction_is_stale,
+        failed_count=failed_count,
+        blocked_count=blocked_count,
+    )
 
     return {
         "property_id": int(prop.id),
@@ -274,20 +309,24 @@ def _build_row(
         "projected_monthly_cashflow": _safe_float(getattr(uw_row, "cash_flow", None), 0.0) if uw_row else None,
         "dscr": _safe_float(getattr(uw_row, "dscr", None), 0.0) if uw_row else None,
         "next_actions": state_payload.get("next_actions") or [],
-        "blockers": (state_payload.get("outstanding_tasks") or {}).get("blockers") or [],
+        "blockers": blockers,
         "updated_at": state_payload.get("updated_at"),
+        "urgency": urgency,
+        "is_stale": jurisdiction_is_stale,
+        "failed_count": failed_count,
+        "blocked_count": blocked_count,
         "jurisdiction": {
             "exists": jurisdiction.get("exists"),
             "gate_ok": jurisdiction.get("gate_ok"),
             "profile_id": jurisdiction.get("profile_id"),
             "completeness_status": jurisdiction.get("completeness_status"),
-            "is_stale": jurisdiction.get("is_stale"),
+            "is_stale": jurisdiction_is_stale,
         },
         "compliance": {
             "is_compliant": completion.get("is_compliant"),
             "completion_pct": completion.get("completion_pct"),
-            "failed_count": completion.get("failed_count"),
-            "blocked_count": completion.get("blocked_count"),
+            "failed_count": failed_count,
+            "blocked_count": blocked_count,
             "latest_inspection_passed": completion.get("latest_inspection_passed"),
             "open_failed_items": inspection.get("open_failed_items"),
         },
@@ -301,7 +340,7 @@ def _build_row(
     }
 
 
-def _build_blocker_summary(rows: list[dict[str, Any]], *, limit: int = 10) -> list[dict[str, Any]]:
+def _build_blockers(rows: list[dict[str, Any]], *, limit: int = 15) -> list[dict[str, Any]]:
     counter: dict[str, int] = defaultdict(int)
     examples: dict[str, dict[str, Any]] = {}
 
@@ -318,6 +357,8 @@ def _build_blocker_summary(rows: list[dict[str, Any]], *, limit: int = 10) -> li
                     "count": 0,
                     "example_property_id": row.get("property_id"),
                     "example_address": row.get("address"),
+                    "example_city": row.get("city"),
+                    "urgency": row.get("urgency"),
                 },
             )
 
@@ -329,7 +370,7 @@ def _build_blocker_summary(rows: list[dict[str, Any]], *, limit: int = 10) -> li
     return out
 
 
-def _build_recent_actions(rows: list[dict[str, Any]], *, limit: int = 15) -> list[dict[str, Any]]:
+def _build_recent_actions(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for row in rows:
         actions = row.get("next_actions") or []
@@ -341,6 +382,7 @@ def _build_recent_actions(rows: list[dict[str, Any]], *, limit: int = 15) -> lis
                     "city": row.get("city"),
                     "pane": row.get("current_pane"),
                     "stage": row.get("current_stage"),
+                    "urgency": row.get("urgency"),
                     "action": action,
                     "updated_at": row.get("updated_at"),
                 }
@@ -357,24 +399,15 @@ def _build_recent_actions(rows: list[dict[str, Any]], *, limit: int = 15) -> lis
     return items[:limit]
 
 
-def _build_recommended_next_actions(rows: list[dict[str, Any]], *, limit: int = 12) -> list[dict[str, Any]]:
-    priority_order = {
-        "missing_underwriting": 0,
-        "not_acquired": 1,
-        "rehab_blocked": 2,
-        "inspection_open_failures": 3,
-        "compliance_failed_items": 4,
-        "missing_tenant_pipeline": 5,
-        "tenant_pipeline_in_progress": 6,
-        "missing_cash_transactions": 7,
-        "turnover_active": 8,
-    }
-
+def _build_next_actions(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
+    priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     candidates: list[dict[str, Any]] = []
+
     for row in rows:
         actions = row.get("next_actions") or []
         blockers = row.get("blockers") or []
-        first_blocker = blockers[0] if blockers else ""
+        first_blocker = blockers[0] if blockers else None
+
         for idx, action in enumerate(actions[:2]):
             candidates.append(
                 {
@@ -383,9 +416,10 @@ def _build_recommended_next_actions(rows: list[dict[str, Any]], *, limit: int = 
                     "city": row.get("city"),
                     "stage": row.get("current_stage"),
                     "pane": row.get("current_pane"),
+                    "urgency": row.get("urgency"),
                     "blocker": first_blocker,
                     "action": action,
-                    "priority": priority_order.get(str(first_blocker), 50) + idx,
+                    "priority": priority_order.get(_safe_str(row.get("urgency")).lower(), 99) + idx,
                 }
             )
 
@@ -399,27 +433,23 @@ def _build_recommended_next_actions(rows: list[dict[str, Any]], *, limit: int = 
     return candidates[:limit]
 
 
-def _build_stale_items(rows: list[dict[str, Any]], *, limit: int = 15) -> list[dict[str, Any]]:
+def _build_stale_items(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
     stale: list[dict[str, Any]] = []
 
     for row in rows:
+        reasons: list[str] = []
+
         jurisdiction = row.get("jurisdiction") or {}
         compliance = row.get("compliance") or {}
-        blockers = row.get("blockers") or []
 
-        reasons: list[str] = []
         if jurisdiction.get("is_stale"):
             reasons.append("jurisdiction_stale")
-        if jurisdiction.get("completeness_status") not in {None, "complete"}:
-            reasons.append("jurisdiction_incomplete")
         if _safe_int(compliance.get("failed_count"), 0) > 0:
             reasons.append("compliance_failed_items")
         if _safe_int(compliance.get("blocked_count"), 0) > 0:
             reasons.append("compliance_blocked_items")
-        if "missing_cash_transactions" in blockers:
+        if "missing_cash_transactions" in (row.get("blockers") or []):
             reasons.append("missing_cash_transactions")
-        if "tenant_pipeline_in_progress" in blockers:
-            reasons.append("tenant_pipeline_in_progress")
 
         if not reasons:
             continue
@@ -431,6 +461,7 @@ def _build_stale_items(rows: list[dict[str, Any]], *, limit: int = 15) -> list[d
                 "city": row.get("city"),
                 "stage": row.get("current_stage"),
                 "pane": row.get("current_pane"),
+                "urgency": row.get("urgency"),
                 "reasons": reasons,
             }
         )
@@ -446,94 +477,65 @@ def _build_stale_items(rows: list[dict[str, Any]], *, limit: int = 15) -> list[d
     return stale[:limit]
 
 
-def _build_kpis_for_pane(pane: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    total = len(rows)
-    if total == 0:
-        base = {
-            "total_properties": 0,
-            "with_blockers": 0,
-            "with_next_actions": 0,
-            "stale_count": 0,
-        }
-        if pane == "investor":
-            base.update({"good_candidates": 0, "review_candidates": 0, "avg_cashflow_estimate": 0.0})
-        elif pane == "acquisition":
-            base.update({"offer_stage_count": 0, "acquired_stage_count": 0, "blocked_acquisitions": 0})
-        elif pane == "compliance":
-            base.update({"inspection_pending_count": 0, "failed_items_total": 0, "jurisdiction_stale_count": 0})
-        elif pane == "tenants":
-            base.update({"marketing_count": 0, "screening_count": 0, "leased_count": 0})
-        elif pane == "management":
-            base.update({"occupied_count": 0, "turnover_count": 0, "maintenance_count": 0})
-        elif pane == "admin":
-            base.update({"org_property_count": 0, "pane_count": len(PANES), "blocked_items_total": 0})
-        return base
+def _build_queue_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    by_stage: dict[str, int] = defaultdict(int)
+    by_status: dict[str, int] = defaultdict(int)
+    by_urgency: dict[str, int] = defaultdict(int)
 
+    for row in rows:
+        by_stage[_safe_str(row.get("current_stage"), "unknown")] += 1
+        by_status[_safe_str(row.get("gate_status"), "unknown")] += 1
+        by_urgency[_safe_str(row.get("urgency"), "unknown")] += 1
+
+    return {
+        "total": len(rows),
+        "by_stage": dict(sorted(by_stage.items(), key=lambda item: item[0])),
+        "by_status": dict(sorted(by_status.items(), key=lambda item: item[0])),
+        "by_urgency": dict(sorted(by_urgency.items(), key=lambda item: item[0])),
+    }
+
+
+def _build_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(rows)
     with_blockers = sum(1 for row in rows if row.get("blockers"))
     with_next_actions = sum(1 for row in rows if row.get("next_actions"))
-    stale_count = len(_build_stale_items(rows, limit=100000))
+    stale_count = sum(1 for row in rows if row.get("is_stale"))
+    critical_count = sum(1 for row in rows if row.get("urgency") == "critical")
+    high_count = sum(1 for row in rows if row.get("urgency") == "high")
 
-    kpis: dict[str, Any] = {
+    total_asking = 0.0
+    total_cashflow = 0.0
+    total_dscr = 0.0
+    asking_count = 0
+    cashflow_count = 0
+    dscr_count = 0
+
+    for row in rows:
+        asking_price = row.get("asking_price")
+        projected_cashflow = row.get("projected_monthly_cashflow")
+        dscr_value = row.get("dscr")
+
+        if asking_price is not None:
+            total_asking += _safe_float(asking_price)
+            asking_count += 1
+        if projected_cashflow is not None:
+            total_cashflow += _safe_float(projected_cashflow)
+            cashflow_count += 1
+        if dscr_value is not None:
+            total_dscr += _safe_float(dscr_value)
+            dscr_count += 1
+
+    return {
         "total_properties": total,
         "with_blockers": with_blockers,
         "with_next_actions": with_next_actions,
-        "stale_count": stale_count,
+        "stale_items": stale_count,
+        "critical_items": critical_count,
+        "high_priority_items": high_count,
+        "avg_asking_price": round(total_asking / asking_count, 2) if asking_count else 0.0,
+        "avg_projected_monthly_cashflow": round(total_cashflow / cashflow_count, 2) if cashflow_count else 0.0,
+        "avg_dscr": round(total_dscr / dscr_count, 3) if dscr_count else 0.0,
     }
-
-    if pane == "investor":
-        good_candidates = sum(1 for row in rows if str(row.get("normalized_decision") or "").upper() == "GOOD")
-        review_candidates = sum(1 for row in rows if str(row.get("normalized_decision") or "").upper() == "REVIEW")
-        cash_values = [row.get("projected_monthly_cashflow") for row in rows if row.get("projected_monthly_cashflow") is not None]
-        kpis.update(
-            {
-                "good_candidates": good_candidates,
-                "review_candidates": review_candidates,
-                "avg_cashflow_estimate": round(sum(_safe_float(x) for x in cash_values) / len(cash_values), 2) if cash_values else 0.0,
-            }
-        )
-    elif pane == "acquisition":
-        kpis.update(
-            {
-                "offer_stage_count": sum(1 for row in rows if row.get("current_stage") == "offer"),
-                "acquired_stage_count": sum(1 for row in rows if row.get("current_stage") == "acquired"),
-                "blocked_acquisitions": sum(1 for row in rows if str(row.get("gate_status") or "").upper() == "BLOCKED"),
-            }
-        )
-    elif pane == "compliance":
-        kpis.update(
-            {
-                "inspection_pending_count": sum(1 for row in rows if row.get("current_stage") == "inspection_pending"),
-                "failed_items_total": sum(_safe_int((row.get("compliance") or {}).get("failed_count"), 0) for row in rows),
-                "jurisdiction_stale_count": sum(1 for row in rows if (row.get("jurisdiction") or {}).get("is_stale") is True),
-            }
-        )
-    elif pane == "tenants":
-        kpis.update(
-            {
-                "marketing_count": sum(1 for row in rows if row.get("current_stage") == "tenant_marketing"),
-                "screening_count": sum(1 for row in rows if row.get("current_stage") == "tenant_screening"),
-                "leased_count": sum(1 for row in rows if row.get("current_stage") == "leased"),
-            }
-        )
-    elif pane == "management":
-        kpis.update(
-            {
-                "occupied_count": sum(1 for row in rows if row.get("current_stage") == "occupied"),
-                "turnover_count": sum(1 for row in rows if row.get("current_stage") == "turnover"),
-                "maintenance_count": sum(1 for row in rows if row.get("current_stage") == "maintenance"),
-            }
-        )
-    elif pane == "admin":
-        blocked_items_total = sum(len(row.get("blockers") or []) for row in rows)
-        kpis.update(
-            {
-                "org_property_count": total,
-                "pane_count": len(PANES),
-                "blocked_items_total": blocked_items_total,
-            }
-        )
-
-    return kpis
 
 
 def _filter_rows_for_pane(
@@ -541,40 +543,21 @@ def _filter_rows_for_pane(
     *,
     pane: str,
     status: Optional[str],
-    jurisdiction: Optional[str],
+    stage: Optional[str],
+    urgency: Optional[str],
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    wanted_jurisdiction = _normalize_status(jurisdiction)
 
     for row in rows:
         current_pane = clamp_pane(row.get("current_pane"))
         if not _property_matches_pane(pane, current_pane=current_pane):
             continue
-
-        if not _property_matches_status(
-            {
-                "current_stage": row.get("current_stage"),
-                "gate_status": row.get("gate_status"),
-                "normalized_decision": row.get("normalized_decision"),
-            },
-            pane=pane,
-            status=status,
-        ):
+        if not _property_matches_status(row, status=status):
             continue
-
-        if wanted_jurisdiction:
-            jurisdiction_payload = row.get("jurisdiction") or {}
-            profile_id = jurisdiction_payload.get("profile_id")
-            completeness_status = _normalize_status(jurisdiction_payload.get("completeness_status"))
-            if wanted_jurisdiction == "missing" and profile_id:
-                continue
-            if wanted_jurisdiction == "stale" and not jurisdiction_payload.get("is_stale"):
-                continue
-            if wanted_jurisdiction == "incomplete" and completeness_status == "complete":
-                continue
-            if wanted_jurisdiction not in {"missing", "stale", "incomplete"}:
-                if completeness_status != wanted_jurisdiction:
-                    continue
+        if not _property_matches_stage(row, stage=stage):
+            continue
+        if not _property_matches_urgency(row, urgency=urgency):
+            continue
 
         out.append(row)
 
@@ -589,7 +572,7 @@ def _build_rows_for_scope(
     county: Optional[str] = None,
     city: Optional[str] = None,
     q: Optional[str] = None,
-    assigned_user_id: Optional[int] = None,
+    assigned_user: Optional[int] = None,
     max_scan: int = 1000,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     scope_t0 = time.perf_counter()
@@ -600,7 +583,7 @@ def _build_rows_for_scope(
         county=county,
         city=city,
         q=q,
-        assigned_user_id=assigned_user_id,
+        assigned_user=assigned_user,
     )
 
     query_t0 = time.perf_counter()
@@ -649,18 +632,18 @@ def _build_rows_for_scope(
     return rows, meta
 
 
-def _build_pane_response(
+def _build_contract_response(
     *,
     pane_key: str,
     principal: Any,
+    org_id: int,
     raw_rows: list[dict[str, Any]],
-    state: Optional[str],
-    county: Optional[str],
     city: Optional[str],
-    jurisdiction: Optional[str],
+    county: Optional[str],
+    assigned_user: Optional[int],
     status: Optional[str],
-    assigned_user_id: Optional[int],
-    q: Optional[str],
+    stage: Optional[str],
+    urgency: Optional[str],
     limit: int,
 ) -> dict[str, Any]:
     allowed = allowed_panes_for_principal(principal)
@@ -677,52 +660,54 @@ def _build_pane_response(
         raw_rows,
         pane=pane_key,
         status=status,
-        jurisdiction=jurisdiction,
+        stage=stage,
+        urgency=urgency,
     )
 
     plan = _build_plan_context(principal)
-    stale_items = _build_stale_items(pane_rows)
-    blockers = _build_blocker_summary(pane_rows)
-    recent_actions = _build_recent_actions(pane_rows)
-    recommended_next_actions = _build_recommended_next_actions(pane_rows)
-    kpis = _build_kpis_for_pane(pane_key, pane_rows)
-
     response: dict[str, Any] = {
         "ok": True,
         "pane": pane_key,
         "pane_label": pane_label(pane_key),
         "allowed_panes": allowed,
         "catalog": pane_catalog(),
-        "filters": {
-            "state": state,
-            "county": county,
-            "city": city,
-            "jurisdiction": jurisdiction,
-            "status": status,
-            "assigned_user_id": assigned_user_id,
-            "q": q,
-            "limit": limit,
-        },
+        "filters": _standard_filters(
+            org_id=org_id,
+            city=city,
+            county=county,
+            assigned_user=assigned_user,
+            status=status,
+            stage=stage,
+            urgency=urgency,
+        ),
         "plan": plan,
-        "kpis": kpis,
-        "blockers": blockers,
-        "recent_actions": recent_actions,
-        "recommended_next_actions": recommended_next_actions,
-        "stale_items": stale_items,
+        "kpis": _build_kpis(pane_rows),
+        "blockers": _build_blockers(pane_rows),
+        "recent_actions": _build_recent_actions(pane_rows),
+        "next_actions": _build_next_actions(pane_rows),
+        "stale_items": _build_stale_items(pane_rows),
+        "queue_counts": _build_queue_counts(pane_rows),
         "rows": pane_rows[: int(limit)],
         "count": len(pane_rows),
     }
 
     if plan["advanced_fields_enabled"]:
-        stage_mix: dict[str, int] = defaultdict(int)
         county_mix: dict[str, int] = defaultdict(int)
+        stage_mix: dict[str, int] = defaultdict(int)
+
         for row in pane_rows:
-            stage_mix[_safe_str(row.get("current_stage"), "unknown")] += 1
             county_mix[_safe_str(row.get("county"), "unknown")] += 1
+            stage_mix[_safe_str(row.get("current_stage"), "unknown")] += 1
 
         response["advanced"] = {
-            "stage_mix": [{"key": key, "value": value} for key, value in sorted(stage_mix.items(), key=lambda item: item[0])],
-            "county_breakdown": [{"key": key, "value": value} for key, value in sorted(county_mix.items(), key=lambda item: (-item[1], item[0]))],
+            "county_breakdown": [
+                {"key": key, "value": value}
+                for key, value in sorted(county_mix.items(), key=lambda item: (-item[1], item[0]))
+            ],
+            "stage_breakdown": [
+                {"key": key, "value": value}
+                for key, value in sorted(stage_mix.items(), key=lambda item: item[0])
+            ],
             "leaderboards": {
                 "cashflow": sorted(
                     pane_rows,
@@ -749,9 +734,10 @@ def build_pane_dashboard(
     state: Optional[str] = None,
     county: Optional[str] = None,
     city: Optional[str] = None,
-    jurisdiction: Optional[str] = None,
     status: Optional[str] = None,
-    assigned_user_id: Optional[int] = None,
+    stage: Optional[str] = None,
+    urgency: Optional[str] = None,
+    assigned_user: Optional[int] = None,
     q: Optional[str] = None,
     limit: int = 200,
 ) -> dict[str, Any]:
@@ -765,21 +751,21 @@ def build_pane_dashboard(
         county=county,
         city=city,
         q=q,
-        assigned_user_id=assigned_user_id,
+        assigned_user=assigned_user,
         max_scan=max(int(limit) * 5, 500),
     )
 
-    response = _build_pane_response(
+    response = _build_contract_response(
         pane_key=pane_key,
         principal=principal,
+        org_id=org_id,
         raw_rows=raw_rows,
-        state=state,
-        county=county,
         city=city,
-        jurisdiction=jurisdiction,
+        county=county,
+        assigned_user=assigned_user,
         status=status,
-        assigned_user_id=assigned_user_id,
-        q=q,
+        stage=stage,
+        urgency=urgency,
         limit=limit,
     )
 
@@ -791,12 +777,12 @@ def build_pane_dashboard(
             "pane": pane_key,
             "count": response.get("count", 0),
             "limit": limit,
-            "state": state,
             "county": county,
             "city": city,
-            "jurisdiction": jurisdiction,
             "status": status,
-            "assigned_user_id": assigned_user_id,
+            "stage": stage,
+            "urgency": urgency,
+            "assigned_user": assigned_user,
             "q": q,
             "scope_query_rows": scope_meta["query_rows"],
             "scope_returned_rows": scope_meta["returned_rows"],
@@ -817,9 +803,10 @@ def build_all_pane_summaries(
     state: Optional[str] = None,
     county: Optional[str] = None,
     city: Optional[str] = None,
-    jurisdiction: Optional[str] = None,
     status: Optional[str] = None,
-    assigned_user_id: Optional[int] = None,
+    stage: Optional[str] = None,
+    urgency: Optional[str] = None,
+    assigned_user: Optional[int] = None,
     q: Optional[str] = None,
     limit: int = 100,
 ) -> dict[str, Any]:
@@ -833,7 +820,7 @@ def build_all_pane_summaries(
         county=county,
         city=city,
         q=q,
-        assigned_user_id=assigned_user_id,
+        assigned_user=assigned_user,
         max_scan=max(int(limit) * 8, 800),
     )
 
@@ -842,17 +829,17 @@ def build_all_pane_summaries(
         if pane not in allowed and pane != "admin":
             continue
 
-        summary = _build_pane_response(
+        summary = _build_contract_response(
             pane_key=pane,
             principal=principal,
+            org_id=org_id,
             raw_rows=raw_rows,
-            state=state,
-            county=county,
             city=city,
-            jurisdiction=jurisdiction,
+            county=county,
+            assigned_user=assigned_user,
             status=status,
-            assigned_user_id=assigned_user_id,
-            q=q,
+            stage=stage,
+            urgency=urgency,
             limit=limit,
         )
 
@@ -861,9 +848,11 @@ def build_all_pane_summaries(
                 "pane": pane,
                 "pane_label": pane_label(pane),
                 "count": summary.get("count", 0),
+                "filters": summary.get("filters", {}),
                 "kpis": summary.get("kpis", {}),
-                "top_blockers": summary.get("blockers", [])[:3],
-                "top_actions": summary.get("recommended_next_actions", [])[:3],
+                "blockers": summary.get("blockers", [])[:3],
+                "next_actions": summary.get("next_actions", [])[:3],
+                "queue_counts": summary.get("queue_counts", {}),
             }
         )
 
@@ -875,12 +864,12 @@ def build_all_pane_summaries(
             "allowed_pane_count": len(allowed),
             "pane_count": len(panes),
             "limit": limit,
-            "state": state,
             "county": county,
             "city": city,
-            "jurisdiction": jurisdiction,
             "status": status,
-            "assigned_user_id": assigned_user_id,
+            "stage": stage,
+            "urgency": urgency,
+            "assigned_user": assigned_user,
             "q": q,
             "scope_query_rows": scope_meta["query_rows"],
             "scope_returned_rows": scope_meta["returned_rows"],
@@ -895,6 +884,15 @@ def build_all_pane_summaries(
         "ok": True,
         "allowed_panes": allowed,
         "catalog": pane_catalog(),
+        "filters": _standard_filters(
+            org_id=org_id,
+            city=city,
+            county=county,
+            assigned_user=assigned_user,
+            status=status,
+            stage=stage,
+            urgency=urgency,
+        ),
         "panes": panes,
     }
 
@@ -907,40 +905,57 @@ def build_portfolio_rollup_with_panes(
     state: Optional[str] = None,
     county: Optional[str] = None,
     city: Optional[str] = None,
-    decision: Optional[str] = None,
+    status: Optional[str] = None,
     stage: Optional[str] = None,
+    urgency: Optional[str] = None,
+    assigned_user: Optional[int] = None,
     limit: int = 500,
 ) -> dict[str, Any]:
-    data = compute_rollups(
+    raw_rows, _ = _build_rows_for_scope(
         db,
         org_id=org_id,
         state=state,
         county=county,
         city=city,
-        decision=decision,
-        stage=stage,
-        limit=limit,
+        assigned_user=assigned_user,
+        max_scan=max(int(limit), 500),
     )
+
+    filtered_rows = [
+        row
+        for row in raw_rows
+        if _property_matches_status(row, status=status)
+        and _property_matches_stage(row, stage=stage)
+        and _property_matches_urgency(row, urgency=urgency)
+    ]
 
     pane_counts: dict[str, int] = defaultdict(int)
     properties_with_next_actions = 0
 
-    for row in data.get("rows", []):
+    for row in filtered_rows:
         pane_key = clamp_pane(row.get("current_pane"))
         pane_counts[pane_key] += 1
         if row.get("next_actions"):
             properties_with_next_actions += 1
 
     return {
-        "properties": data.get("summary", {}).get("property_count", 0),
-        "stage_counts": data.get("buckets", {}).get("stages", {}),
-        "decision_counts": data.get("buckets", {}).get("decisions", {}),
+        "filters": _standard_filters(
+            org_id=org_id,
+            city=city,
+            county=county,
+            assigned_user=assigned_user,
+            status=status,
+            stage=stage,
+            urgency=urgency,
+        ),
+        "kpis": _build_kpis(filtered_rows),
+        "blockers": _build_blockers(filtered_rows),
+        "recent_actions": _build_recent_actions(filtered_rows),
+        "next_actions": _build_next_actions(filtered_rows),
+        "stale_items": _build_stale_items(filtered_rows),
+        "queue_counts": _build_queue_counts(filtered_rows),
         "pane_counts": dict(sorted(pane_counts.items(), key=lambda item: item[0])),
         "properties_with_next_actions": properties_with_next_actions,
-        "averages": {
-            "asking_price": data.get("summary", {}).get("avg_asking_price", 0.0),
-            "projected_monthly_cashflow": data.get("summary", {}).get("avg_projected_monthly_cashflow", 0.0),
-            "dscr": data.get("summary", {}).get("avg_dscr", 0.0),
-        },
         "allowed_panes": allowed_panes_for_principal(principal),
+        "rows": filtered_rows[: int(limit)],
     }

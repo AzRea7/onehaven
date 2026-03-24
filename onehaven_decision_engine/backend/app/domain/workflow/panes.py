@@ -130,6 +130,12 @@ def stage_to_pane(stage: Optional[str], *, turnover_target: str = "compliance") 
     return "investor"
 
 
+def next_stage_to_pane(next_stage: Optional[str], *, turnover_target: str = "compliance") -> Optional[str]:
+    if next_stage is None:
+        return None
+    return stage_to_pane(next_stage, turnover_target=turnover_target)
+
+
 def _normalize_roles(roles: Iterable[str]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()

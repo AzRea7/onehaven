@@ -1,7 +1,6 @@
 import React from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  Building2,
   Gavel,
   LayoutDashboard,
   LogOut,
@@ -93,7 +92,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <aside className="oh-sidebar h-screen min-h-0 overflow-hidden">
             <div className="oh-sidebar-inner flex h-screen min-h-0 flex-col overflow-hidden px-4 py-4">
               <NavLink
-                to="/dashboard"
+                to="/panes/investor"
                 className="oh-sidebar-brand shrink-0 rounded-[24px] border border-app bg-app-panel px-4 py-4 shadow-soft"
               >
                 <div className="oh-brand-mark">
@@ -103,24 +102,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <div className="text-sm font-semibold text-app-0">
                     OneHaven
                   </div>
-                  <div className="text-[11px] text-app-4">Investment OS</div>
+                  <div className="text-[11px] text-app-4">
+                    Lifecycle operating system
+                  </div>
                 </div>
               </NavLink>
 
               <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
                 <div className="space-y-5 pb-4">
                   <div className="oh-sidebar-section">
-                    <div className="oh-sidebar-heading">Core</div>
+                    <div className="oh-sidebar-heading">Workspace</div>
                     <div className="oh-sidebar-links">
                       <SideLink
                         to="/dashboard"
                         icon={<LayoutDashboard className="h-4 w-4" />}
-                        label="Dashboard"
-                      />
-                      <SideLink
-                        to="/properties"
-                        icon={<Building2 className="h-4 w-4" />}
-                        label="Investor"
+                        label="Portfolio dashboard"
                       />
                       <SideLink
                         to="/agents"
@@ -174,13 +170,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       Navigation model
                     </div>
                     <div className="mt-2 text-sm font-semibold text-app-0">
-                      Workflow-first navigation
+                      Pane-driven lifecycle
                     </div>
                     <div className="mt-2 text-xs leading-relaxed text-app-4">
-                      The header now carries the pane progression bar so moving
-                      between modes feels like advancing the property through
-                      one operating lifecycle instead of switching between
-                      separate pages.
+                      The top header is now the main operating navigation. Users
+                      move a property through investor, acquisition, compliance,
+                      tenant placement, and management instead of bouncing
+                      across unrelated pages.
                     </div>
                   </div>
                 </div>
@@ -191,7 +187,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   type="button"
                   onClick={() => logout()}
                   disabled={loading}
-                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-red-700 bg-red-600 px-4 text-sm font-semibold text-white shadow-lg shadow-red-900/25 transition hover:bg-red-700 hover:border-red-800 active:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-red-700 bg-red-600 px-4 text-sm font-semibold text-white shadow-lg shadow-red-900/25 transition hover:border-red-800 hover:bg-red-700 active:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <LogOut className="h-4 w-4" />
                   {loading ? "Signing out…" : "Logout"}

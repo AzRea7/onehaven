@@ -17,12 +17,15 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  BriefcaseBusiness,
+  GitBranch,
 } from "lucide-react";
 
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
 import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
+import PaneSwitcher from "../components/PaneSwitcher";
 import { api, type SupportedMarket } from "../lib/api";
 
 type Row = any;
@@ -589,86 +592,223 @@ export default function InvestorPane() {
   }, [
     baseRows,
     deferredQ,
+    selectedCity,
     decision,
     financing,
     completeness,
     sort,
-    selectedCity,
   ]);
 
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [deferredQ, decision, financing, completeness, sort, selectedCity]);
+  }, [deferredQ, selectedCity, decision, financing, completeness, sort]);
 
-  const cityOptions = React.useMemo(() => {
-    const marketCities = markets
-      .map((m) => String(m?.city || "").trim())
-      .filter(Boolean);
-
-    const rowCities = uniqueCities(baseRows);
-    return Array.from(new Set([...marketCities, ...rowCities])).sort((a, b) =>
-      a.localeCompare(b),
-    );
-  }, [markets, baseRows]);
-
-  const completenessCounts = React.useMemo(() => {
-    let complete = 0;
-    let partial = 0;
-    let missing = 0;
-
-    for (const row of baseRows) {
-      const value = inferCompleteness(row);
-      if (value === "COMPLETE") complete += 1;
-      else if (value === "PARTIAL") partial += 1;
-      else missing += 1;
-    }
-
-    return {
-      complete,
-      partial,
-      missing,
-      total: baseRows.length,
-    };
-  }, [baseRows]);
+  const cityOptions = React.useMemo(() => uniqueCities(baseRows), [baseRows]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * PAGE_SIZE;
   const endIndex = startIndex + PAGE_SIZE;
   const pagedRows = filtered.slice(startIndex, endIndex);
-  const pageNumbers = buildPagination(safeCurrentPage, totalPages);
+  const pagination = buildPagination(safeCurrentPage, totalPages);
 
-  const handleRefresh = React.useCallback(async () => {
-    await load();
-  }, [load]);
+  const counts = React.useMemo(() => {
+    const c: Record<"GOOD_DEAL" | "REVIEW" | "REJECT", number> = {
+      GOOD_DEAL: 0,
+      REVIEW: 0,
+      REJECT: 0,
+    };
+    for (const r of baseRows || []) {
+      const d = normalizeDecision(
+        r?.normalized_decision || r?.classification || r?.decision,
+      ) as "GOOD_DEAL" | "REVIEW" | "REJECT";
+      c[d] += 1;
+    }
+    return c;
+  }, [baseRows]);
 
-  const handlePageChange = React.useCallback((page: number) => {
-    setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+  const enrichedCount = React.useMemo(
+    () => baseRows.filter((r) => inferCompleteness(r) === "COMPLETE").length,
+    [baseRows],
+  );
+  const positiveCashflowCount = React.useMemo(
+    () => baseRows.filter((r) => (inferCashflow(r) ?? 0) > 0).length,
+    [baseRows],
+  );
+  const avgCashflow = React.useMemo(() => {
+    const values = baseRows
+      .map((r) => inferCashflow(r))
+      .filter((v): v is number => typeof v === "number");
+    if (!values.length) return null;
+    return values.reduce((sum, v) => sum + v, 0) / values.length;
+  }, [baseRows]);
 
   return (
     <PageShell>
-      <PageHero title="Investor Inventory" />
+      <div className="space-y-6">
+        <PageHero
+          eyebrow="Pane 1"
+          title="Investor pane"
+          subtitle="This is the lifecycle start. Discover, rank, filter, and open properties that should move into acquisition next."
+          actions={
+            <>
+              <button onClick={load} className="oh-btn oh-btn-secondary">
+                {refreshing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-4 w-4" />
+                )}
+                Refresh inventory
+              </button>
+              <Link to="/dashboard" className="oh-btn oh-btn-secondary">
+                Portfolio dashboard
+              </Link>
+            </>
+          }
+        />
 
-      <div className="grid gap-4">
-        <Surface className="p-4">
-          <div className="grid gap-4 lg:grid-cols-[1.4fr_1.4fr_auto]">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
+        <PaneSwitcher activePane="investor" />
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+          <Surface
+            title="Investor inventory"
+            subtitle="Visible acquisition candidates"
+          >
+            <div className="text-3xl font-semibold text-app-0">
+              {baseRows.length.toLocaleString()}
+            </div>
+          </Surface>
+          <Surface
+            title="Good deals"
+            subtitle="Underwriting-positive candidates"
+          >
+            <div className="text-3xl font-semibold text-app-0">
+              {counts.GOOD_DEAL.toLocaleString()}
+            </div>
+          </Surface>
+          <Surface title="Fully enriched" subtitle="Ready for deeper review">
+            <div className="text-3xl font-semibold text-app-0">
+              {enrichedCount.toLocaleString()}
+            </div>
+          </Surface>
+          <Surface
+            title="Cashflow positive"
+            subtitle="Monthly upside candidates"
+          >
+            <div className="text-3xl font-semibold text-app-0">
+              {positiveCashflowCount.toLocaleString()}
+            </div>
+          </Surface>
+        </div>
+
+        <Surface
+          title="Lifecycle handoff"
+          subtitle="This pane exists to decide which properties should move into acquisition."
+        >
+          <div className="flex flex-wrap gap-2">
+            <span className="oh-pill">
+              current stage discovery / underwriting
+            </span>
+            <span className="oh-pill oh-pill-accent">
+              next stage acquisition
+            </span>
+            <span className="oh-pill oh-pill-warn">
+              blocker incomplete underwriting or enrichment
+            </span>
+            <span className="oh-pill">
+              {acquisitionIds.size} already moved to acquisition
+            </span>
+          </div>
+
+          {marketsErr ? (
+            <div className="mt-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              Market list unavailable: {marketsErr}
+            </div>
+          ) : null}
+        </Surface>
+
+        <Surface
+          title="Filters"
+          subtitle="Investor pane-specific shortlist controls"
+        >
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Search className="h-3.5 w-3.5" />
+                Search
+              </div>
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search address, city, county, tags..."
-                className="w-full rounded-2xl border border-app bg-app-panel pl-10 pr-4 py-3 text-sm text-app-0 outline-none"
+                placeholder="address, city, county, tag…"
+                className="w-full bg-transparent text-sm text-app-0 outline-none"
               />
-            </div>
+            </label>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <ShieldAlert className="h-3.5 w-3.5" />
+                Decision
+              </div>
+              <select
+                value={decision}
+                onChange={(e) => setDecision(e.target.value as DecisionFilter)}
+                className="w-full bg-transparent text-sm text-app-0 outline-none"
+              >
+                <option value="ALL">All</option>
+                <option value="GOOD_DEAL">Good deal</option>
+                <option value="REVIEW">Review</option>
+                <option value="REJECT">Reject</option>
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Banknote className="h-3.5 w-3.5" />
+                Financing
+              </div>
+              <select
+                value={financing}
+                onChange={(e) =>
+                  setFinancing(e.target.value as FinancingFilter)
+                }
+                className="w-full bg-transparent text-sm text-app-0 outline-none"
+              >
+                <option value="ALL">All</option>
+                <option value="CASH">Cash</option>
+                <option value="DSCR">DSCR</option>
+                <option value="UNKNOWN">Unknown</option>
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                Completeness
+              </div>
+              <select
+                value={completeness}
+                onChange={(e) =>
+                  setCompleteness(e.target.value as CompletenessFilter)
+                }
+                className="w-full bg-transparent text-sm text-app-0 outline-none"
+              >
+                <option value="ALL">All</option>
+                <option value="COMPLETE">Enriched</option>
+                <option value="PARTIAL">Partial</option>
+                <option value="MISSING">Missing</option>
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Landmark className="h-3.5 w-3.5" />
+                City
+              </div>
               <select
                 value={selectedCity}
                 onChange={(e) => setSelectedCity(e.target.value)}
-                className="rounded-2xl border border-app bg-app-panel px-3 py-3 text-sm text-app-0"
+                className="w-full bg-transparent text-sm text-app-0 outline-none"
               >
                 <option value="ALL">All cities</option>
                 {cityOptions.map((city) => (
@@ -677,48 +817,17 @@ export default function InvestorPane() {
                   </option>
                 ))}
               </select>
+            </label>
 
-              <select
-                value={decision}
-                onChange={(e) => setDecision(e.target.value as DecisionFilter)}
-                className="rounded-2xl border border-app bg-app-panel px-3 py-3 text-sm text-app-0"
-              >
-                <option value="ALL">All decisions</option>
-                <option value="GOOD_DEAL">Good deal</option>
-                <option value="REVIEW">Review</option>
-                <option value="REJECT">Reject</option>
-              </select>
-
-              <select
-                value={financing}
-                onChange={(e) =>
-                  setFinancing(e.target.value as FinancingFilter)
-                }
-                className="rounded-2xl border border-app bg-app-panel px-3 py-3 text-sm text-app-0"
-              >
-                <option value="ALL">All financing</option>
-                <option value="CASH">Cash</option>
-                <option value="DSCR">DSCR</option>
-                <option value="UNKNOWN">Unknown</option>
-              </select>
-
-              <select
-                value={completeness}
-                onChange={(e) =>
-                  setCompleteness(e.target.value as CompletenessFilter)
-                }
-                className="rounded-2xl border border-app bg-app-panel px-3 py-3 text-sm text-app-0"
-              >
-                <option value="ALL">All completeness</option>
-                <option value="COMPLETE">Enriched</option>
-                <option value="PARTIAL">Partial</option>
-                <option value="MISSING">Missing</option>
-              </select>
-
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <GitBranch className="h-3.5 w-3.5" />
+                Sort
+              </div>
               <select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
-                className="rounded-2xl border border-app bg-app-panel px-3 py-3 text-sm text-app-0"
+                className="w-full bg-transparent text-sm text-app-0 outline-none"
               >
                 <option value="BEST_CASHFLOW">Best cashflow</option>
                 <option value="LOWEST_PRICE">Lowest price</option>
@@ -726,50 +835,8 @@ export default function InvestorPane() {
                 <option value="BEST_DSCR">Best DSCR</option>
                 <option value="NEWEST">Newest</option>
               </select>
-            </div>
-
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm text-app-0 disabled:opacity-60"
-            >
-              {refreshing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCcw className="h-4 w-4" />
-              )}
-              Refresh
-            </button>
+            </label>
           </div>
-
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Live inventory filters
-            </div>
-
-            <div className="flex flex-wrap gap-2 text-xs text-app-4">
-              <span className="oh-pill">{completenessCounts.total} loaded</span>
-              <span className="oh-pill">
-                {completenessCounts.complete} enriched
-              </span>
-              <span className="oh-pill">
-                {completenessCounts.partial} partial
-              </span>
-              <span className="oh-pill">
-                {completenessCounts.missing} missing
-              </span>
-              <span className="oh-pill">
-                {acquisitionIds.size} moved to acquisition
-              </span>
-            </div>
-          </div>
-
-          {marketsErr && (
-            <div className="mt-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-              Market list unavailable: {marketsErr}
-            </div>
-          )}
         </Surface>
 
         <Surface className="p-4">
@@ -859,7 +926,7 @@ export default function InvestorPane() {
                             </div>
 
                             <div className="flex flex-wrap gap-2">
-                              <div
+                              <span
                                 className={decisionPillClass(
                                   r?.normalized_decision || r?.classification,
                                 )}
@@ -867,110 +934,120 @@ export default function InvestorPane() {
                                 {normalizeDecision(
                                   r?.normalized_decision || r?.classification,
                                 ).replace("_", " ")}
-                              </div>
-                              <div
+                              </span>
+                              <span
                                 className={completenessPillClass(
                                   completenessValue,
                                 )}
                               >
                                 {completenessLabel(completenessValue)}
-                              </div>
+                              </span>
                             </div>
                           </div>
 
-                          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                            <div className="rounded-2xl border border-app bg-app px-3 py-3">
-                              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                <Landmark className="h-3.5 w-3.5" />
+                          <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+                            <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
+                              <div className="flex items-center gap-2 text-xs text-app-4">
+                                <Wallet className="h-3.5 w-3.5" />
                                 Price
                               </div>
-                              <div className="mt-2 text-base font-semibold text-app-0">
+                              <div className="mt-2 text-sm font-semibold text-app-0">
                                 {money(price)}
                               </div>
                             </div>
 
-                            <div className="rounded-2xl border border-app bg-app px-3 py-3">
-                              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                            <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
+                              <div className="flex items-center gap-2 text-xs text-app-4">
+                                <Banknote className="h-3.5 w-3.5" />
+                                Rent
+                              </div>
+                              <div className="mt-2 text-sm font-semibold text-app-0">
+                                {money(rent)}
+                              </div>
+                            </div>
+
+                            <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
+                              <div className="flex items-center gap-2 text-xs text-app-4">
                                 <Wallet className="h-3.5 w-3.5" />
                                 Cashflow
                               </div>
                               <div
-                                className={`mt-2 text-base font-semibold ${metricTone(cashflow)}`}
+                                className={`mt-2 text-sm font-semibold ${metricTone(cashflow)}`}
                               >
                                 {money(cashflow)}
                               </div>
                             </div>
 
-                            <div className="rounded-2xl border border-app bg-app px-3 py-3">
-                              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                <Banknote className="h-3.5 w-3.5" />
+                            <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
+                              <div className="flex items-center gap-2 text-xs text-app-4">
+                                <Landmark className="h-3.5 w-3.5" />
                                 DSCR
                               </div>
-                              <div className="mt-2 text-base font-semibold text-app-0">
+                              <div className="mt-2 text-sm font-semibold text-app-0">
                                 {dscr != null ? dscr.toFixed(2) : "—"}
                               </div>
                             </div>
                           </div>
 
-                          <div className="mt-4 grid gap-3 sm:grid-cols-4">
-                            <div className="flex items-center gap-2 text-sm text-app-3">
-                              <BedDouble className="h-4 w-4" />
-                              {property?.bedrooms ?? "—"} bd
-                            </div>
-                            <div className="flex items-center gap-2 text-sm text-app-3">
-                              <Bath className="h-4 w-4" />
-                              {property?.bathrooms ?? "—"} ba
-                            </div>
-                            <div className="flex items-center gap-2 text-sm text-app-3">
-                              <Ruler className="h-4 w-4" />
-                              {property?.square_feet
-                                ? Number(property.square_feet).toLocaleString()
-                                : "—"}{" "}
-                              sqft
-                            </div>
-                            <div className="flex items-center gap-2 text-sm text-app-3">
-                              <ShieldAlert className="h-4 w-4" />
-                              Crime {inferCrime(r) ?? "—"}
-                            </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {property?.bedrooms != null ? (
+                              <span className="oh-pill">
+                                <BedDouble className="mr-1 h-3.5 w-3.5" />
+                                {property.bedrooms} bd
+                              </span>
+                            ) : null}
+                            {property?.bathrooms != null ? (
+                              <span className="oh-pill">
+                                <Bath className="mr-1 h-3.5 w-3.5" />
+                                {property.bathrooms} ba
+                              </span>
+                            ) : null}
+                            {property?.square_feet != null ? (
+                              <span className="oh-pill">
+                                <Ruler className="mr-1 h-3.5 w-3.5" />
+                                {Number(
+                                  property.square_feet,
+                                ).toLocaleString()}{" "}
+                                sf
+                              </span>
+                            ) : null}
+                            <span className="oh-pill">
+                              {getFinancingType(price)}
+                            </span>
+                            {inferCrime(r) != null ? (
+                              <span className="oh-pill">
+                                crime {inferCrime(r)}
+                              </span>
+                            ) : null}
                           </div>
 
-                          <div className="mt-4 grid gap-3 sm:grid-cols-3 text-sm text-app-3">
-                            <div>Mortgage: {money(mortgage)}</div>
-                            <div>Market rent: {money(rent)}</div>
-                            <div>
-                              Updated: {relativeTime(inferUpdatedAt(r))}
-                            </div>
-                          </div>
-
-                          {tags.length > 0 && (
-                            <div className="mt-4 flex flex-wrap gap-2">
+                          {tags.length ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
                               {tags.map((tag) => (
                                 <span key={tag} className="oh-pill">
                                   {tag}
                                 </span>
                               ))}
                             </div>
-                          )}
+                          ) : null}
 
-                          <div className="mt-5 flex items-center justify-between gap-3">
-                            <div className="text-xs text-app-4">
-                              Location confidence:{" "}
-                              {inferLocationConfidence(r) ?? "—"}
+                          <div className="mt-4 flex items-center justify-between gap-3 text-xs text-app-4">
+                            <div>
+                              updated {relativeTime(inferUpdatedAt(r))}
+                              {inferLocationConfidence(r) != null
+                                ? ` · geocode ${inferLocationConfidence(r)?.toFixed(2)}`
+                                : ""}
                             </div>
 
                             {propertyId ? (
                               <Link
                                 to={`/properties/${propertyId}`}
-                                className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app px-3 py-2 text-sm text-app-0"
+                                className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0 transition hover:bg-app-panel"
                               >
-                                Open property
+                                Open lifecycle
                                 <ArrowUpRight className="h-4 w-4" />
                               </Link>
-                            ) : (
-                              <div className="text-xs text-red-300">
-                                Missing property id
-                              </div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -979,61 +1056,109 @@ export default function InvestorPane() {
                 })}
               </div>
 
-              <div className="mt-8 flex flex-col items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() =>
-                      handlePageChange(Math.max(1, safeCurrentPage - 1))
-                    }
-                    disabled={safeCurrentPage === 1}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-panel px-3 py-2 text-sm text-app-0 disabled:opacity-50"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    Previous
-                  </button>
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(1, prev - 1))
+                  }
+                  disabled={safeCurrentPage <= 1}
+                  className="oh-btn oh-btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </button>
 
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    {pageNumbers.map((page, idx) =>
-                      page === "..." ? (
-                        <span
-                          key={`ellipsis-${idx}`}
-                          className="px-2 py-2 text-sm text-app-4"
-                        >
-                          ...
-                        </span>
-                      ) : (
-                        <button
-                          key={`page-${page}`}
-                          onClick={() => handlePageChange(Number(page))}
-                          className={`min-w-[40px] rounded-2xl border px-3 py-2 text-sm ${
-                            safeCurrentPage === page
-                              ? "border-app bg-app text-app-0"
-                              : "border-app bg-app-panel text-app-3"
-                          }`}
-                        >
-                          {page}
-                        </button>
-                      ),
-                    )}
-                  </div>
-
-                  <button
-                    onClick={() =>
-                      handlePageChange(
-                        Math.min(totalPages, safeCurrentPage + 1),
-                      )
-                    }
-                    disabled={safeCurrentPage === totalPages}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-panel px-3 py-2 text-sm text-app-0 disabled:opacity-50"
-                  >
-                    Next
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {pagination.map((page, idx) =>
+                    typeof page === "string" ? (
+                      <span
+                        key={`${page}-${idx}`}
+                        className="px-2 text-sm text-app-4"
+                      >
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={page}
+                        type="button"
+                        onClick={() => setCurrentPage(page)}
+                        className={`inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border px-3 text-sm ${
+                          page === safeCurrentPage
+                            ? "border-app-strong bg-app-panel text-app-0"
+                            : "border-app bg-app-muted text-app-3"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ),
+                  )}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                  }
+                  disabled={safeCurrentPage >= totalPages}
+                  className="oh-btn oh-btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </button>
               </div>
             </>
           )}
         </Surface>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Surface title="Market coverage" subtitle="Supported intake markets">
+            {marketsLoading ? (
+              <div className="text-sm text-app-4">Loading markets…</div>
+            ) : markets.length ? (
+              <div className="flex flex-wrap gap-2">
+                {markets.slice(0, 16).map((market: any, idx) => (
+                  <span
+                    key={`${market?.city || market?.label || idx}`}
+                    className="oh-pill"
+                  >
+                    {market?.city || market?.label || "market"}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <EmptyState compact title="No markets loaded" />
+            )}
+          </Surface>
+
+          <Surface
+            title="Average cashflow"
+            subtitle="Across visible investor inventory"
+          >
+            <div
+              className={`text-3xl font-semibold ${metricTone(avgCashflow)}`}
+            >
+              {money(avgCashflow)}
+            </div>
+          </Surface>
+
+          <Surface
+            title="Next lifecycle move"
+            subtitle="What this pane should do"
+          >
+            <div className="space-y-3 text-sm text-app-2">
+              <div className="flex items-center gap-2">
+                <BriefcaseBusiness className="h-4 w-4" />
+                Move shortlisted and reviewable assets into acquisition.
+              </div>
+              <div className="flex items-center gap-2">
+                <GitBranch className="h-4 w-4" />
+                The main blocker here is missing enrichment or weak
+                underwriting.
+              </div>
+            </div>
+          </Surface>
+        </div>
       </div>
     </PageShell>
   );

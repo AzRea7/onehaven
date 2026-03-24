@@ -34,7 +34,7 @@ export const PANE_META: PaneMeta[] = [
     label: "Investor",
     shortLabel: "Investor",
     description: "Discovery, shortlist, underwriting, and property evaluation.",
-    to: "/properties",
+    to: "/panes/investor",
     icon: <Wallet className="h-4 w-4" />,
     step: 1,
   },
@@ -97,6 +97,13 @@ export function paneStep(key?: string | null) {
   return PANE_META.find((pane) => pane.key === key)?.step ?? null;
 }
 
+export function nextPaneKey(key?: string | null) {
+  const current = PANE_META.find((pane) => pane.key === key);
+  if (!current) return null;
+  const next = PANE_META.find((pane) => pane.step === current.step + 1);
+  return next?.key ?? null;
+}
+
 export default function PaneSwitcher({
   activePane,
   allowedPanes,
@@ -142,11 +149,14 @@ export default function PaneSwitcher({
           <Link
             key={pane.key}
             to={pane.to}
-            title={pane.label}
+            title={`${pane.step}. ${pane.label}`}
             className={clsx("oh-pane-tab", isActive && "oh-pane-tab-active")}
           >
             <span className="mr-2 flex items-center justify-center">
               {pane.icon}
+            </span>
+            <span className="mr-2 hidden text-[10px] font-semibold opacity-70 md:inline">
+              {pane.step}
             </span>
             <span className="truncate">{pane.shortLabel}</span>
           </Link>

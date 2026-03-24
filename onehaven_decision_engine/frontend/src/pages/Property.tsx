@@ -1,43 +1,75 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
-  ArrowUpRight,
-  Banknote,
-  Home,
-  Search,
-  ShieldAlert,
-  Wallet,
-  RefreshCcw,
-  Filter,
-  ClipboardList,
-  MapPinned,
-  Crosshair,
-  LocateFixed,
   AlertTriangle,
+  ArrowRight,
+  BadgeDollarSign,
+  CheckCircle2,
+  ClipboardCheck,
+  FileWarning,
   GitBranch,
+  Home,
+  LocateFixed,
+  MapPinned,
+  RefreshCcw,
+  ShieldAlert,
+  Users,
+  Wallet,
 } from "lucide-react";
-
-import { api } from "../lib/api";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
 import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
 import Golem from "../components/Golem";
-import IngestionLaunchCard from "../components/IngestionLaunchCard";
-import IngestionRunsPanel from "../components/IngestionRunsPanel";
-import IngestionErrorsDrawer from "../components/IngestionErrorsDrawer";
-import PaneSwitcher, { paneLabel } from "../components/PaneSwitcher";
+import { api } from "../lib/api";
+import { nextPaneKey, paneLabel, paneStep } from "../components/PaneSwitcher";
 
-type Row = any;
+type PropertyPayload = {
+  id?: number;
+  property_id?: number;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  county?: string;
+  current_stage?: string;
+  current_stage_label?: string;
+  current_pane?: string;
+  current_pane_label?: string;
+  suggested_pane?: string;
+  route_reason?: string;
+  normalized_decision?: string;
+  gate_status?: string;
+  asking_price?: number | null;
+  projected_monthly_cashflow?: number | null;
+  dscr?: number | null;
+  blockers?: string[];
+  next_actions?: string[];
+  jurisdiction?: {
+    completeness_status?: string;
+    is_stale?: boolean;
+  };
+  compliance?: {
+    completion_pct?: number;
+    failed_count?: number;
+    blocked_count?: number;
+    open_failed_items?: number;
+  };
+};
 
-function money(v: any) {
+function money(v?: number | null) {
   if (v == null || Number.isNaN(Number(v))) return "—";
-  return `$${Math.round(Number(v)).toLocaleString()}`;
+  return Number(v).toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
 }
 
-function numberOrNull(v: any) {
+function num(v?: number | null, digits = 2) {
   const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(digits);
 }
 
 function normalizeDecision(raw?: string) {
@@ -53,93 +85,11 @@ function normalizeDecision(raw?: string) {
   return "REVIEW";
 }
 
-function resolvePropertyId(r: any) {
-  const candidates = [
-    r?.id,
-    r?.property_id,
-    r?.property?.id,
-    r?.propertyId,
-    r?.property?.property_id,
-  ];
-
-  for (const value of candidates) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
-  return null;
-}
-
 function decisionPillClass(raw?: string) {
   const d = normalizeDecision(raw);
   if (d === "GOOD_DEAL") return "oh-pill oh-pill-good";
   if (d === "REVIEW") return "oh-pill oh-pill-warn";
   return "oh-pill oh-pill-bad";
-}
-
-function normalizeStage(raw?: string) {
-  const x = String(raw || "")
-    .trim()
-    .toLowerCase();
-
-  if (
-    [
-      "deal",
-      "intake",
-      "sourcing",
-      "procurement",
-      "underwriting",
-      "discovered",
-      "shortlisted",
-      "underwritten",
-    ].includes(x)
-  ) {
-    return "deal";
-  }
-  if (["rehab", "renovation", "construction", "acquired"].includes(x))
-    return "rehab";
-  if (
-    [
-      "compliance",
-      "inspection",
-      "licensing",
-      "compliance_readying",
-      "inspection_pending",
-    ].includes(x)
-  ) {
-    return "compliance";
-  }
-  if (["tenant", "voucher", "tenant_marketing", "tenant_screening"].includes(x))
-    return "tenant";
-  if (["lease", "leasing", "leased"].includes(x)) return "lease";
-  if (["management", "ops", "maintenance", "occupied", "turnover"].includes(x))
-    return "management";
-  if (["cash", "cashflow", "equity", "portfolio"].includes(x)) {
-    return "cash_equity";
-  }
-
-  return "deal";
-}
-
-function stageLabel(raw?: string) {
-  const s = normalizeStage(raw);
-  if (s === "deal") return "Deal / Procurement";
-  if (s === "rehab") return "Rehab";
-  if (s === "compliance") return "Compliance";
-  if (s === "tenant") return "Tenant Placement";
-  if (s === "lease") return "Lease Activation";
-  if (s === "management") return "Management";
-  return "Cashflow / Equity";
-}
-
-function stagePillClass(raw?: string) {
-  const s = normalizeStage(raw);
-  if (s === "cash_equity") return "oh-pill oh-pill-good";
-  if (s === "lease" || s === "management") return "oh-pill oh-pill-accent";
-  if (s === "tenant" || s === "compliance" || s === "rehab") {
-    return "oh-pill oh-pill-warn";
-  }
-  return "oh-pill";
 }
 
 function panePillClass(raw?: string) {
@@ -153,351 +103,97 @@ function panePillClass(raw?: string) {
   return "oh-pill";
 }
 
-function getFinancingType(price?: number | null) {
-  if (price == null || !Number.isFinite(Number(price))) return "Unknown";
-  if (Number(price) < 75000) return "Cash";
-  return "DSCR";
-}
-
-function inferCashflow(r: any) {
-  const direct =
-    r?.cashflow_estimate ??
-    r?.projected_monthly_cashflow ??
-    r?.last_underwriting_result?.cash_flow ??
-    r?.last_underwriting_result?.cashflow ??
-    r?.property_net_cash_window ??
-    r?.metrics?.cashflow_estimate;
-
-  const n = numberOrNull(direct);
-  if (n != null) return n;
-
-  const rent =
-    numberOrNull(r?.market_rent_estimate) ??
-    numberOrNull(r?.rent_assumption?.market_rent_estimate) ??
-    0;
-  const rehabOpen = numberOrNull(r?.rehab_open_cost) ?? 0;
-  if (rent > 0) return rent - rehabOpen / 12;
-
-  return null;
-}
-
-function inferAskingPrice(r: any) {
-  return (
-    numberOrNull(r?.asking_price) ??
-    numberOrNull(r?.deal?.asking_price) ??
-    numberOrNull(r?.deal?.price) ??
-    numberOrNull(r?.property?.price) ??
-    null
-  );
-}
-
-function inferDscr(r: any) {
-  return (
-    numberOrNull(r?.dscr) ??
-    numberOrNull(r?.last_underwriting_result?.dscr) ??
-    null
-  );
-}
-
-function inferCrime(r: any) {
-  return (
-    numberOrNull(r?.crime_score) ??
-    numberOrNull(r?.property?.crime_score) ??
-    null
-  );
-}
-
-function inferStage(r: any) {
-  return (
-    r?.current_stage ||
-    r?.stage ||
-    r?.stage_label ||
-    r?.workflow?.current_stage ||
-    r?.property_state?.current_stage ||
-    r?.property?.current_stage ||
-    "deal"
-  );
-}
-
-function inferStageLabel(r: any) {
-  return (
-    r?.current_stage_label ||
-    r?.workflow?.current_stage_label ||
-    r?.property_state?.current_stage_label ||
-    stageLabel(inferStage(r))
-  );
-}
-
-function inferDecision(r: any) {
-  return normalizeDecision(
-    r?.normalized_decision ||
-      r?.classification ||
-      r?.latest_decision ||
-      r?.raw_decision ||
-      r?.last_underwriting_result?.decision,
-  );
-}
-
-function inferProperty(r: any) {
-  return r?.property || r || {};
-}
-
-function inferLocationConfidence(r: any) {
-  return (
-    numberOrNull(r?.geocode_confidence) ??
-    numberOrNull(r?.property?.geocode_confidence) ??
-    null
-  );
-}
-
-function inferLocationSource(r: any) {
-  return r?.geocode_source || r?.property?.geocode_source || null;
-}
-
-function inferNormalizedAddress(r: any) {
-  return r?.normalized_address || r?.property?.normalized_address || null;
-}
-
-function inferLat(r: any) {
-  return numberOrNull(r?.lat) ?? numberOrNull(r?.property?.lat) ?? null;
-}
-
-function inferLng(r: any) {
-  return numberOrNull(r?.lng) ?? numberOrNull(r?.property?.lng) ?? null;
-}
-
-function inferCounty(r: any) {
-  return r?.county || r?.property?.county || null;
-}
-
-function inferCurrentPane(r: any) {
-  return (
-    r?.current_pane ||
-    r?.workflow?.current_pane ||
-    r?.property_state?.current_pane ||
-    r?.pane?.current_pane ||
-    "investor"
-  );
-}
-
-function inferSuggestedPane(r: any) {
-  return (
-    r?.suggested_pane ||
-    r?.workflow?.suggested_pane ||
-    r?.property_state?.suggested_pane ||
-    r?.pane?.suggested_pane ||
-    inferCurrentPane(r)
-  );
-}
-
-function inferRouteReason(r: any) {
-  return (
-    r?.route_reason ||
-    r?.workflow?.route_reason ||
-    r?.property_state?.route_reason ||
-    r?.pane?.route_reason ||
-    null
-  );
-}
-
-function inferLocationStatus(r: any): {
-  label: string;
-  pillClass: string;
-  detail: string;
-} {
-  const lat = inferLat(r);
-  const lng = inferLng(r);
-  const normalizedAddress = inferNormalizedAddress(r);
-  const confidence = inferLocationConfidence(r);
-
-  if (lat == null || lng == null) {
-    return {
-      label: "Location incomplete",
-      pillClass: "oh-pill oh-pill-bad",
-      detail: "Missing usable coordinates",
-    };
-  }
-
-  if (!normalizedAddress) {
-    return {
-      label: "Location partial",
-      pillClass: "oh-pill oh-pill-warn",
-      detail: "Coordinates found but normalization missing",
-    };
-  }
-
-  if (confidence != null && confidence < 0.7) {
-    return {
-      label: "Location approximate",
-      pillClass: "oh-pill oh-pill-warn",
-      detail: "Coordinates found with lower confidence",
-    };
-  }
-
-  return {
-    label: "Location verified",
-    pillClass: "oh-pill oh-pill-good",
-    detail: "Normalized and geocoded",
-  };
-}
-
-type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
-type FinancingFilter = "ALL" | "CASH" | "DSCR";
-type LocationFilter = "ALL" | "VERIFIED" | "PARTIAL" | "MISSING";
-type PaneFilter =
-  | "ALL"
-  | "investor"
-  | "acquisition"
-  | "compliance"
-  | "tenants"
-  | "management";
-
 export default function Property() {
-  const [rows, setRows] = React.useState<Row[]>([]);
-  const [err, setErr] = React.useState<string | null>(null);
+  const { id } = useParams();
+  const [data, setData] = React.useState<PropertyPayload | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [selectedRunId, setSelectedRunId] = React.useState<number | null>(null);
-  const [ingestionRefreshKey, setIngestionRefreshKey] = React.useState(0);
-
-  const [q, setQ] = React.useState("");
-  const deferredQ = React.useDeferredValue(q);
-
-  const [decision, setDecision] = React.useState<DecisionFilter>("ALL");
-  const [financing, setFinancing] = React.useState<FinancingFilter>("ALL");
-  const [locationFilter, setLocationFilter] =
-    React.useState<LocationFilter>("ALL");
-  const [paneFilter, setPaneFilter] = React.useState<PaneFilter>("ALL");
-
-  const abortRef = React.useRef<AbortController | null>(null);
+  const [err, setErr] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
+    if (!id) return;
 
     try {
-      setErr(null);
       setLoading(true);
-
-      const out = await api.properties({}, ac.signal);
-
-      const normalizedRows = Array.isArray(out)
-        ? out
-        : Array.isArray((out as any)?.items)
-          ? (out as any).items
-          : Array.isArray((out as any)?.rows)
-            ? (out as any).rows
-            : Array.isArray((out as any)?.properties)
-              ? (out as any).properties
-              : [];
-
-      setRows(normalizedRows);
+      const out = await api.get<PropertyPayload>(`/dashboard/property/${id}`);
+      setData(out);
+      setErr(null);
     } catch (e: any) {
-      if (String(e?.name) === "AbortError") return;
-      setErr(String(e?.message || e));
+      try {
+        const fallback = await api.get<PropertyPayload>(
+          `/properties/${id}/view`,
+        );
+        setData(fallback);
+        setErr(null);
+      } catch (inner: any) {
+        setErr(String(inner?.message || inner || e?.message || e));
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [id]);
 
   React.useEffect(() => {
     refresh();
-    return () => abortRef.current?.abort();
   }, [refresh]);
 
-  const filtered = React.useMemo(() => {
-    const needle = deferredQ.trim().toLowerCase();
-
-    return (rows || []).filter((r) => {
-      const p = inferProperty(r);
-      const d = inferDecision(r);
-      const price = inferAskingPrice(r);
-      const financingType = getFinancingType(price);
-      const locationStatus = inferLocationStatus(r);
-      const currentPane = String(inferCurrentPane(r)).toLowerCase();
-
-      const hay =
-        `${p.address || ""} ${p.city || ""} ${p.state || ""} ${p.zip || ""} ${p.county || ""} ${
-          inferNormalizedAddress(r) || ""
-        } ${inferLocationSource(r) || ""} ${inferRouteReason(r) || ""}`.toLowerCase();
-
-      if (needle && !hay.includes(needle)) return false;
-      if (decision !== "ALL" && d !== decision) return false;
-      if (financing === "CASH" && financingType !== "Cash") return false;
-      if (financing === "DSCR" && financingType !== "DSCR") return false;
-      if (paneFilter !== "ALL" && currentPane !== paneFilter) return false;
-
-      if (
-        locationFilter === "VERIFIED" &&
-        locationStatus.label !== "Location verified"
-      ) {
-        return false;
-      }
-      if (
-        locationFilter === "PARTIAL" &&
-        locationStatus.label !== "Location partial" &&
-        locationStatus.label !== "Location approximate"
-      ) {
-        return false;
-      }
-      if (
-        locationFilter === "MISSING" &&
-        locationStatus.label !== "Location incomplete"
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [rows, deferredQ, decision, financing, locationFilter, paneFilter]);
-
-  const counts = React.useMemo(() => {
-    const c: Record<"GOOD_DEAL" | "REVIEW" | "REJECT", number> = {
-      GOOD_DEAL: 0,
-      REVIEW: 0,
-      REJECT: 0,
-    };
-    for (const r of rows || []) {
-      const d = inferDecision(r) as "GOOD_DEAL" | "REVIEW" | "REJECT";
-      c[d] += 1;
-    }
-    return c;
-  }, [rows]);
-
-  const stageCounts = React.useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const r of filtered) {
-      const s = normalizeStage(inferStage(r));
-      out[s] = (out[s] || 0) + 1;
-    }
-    return out;
-  }, [filtered]);
-
-  const locationCounts = React.useMemo(() => {
-    const out = { verified: 0, partial: 0, missing: 0 };
-    for (const r of rows || []) {
-      const status = inferLocationStatus(r).label;
-      if (status === "Location verified") out.verified += 1;
-      else if (status === "Location incomplete") out.missing += 1;
-      else out.partial += 1;
-    }
-    return out;
-  }, [rows]);
-
-  function refreshIngestion() {
-    setIngestionRefreshKey((v) => v + 1);
-    refresh().catch(() => undefined);
+  if (loading) {
+    return (
+      <PageShell>
+        <div className="space-y-6">
+          <div className="oh-skeleton h-[220px] rounded-[32px]" />
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="oh-skeleton h-[140px] rounded-3xl" />
+            ))}
+          </div>
+        </div>
+      </PageShell>
+    );
   }
+
+  if (err || !data) {
+    return (
+      <PageShell>
+        <EmptyState
+          icon={FileWarning}
+          title="Property failed to load"
+          description={err || "Property data is unavailable."}
+        />
+      </PageShell>
+    );
+  }
+
+  const currentPane = String(data.current_pane || "investor").toLowerCase();
+  const suggestedPane = String(
+    data.suggested_pane || data.current_pane || "investor",
+  ).toLowerCase();
+  const nextStagePane = nextPaneKey(currentPane);
+  const paneChanged = suggestedPane && suggestedPane !== currentPane;
+  const movedToCompliance =
+    currentPane !== "compliance" && suggestedPane === "compliance";
+  const movedToTenants =
+    currentPane !== "tenants" && suggestedPane === "tenants";
+  const movedToManagement =
+    currentPane !== "management" && suggestedPane === "management";
+  const topBlocker = data.blockers?.[0] || null;
+  const nextAction = data.next_actions?.[0] || null;
 
   return (
     <PageShell>
       <div className="space-y-6">
         <PageHero
-          eyebrow="Portfolio inventory"
-          title="Properties"
-          subtitle="This is the property list view. Use it to scan inventory, filter by pane, and open the single-property page to work the actual stage and next-pane workflow."
+          eyebrow="Property lifecycle"
+          title={data.address || `Property #${id}`}
+          subtitle={[
+            data.city,
+            data.state,
+            data.zip,
+            data.county ? `County: ${data.county}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
           right={
-            <div className="absolute inset-0 flex items-center justify-center overflow-visible pointer-events-auto">
+            <div className="pointer-events-auto absolute inset-0 flex items-center justify-center overflow-visible">
               <div className="h-[220px] w-[220px] translate-y-[-8px] opacity-95 md:h-[250px] md:w-[250px]">
                 <Golem className="h-full w-full" />
               </div>
@@ -506,470 +202,314 @@ export default function Property() {
           actions={
             <>
               <button onClick={refresh} className="oh-btn oh-btn-secondary">
-                Refresh properties
+                <RefreshCcw className="h-4 w-4" />
+                Refresh property
               </button>
-              <span className="oh-pill oh-pill-good">
-                good deal {counts.GOOD_DEAL}
-              </span>
-              <span className="oh-pill oh-pill-warn">
-                review {counts.REVIEW}
-              </span>
-              <span className="oh-pill oh-pill-bad">
-                reject {counts.REJECT}
-              </span>
+              <Link
+                to={`/panes/${currentPane}`}
+                className="oh-btn oh-btn-secondary"
+              >
+                Open current pane
+              </Link>
             </>
           }
         />
 
-        <PaneSwitcher
-          activePane={paneFilter === "ALL" ? undefined : paneFilter}
-        />
+        <Surface
+          title="Lifecycle routing"
+          subtitle="This is the property-level lifecycle state that drives the pane shell."
+        >
+          <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+            <div className="rounded-3xl border border-app bg-app-panel p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    Current route
+                  </div>
+                  <div className="mt-2 text-lg font-semibold text-app-0">
+                    {paneLabel(currentPane)}
+                  </div>
+                  <div className="mt-1 text-sm text-app-4">
+                    stage{" "}
+                    {data.current_stage_label || data.current_stage || "—"}
+                  </div>
+                </div>
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.28fr_0.92fr]">
-          <div className="space-y-6">
-            <Surface
-              title="Acquisition intake"
-              subtitle="Launch a focused intake run for southeast Michigan directly inside the property workflow."
-            >
-              <IngestionLaunchCard
-                refreshKey={ingestionRefreshKey}
-                onQueued={refreshIngestion}
-              />
-            </Surface>
+                <div className="flex flex-wrap gap-2">
+                  <span className={panePillClass(currentPane)}>
+                    current pane {paneLabel(currentPane)}
+                  </span>
+                  <span className="oh-pill">
+                    step {paneStep(currentPane) || "—"}
+                  </span>
+                  <span className="oh-pill oh-pill-accent">
+                    next pane {paneLabel(suggestedPane)}
+                  </span>
+                </div>
+              </div>
 
-            <Surface
-              title="Workflow progress"
-              subtitle="A cleaner step path from possible deal to tenant-occupied cashflow."
-            >
-              <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-                {[
-                  ["deal", "Deal / Procurement"],
-                  ["rehab", "Rehab"],
-                  ["compliance", "Compliance"],
-                  ["tenant", "Tenant Placement"],
-                  ["lease", "Lease Activation"],
-                  ["cash_equity", "Cashflow / Equity"],
-                ].map(([key, label]) => (
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    Current stage
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-app-0">
+                    {data.current_stage_label || data.current_stage || "—"}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    Next stage
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-app-0">
+                    {paneChanged
+                      ? paneLabel(suggestedPane)
+                      : nextStagePane
+                        ? paneLabel(nextStagePane)
+                        : "Hold in current pane"}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    Top blocker
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-app-0">
+                    {topBlocker ? topBlocker.replace(/_/g, " ") : "No blocker"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {movedToCompliance ? (
+                  <span className="oh-pill oh-pill-warn">
+                    moved to compliance
+                  </span>
+                ) : null}
+                {movedToTenants ? (
+                  <span className="oh-pill oh-pill-accent">
+                    moved to tenants
+                  </span>
+                ) : null}
+                {movedToManagement ? (
+                  <span className="oh-pill oh-pill-good">
+                    moved to management
+                  </span>
+                ) : null}
+                {paneChanged ? (
+                  <span className="oh-pill oh-pill-warn">advance ready</span>
+                ) : (
+                  <span className="oh-pill">still working current pane</span>
+                )}
+                <span className={decisionPillClass(data.normalized_decision)}>
+                  {normalizeDecision(data.normalized_decision).replace(
+                    "_",
+                    " ",
+                  )}
+                </span>
+                {data.gate_status ? (
+                  <span className="oh-pill">{data.gate_status}</span>
+                ) : null}
+              </div>
+
+              <div className="mt-4 text-sm text-app-3">
+                {data.route_reason ||
+                  "This property stays in or moves to the next pane based on stage completion, blockers, and workflow routing."}
+              </div>
+
+              {nextAction ? (
+                <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    <ArrowRight className="h-3.5 w-3.5" />
+                    Next action
+                  </div>
+                  <div className="mt-2 text-sm font-medium text-app-0">
+                    {nextAction}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-3xl border border-app bg-app-panel p-5">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  <Wallet className="h-3.5 w-3.5" />
+                  Underwriting
+                </div>
+                <div className="mt-4 grid gap-3">
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-app bg-app-muted px-4 py-3">
+                    <span className="text-sm text-app-4">Asking price</span>
+                    <span className="text-sm font-semibold text-app-0">
+                      {money(data.asking_price)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-app bg-app-muted px-4 py-3">
+                    <span className="text-sm text-app-4">Cashflow est.</span>
+                    <span className="text-sm font-semibold text-app-0">
+                      {money(data.projected_monthly_cashflow)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-app bg-app-muted px-4 py-3">
+                    <span className="text-sm text-app-4">DSCR</span>
+                    <span className="text-sm font-semibold text-app-0">
+                      {num(data.dscr)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-app bg-app-panel p-5">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  <MapPinned className="h-3.5 w-3.5" />
+                  Compliance state
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {data.jurisdiction?.is_stale ? (
+                    <span className="oh-pill oh-pill-bad">
+                      jurisdiction stale
+                    </span>
+                  ) : (
+                    <span className="oh-pill oh-pill-good">
+                      jurisdiction current
+                    </span>
+                  )}
+                  {data.jurisdiction?.completeness_status ? (
+                    <span className="oh-pill">
+                      {data.jurisdiction.completeness_status}
+                    </span>
+                  ) : null}
+                  {Number(data.compliance?.failed_count || 0) > 0 ? (
+                    <span className="oh-pill oh-pill-bad">
+                      failed {Number(data.compliance?.failed_count || 0)}
+                    </span>
+                  ) : null}
+                  {Number(data.compliance?.blocked_count || 0) > 0 ? (
+                    <span className="oh-pill oh-pill-warn">
+                      blocked {Number(data.compliance?.blocked_count || 0)}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Surface>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+          <Surface title="Pane" subtitle="Current operating owner">
+            <div className="flex items-center gap-2 text-2xl font-semibold text-app-0">
+              <Home className="h-5 w-5" />
+              {paneLabel(currentPane)}
+            </div>
+          </Surface>
+          <Surface title="Stage" subtitle="Current workflow stage">
+            <div className="flex items-center gap-2 text-2xl font-semibold text-app-0">
+              <GitBranch className="h-5 w-5" />
+              {data.current_stage_label || data.current_stage || "—"}
+            </div>
+          </Surface>
+          <Surface title="Next stage" subtitle="Likely next lifecycle move">
+            <div className="flex items-center gap-2 text-2xl font-semibold text-app-0">
+              <ArrowRight className="h-5 w-5" />
+              {paneChanged
+                ? paneLabel(suggestedPane)
+                : nextStagePane
+                  ? paneLabel(nextStagePane)
+                  : "Hold"}
+            </div>
+          </Surface>
+          <Surface title="Top blocker" subtitle="What is holding movement">
+            <div className="flex items-center gap-2 text-lg font-semibold text-app-0">
+              <AlertTriangle className="h-5 w-5" />
+              {topBlocker ? topBlocker.replace(/_/g, " ") : "No blocker"}
+            </div>
+          </Surface>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Surface
+            title="Movement badges"
+            subtitle="Automatic lifecycle movement cues"
+          >
+            <div className="flex flex-wrap gap-2">
+              {movedToCompliance ? (
+                <span className="oh-pill oh-pill-warn">
+                  moved to compliance
+                </span>
+              ) : null}
+              {movedToTenants ? (
+                <span className="oh-pill oh-pill-accent">moved to tenants</span>
+              ) : null}
+              {movedToManagement ? (
+                <span className="oh-pill oh-pill-good">
+                  moved to management
+                </span>
+              ) : null}
+              {!movedToCompliance && !movedToTenants && !movedToManagement ? (
+                <span className="oh-pill">no pane move yet</span>
+              ) : null}
+            </div>
+          </Surface>
+
+          <Surface title="Blockers" subtitle="Normalized blocker set">
+            {!(data.blockers || []).length ? (
+              <EmptyState compact title="No blockers" />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {data.blockers?.map((b) => (
+                  <span key={b} className="oh-pill oh-pill-warn">
+                    {b.replace(/_/g, " ")}
+                  </span>
+                ))}
+              </div>
+            )}
+          </Surface>
+
+          <Surface title="Next actions" subtitle="What to do now">
+            {!(data.next_actions || []).length ? (
+              <EmptyState compact title="No next actions" />
+            ) : (
+              <div className="space-y-2">
+                {data.next_actions?.map((action, idx) => (
                   <div
-                    key={key}
-                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
+                    key={`${action}-${idx}`}
+                    className="rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm text-app-2"
                   >
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                      step
-                    </div>
-                    <div className="mt-2 text-sm font-semibold text-app-0">
-                      {label}
-                    </div>
-                    <div className="mt-3 text-2xl font-semibold text-app-0">
-                      {stageCounts[key] || 0}
-                    </div>
+                    {action}
                   </div>
                 ))}
               </div>
-            </Surface>
-
-            <Surface
-              title="Location quality"
-              subtitle="Track which properties are ready for jurisdiction, risk, and rent workflows."
-            >
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                    <LocateFixed className="h-3.5 w-3.5" />
-                    Verified
-                  </div>
-                  <div className="mt-3 text-2xl font-semibold text-app-0">
-                    {locationCounts.verified}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    Partial
-                  </div>
-                  <div className="mt-3 text-2xl font-semibold text-app-0">
-                    {locationCounts.partial}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                    <Crosshair className="h-3.5 w-3.5" />
-                    Missing
-                  </div>
-                  <div className="mt-3 text-2xl font-semibold text-app-0">
-                    {locationCounts.missing}
-                  </div>
-                </div>
-              </div>
-            </Surface>
-
-            {err ? (
-              <Surface tone="danger">
-                <div className="text-sm text-red-300">{err}</div>
-              </Surface>
-            ) : null}
-
-            <Surface
-              title="Property list"
-              subtitle={`${filtered.length} visible ${
-                filtered.length === 1 ? "property" : "properties"
-              }`}
-            >
-              <div className="mb-4 rounded-3xl border border-app bg-app-panel px-4 py-4">
-                <div className="grid gap-3 lg:grid-cols-[1.15fr_0.7fr_0.7fr_0.8fr_0.8fr_auto]">
-                  <label className="block">
-                    <span className="oh-field-label">Search</span>
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
-                      <input
-                        value={q}
-                        onChange={(e) => setQ(e.target.value)}
-                        placeholder="Search address, city, county, zip, normalized location"
-                        className="oh-input pl-10"
-                      />
-                    </div>
-                  </label>
-
-                  <label className="block">
-                    <span className="oh-field-label">Classification</span>
-                    <select
-                      value={decision}
-                      onChange={(e) =>
-                        setDecision(e.target.value as DecisionFilter)
-                      }
-                      className="oh-input"
-                    >
-                      <option value="ALL">All</option>
-                      <option value="GOOD_DEAL">Good deal</option>
-                      <option value="REVIEW">Review</option>
-                      <option value="REJECT">Reject</option>
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="oh-field-label">Financing</span>
-                    <select
-                      value={financing}
-                      onChange={(e) =>
-                        setFinancing(e.target.value as FinancingFilter)
-                      }
-                      className="oh-input"
-                    >
-                      <option value="ALL">All</option>
-                      <option value="CASH">Cash</option>
-                      <option value="DSCR">DSCR</option>
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="oh-field-label">Location</span>
-                    <select
-                      value={locationFilter}
-                      onChange={(e) =>
-                        setLocationFilter(e.target.value as LocationFilter)
-                      }
-                      className="oh-input"
-                    >
-                      <option value="ALL">All</option>
-                      <option value="VERIFIED">Verified</option>
-                      <option value="PARTIAL">Partial / approximate</option>
-                      <option value="MISSING">Missing</option>
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="oh-field-label">Pane</span>
-                    <select
-                      value={paneFilter}
-                      onChange={(e) =>
-                        setPaneFilter(e.target.value as PaneFilter)
-                      }
-                      className="oh-input"
-                    >
-                      <option value="ALL">All panes</option>
-                      <option value="investor">Investor</option>
-                      <option value="acquisition">Acquisition</option>
-                      <option value="compliance">Compliance</option>
-                      <option value="tenants">Tenants</option>
-                      <option value="management">Management</option>
-                    </select>
-                  </label>
-
-                  <div className="flex items-end">
-                    <button
-                      onClick={refresh}
-                      className="oh-btn oh-btn-secondary w-full lg:w-auto"
-                    >
-                      <RefreshCcw className="h-4 w-4" />
-                      Refresh
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {loading ? (
-                <div className="grid gap-3">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="oh-skeleton h-[190px] rounded-3xl"
-                    />
-                  ))}
-                </div>
-              ) : !filtered.length ? (
-                <EmptyState
-                  icon={Filter}
-                  title="No properties matched"
-                  description="Try a broader search or change the classification, financing, location, or pane filter."
-                />
-              ) : (
-                <div className="max-h-[980px] overflow-y-auto pr-1">
-                  <div className="grid gap-4">
-                    {filtered.map((r: any) => {
-                      const resolvedId = resolvePropertyId(r);
-                      if (!resolvedId) return null;
-
-                      const p = inferProperty(r);
-                      const decisionTxt = inferDecision(r);
-                      const stage = inferStage(r);
-                      const stageTxt = inferStageLabel(r);
-
-                      const askingPrice = inferAskingPrice(r);
-                      const dscr = inferDscr(r);
-                      const crime = inferCrime(r);
-                      const cashflow = inferCashflow(r);
-
-                      const financingType = getFinancingType(askingPrice);
-
-                      const locationStatus = inferLocationStatus(r);
-                      const locationSource = inferLocationSource(r);
-                      const locationConfidence = inferLocationConfidence(r);
-                      const normalizedAddress = inferNormalizedAddress(r);
-                      const lat = inferLat(r);
-                      const lng = inferLng(r);
-                      const county = inferCounty(r);
-
-                      const currentPane = inferCurrentPane(r);
-                      const suggestedPane = inferSuggestedPane(r);
-                      const routeReason = inferRouteReason(r);
-                      const paneChanged =
-                        String(currentPane).toLowerCase() !==
-                        String(suggestedPane).toLowerCase();
-
-                      return (
-                        <Link
-                          key={resolvedId}
-                          to={`/properties/${resolvedId}`}
-                          className="group block rounded-3xl border border-app bg-app-panel px-5 py-5 shadow-soft hover:-translate-y-[1px] hover:border-app-strong hover:shadow-soft-lg"
-                        >
-                          <div className="grid gap-5 xl:grid-cols-[1.35fr_0.95fr]">
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="truncate text-lg font-semibold text-app-0">
-                                    {p.address || `Property #${resolvedId}`}
-                                  </div>
-                                  <div className="mt-1 truncate text-sm text-app-3">
-                                    {p.city
-                                      ? `${p.city}, ${p.state || ""} ${p.zip || ""}`
-                                      : "—"}
-                                    {county ? ` · ${county}` : ""}
-                                    {p.bedrooms != null
-                                      ? ` · ${p.bedrooms}bd`
-                                      : ""}
-                                    {p.bathrooms != null
-                                      ? ` · ${Number(p.bathrooms).toFixed(1)}ba`
-                                      : ""}
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center gap-2 text-app-4 group-hover:text-app-1">
-                                  <ArrowUpRight className="h-4 w-4" />
-                                </div>
-                              </div>
-
-                              <div className="mt-4 flex flex-wrap gap-2">
-                                <span
-                                  className={decisionPillClass(decisionTxt)}
-                                >
-                                  {decisionTxt.replace("_", " ")}
-                                </span>
-                                <span className={stagePillClass(stage)}>
-                                  {stageTxt}
-                                </span>
-                                <span className={panePillClass(currentPane)}>
-                                  {paneLabel(currentPane)}
-                                </span>
-                                <span className="oh-pill">{financingType}</span>
-                                <span className={locationStatus.pillClass}>
-                                  {locationStatus.label}
-                                </span>
-                              </div>
-
-                              <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <ClipboardList className="h-3.5 w-3.5" />
-                                  Workflow gate
-                                </div>
-                                <div className="mt-2 text-sm text-app-2">
-                                  Current stage:{" "}
-                                  <span className="font-semibold text-app-0">
-                                    {stageTxt}
-                                  </span>
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <span className={panePillClass(currentPane)}>
-                                    current pane {paneLabel(currentPane)}
-                                  </span>
-                                  <span
-                                    className={panePillClass(suggestedPane)}
-                                  >
-                                    target pane {paneLabel(suggestedPane)}
-                                  </span>
-                                  {paneChanged ? (
-                                    <span className="oh-pill oh-pill-warn">
-                                      move to next pane
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="mt-2 text-xs text-app-4">
-                                  {routeReason ||
-                                    "Open the property to continue the next action and move it toward the correct operating pane."}
-                                </div>
-                              </div>
-
-                              <div className="mt-3 rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <MapPinned className="h-3.5 w-3.5" />
-                                  Location automation
-                                </div>
-
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <span className={locationStatus.pillClass}>
-                                    {locationStatus.label}
-                                  </span>
-
-                                  {locationSource ? (
-                                    <span className="oh-pill">
-                                      source {locationSource}
-                                    </span>
-                                  ) : null}
-
-                                  {locationConfidence != null ? (
-                                    <span className="oh-pill">
-                                      confidence {locationConfidence.toFixed(2)}
-                                    </span>
-                                  ) : null}
-                                </div>
-
-                                <div className="mt-2 text-xs text-app-4">
-                                  {locationStatus.detail}
-                                </div>
-
-                                {normalizedAddress ? (
-                                  <div className="mt-2 text-sm text-app-2">
-                                    {normalizedAddress}
-                                  </div>
-                                ) : (
-                                  <div className="mt-2 text-sm text-app-4">
-                                    Normalized address not available yet
-                                  </div>
-                                )}
-
-                                {lat != null && lng != null ? (
-                                  <div className="mt-2 text-xs text-app-4">
-                                    {lat.toFixed(4)}, {lng.toFixed(4)}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-
-                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
-                              <div className="rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <Banknote className="h-3.5 w-3.5" />
-                                  Price
-                                </div>
-                                <div className="mt-2 text-base font-semibold text-app-0">
-                                  {money(askingPrice)}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <Home className="h-3.5 w-3.5" />
-                                  DSCR
-                                </div>
-                                <div className="mt-2 text-base font-semibold text-app-0">
-                                  {dscr != null ? dscr.toFixed(2) : "—"}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <ShieldAlert className="h-3.5 w-3.5" />
-                                  Crime
-                                </div>
-                                <div className="mt-2 text-base font-semibold text-app-0">
-                                  {crime != null ? crime.toFixed(1) : "—"}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app px-4 py-3">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <Wallet className="h-3.5 w-3.5" />
-                                  Cash flow est.
-                                </div>
-                                <div className="mt-2 text-base font-semibold text-app-0">
-                                  {money(cashflow)}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app px-4 py-3 sm:col-span-2">
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                  <GitBranch className="h-3.5 w-3.5" />
-                                  Pane routing
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <span className={panePillClass(currentPane)}>
-                                    now {paneLabel(currentPane)}
-                                  </span>
-                                  <span
-                                    className={panePillClass(suggestedPane)}
-                                  >
-                                    next {paneLabel(suggestedPane)}
-                                  </span>
-                                </div>
-                                <div className="mt-2 text-xs text-app-4">
-                                  {routeReason ||
-                                    "Routing detail will be shown when workflow state is available."}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </Surface>
-          </div>
-
-          <div className="space-y-6">
-            <IngestionRunsPanel
-              refreshKey={ingestionRefreshKey}
-              onSelectRun={setSelectedRunId}
-            />
-          </div>
+            )}
+          </Surface>
         </div>
 
-        <IngestionErrorsDrawer
-          runId={selectedRunId}
-          onClose={() => setSelectedRunId(null)}
-        />
+        <Surface
+          title="Open pane workspace"
+          subtitle="Jump directly into the owning queue"
+        >
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to={`/panes/${currentPane}`}
+              className="oh-btn oh-btn-secondary"
+            >
+              <LocateFixed className="h-4 w-4" />
+              Current pane workspace
+            </Link>
+            {suggestedPane ? (
+              <Link
+                to={`/panes/${suggestedPane}`}
+                className="oh-btn oh-btn-secondary"
+              >
+                <ClipboardCheck className="h-4 w-4" />
+                Suggested pane workspace
+              </Link>
+            ) : null}
+            <Link to="/dashboard" className="oh-btn oh-btn-secondary">
+              <BadgeDollarSign className="h-4 w-4" />
+              Portfolio dashboard
+            </Link>
+          </div>
+        </Surface>
       </div>
     </PageShell>
   );

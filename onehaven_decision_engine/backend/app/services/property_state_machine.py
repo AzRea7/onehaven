@@ -14,6 +14,8 @@ from ..domain.workflow.stages import (
     STAGES,
     clamp_stage,
     gate_for_next_stage,
+    infer_transition_reason,
+    next_stage,
     stage_label,
 )
 from .pane_routing_service import build_pane_context
@@ -919,6 +921,8 @@ def derive_stage_and_constraints(
         "route_reason": pane["route_reason"],
         "allowed_panes": pane["allowed_panes"],
         "allowed_pane_labels": pane["allowed_pane_labels"],
+        "suggested_next_pane": pane.get("suggested_next_pane"),
+        "suggested_next_pane_label": pane.get("suggested_next_pane_label"),
         "normalized_decision": decision_bucket,
         "decision_bucket": decision_bucket,
         "constraints": constraints,
@@ -946,6 +950,8 @@ def _build_snapshot_payload(
         "current_pane_label": state["current_pane_label"],
         "suggested_pane": state["suggested_pane"],
         "suggested_pane_label": state["suggested_pane_label"],
+        "suggested_next_pane": state.get("suggested_next_pane"),
+        "suggested_next_pane_label": state.get("suggested_next_pane_label"),
         "route_reason": state["route_reason"],
         "allowed_panes": state["allowed_panes"],
         "allowed_pane_labels": state["allowed_pane_labels"],
@@ -959,6 +965,9 @@ def _build_snapshot_payload(
         "stage_completion_summary": state["stage_completion_summary"],
         "updated_at": updated_at.isoformat() if updated_at is not None else None,
         "last_transitioned_at": last_transitioned_at.isoformat() if last_transitioned_at is not None else None,
+        "transition_at": last_transitioned_at.isoformat() if last_transitioned_at is not None else None,
+        "transition_reason": state.get("transition_reason"),
+        "is_auto_routed": True,
         "stage_order": list(STAGES),
     }
 
@@ -972,6 +981,8 @@ def _attach_snapshot_to_constraints(state: dict[str, Any]) -> dict[str, Any]:
         "current_pane_label": state["current_pane_label"],
         "suggested_pane": state["suggested_pane"],
         "suggested_pane_label": state["suggested_pane_label"],
+        "suggested_next_pane": state.get("suggested_next_pane"),
+        "suggested_next_pane_label": state.get("suggested_next_pane_label"),
         "route_reason": state["route_reason"],
         "allowed_panes": state["allowed_panes"],
         "allowed_pane_labels": state["allowed_pane_labels"],
@@ -980,6 +991,8 @@ def _attach_snapshot_to_constraints(state: dict[str, Any]) -> dict[str, Any]:
         "gate": state["gate"],
         "gate_status": state["gate_status"],
         "stage_completion_summary": state["stage_completion_summary"],
+        "transition_reason": state.get("transition_reason"),
+        "is_auto_routed": True,
         "stage_order": list(STAGES),
     }
     return constraints
@@ -1015,6 +1028,8 @@ def _payload_from_row_snapshot(
         "current_pane_label": snapshot.get("current_pane_label"),
         "suggested_pane": snapshot.get("suggested_pane"),
         "suggested_pane_label": snapshot.get("suggested_pane_label"),
+        "suggested_next_pane": snapshot.get("suggested_next_pane"),
+        "suggested_next_pane_label": snapshot.get("suggested_next_pane_label"),
         "route_reason": snapshot.get("route_reason"),
         "allowed_panes": snapshot.get("allowed_panes") or [],
         "allowed_pane_labels": snapshot.get("allowed_pane_labels") or [],
@@ -1028,6 +1043,9 @@ def _payload_from_row_snapshot(
         "stage_completion_summary": snapshot.get("stage_completion_summary") or {},
         "updated_at": updated_at.isoformat() if updated_at is not None else None,
         "last_transitioned_at": last_transitioned_at.isoformat() if last_transitioned_at is not None else None,
+        "transition_at": last_transitioned_at.isoformat() if last_transitioned_at is not None else None,
+        "transition_reason": snapshot.get("transition_reason"),
+        "is_auto_routed": True,
         "stage_order": snapshot.get("stage_order") or list(STAGES),
     }
 
@@ -1037,14 +1055,17 @@ def sync_property_state(db: Session, *, org_id: int, property_id: int) -> Proper
     row = ensure_state_row(db, org_id=org_id, property_id=property_id)
 
     new_stage = clamp_stage(state["current_stage"])
-    old_stage = clamp_stage(getattr(row, "current_stage", None))
+    old_raw = getattr(row, "current_stage", None)
+    old_stage = clamp_stage(old_raw) if old_raw is not None else None
+    transition_reason = infer_transition_reason(old_stage, new_stage)
+    state["transition_reason"] = transition_reason
 
     row.current_stage = new_stage
     row.constraints_json = _json_dumps(_attach_snapshot_to_constraints(state))
     row.outstanding_tasks_json = _json_dumps(state["outstanding_tasks"])
     row.updated_at = _utcnow()
 
-    if hasattr(row, "last_transitioned_at") and new_stage != old_stage:
+    if hasattr(row, "last_transitioned_at") and old_stage is not None and new_stage != old_stage:
         setattr(row, "last_transitioned_at", _utcnow())
 
     db.add(row)
@@ -1113,6 +1134,13 @@ def get_transition_payload(
         "current_stage_label": state["current_stage_label"],
         "current_pane": state["current_pane"],
         "current_pane_label": state["current_pane_label"],
+        "next_stage": next_stage(state["current_stage"]),
+        "next_stage_label": stage_label(next_stage(state["current_stage"])),
+        "suggested_next_pane": state.get("suggested_next_pane"),
+        "suggested_next_pane_label": state.get("suggested_next_pane_label"),
+        "transition_reason": state.get("transition_reason"),
+        "transition_at": state.get("transition_at"),
+        "is_auto_routed": state.get("is_auto_routed", True),
         "decision_bucket": state["decision_bucket"],
         "gate": state["gate"],
         "gate_status": state["gate_status"],

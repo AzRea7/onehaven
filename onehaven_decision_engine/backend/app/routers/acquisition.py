@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..schemas.acquisition import AcquisitionDocumentCreate, AcquisitionRecordUpdate
+from ..schemas import AcquisitionDocumentCreate, AcquisitionRecordUpdate
 from ..services.acquisition_service import (
     add_acquisition_document,
     get_acquisition_detail,

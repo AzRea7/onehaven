@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import AppShell from "./components/AppShell";
 
 import Dashboard from "./pages/Dashboard";
-import PropertyView from "./pages/PropertyView";
+import Property from "./pages/Property";
 
 import Agents from "./pages/Agents";
 import Constitution from "./pages/Constitution";
@@ -28,7 +28,7 @@ function Protected({ children }: { children: React.ReactNode }) {
 
 function LegacyPropertyRedirect() {
   const { id } = useParams();
-  return <Navigate to={id ? `/properties/${id}` : "/properties"} replace />;
+  return <Navigate to={id ? `/properties/${id}` : "/panes/investor"} replace />;
 }
 
 function LegacyPipelineRedirect() {
@@ -55,7 +55,7 @@ export default function App() {
   return (
     <AppShell>
       <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<Navigate to="/panes/investor" replace />} />
 
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -73,7 +73,7 @@ export default function App() {
           path="/properties"
           element={
             <Protected>
-              <InvestorPane />
+              <Navigate to="/panes/investor" replace />
             </Protected>
           }
         />
@@ -127,7 +127,7 @@ export default function App() {
           path="/properties/:id"
           element={
             <Protected>
-              <PropertyView />
+              <Property />
             </Protected>
           }
         />
@@ -249,7 +249,7 @@ export default function App() {
           }
         />
 
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/panes/investor" replace />} />
       </Routes>
     </AppShell>
   );

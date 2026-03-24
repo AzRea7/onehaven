@@ -4,13 +4,14 @@ from typing import Any, Optional
 
 from ..domain.workflow.panes import (
     allowed_panes_for_principal,
+    next_stage_to_pane,
     pane_catalog,
     pane_label,
     pane_meta,
     principal_roles,
     stage_to_pane,
 )
-from ..domain.workflow.stages import stage_label
+from ..domain.workflow.stages import next_stage, stage_label
 
 
 def _turnover_target_from_constraints(constraints: dict[str, Any]) -> str:
@@ -30,25 +31,20 @@ def _turnover_target_from_constraints(constraints: dict[str, Any]) -> str:
 
     if compliance_issue:
         return "compliance"
-
     if decision_bucket in {"REVIEW", "REJECT"}:
         return "investor"
-
     return "management"
 
 
-def build_pane_context(
-    *,
-    current_stage: Optional[str],
-    constraints: Optional[dict[str, Any]] = None,
-    principal: Any = None,
-    org_id: Optional[int] = None,
-) -> dict[str, Any]:
+def build_pane_context(*, current_stage: Optional[str], constraints: Optional[dict[str, Any]] = None, principal: Any = None, org_id: Optional[int] = None) -> dict[str, Any]:
     constraints = constraints or {}
     stage_key = str(current_stage or "").strip().lower()
-
     turnover_target = _turnover_target_from_constraints(constraints)
+
     current_pane = stage_to_pane(stage_key, turnover_target=turnover_target)
+    next_stage_key = next_stage(stage_key)
+    suggested_next_pane = next_stage_to_pane(next_stage_key, turnover_target=turnover_target)
+
     allowed_panes = allowed_panes_for_principal(principal)
     roles = principal_roles(principal)
 
@@ -79,6 +75,8 @@ def build_pane_context(
         "current_pane_label": pane_label(current_pane),
         "suggested_pane": current_pane,
         "suggested_pane_label": pane_label(current_pane),
+        "suggested_next_pane": suggested_next_pane,
+        "suggested_next_pane_label": pane_label(suggested_next_pane) if suggested_next_pane else None,
         "route_reason": route_reason,
         "turnover_target": turnover_target if stage_key == "turnover" else None,
         "allowed_panes": allowed_panes,

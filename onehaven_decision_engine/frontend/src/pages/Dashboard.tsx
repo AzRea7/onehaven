@@ -26,8 +26,8 @@ type PaneOverviewPayload = {
     pane_label?: string;
     count?: number;
     kpis?: Record<string, any>;
-    top_blockers?: Array<{ blocker?: string; count?: number }>;
-    top_actions?: Array<{ action?: string }>;
+    blockers?: Array<{ blocker?: string; count?: number }>;
+    next_actions?: Array<{ action?: string }>;
   }>;
   allowed_panes?: string[];
 };
@@ -46,7 +46,7 @@ type PaneDashboardPayload = {
     stage?: string;
     action?: string;
   }>;
-  recommended_next_actions?: Array<{
+  next_actions?: Array<{
     property_id?: number;
     address?: string;
     city?: string;
@@ -128,11 +128,11 @@ export default function Dashboard() {
           title={pane ? `${activePaneLabel} dashboard` : "Portfolio dashboard"}
           subtitle={
             pane
-              ? "This dashboard is filtered into one operating mode so the user sees the correct queue, blockers, and next actions for that pane."
-              : "The dashboard now acts as the portfolio command surface: pane summaries, blockers, stale items, and recommended next actions all live here."
+              ? "This dashboard is filtered into one operating mode so the user sees the correct queue, blockers, stale items, and next actions for that pane."
+              : "The dashboard now acts as the portfolio command surface: pane summaries, blockers, stale items, and normalized action queues all live here."
           }
           right={
-            <div className="absolute inset-0 flex items-center justify-center overflow-visible pointer-events-auto">
+            <div className="pointer-events-auto absolute inset-0 flex items-center justify-center overflow-visible">
               <div className="h-[220px] w-[220px] translate-y-[-8px] opacity-95 md:h-[250px] md:w-[250px]">
                 <Golem className="h-full w-full" />
               </div>
@@ -144,8 +144,8 @@ export default function Dashboard() {
                 <RefreshCcw className="h-4 w-4" />
                 Sync dashboard
               </button>
-              <Link to="/properties" className="oh-btn oh-btn-secondary">
-                Open properties
+              <Link to="/panes/investor" className="oh-btn oh-btn-secondary">
+                Open lifecycle start
               </Link>
               <div className="px-2 py-2 text-[11px] text-app-4">
                 {lastSync
@@ -171,7 +171,7 @@ export default function Dashboard() {
           <>
             <Surface
               title="Pane summaries"
-              subtitle="Each pane has its own dashboard contract, but this top-level dashboard shows the portfolio at mode level."
+              subtitle="Every pane now consumes the same dashboard shape, so the portfolio can summarize them consistently."
             >
               <PaneSummaryCards panes={overview?.panes} />
             </Surface>
@@ -236,7 +236,7 @@ export default function Dashboard() {
                 subtitle="Needs attention or refresh"
               >
                 <div className="text-3xl font-semibold text-app-0">
-                  {Number(paneData?.kpis?.stale_count || 0)}
+                  {Number(paneData?.kpis?.stale_items || 0)}
                 </div>
               </Surface>
               <Surface
@@ -283,39 +283,36 @@ export default function Dashboard() {
               </Surface>
 
               <Surface
-                title="Recommended next actions"
+                title="Next actions"
                 subtitle="Action list already normalized for this pane."
               >
                 {loading ? (
                   <div className="oh-skeleton h-[220px] rounded-3xl" />
-                ) : !(paneData?.recommended_next_actions || []).length ? (
-                  <EmptyState compact title="No recommended actions yet." />
+                ) : !(paneData?.next_actions || []).length ? (
+                  <EmptyState compact title="No next actions yet." />
                 ) : (
                   <div className="space-y-3">
-                    {paneData?.recommended_next_actions
-                      ?.slice(0, 8)
-                      .map((row, idx) => (
-                        <Link
-                          key={`${row.property_id}-${idx}`}
-                          to={
-                            row.property_id
-                              ? `/properties/${row.property_id}`
-                              : "/properties"
-                          }
-                          className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
-                        >
-                          <div className="text-sm font-semibold text-app-0">
-                            {row.address ||
-                              `Property #${row.property_id ?? "—"}`}
-                          </div>
-                          <div className="mt-1 text-xs text-app-4">
-                            {[row.city, row.stage].filter(Boolean).join(" · ")}
-                          </div>
-                          <div className="mt-2 text-sm text-app-2">
-                            {row.action}
-                          </div>
-                        </Link>
-                      ))}
+                    {paneData?.next_actions?.slice(0, 8).map((row, idx) => (
+                      <Link
+                        key={`${row.property_id}-${idx}`}
+                        to={
+                          row.property_id
+                            ? `/properties/${row.property_id}`
+                            : "/panes/investor"
+                        }
+                        className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
+                      >
+                        <div className="text-sm font-semibold text-app-0">
+                          {row.address || `Property #${row.property_id ?? "—"}`}
+                        </div>
+                        <div className="mt-1 text-xs text-app-4">
+                          {[row.city, row.stage].filter(Boolean).join(" · ")}
+                        </div>
+                        <div className="mt-2 text-sm text-app-2">
+                          {row.action}
+                        </div>
+                      </Link>
+                    ))}
                   </div>
                 )}
               </Surface>
@@ -336,7 +333,7 @@ export default function Dashboard() {
                         to={
                           row.property_id
                             ? `/properties/${row.property_id}`
-                            : "/properties"
+                            : "/panes/investor"
                         }
                         className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
                       >
@@ -381,7 +378,7 @@ export default function Dashboard() {
                     Avg cashflow est.
                   </div>
                   <div className="mt-2 text-3xl font-semibold text-app-0">
-                    {money(paneData?.kpis?.avg_cashflow_estimate)}
+                    {money(paneData?.kpis?.avg_projected_monthly_cashflow)}
                   </div>
                 </div>
 

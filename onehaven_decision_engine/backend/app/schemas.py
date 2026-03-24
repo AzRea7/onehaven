@@ -845,6 +845,58 @@ class PropertyStateUpsert(BaseModel):
     constraints: Optional[dict[str, Any]] = None
     outstanding_tasks: Optional[dict[str, Any]] = None
 
+
+class WorkflowTransitionOut(BaseModel):
+    property_id: int
+    current_stage: str
+    current_stage_label: str
+    next_stage: Optional[str] = None
+    next_stage_label: Optional[str] = None
+    current_pane: str
+    current_pane_label: str
+    suggested_next_pane: Optional[str] = None
+    suggested_next_pane_label: Optional[str] = None
+    route_reason: Optional[str] = None
+    transition_reason: Optional[str] = None
+    transition_at: Optional[datetime] = None
+    is_auto_routed: bool = True
+    decision_bucket: str
+    gate: dict[str, Any] = Field(default_factory=dict)
+    gate_status: str
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    next_actions: list[str] = Field(default_factory=list)
+    stage_completion_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class PropertyStateOut(BaseModel):
+    property_id: int
+    current_stage: str
+    suggested_stage: str
+    current_stage_label: str
+    current_pane: str
+    current_pane_label: str
+    suggested_pane: str
+    suggested_pane_label: str
+    suggested_next_pane: Optional[str] = None
+    suggested_next_pane_label: Optional[str] = None
+    route_reason: Optional[str] = None
+    transition_reason: Optional[str] = None
+    transition_at: Optional[datetime] = None
+    is_auto_routed: bool = True
+    allowed_panes: list[str] = Field(default_factory=list)
+    allowed_pane_labels: list[str] = Field(default_factory=list)
+    normalized_decision: str
+    decision_bucket: str
+    gate: dict[str, Any] = Field(default_factory=dict)
+    gate_status: str
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    outstanding_tasks: dict[str, Any] = Field(default_factory=dict)
+    next_actions: list[str] = Field(default_factory=list)
+    stage_completion_summary: dict[str, Any] = Field(default_factory=dict)
+    updated_at: Optional[str] = None
+    last_transitioned_at: Optional[str] = None
+    stage_order: list[str] = Field(default_factory=list)
+
 # --------------------
 # Rehab
 # --------------------
