@@ -15,6 +15,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import PolicyReview from "./pages/PolicyReview";
 import InvestorPane from "./pages/InvestorPane";
+import AcquisitionPane from "./pages/AcquisitionPane";
 import CompliancePane from "./pages/CompliancePane";
 import TenantsPane from "./pages/TenantsPane";
 import ManagementPane from "./pages/ManagementPane";
@@ -82,6 +83,15 @@ export default function App() {
           element={
             <Protected>
               <InvestorPane />
+            </Protected>
+          }
+        />
+
+        <Route
+          path="/panes/acquisition"
+          element={
+            <Protected>
+              <AcquisitionPane />
             </Protected>
           }
         />

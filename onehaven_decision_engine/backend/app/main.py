@@ -1,4 +1,3 @@
-# backend/app/main.py
 from __future__ import annotations
 
 from fastapi import FastAPI
@@ -34,6 +33,7 @@ from .routers.tenants import router as tenants_router
 from .routers.cash import router as cash_router
 from .routers.equity import router as equity_router
 from .routers.ops import router as ops_router
+from .routers.acquisition import router as acquisition_router
 
 from .routers.agents import router as agents_router
 from .routers.agent_runs import router as agent_runs_router
@@ -41,11 +41,9 @@ from .routers.workflow import router as workflow_router
 from .routers.audit import router as audit_router
 from .routers.trust import router as trust_router
 
-# SaaS auth + api keys
 from .routers.auth import router as auth_router
 from .routers.api_keys import router as api_keys_router
 
-# ✅ NEW: Jurisdiction Profiles (global defaults + org overrides)
 from .routers.jurisdiction_profiles import router as jurisdiction_profiles_router
 from .routers.policy_seed import router as policy_seed_router
 from .routers.policy_evidence import router as policy_evidence_router
@@ -95,7 +93,6 @@ def create_app() -> FastAPI:
         version=getattr(settings, "decision_version", "dev"),
     )
 
-    # Observability first
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(StructuredLoggingMiddleware)
 
@@ -109,55 +106,48 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Core
     app.include_router(health_router, prefix=API_PREFIX)
     app.include_router(meta_router, prefix=API_PREFIX)
     app.include_router(dashboard_router, prefix=API_PREFIX)
 
-    # Decision engine pipeline
     app.include_router(properties_router, prefix=API_PREFIX)
     app.include_router(deals_router, prefix=API_PREFIX)
     app.include_router(jurisdictions_router, prefix=API_PREFIX)
     app.include_router(evaluate_router, prefix=API_PREFIX)
 
-    # Ingest + rent
     app.include_router(imports_router, prefix=API_PREFIX)
     app.include_router(imports_alias_router, prefix=API_PREFIX)
     app.include_router(rent_router, prefix=API_PREFIX)
     app.include_router(rent_enrich_router, prefix=API_PREFIX)
 
-    # Compliance
     app.include_router(compliance_router, prefix=API_PREFIX)
     app.include_router(inspections_router, prefix=API_PREFIX)
     app.include_router(photos_router, prefix=API_PREFIX)
 
-    # Ops
     app.include_router(rehab_router, prefix=API_PREFIX)
     app.include_router(tenants_router, prefix=API_PREFIX)
     app.include_router(cash_router, prefix=API_PREFIX)
     app.include_router(equity_router, prefix=API_PREFIX)
     app.include_router(ops_router, prefix=API_PREFIX)
+    app.include_router(acquisition_router, prefix=API_PREFIX)
 
-    # Agents + workflow
     app.include_router(agents_router, prefix=API_PREFIX)
     app.include_router(agent_runs_router, prefix=API_PREFIX)
     app.include_router(workflow_router, prefix=API_PREFIX)
     app.include_router(audit_router, prefix=API_PREFIX)
     app.include_router(trust_router, prefix=API_PREFIX)
 
-    # SaaS auth + api keys
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(api_keys_router, prefix=API_PREFIX)
 
-    # ✅ NEW: Jurisdiction Profiles
     app.include_router(jurisdiction_profiles_router, prefix=API_PREFIX)
     app.include_router(policy_seed_router, prefix=API_PREFIX)
     app.include_router(policy_router, prefix=API_PREFIX)
     app.include_router(policy_evidence_router, prefix=API_PREFIX)
     app.include_router(policy_catalog_admin_router, prefix=API_PREFIX)
-    app.include_router(ingestion_router, prefix=API_PREFIX)
 
-    app.include_router(markets_router, prefix=API_PREFIX)    
+    app.include_router(ingestion_router, prefix=API_PREFIX)
+    app.include_router(markets_router, prefix=API_PREFIX)
 
     return app
 

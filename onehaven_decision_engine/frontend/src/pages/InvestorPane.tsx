@@ -27,6 +27,7 @@ import { api, type SupportedMarket } from "../lib/api";
 
 type Row = any;
 type MarketRow = SupportedMarket;
+type AcquisitionQueueRow = { property_id: number };
 
 type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
 type FinancingFilter = "ALL" | "CASH" | "DSCR" | "UNKNOWN";
@@ -443,6 +444,10 @@ function buildPagination(currentPage: number, totalPages: number) {
 export default function InvestorPane() {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [markets, setMarkets] = React.useState<MarketRow[]>([]);
+  const [acquisitionIds, setAcquisitionIds] = React.useState<Set<number>>(
+    new Set(),
+  );
+
   const [inventoryErr, setInventoryErr] = React.useState<string | null>(null);
   const [marketsErr, setMarketsErr] = React.useState<string | null>(null);
 
@@ -466,14 +471,29 @@ export default function InvestorPane() {
     setInventoryErr(null);
 
     try {
-      const propertiesRes = await api.get<any>("/properties", {
-        params: { limit: INITIAL_LIMIT },
-      });
+      const [propertiesRes, acquisitionRes] = await Promise.all([
+        api.get<any>("/properties", {
+          params: { limit: INITIAL_LIMIT },
+        }),
+        api.get<any>("/acquisition/queue", {
+          params: { limit: 1000 },
+        }),
+      ]);
 
       const propertyItems =
         propertiesRes?.items || propertiesRes?.rows || propertiesRes || [];
       const normalized = Array.isArray(propertyItems) ? propertyItems : [];
 
+      const acquisitionItems = Array.isArray(acquisitionRes?.items)
+        ? acquisitionRes.items
+        : [];
+      const acquisitionPropertyIds = new Set<number>(
+        acquisitionItems
+          .map((x: AcquisitionQueueRow) => Number(x?.property_id))
+          .filter((n: number) => Number.isFinite(n) && n > 0),
+      );
+
+      setAcquisitionIds(acquisitionPropertyIds);
       setRows(normalized);
     } catch (e: any) {
       setInventoryErr(formatApiError(e, "Failed to load investor inventory."));
@@ -507,12 +527,20 @@ export default function InvestorPane() {
     load();
   }, [load]);
 
+  const baseRows = React.useMemo(() => {
+    return rows.filter((r) => {
+      const propertyId = resolvePropertyId(r);
+      if (!propertyId) return true;
+      return !acquisitionIds.has(propertyId);
+    });
+  }, [rows, acquisitionIds]);
+
   const filtered = React.useMemo(() => {
     const normalizedQuery = String(deferredQ || "")
       .trim()
       .toLowerCase();
 
-    let next = rows.filter((r) => {
+    let next = baseRows.filter((r) => {
       const property = inferProperty(r);
       const price = inferAskingPrice(r);
       const financingType = getFinancingType(price);
@@ -558,7 +586,15 @@ export default function InvestorPane() {
 
     next = sortRows(next, sort);
     return next;
-  }, [rows, deferredQ, decision, financing, completeness, sort, selectedCity]);
+  }, [
+    baseRows,
+    deferredQ,
+    decision,
+    financing,
+    completeness,
+    sort,
+    selectedCity,
+  ]);
 
   React.useEffect(() => {
     setCurrentPage(1);
@@ -569,18 +605,18 @@ export default function InvestorPane() {
       .map((m) => String(m?.city || "").trim())
       .filter(Boolean);
 
-    const rowCities = uniqueCities(rows);
+    const rowCities = uniqueCities(baseRows);
     return Array.from(new Set([...marketCities, ...rowCities])).sort((a, b) =>
       a.localeCompare(b),
     );
-  }, [markets, rows]);
+  }, [markets, baseRows]);
 
   const completenessCounts = React.useMemo(() => {
     let complete = 0;
     let partial = 0;
     let missing = 0;
 
-    for (const row of rows) {
+    for (const row of baseRows) {
       const value = inferCompleteness(row);
       if (value === "COMPLETE") complete += 1;
       else if (value === "PARTIAL") partial += 1;
@@ -591,9 +627,9 @@ export default function InvestorPane() {
       complete,
       partial,
       missing,
-      total: rows.length,
+      total: baseRows.length,
     };
-  }, [rows]);
+  }, [baseRows]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -723,6 +759,9 @@ export default function InvestorPane() {
               <span className="oh-pill">
                 {completenessCounts.missing} missing
               </span>
+              <span className="oh-pill">
+                {acquisitionIds.size} moved to acquisition
+              </span>
             </div>
           </div>
 
@@ -740,7 +779,8 @@ export default function InvestorPane() {
                 Available investment inventory
               </div>
               <div className="text-xs text-app-4">
-                Showing 25 properties per page.
+                Showing 25 properties per page. Active acquisition files are
+                excluded from this list.
               </div>
             </div>
             <div className="text-xs text-app-4">
@@ -920,7 +960,7 @@ export default function InvestorPane() {
 
                             {propertyId ? (
                               <Link
-                                to={`/property/${propertyId}`}
+                                to={`/properties/${propertyId}`}
                                 className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app px-3 py-2 text-sm text-app-0"
                               >
                                 Open property

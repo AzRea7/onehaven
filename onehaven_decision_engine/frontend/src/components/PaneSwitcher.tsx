@@ -42,8 +42,9 @@ export const PANE_META: PaneMeta[] = [
     key: "acquisition",
     label: "Acquisition",
     shortLabel: "Acquire",
-    description: "Offer execution and close-stage acquisition workflow.",
-    to: "/dashboard?pane=acquisition",
+    description:
+      "Offer execution, document intake, lender/title coordination, and close-stage workflow.",
+    to: "/panes/acquisition",
     icon: <BriefcaseBusiness className="h-4 w-4" />,
     step: 2,
   },

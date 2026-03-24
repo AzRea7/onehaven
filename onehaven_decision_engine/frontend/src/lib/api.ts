@@ -233,6 +233,7 @@ type ApiRequestOptions = {
   cacheTtlMs?: number;
   signal?: AbortSignal;
   params?: Record<string, any>;
+  responseType?: "json" | "blob" | "text";
 };
 
 export function getOrgSlug(): string {
@@ -400,6 +401,7 @@ async function request<T>(
         cacheTtlMs?: number;
         signal?: AbortSignal;
         params?: Record<string, any>;
+        responseType?: "json" | "blob" | "text";
       })
     | undefined,
 ): Promise<T> {
@@ -409,7 +411,16 @@ async function request<T>(
 
   const finalPath = appendParamsToPath(path, init?.params);
 
-  const bodyKey = typeof init?.body === "string" ? init.body : undefined;
+  const isFormData =
+    typeof FormData !== "undefined" && init?.body instanceof FormData;
+
+  const bodyKey =
+    typeof init?.body === "string"
+      ? init.body
+      : isFormData
+        ? "[formdata]"
+        : undefined;
+
   const key = cacheKey(method, finalPath, bodyKey);
 
   if (method === "GET" && ttl > 0) {
@@ -425,17 +436,15 @@ async function request<T>(
   }
 
   const run = (async () => {
-    const headers: Record<string, string> = {
-      ...(init?.headers as any),
-    };
+    const headers = new Headers(init?.headers as HeadersInit | undefined);
 
     const hasBody =
       init?.body !== undefined &&
       init?.body !== null &&
       !(typeof init.body === "string" && init.body.length === 0);
 
-    if (hasBody && !headers["Content-Type"]) {
-      headers["Content-Type"] = "application/json";
+    if (hasBody && !isFormData && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
     }
 
     const isAuthBootstrap =
@@ -445,33 +454,67 @@ async function request<T>(
       finalPath.startsWith("/auth/orgs") ||
       finalPath.startsWith("/auth/select-org");
 
-    if (auth.orgSlug && !isAuthBootstrap) {
-      headers["X-Org-Slug"] = auth.orgSlug;
+    if (auth.orgSlug && !isAuthBootstrap && !headers.has("X-Org-Slug")) {
+      headers.set("X-Org-Slug", auth.orgSlug);
     }
-    if (auth.devEmail) headers["X-User-Email"] = auth.devEmail;
-    if (auth.devRole) headers["X-User-Role"] = auth.devRole;
+    if (auth.devEmail && !headers.has("X-User-Email")) {
+      headers.set("X-User-Email", auth.devEmail);
+    }
+    if (auth.devRole && !headers.has("X-User-Role")) {
+      headers.set("X-User-Role", auth.devRole);
+    }
 
     const res = await fetch(`${API_BASE}${finalPath}`, {
       ...init,
       credentials: "include",
       headers,
       signal: init?.signal,
+      body: init?.body,
     });
 
     if (!res.ok) {
-      const text = await res.text();
+      const contentType = res.headers.get("content-type") || "";
+      let data: any = null;
+
+      try {
+        if (contentType.includes("application/json")) {
+          data = await res.json();
+        } else {
+          data = { detail: await res.text() };
+        }
+      } catch {
+        data = { detail: `Request failed with ${res.status}` };
+      }
 
       if (res.status === 401 && finalPath.startsWith("/auth/me")) {
         return null as any as T;
       }
 
-      throw new Error(`${res.status} ${res.statusText}: ${text}`);
+      throw {
+        response: {
+          status: res.status,
+          data,
+          headers: {
+            "x-request-id": res.headers.get("x-request-id") || undefined,
+            "X-Request-ID": res.headers.get("X-Request-ID") || undefined,
+          },
+        },
+      };
     }
 
-    const ct = res.headers.get("content-type") || "";
-    const data = ct.includes("application/json")
-      ? await res.json()
-      : await res.text();
+    let data: any;
+    const responseType = init?.responseType ?? "json";
+
+    if (responseType === "blob") {
+      data = await res.blob();
+    } else if (responseType === "text") {
+      data = await res.text();
+    } else {
+      const ct = res.headers.get("content-type") || "";
+      data = ct.includes("application/json")
+        ? await res.json()
+        : await res.text();
+    }
 
     if (method === "GET" && ttl > 0) {
       memCache.set(key, { at: Date.now(), value: data });
@@ -514,42 +557,37 @@ export const api = {
       cacheTtlMs: init?.cacheTtlMs ?? 0,
       signal: init?.signal,
       params: init?.params,
+      responseType: init?.responseType,
     }),
 
-  post: <T = any>(
-    path: string,
-    body?: any,
-    init?: { cacheTtlMs?: number; signal?: AbortSignal },
-  ) =>
+  post: <T = any>(path: string, body?: any, init?: ApiRequestOptions) =>
     request<T>(path, {
       method: "POST",
-      body: JSON.stringify(body ?? {}),
+      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
       cacheTtlMs: init?.cacheTtlMs,
       signal: init?.signal,
+      params: init?.params,
+      responseType: init?.responseType,
     }),
 
-  put: <T = any>(
-    path: string,
-    body?: any,
-    init?: { cacheTtlMs?: number; signal?: AbortSignal },
-  ) =>
+  put: <T = any>(path: string, body?: any, init?: ApiRequestOptions) =>
     request<T>(path, {
       method: "PUT",
-      body: JSON.stringify(body ?? {}),
+      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
       cacheTtlMs: init?.cacheTtlMs,
       signal: init?.signal,
+      params: init?.params,
+      responseType: init?.responseType,
     }),
 
-  patch: <T = any>(
-    path: string,
-    body?: any,
-    init?: { cacheTtlMs?: number; signal?: AbortSignal },
-  ) =>
+  patch: <T = any>(path: string, body?: any, init?: ApiRequestOptions) =>
     request<T>(path, {
       method: "PATCH",
-      body: JSON.stringify(body ?? {}),
+      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
       cacheTtlMs: init?.cacheTtlMs,
       signal: init?.signal,
+      params: init?.params,
+      responseType: init?.responseType,
     }),
 
   delete: <T = any>(path: string, init?: ApiRequestOptions) =>
@@ -558,6 +596,7 @@ export const api = {
       cacheTtlMs: init?.cacheTtlMs,
       signal: init?.signal,
       params: init?.params,
+      responseType: init?.responseType,
     }),
 
   authRegister: (payload: {

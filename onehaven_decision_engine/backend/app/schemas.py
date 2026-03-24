@@ -6,12 +6,87 @@ import json
 from datetime import datetime
 from typing import Optional, List, Any, Literal, Dict
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict, model_validator, field_validator
 
 
 # --------------------
 # Imports / Snapshots
 # --------------------
+
+AcquisitionDocumentKind = Literal[
+    "purchase_agreement",
+    "loan_documents",
+    "loan_estimate",
+    "closing_disclosure",
+    "title_documents",
+    "insurance_binder",
+    "inspection_report",
+    "other",
+]
+
+
+class AcquisitionRecordUpdate(BaseModel):
+    status: str | None = None
+    waiting_on: str | None = None
+    next_step: str | None = None
+    contract_date: str | None = None
+    target_close_date: str | None = None
+    closing_date: str | None = None
+    purchase_price: float | None = None
+    earnest_money: float | None = None
+    loan_amount: float | None = None
+    loan_type: str | None = None
+    interest_rate: float | None = None
+    cash_to_close: float | None = None
+    closing_costs: float | None = None
+    seller_credits: float | None = None
+    title_company: str | None = None
+    escrow_officer: str | None = None
+    notes: str | None = None
+    contacts_json: list[dict[str, Any]] | None = None
+    milestones_json: list[dict[str, Any]] | None = None
+
+    @field_validator(
+        "status",
+        "waiting_on",
+        "next_step",
+        "loan_type",
+        "title_company",
+        "escrow_officer",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+
+class AcquisitionDocumentCreate(BaseModel):
+    kind: AcquisitionDocumentKind = "other"
+    name: str = Field(min_length=1, max_length=255)
+    status: str | None = "received"
+    source_url: str | None = None
+    extracted_text: str | None = None
+    extracted_fields: dict[str, Any] | None = None
+    notes: str | None = None
+
+    @field_validator("name", "status", "notes", "source_url", "extracted_text", mode="before")
+    @classmethod
+    def normalize_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+
+class AcquisitionUploadResponse(BaseModel):
+    ok: bool = True
+    document: dict[str, Any]
+
+
 class ImportSnapshotOut(BaseModel):
     id: int
     org_id: Optional[int] = None
