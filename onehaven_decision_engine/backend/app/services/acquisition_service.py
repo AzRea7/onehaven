@@ -15,6 +15,9 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .acquisition_deadline_service import list_deadlines
+from .acquisition_document_review_service import create_field_suggestions_from_document, list_document_field_values
+from .acquisition_participant_service import list_participants
 from .document_parsing_service import parse_document
 from .virus_scanning_service import scan_file
 
@@ -116,17 +119,11 @@ def _sanitize_filename(filename: str | None) -> str:
 def _validate_extension_and_content_type(filename: str, content_type: str | None) -> str:
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type '{ext or 'unknown'}' is not allowed.",
-        )
+        raise HTTPException(status_code=400, detail=f"File type '{ext or 'unknown'}' is not allowed.")
     if content_type:
         normalized = content_type.strip().lower()
         if normalized not in ALLOWED_UPLOAD_CONTENT_TYPES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Content type '{normalized}' is not allowed.",
-            )
+            raise HTTPException(status_code=400, detail=f"Content type '{normalized}' is not allowed.")
     return ext
 
 
@@ -322,44 +319,6 @@ def update_acquisition_record(
     return ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
 
 
-def _apply_extracted_fields_to_record(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-    extracted_fields: dict[str, Any],
-) -> None:
-    if not extracted_fields:
-        return
-
-    mapping = {
-        "purchase_price": "purchase_price",
-        "earnest_money": "earnest_money",
-        "loan_amount": "loan_amount",
-        "loan_type": "loan_type",
-        "cash_to_close": "cash_to_close",
-        "closing_costs": "closing_costs",
-    }
-
-    payload: dict[str, Any] = {}
-    for source_key, target_key in mapping.items():
-        value = extracted_fields.get(source_key)
-        if value not in (None, "", []):
-            payload[target_key] = value
-
-    lender_name = extracted_fields.get("lender_name")
-    if lender_name and not payload.get("title_company"):
-        payload["notes"] = f"Parsed lender: {lender_name}"
-
-    if payload:
-        update_acquisition_record(
-            db,
-            org_id=org_id,
-            property_id=property_id,
-            payload=payload,
-        )
-
-
 def add_acquisition_document(
     db: Session,
     *,
@@ -397,6 +356,9 @@ def add_acquisition_document(
                 extracted_text,
                 extracted_fields_json,
                 notes,
+                replaced_by_document_id,
+                deleted_at,
+                deleted_reason,
                 created_at,
                 updated_at
             )
@@ -422,6 +384,9 @@ def add_acquisition_document(
                 :extracted_text,
                 :extracted_fields_json,
                 :notes,
+                :replaced_by_document_id,
+                :deleted_at,
+                :deleted_reason,
                 now(),
                 now()
             )
@@ -449,16 +414,12 @@ def add_acquisition_document(
             "extracted_text": extracted_text or None,
             "extracted_fields_json": json.dumps(extracted_fields),
             "notes": payload.get("notes"),
+            "replaced_by_document_id": payload.get("replaced_by_document_id"),
+            "deleted_at": payload.get("deleted_at"),
+            "deleted_reason": payload.get("deleted_reason"),
         },
     )
     db.commit()
-
-    _apply_extracted_fields_to_record(
-        db,
-        org_id=org_id,
-        property_id=property_id,
-        extracted_fields=extracted_fields,
-    )
 
     doc = _row_to_dict(
         db.execute(
@@ -475,6 +436,15 @@ def add_acquisition_document(
         ).fetchone()
     ) or {}
     doc["extracted_fields"] = _safe_json_load(doc.get("extracted_fields_json"), {})
+    if doc.get("id") and extracted_fields:
+        create_field_suggestions_from_document(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            document_id=int(doc["id"]),
+            extracted_fields=extracted_fields,
+            extraction_version=payload.get("parser_version") or "v1",
+        )
     return doc
 
 
@@ -487,6 +457,7 @@ def upload_acquisition_document_file(
     name: str | None,
     notes: str | None,
     upload: UploadFile,
+    replace_document_id: int | None = None,
 ) -> dict[str, Any]:
     ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
 
@@ -514,10 +485,9 @@ def upload_acquisition_document_file(
         raise HTTPException(status_code=400, detail="Upload blocked: file failed malware scan.")
 
     parse = parse_document(stored_path, upload.content_type)
-
     relative_storage_path = str(stored_path.relative_to(_acquisition_upload_root()))
 
-    return add_acquisition_document(
+    created = add_acquisition_document(
         db,
         org_id=org_id,
         property_id=property_id,
@@ -543,6 +513,123 @@ def upload_acquisition_document_file(
             "extracted_fields": parse.get("extracted_fields") or {},
         },
     )
+
+    if replace_document_id:
+        replace_acquisition_document(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            document_id=int(replace_document_id),
+            replacement_document_id=int(created["id"]),
+            reason="replaced_by_new_upload",
+        )
+    return created
+
+
+def replace_acquisition_document(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    document_id: int,
+    replacement_document_id: int,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    existing = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_documents
+                where id = :document_id and org_id = :org_id and property_id = :property_id
+                """
+            ),
+            {"document_id": int(document_id), "org_id": int(org_id), "property_id": int(property_id)},
+        ).fetchone()
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    db.execute(
+        text(
+            """
+            update acquisition_documents
+            set status = 'replaced',
+                replaced_by_document_id = :replacement_document_id,
+                deleted_reason = :reason,
+                updated_at = now()
+            where id = :document_id and org_id = :org_id and property_id = :property_id
+            """
+        ),
+        {
+            "document_id": int(document_id),
+            "replacement_document_id": int(replacement_document_id),
+            "reason": (reason or "").strip() or "replaced",
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+        },
+    )
+    db.commit()
+    return _row_to_dict(
+        db.execute(text("select * from acquisition_documents where id = :id"), {"id": int(document_id)}).fetchone()
+    ) or {}
+
+
+def delete_acquisition_document(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    document_id: int,
+    reason: str | None = None,
+    hard_delete_file: bool = False,
+) -> dict[str, Any]:
+    row = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_documents
+                where id = :document_id and org_id = :org_id and property_id = :property_id
+                """
+            ),
+            {"document_id": int(document_id), "org_id": int(org_id), "property_id": int(property_id)},
+        ).fetchone()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    db.execute(
+        text(
+            """
+            update acquisition_documents
+            set status = 'deleted',
+                deleted_at = now(),
+                deleted_reason = :reason,
+                updated_at = now()
+            where id = :document_id and org_id = :org_id and property_id = :property_id
+            """
+        ),
+        {
+            "document_id": int(document_id),
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "reason": (reason or "").strip() or "deleted",
+        },
+    )
+    db.commit()
+
+    if hard_delete_file:
+        rel = row.get("storage_path")
+        if rel:
+            root = _acquisition_upload_root()
+            path = (root / rel).resolve()
+            if root in path.parents and path.exists():
+                path.unlink(missing_ok=True)
+
+    return _row_to_dict(
+        db.execute(text("select * from acquisition_documents where id = :id"), {"id": int(document_id)}).fetchone()
+    ) or {}
 
 
 def get_acquisition_detail(db: Session, *, org_id: int, property_id: int) -> dict[str, Any] | None:
@@ -604,6 +691,9 @@ def get_acquisition_detail(db: Session, *, org_id: int, property_id: int) -> dic
                     extracted_text,
                     extracted_fields_json,
                     notes,
+                    replaced_by_document_id,
+                    deleted_at,
+                    deleted_reason,
                     created_at,
                     updated_at
                 from acquisition_documents
@@ -620,14 +710,20 @@ def get_acquisition_detail(db: Session, *, org_id: int, property_id: int) -> dic
 
     contacts = _safe_json_load(acquisition_row.get("contacts_json"), [])
     milestones = _safe_json_load(acquisition_row.get("milestones_json"), [])
-
     target_close = acquisition_row.get("target_close_date") or acquisition_row.get("closing_date")
-    present_doc_kinds = {str(d.get("kind") or "").strip() for d in documents}
+    present_doc_kinds = {
+        str(d.get("kind") or "").strip()
+        for d in documents
+        if str(d.get("status") or "").lower() not in {"deleted", "replaced"}
+    }
 
-    required_docs = [
-        {**doc, "present": doc["kind"] in present_doc_kinds}
-        for doc in DEFAULT_REQUIRED_DOCS
-    ]
+    required_docs = [{**doc, "present": doc["kind"] in present_doc_kinds} for doc in DEFAULT_REQUIRED_DOCS]
+    deadlines = list_deadlines(db, org_id=org_id, property_id=property_id)
+    participants = list_participants(db, org_id=org_id, property_id=property_id)
+    field_values = list_document_field_values(db, org_id=org_id, property_id=property_id)
+
+    has_overdue = any(bool(x.get("is_overdue")) for x in deadlines)
+    suggested_count = sum(1 for x in field_values if str(x.get("review_state") or "") == "suggested")
 
     return {
         "property": property_row,
@@ -638,12 +734,19 @@ def get_acquisition_detail(db: Session, *, org_id: int, property_id: int) -> dic
             "days_to_close": _days_to_close(target_close),
         },
         "documents": documents,
+        "participants": participants,
+        "deadlines": deadlines,
+        "field_values": field_values,
         "required_documents": required_docs,
         "summary": {
             "days_to_close": _days_to_close(target_close),
             "document_count": len(documents),
             "required_documents_total": len(required_docs),
             "required_documents_present": sum(1 for d in required_docs if d["present"]),
+            "overdue_deadline_count": sum(1 for d in deadlines if d.get("is_overdue")),
+            "suggested_field_count": suggested_count,
+            "has_overdue_deadlines": has_overdue,
+            "has_missing_required_docs": any(not d["present"] for d in required_docs),
         },
     }
 
@@ -653,10 +756,17 @@ def list_acquisition_queue(
     *,
     org_id: int,
     q: str | None = None,
+    status: str | None = None,
+    waiting_on: str | None = None,
+    has_overdue_deadlines: bool | None = None,
+    has_missing_required_docs: bool | None = None,
+    needs_review: bool | None = None,
     limit: int = 250,
     offset: int = 0,
 ) -> dict[str, Any]:
     q = (q or "").strip().lower()
+    status = (status or "").strip().lower() or None
+    waiting_on = (waiting_on or "").strip().lower() or None
 
     rows = db.execute(
         text(
@@ -687,7 +797,21 @@ def list_acquisition_queue(
                     select count(*)
                     from acquisition_documents ad
                     where ad.org_id = p.org_id and ad.property_id = p.id
-                ) as document_count
+                      and coalesce(ad.status, 'received') not in ('deleted', 'replaced')
+                ) as document_count,
+                (
+                    select count(*)
+                    from acquisition_field_values fv
+                    where fv.org_id = p.org_id and fv.property_id = p.id
+                      and fv.review_state = 'suggested'
+                ) as suggested_field_count,
+                (
+                    select count(*)
+                    from acquisition_deadlines dl
+                    where dl.org_id = p.org_id and dl.property_id = p.id
+                      and dl.status not in ('completed', 'waived')
+                      and dl.due_at < now()
+                ) as overdue_deadline_count
             from properties p
             left join property_states ps
                 on ps.org_id = p.org_id and ps.property_id = p.id
@@ -698,8 +822,14 @@ def list_acquisition_queue(
                 ar.id is not null
                 or lower(coalesce(ps.current_stage, '')) in ('offer', 'under_contract', 'acquisition', 'closing', 'escrow')
               )
-            order by coalesce(ar.target_close_date, ar.closing_date) asc nulls last,
-                     coalesce(ar.updated_at, now()) desc
+            order by
+                (
+                    select min(dl2.due_at)
+                    from acquisition_deadlines dl2
+                    where dl2.org_id = p.org_id and dl2.property_id = p.id and dl2.status not in ('completed', 'waived')
+                ) asc nulls last,
+                coalesce(ar.target_close_date, ar.closing_date) asc nulls last,
+                coalesce(ar.updated_at, now()) desc
             limit :limit
             offset :offset
             """
@@ -709,23 +839,57 @@ def list_acquisition_queue(
 
     items = _rows_to_dicts(rows)
     filtered: list[dict[str, Any]] = []
+
     for item in items:
-        haystack = " ".join([
-            str(item.get("address") or ""),
-            str(item.get("city") or ""),
-            str(item.get("state") or ""),
-            str(item.get("zip") or ""),
-            str(item.get("county") or ""),
-            str(item.get("status") or ""),
-            str(item.get("waiting_on") or ""),
-            str(item.get("next_step") or ""),
-        ]).lower()
+        haystack = " ".join(
+            [
+                str(item.get("address") or ""),
+                str(item.get("city") or ""),
+                str(item.get("state") or ""),
+                str(item.get("zip") or ""),
+                str(item.get("county") or ""),
+                str(item.get("status") or ""),
+                str(item.get("waiting_on") or ""),
+                str(item.get("next_step") or ""),
+            ]
+        ).lower()
 
         if q and q not in haystack:
             continue
+        if status and str(item.get("status") or "").lower() != status:
+            continue
+        if waiting_on and waiting_on not in str(item.get("waiting_on") or "").lower():
+            continue
+        if has_overdue_deadlines is True and int(item.get("overdue_deadline_count") or 0) <= 0:
+            continue
+        if needs_review is True and int(item.get("suggested_field_count") or 0) <= 0:
+            continue
 
         target_close = item.get("target_close_date") or item.get("closing_date")
-        item["days_to_close"] = _days_to_close(target_close)
+        item["days_to_close"] = _days_to_close(str(target_close) if target_close else None)
+
+        active_doc_rows = _rows_to_dicts(
+            db.execute(
+                text(
+                    """
+                    select kind, status
+                    from acquisition_documents
+                    where org_id = :org_id and property_id = :property_id
+                      and coalesce(status, 'received') not in ('deleted', 'replaced')
+                    """
+                ),
+                {"org_id": int(org_id), "property_id": int(item["property_id"])},
+            ).fetchall()
+        )
+        present_kinds = {str(x.get("kind") or "") for x in active_doc_rows}
+        missing_required = [doc for doc in DEFAULT_REQUIRED_DOCS if doc["kind"] not in present_kinds]
+        item["missing_required_document_count"] = len(missing_required)
+        item["missing_required_document_kinds"] = [doc["kind"] for doc in missing_required]
+        item["has_missing_required_docs"] = bool(missing_required)
+
+        if has_missing_required_docs is True and not missing_required:
+            continue
+
         filtered.append(item)
 
     return {"items": filtered, "count": len(filtered)}
@@ -751,7 +915,8 @@ def get_document_file_response(
                     storage_path,
                     content_type,
                     upload_status,
-                    scan_status
+                    scan_status,
+                    status
                 from acquisition_documents
                 where org_id = :org_id
                   and property_id = :property_id
@@ -773,6 +938,8 @@ def get_document_file_response(
         raise HTTPException(status_code=400, detail="Document file is not available.")
     if row.get("scan_status") not in {"clean", "skipped", "error"}:
         raise HTTPException(status_code=400, detail="Document is not cleared for access.")
+    if str(row.get("status") or "").lower() == "deleted":
+        raise HTTPException(status_code=400, detail="Document has been deleted.")
 
     rel = row.get("storage_path")
     if not rel:

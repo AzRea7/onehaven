@@ -1,733 +1,796 @@
 from __future__ import annotations
 
-import asyncio
+import hashlib
 import json
-import logging
 import os
 import re
-import time
-from typing import Any, Optional
+import uuid
+import zipfile
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import asc, desc, func, select
-from sqlalchemy.orm import Session, selectinload
+from fastapi import HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from ..auth import get_principal
-from ..config import settings
-from ..db import get_db
-from ..domain.jurisdiction_scoring import compute_friction
-from ..models import (
-    AppUser,
-    Deal,
-    JurisdictionRule,
-    Lease,
-    Property,
-    PropertyChecklist,
-    PropertyChecklistItem,
-    RehabTask,
-    RentAssumption,
-    Transaction,
-    UnderwritingResult,
-    Valuation,
-)
-from ..schemas import (
-    CeilingCandidate,
-    ChecklistItemOut,
-    ChecklistOut,
-    DealOut,
-    JurisdictionRuleOut,
-    LeaseOut,
-    PropertyCreate,
-    PropertyOut,
-    PropertyViewOut,
-    RehabTaskOut,
-    RentExplainOut,
-    TransactionOut,
-    UnderwritingResultOut,
-    ValuationOut,
-)
-from ..services.geo_enrichment import enrich_property_geo
-from ..services.property_state_machine import (
-    compute_and_persist_stage,
-    get_state_payload,
-    normalize_decision_bucket,
-)
-from ..services.workflow_gate_service import build_workflow_summary
+from .document_parsing_service import parse_document
+from .virus_scanning_service import scan_file
 
-router = APIRouter(prefix="/properties", tags=["properties"])
-log = logging.getLogger("onehaven.properties")
+DEFAULT_REQUIRED_DOCS = [
+    {"kind": "purchase_agreement", "label": "Purchase agreement"},
+    {"kind": "loan_documents", "label": "Loan documents"},
+    {"kind": "loan_estimate", "label": "Loan estimate"},
+    {"kind": "closing_disclosure", "label": "Closing disclosure"},
+    {"kind": "title_documents", "label": "Title / escrow"},
+    {"kind": "insurance_binder", "label": "Insurance binder"},
+    {"kind": "inspection_report", "label": "Inspection / due diligence"},
+]
+
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".txt": "text/plain",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+}
+
+ALLOWED_UPLOAD_CONTENT_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+    "image/png",
+    "image/jpeg",
+}
+
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 
-def _safe_float(v: Any, default: float = 0.0) -> float:
-    try:
-        if v is None:
-            return default
-        return float(v)
-    except Exception:
-        return default
-
-
-def _crime_label(score: Any) -> str:
-    if score is None:
-        return "UNKNOWN"
-    value = _safe_float(score, 0.0)
-    if value >= 80:
-        return "HIGH"
-    if value >= 45:
-        return "MODERATE"
-    return "LOW"
-
-
-def _asking_price(prop: Property, deal: Deal | None) -> float | None:
-    for attr in ("asking_price", "list_price", "price", "offer_price", "purchase_price"):
-        if deal is not None and getattr(deal, attr, None) is not None:
-            return _safe_float(getattr(deal, attr, None), 0.0)
-    for attr in ("asking_price", "list_price", "price"):
-        if getattr(prop, attr, None) is not None:
-            return _safe_float(getattr(prop, attr, None), 0.0)
-    return None
-
-
-def _norm_city(s: str) -> str:
-    return (s or "").strip().title()
-
-
-def _norm_state(s: str) -> str:
-    return (s or "MI").strip().upper()
-
-
-def _maybe_geo_enrich_property(db: Session, *, org_id: int, property_id: int, force: bool = False) -> dict[str, Any]:
-    key = os.getenv("GOOGLE_MAPS_API_KEY")
-    try:
-        return asyncio.run(
-            enrich_property_geo(
-                db,
-                org_id=org_id,
-                property_id=property_id,
-                google_api_key=key,
-                force=force,
-            )
-        )
-    except RuntimeError:
-        return {"ok": False, "error": "geo_enrichment_runtime_error"}
-    except Exception as e:
-        log.exception(
-            "property_geo_enrich_failed",
-            extra={"org_id": org_id, "property_id": property_id, "force": force},
-        )
-        return {"ok": False, "error": str(e)}
-
-
-def _pick_jurisdiction_rule(db: Session, org_id: int, city: str, state: str) -> JurisdictionRule | None:
-    city = _norm_city(city)
-    state = _norm_state(state)
-
-    jr = db.scalar(
-        select(JurisdictionRule).where(
-            JurisdictionRule.org_id == org_id,
-            JurisdictionRule.city == city,
-            JurisdictionRule.state == state,
-        )
-    )
-    if jr:
-        return jr
-
-    return db.scalar(
-        select(JurisdictionRule).where(
-            JurisdictionRule.org_id.is_(None),
-            JurisdictionRule.city == city,
-            JurisdictionRule.state == state,
-        )
-    )
-
-
-def _latest_deal(db: Session, *, org_id: int, property_id: int) -> Deal | None:
-    return db.scalar(
-        select(Deal)
-        .where(Deal.org_id == org_id, Deal.property_id == property_id)
-        .order_by(desc(Deal.updated_at), desc(Deal.id))
-        .limit(1)
-    )
-
-
-def _latest_underwriting(db: Session, *, org_id: int, property_id: int) -> UnderwritingResult | None:
-    return db.scalar(
-        select(UnderwritingResult)
-        .join(Deal, Deal.id == UnderwritingResult.deal_id)
-        .where(UnderwritingResult.org_id == org_id, Deal.property_id == property_id)
-        .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
-        .limit(1)
-    )
-
-
-def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strategy: str) -> RentExplainOut:
-    ra = db.scalar(
-        select(RentAssumption).where(
-            RentAssumption.org_id == org_id,
-            RentAssumption.property_id == property_id,
-        )
-    )
-    if not ra:
-        raise HTTPException(status_code=404, detail="rent assumption not found")
-
-    ps = float(settings.payment_standard_pct)
-
-    fmr_adjusted = (
-        float(ra.section8_fmr) * ps
-        if (ra.section8_fmr is not None and float(ra.section8_fmr) > 0)
-        else None
-    )
-
-    cap_reason = "none"
-    ceiling_candidates: list[CeilingCandidate] = []
-
-    if fmr_adjusted is not None:
-        ceiling_candidates.append(CeilingCandidate(type="payment_standard", value=float(fmr_adjusted)))
-    if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-        ceiling_candidates.append(CeilingCandidate(type="rent_reasonableness", value=float(ra.rent_reasonableness_comp)))
-
-    if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
-        cap_reason = "override"
-    else:
-        cands: list[tuple[str, float]] = []
-        if fmr_adjusted is not None:
-            cands.append(("fmr", float(fmr_adjusted)))
-        if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-            cands.append(("comps", float(ra.rent_reasonableness_comp)))
-        if cands:
-            cap_reason = min(cands, key=lambda x: x[1])[0]
-
-    return RentExplainOut(
-        property_id=property_id,
-        strategy=strategy,
-        payment_standard_pct=ps,
-        market_rent_estimate=ra.market_rent_estimate,
-        section8_fmr=ra.section8_fmr,
-        rent_reasonableness_comp=ra.rent_reasonableness_comp,
-        approved_rent_ceiling=ra.approved_rent_ceiling,
-        calibrated_market_rent=None,
-        rent_used=ra.rent_used,
-        ceiling_candidates=ceiling_candidates,
-        cap_reason=cap_reason,
-        explanation=None,
-        fmr_adjusted=fmr_adjusted,
-        run_id=None,
-        created_at=None,
-    )
-
-
-def _merge_checklist_state(db: Session, org_id: int, property_id: int, items: list[ChecklistItemOut]) -> list[ChecklistItemOut]:
-    state_rows = db.scalars(
-        select(PropertyChecklistItem).where(
-            PropertyChecklistItem.org_id == org_id,
-            PropertyChecklistItem.property_id == property_id,
-        )
-    ).all()
-    by_code: dict[str, PropertyChecklistItem] = {r.item_code: r for r in state_rows}
-
-    user_ids = {r.marked_by_user_id for r in state_rows if r.marked_by_user_id}
-    users_by_id: dict[int, str] = {}
-    if user_ids:
-        for user in db.scalars(select(AppUser).where(AppUser.id.in_(list(user_ids)))).all():
-            users_by_id[user.id] = user.email
-
-    out: list[ChecklistItemOut] = []
-    for item in items:
-        state_row = by_code.get(item.item_code)
-        if state_row:
-            item.status = state_row.status
-            item.marked_at = state_row.marked_at
-            item.proof_url = state_row.proof_url
-            item.notes = state_row.notes
-            if state_row.marked_by_user_id:
-                item.marked_by = users_by_id.get(state_row.marked_by_user_id)
-        out.append(item)
+def _rows_to_dicts(rows: list[Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            out.append(dict(row._mapping))
+        except Exception:
+            out.append(dict(row))
     return out
 
 
-def _extract_urls_from_any(value: Any, out: list[str]) -> None:
-    if value is None:
-        return
+def _row_to_dict(row: Any | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    try:
+        return dict(row._mapping)
+    except Exception:
+        return dict(row)
 
+
+def _safe_json_load(value: Any, fallback: Any) -> Any:
+    if value is None:
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
     if isinstance(value, str):
         s = value.strip()
         if not s:
-            return
-
-        if s.startswith("http") and any(x in s.lower() for x in [".jpg", ".jpeg", ".png", ".webp", "image", "photo"]):
-            out.append(s)
-            return
-
-        if (s.startswith("[") and s.endswith("]")) or (s.startswith("{") and s.endswith("}")):
-            try:
-                parsed = json.loads(s)
-                _extract_urls_from_any(parsed, out)
-            except Exception:
-                pass
-
-        for url in re.findall(r"https?://[^\s'\"<>]+", s):
-            lo = url.lower()
-            if any(x in lo for x in [".jpg", ".jpeg", ".png", ".webp", "zillowstatic", "photos.zillowstatic"]):
-                out.append(url)
-        return
-
-    if isinstance(value, dict):
-        for v in value.values():
-            _extract_urls_from_any(v, out)
-        return
-
-    if isinstance(value, list):
-        for item in value:
-            _extract_urls_from_any(item, out)
-        return
+            return fallback
+        try:
+            return json.loads(s)
+        except Exception:
+            return fallback
+    return fallback
 
 
-def _dedupe_keep_order(items: list[str]) -> list[str]:
-    seen = set()
-    out: list[str] = []
-    for item in items:
-        value = item.strip()
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        out.append(value)
-    return out
+def _days_to_close(target_close_date: str | None) -> int | None:
+    if not target_close_date:
+        return None
+    try:
+        dt = datetime.strptime(target_close_date, "%Y-%m-%d").date()
+        return (dt - date.today()).days
+    except Exception:
+        return None
 
 
-def _extract_zillow_photo_urls(source_raw_json: Optional[str]) -> list[str]:
-    if not source_raw_json:
-        return []
+def _acquisition_upload_root() -> Path:
+    raw = os.getenv("ACQUISITION_UPLOAD_DIR", "/app/data/acquisition_uploads")
+    root = Path(raw).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _sanitize_filename(filename: str | None) -> str:
+    raw = (filename or "upload").strip()
+    raw = raw.replace("\\", "/").split("/")[-1]
+    raw = re.sub(r"[^A-Za-z0-9._\- ]+", "_", raw).strip()
+    raw = re.sub(r"\s+", "_", raw)
+    if not raw:
+        raw = "upload"
+    if len(raw) > 180:
+        stem, ext = os.path.splitext(raw)
+        raw = stem[:140] + ext[:20]
+    return raw
+
+
+def _validate_extension_and_content_type(filename: str, content_type: str | None) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext or 'unknown'}' is not allowed.",
+        )
+    if content_type:
+        normalized = content_type.strip().lower()
+        if normalized not in ALLOWED_UPLOAD_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Content type '{normalized}' is not allowed.",
+            )
+    return ext
+
+
+def _sniff_magic_bytes(ext: str, file_head: bytes) -> None:
+    if ext == ".pdf" and not file_head.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="Uploaded PDF failed signature validation.")
+    if ext == ".png" and not file_head.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(status_code=400, detail="Uploaded PNG failed signature validation.")
+    if ext in {".jpg", ".jpeg"} and not file_head.startswith(b"\xff\xd8\xff"):
+        raise HTTPException(status_code=400, detail="Uploaded JPEG failed signature validation.")
+    if ext == ".docx" and not file_head.startswith(b"PK"):
+        raise HTTPException(status_code=400, detail="Uploaded DOCX failed signature validation.")
+
+
+def _validate_docx_safely(path: Path) -> None:
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            names = zf.namelist()
+            for name in names:
+                lowered = name.lower()
+                if name.startswith("/") or ".." in name.replace("\\", "/").split("/"):
+                    raise HTTPException(status_code=400, detail="DOCX contains invalid archive paths.")
+                if lowered.endswith("vbaproject.bin"):
+                    raise HTTPException(status_code=400, detail="Macro-enabled Office files are not allowed.")
+            if "[Content_Types].xml" not in names:
+                raise HTTPException(status_code=400, detail="DOCX structure is invalid.")
+            if not any(name.startswith("word/") for name in names):
+                raise HTTPException(status_code=400, detail="DOCX structure is invalid.")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="DOCX validation failed.")
+
+
+def _stream_upload_to_disk(upload: UploadFile, target_path: Path) -> dict[str, Any]:
+    sha256 = hashlib.sha256()
+    total = 0
+    first_chunk = b""
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        raw = json.loads(source_raw_json)
-    except Exception:
-        return []
+        with target_path.open("wb") as out:
+            while True:
+                chunk = upload.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                if not first_chunk:
+                    first_chunk = chunk[:64]
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail="Upload exceeds maximum size of 15 MB.")
+                sha256.update(chunk)
+                out.write(chunk)
+    except HTTPException:
+        target_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save upload: {exc}")
 
-    urls: list[str] = []
-    _extract_urls_from_any(raw, urls)
-
-    cleaned = []
-    for url in _dedupe_keep_order(urls):
-        lo = url.lower()
-        if any(tok in lo for tok in [".jpg", ".jpeg", ".png", ".webp", "zillowstatic", "photos.zillowstatic"]):
-            cleaned.append(url)
-
-    return cleaned[:50]
-
-
-def _latest_zillow_deal(db: Session, *, org_id: int, property_id: int) -> Deal | None:
-    return db.scalar(
-        select(Deal)
-        .where(
-            Deal.org_id == org_id,
-            Deal.property_id == property_id,
-            Deal.source == "zillow",
-        )
-        .order_by(desc(Deal.id))
-        .limit(1)
-    )
-
-
-def _photo_gallery_for_property(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    zdeal = _latest_zillow_deal(db, org_id=org_id, property_id=property_id)
-    photos = _extract_zillow_photo_urls(getattr(zdeal, "source_raw_json", None)) if zdeal else []
     return {
-        "cover_url": photos[0] if photos else None,
-        "photos": photos,
-        "count": len(photos),
-        "source": "zillow_import" if photos else None,
+        "size_bytes": total,
+        "sha256": sha256.hexdigest(),
+        "head": first_chunk,
     }
 
 
-def _build_property_list_item(
+def ensure_acquisition_record(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    existing = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_records
+                where org_id = :org_id and property_id = :property_id
+                limit 1
+                """
+            ),
+            {"org_id": org_id, "property_id": property_id},
+        ).fetchone()
+    )
+    if existing:
+        return existing
+
+    db.execute(
+        text(
+            """
+            insert into acquisition_records (
+                org_id,
+                property_id,
+                status,
+                waiting_on,
+                next_step,
+                contacts_json,
+                milestones_json,
+                created_at,
+                updated_at
+            )
+            values (
+                :org_id,
+                :property_id,
+                'needs_setup',
+                'Purchase agreement',
+                'Import or enter acquisition data',
+                :contacts_json,
+                :milestones_json,
+                now(),
+                now()
+            )
+            """
+        ),
+        {
+            "org_id": org_id,
+            "property_id": property_id,
+            "contacts_json": json.dumps([]),
+            "milestones_json": json.dumps([]),
+        },
+    )
+    db.commit()
+    return _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_records
+                where org_id = :org_id and property_id = :property_id
+                limit 1
+                """
+            ),
+            {"org_id": org_id, "property_id": property_id},
+        ).fetchone()
+    ) or {}
+
+
+def update_acquisition_record(
     db: Session,
     *,
     org_id: int,
-    prop: Property,
-    recompute_state: bool = False,
+    property_id: int,
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Cheap list-item builder for inventory/dashboard reads.
+    ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
 
-    Important:
-    - Defaults to recompute_state=False so list endpoints do not trigger expensive
-      workflow/state recomputation across hundreds of properties.
-    - Detail endpoints can still explicitly recompute when needed.
-    """
-    deal = _latest_deal(db, org_id=org_id, property_id=int(prop.id))
-    uw = _latest_underwriting(db, org_id=org_id, property_id=int(prop.id))
-    state_payload = get_state_payload(
-        db,
-        org_id=org_id,
-        property_id=int(prop.id),
-        recompute=bool(recompute_state),
+    allowed_fields = {
+        "status",
+        "waiting_on",
+        "next_step",
+        "contract_date",
+        "target_close_date",
+        "closing_date",
+        "purchase_price",
+        "earnest_money",
+        "loan_amount",
+        "loan_type",
+        "interest_rate",
+        "cash_to_close",
+        "closing_costs",
+        "seller_credits",
+        "title_company",
+        "escrow_officer",
+        "notes",
+        "contacts_json",
+        "milestones_json",
+    }
+
+    updates: list[str] = []
+    params: dict[str, Any] = {"org_id": org_id, "property_id": property_id}
+
+    for key, value in payload.items():
+        if key not in allowed_fields:
+            continue
+        if key in {"contacts_json", "milestones_json"} and not isinstance(value, str):
+            value = json.dumps(value)
+        updates.append(f"{key} = :{key}")
+        params[key] = value
+
+    if not updates:
+        return ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+
+    updates.append("updated_at = now()")
+    db.execute(
+        text(
+            f"""
+            update acquisition_records
+            set {", ".join(updates)}
+            where org_id = :org_id and property_id = :property_id
+            """
+        ),
+        params,
     )
-    workflow = build_workflow_summary(
-        db,
-        org_id=org_id,
-        property_id=int(prop.id),
-        recompute=False,
-    )
-
-    prop_payload = PropertyOut.model_validate(prop, from_attributes=True).model_dump()
-
-    prop_payload.update(
-        {
-            "asking_price": _asking_price(prop, deal),
-            "projected_monthly_cashflow": _safe_float(getattr(uw, "cash_flow", None), 0.0) if uw else None,
-            "dscr": _safe_float(getattr(uw, "dscr", None), 0.0) if uw else None,
-            "crime_score": getattr(prop, "crime_score", None),
-            "crime_label": _crime_label(getattr(prop, "crime_score", None)),
-            "normalized_decision": state_payload.get("normalized_decision")
-            or normalize_decision_bucket(getattr(uw, "decision", None) if uw else None),
-            "current_workflow_stage": state_payload.get("current_stage"),
-            "current_workflow_stage_label": state_payload.get("current_stage_label"),
-            "gate_status": state_payload.get("gate_status"),
-            "gate": state_payload.get("gate"),
-            "stage_completion_summary": state_payload.get("stage_completion_summary"),
-            "next_actions": state_payload.get("next_actions") or [],
-            "workflow": workflow,
-        }
-    )
-    return prop_payload
-
-
-@router.post("", response_model=PropertyOut)
-def create_property(payload: PropertyCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
-    row = Property(**payload.model_dump())
-    row.org_id = p.org_id
-    db.add(row)
     db.commit()
-    db.refresh(row)
-
-    if row.lat is None or row.lng is None or not row.county:
-        _maybe_geo_enrich_property(db, org_id=p.org_id, property_id=int(row.id), force=False)
-        db.refresh(row)
-
-    return row
+    return ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
 
 
-@router.get("", response_model=list[dict])
-def list_properties(
-    state: Optional[str] = Query(default=None),
-    city: Optional[str] = Query(default=None),
-    county: Optional[str] = Query(default=None),
-    q: Optional[str] = Query(default=None),
-    stage: Optional[str] = Query(default=None),
-    decision: Optional[str] = Query(default=None),
-    only_red_zone: bool = Query(default=False),
-    exclude_red_zone: bool = Query(default=False),
-    min_crime_score: Optional[float] = Query(default=None),
-    max_crime_score: Optional[float] = Query(default=None),
-    min_offender_count: Optional[int] = Query(default=None),
-    max_offender_count: Optional[int] = Query(default=None),
-    sort: Optional[str] = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=1000),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    req_t0 = time.perf_counter()
+def _apply_extracted_fields_to_record(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    extracted_fields: dict[str, Any],
+) -> None:
+    if not extracted_fields:
+        return
 
-    stmt = (
-        select(Property)
-        .where(Property.org_id == p.org_id)
-        .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
-    )
+    mapping = {
+        "purchase_price": "purchase_price",
+        "earnest_money": "earnest_money",
+        "loan_amount": "loan_amount",
+        "loan_type": "loan_type",
+        "cash_to_close": "cash_to_close",
+        "closing_costs": "closing_costs",
+    }
 
-    if state:
-        stmt = stmt.where(Property.state == state)
-    if city:
-        stmt = stmt.where(func.lower(Property.city) == city.lower())
-    if county:
-        stmt = stmt.where(func.lower(Property.county) == county.lower())
+    payload: dict[str, Any] = {}
+    for source_key, target_key in mapping.items():
+        value = extracted_fields.get(source_key)
+        if value not in (None, "", []):
+            payload[target_key] = value
 
-    if q:
-        like = f"%{q.strip().lower()}%"
-        stmt = stmt.where(
-            func.lower(
-                func.concat(
-                    Property.address,
-                    " ",
-                    Property.city,
-                    " ",
-                    Property.state,
-                    " ",
-                    Property.zip,
-                )
-            ).like(like)
+    lender_name = extracted_fields.get("lender_name")
+    if lender_name and not payload.get("title_company"):
+        payload["notes"] = f"Parsed lender: {lender_name}"
+
+    if payload:
+        update_acquisition_record(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            payload=payload,
         )
 
-    if only_red_zone:
-        stmt = stmt.where(Property.is_red_zone.is_(True))
-    elif exclude_red_zone:
-        stmt = stmt.where((Property.is_red_zone.is_(False)) | (Property.is_red_zone.is_(None)))
 
-    if min_crime_score is not None:
-        stmt = stmt.where(Property.crime_score.is_not(None))
-        stmt = stmt.where(Property.crime_score >= float(min_crime_score))
+def add_acquisition_document(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
 
-    if max_crime_score is not None:
-        stmt = stmt.where(Property.crime_score.is_not(None))
-        stmt = stmt.where(Property.crime_score <= float(max_crime_score))
+    extracted_text = (payload.get("extracted_text") or "").strip()
+    extracted_fields = payload.get("extracted_fields") or {}
 
-    if min_offender_count is not None:
-        stmt = stmt.where(Property.offender_count.is_not(None))
-        stmt = stmt.where(Property.offender_count >= int(min_offender_count))
-
-    if max_offender_count is not None:
-        stmt = stmt.where(Property.offender_count.is_not(None))
-        stmt = stmt.where(Property.offender_count <= int(max_offender_count))
-
-    if sort == "oldest":
-        stmt = stmt.order_by(asc(Property.id))
-    elif sort == "address_asc":
-        stmt = stmt.order_by(asc(Property.address), desc(Property.id))
-    elif sort == "address_desc":
-        stmt = stmt.order_by(desc(Property.address), desc(Property.id))
-    elif sort == "crime_desc":
-        stmt = stmt.order_by(desc(Property.crime_score).nullslast(), desc(Property.id))
-    elif sort == "crime_asc":
-        stmt = stmt.order_by(asc(Property.crime_score).nullslast(), desc(Property.id))
-    elif sort == "offenders_desc":
-        stmt = stmt.order_by(desc(Property.offender_count).nullslast(), desc(Property.id))
-    elif sort == "offenders_asc":
-        stmt = stmt.order_by(asc(Property.offender_count).nullslast(), desc(Property.id))
-    else:
-        stmt = stmt.order_by(desc(Property.id))
-
-    query_t0 = time.perf_counter()
-    rows = db.scalars(stmt.limit(limit)).unique().all()
-    query_ms = round((time.perf_counter() - query_t0) * 1000, 2)
-
-    wanted_stage = (stage or "").strip().lower() or None
-    wanted_decision = normalize_decision_bucket(decision) if decision else None
-
-    out: list[dict] = []
-    skipped_errors = 0
-    skipped_stage = 0
-    skipped_decision = 0
-
-    build_t0 = time.perf_counter()
-    for prop in rows:
-        try:
-            item = _build_property_list_item(
-                db,
-                org_id=p.org_id,
-                prop=prop,
-                recompute_state=False,
+    db.execute(
+        text(
+            """
+            insert into acquisition_documents (
+                org_id,
+                property_id,
+                kind,
+                name,
+                original_filename,
+                storage_path,
+                storage_url,
+                content_type,
+                file_size_bytes,
+                sha256,
+                upload_status,
+                scan_status,
+                scan_result,
+                parse_status,
+                parser_version,
+                preview_text,
+                status,
+                source_url,
+                extracted_text,
+                extracted_fields_json,
+                notes,
+                created_at,
+                updated_at
             )
-
-            if wanted_stage and str(item.get("current_workflow_stage") or "").lower() != wanted_stage:
-                skipped_stage += 1
-                continue
-            if wanted_decision and str(item.get("normalized_decision") or "").upper() != wanted_decision:
-                skipped_decision += 1
-                continue
-
-            out.append(item)
-        except Exception:
-            skipped_errors += 1
-            log.exception(
-                "properties_list_item_build_failed",
-                extra={"org_id": p.org_id, "property_id": int(getattr(prop, "id", 0) or 0)},
+            values (
+                :org_id,
+                :property_id,
+                :kind,
+                :name,
+                :original_filename,
+                :storage_path,
+                :storage_url,
+                :content_type,
+                :file_size_bytes,
+                :sha256,
+                :upload_status,
+                :scan_status,
+                :scan_result,
+                :parse_status,
+                :parser_version,
+                :preview_text,
+                :status,
+                :source_url,
+                :extracted_text,
+                :extracted_fields_json,
+                :notes,
+                now(),
+                now()
             )
+            """
+        ),
+        {
+            "org_id": org_id,
+            "property_id": property_id,
+            "kind": payload.get("kind") or "other",
+            "name": payload.get("name") or "Imported document",
+            "original_filename": payload.get("original_filename"),
+            "storage_path": payload.get("storage_path"),
+            "storage_url": payload.get("storage_url"),
+            "content_type": payload.get("content_type"),
+            "file_size_bytes": payload.get("file_size_bytes"),
+            "sha256": payload.get("sha256"),
+            "upload_status": payload.get("upload_status") or "received",
+            "scan_status": payload.get("scan_status"),
+            "scan_result": payload.get("scan_result"),
+            "parse_status": payload.get("parse_status"),
+            "parser_version": payload.get("parser_version"),
+            "preview_text": payload.get("preview_text"),
+            "status": payload.get("status") or "received",
+            "source_url": payload.get("source_url"),
+            "extracted_text": extracted_text or None,
+            "extracted_fields_json": json.dumps(extracted_fields),
+            "notes": payload.get("notes"),
+        },
+    )
+    db.commit()
+
+    _apply_extracted_fields_to_record(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        extracted_fields=extracted_fields,
+    )
+
+    doc = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_documents
+                where org_id = :org_id and property_id = :property_id
+                order by id desc
+                limit 1
+                """
+            ),
+            {"org_id": org_id, "property_id": property_id},
+        ).fetchone()
+    ) or {}
+    doc["extracted_fields"] = _safe_json_load(doc.get("extracted_fields_json"), {})
+    return doc
+
+
+def upload_acquisition_document_file(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    kind: str,
+    name: str | None,
+    notes: str | None,
+    upload: UploadFile,
+) -> dict[str, Any]:
+    ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+
+    original_filename = _sanitize_filename(upload.filename)
+    ext = _validate_extension_and_content_type(original_filename, upload.content_type)
+
+    base_dir = _acquisition_upload_root() / f"org_{org_id}" / f"property_{property_id}"
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    file_token = uuid.uuid4().hex
+    stored_filename = f"{file_token}_{original_filename}"
+    stored_path = (base_dir / stored_filename).resolve()
+
+    if base_dir not in stored_path.parents:
+        raise HTTPException(status_code=400, detail="Invalid upload path.")
+
+    streamed = _stream_upload_to_disk(upload, stored_path)
+    _sniff_magic_bytes(ext, streamed["head"])
+    if ext == ".docx":
+        _validate_docx_safely(stored_path)
+
+    scan = scan_file(stored_path)
+    if scan.get("infected"):
+        stored_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Upload blocked: file failed malware scan.")
+
+    parse = parse_document(stored_path, upload.content_type)
+
+    relative_storage_path = str(stored_path.relative_to(_acquisition_upload_root()))
+
+    return add_acquisition_document(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        payload={
+            "kind": kind or "other",
+            "name": (name or os.path.splitext(original_filename)[0] or "Uploaded document").strip(),
+            "original_filename": original_filename,
+            "storage_path": relative_storage_path,
+            "storage_url": None,
+            "content_type": (upload.content_type or ALLOWED_UPLOAD_EXTENSIONS.get(ext) or "").strip().lower() or None,
+            "file_size_bytes": streamed["size_bytes"],
+            "sha256": streamed["sha256"],
+            "upload_status": "stored",
+            "scan_status": scan.get("scan_status"),
+            "scan_result": scan.get("scan_result"),
+            "parse_status": parse.get("parse_status"),
+            "parser_version": parse.get("parser_version"),
+            "preview_text": parse.get("preview_text"),
+            "status": "received",
+            "source_url": None,
+            "notes": (notes or "").strip() or None,
+            "extracted_text": parse.get("extracted_text"),
+            "extracted_fields": parse.get("extracted_fields") or {},
+        },
+    )
+
+
+def get_acquisition_detail(db: Session, *, org_id: int, property_id: int) -> dict[str, Any] | None:
+    property_row = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select
+                    p.id as property_id,
+                    p.address,
+                    p.city,
+                    p.state,
+                    p.zip,
+                    p.county,
+                    p.bedrooms,
+                    p.bathrooms,
+                    p.square_feet,
+                    p.year_built,
+                    p.property_type,
+                    ps.current_stage
+                from properties p
+                left join property_states ps
+                    on ps.org_id = p.org_id and ps.property_id = p.id
+                where p.org_id = :org_id and p.id = :property_id
+                limit 1
+                """
+            ),
+            {"org_id": org_id, "property_id": property_id},
+        ).fetchone()
+    )
+    if not property_row:
+        return None
+
+    acquisition_row = ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+
+    documents = _rows_to_dicts(
+        db.execute(
+            text(
+                """
+                select
+                    id,
+                    property_id,
+                    kind,
+                    name,
+                    original_filename,
+                    storage_path,
+                    storage_url,
+                    content_type,
+                    file_size_bytes,
+                    sha256,
+                    upload_status,
+                    scan_status,
+                    scan_result,
+                    parse_status,
+                    parser_version,
+                    preview_text,
+                    status,
+                    source_url,
+                    extracted_text,
+                    extracted_fields_json,
+                    notes,
+                    created_at,
+                    updated_at
+                from acquisition_documents
+                where org_id = :org_id and property_id = :property_id
+                order by created_at desc, id desc
+                """
+            ),
+            {"org_id": org_id, "property_id": property_id},
+        ).fetchall()
+    )
+
+    for doc in documents:
+        doc["extracted_fields"] = _safe_json_load(doc.get("extracted_fields_json"), {})
+
+    contacts = _safe_json_load(acquisition_row.get("contacts_json"), [])
+    milestones = _safe_json_load(acquisition_row.get("milestones_json"), [])
+
+    target_close = acquisition_row.get("target_close_date") or acquisition_row.get("closing_date")
+    present_doc_kinds = {str(d.get("kind") or "").strip() for d in documents}
+
+    required_docs = [
+        {**doc, "present": doc["kind"] in present_doc_kinds}
+        for doc in DEFAULT_REQUIRED_DOCS
+    ]
+
+    return {
+        "property": property_row,
+        "acquisition": {
+            **acquisition_row,
+            "contacts": contacts,
+            "milestones": milestones,
+            "days_to_close": _days_to_close(target_close),
+        },
+        "documents": documents,
+        "required_documents": required_docs,
+        "summary": {
+            "days_to_close": _days_to_close(target_close),
+            "document_count": len(documents),
+            "required_documents_total": len(required_docs),
+            "required_documents_present": sum(1 for d in required_docs if d["present"]),
+        },
+    }
+
+
+def list_acquisition_queue(
+    db: Session,
+    *,
+    org_id: int,
+    q: str | None = None,
+    limit: int = 250,
+    offset: int = 0,
+) -> dict[str, Any]:
+    q = (q or "").strip().lower()
+
+    rows = db.execute(
+        text(
+            """
+            select
+                p.id as property_id,
+                p.address,
+                p.city,
+                p.state,
+                p.zip,
+                p.county,
+                p.bedrooms,
+                p.bathrooms,
+                p.square_feet,
+                ps.current_stage,
+                ar.status,
+                ar.waiting_on,
+                ar.next_step,
+                ar.contract_date,
+                ar.target_close_date,
+                ar.closing_date,
+                ar.purchase_price,
+                ar.loan_amount,
+                ar.cash_to_close,
+                ar.closing_costs,
+                ar.updated_at as acquisition_updated_at,
+                (
+                    select count(*)
+                    from acquisition_documents ad
+                    where ad.org_id = p.org_id and ad.property_id = p.id
+                ) as document_count
+            from properties p
+            left join property_states ps
+                on ps.org_id = p.org_id and ps.property_id = p.id
+            left join acquisition_records ar
+                on ar.org_id = p.org_id and ar.property_id = p.id
+            where p.org_id = :org_id
+              and (
+                ar.id is not null
+                or lower(coalesce(ps.current_stage, '')) in ('offer', 'under_contract', 'acquisition', 'closing', 'escrow')
+              )
+            order by coalesce(ar.target_close_date, ar.closing_date) asc nulls last,
+                     coalesce(ar.updated_at, now()) desc
+            limit :limit
+            offset :offset
+            """
+        ),
+        {"org_id": org_id, "limit": limit, "offset": offset},
+    ).fetchall()
+
+    items = _rows_to_dicts(rows)
+    filtered: list[dict[str, Any]] = []
+    for item in items:
+        haystack = " ".join([
+            str(item.get("address") or ""),
+            str(item.get("city") or ""),
+            str(item.get("state") or ""),
+            str(item.get("zip") or ""),
+            str(item.get("county") or ""),
+            str(item.get("status") or ""),
+            str(item.get("waiting_on") or ""),
+            str(item.get("next_step") or ""),
+        ]).lower()
+
+        if q and q not in haystack:
             continue
 
-    build_ms = round((time.perf_counter() - build_t0) * 1000, 2)
-    total_ms = round((time.perf_counter() - req_t0) * 1000, 2)
+        target_close = item.get("target_close_date") or item.get("closing_date")
+        item["days_to_close"] = _days_to_close(target_close)
+        filtered.append(item)
 
-    log.info(
-        "properties_list_complete",
-        extra={
-            "org_id": p.org_id,
-            "state": state,
-            "city": city,
-            "county": county,
-            "q": q,
-            "stage": stage,
-            "decision": decision,
-            "sort": sort,
-            "limit": limit,
-            "query_rows": len(rows),
-            "returned_rows": len(out),
-            "skipped_errors": skipped_errors,
-            "skipped_stage": skipped_stage,
-            "skipped_decision": skipped_decision,
-            "query_ms": query_ms,
-            "build_ms": build_ms,
-            "total_ms": total_ms,
-        },
-    )
-
-    return out
+    return {"items": filtered, "count": len(filtered)}
 
 
-@router.get("/{property_id}", response_model=PropertyOut)
-def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    stmt = (
-        select(Property)
-        .where(Property.id == property_id)
-        .where(Property.org_id == p.org_id)
-        .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
-    )
-    row = db.execute(stmt).scalar_one_or_none()
-    if not row:
-        raise HTTPException(status_code=404, detail="Property not found")
-    return row
-
-
-@router.post("/{property_id}/geo/enrich", response_model=dict)
-def geo_enrich_property(
+def get_document_file_response(
+    db: Session,
+    *,
+    org_id: int,
     property_id: int,
-    force: bool = Query(default=False),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    prop = db.scalar(select(Property).where(Property.org_id == p.org_id, Property.id == property_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="Property not found")
-
-    return _maybe_geo_enrich_property(
-        db,
-        org_id=p.org_id,
-        property_id=int(property_id),
-        force=bool(force),
+    document_id: int,
+    disposition: str = "inline",
+) -> FileResponse:
+    row = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select
+                    id,
+                    org_id,
+                    property_id,
+                    original_filename,
+                    storage_path,
+                    content_type,
+                    upload_status,
+                    scan_status
+                from acquisition_documents
+                where org_id = :org_id
+                  and property_id = :property_id
+                  and id = :document_id
+                limit 1
+                """
+            ),
+            {
+                "org_id": org_id,
+                "property_id": property_id,
+                "document_id": document_id,
+            },
+        ).fetchone()
     )
 
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if row.get("upload_status") != "stored":
+        raise HTTPException(status_code=400, detail="Document file is not available.")
+    if row.get("scan_status") not in {"clean", "skipped", "error"}:
+        raise HTTPException(status_code=400, detail="Document is not cleared for access.")
 
-@router.get("/{property_id}/view", response_model=PropertyViewOut)
-def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    stmt = (
-        select(Property)
-        .where(Property.id == property_id)
-        .where(Property.org_id == p.org_id)
-        .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
+    rel = row.get("storage_path")
+    if not rel:
+        raise HTTPException(status_code=400, detail="Document storage path is missing.")
+
+    root = _acquisition_upload_root()
+    path = (root / rel).resolve()
+    if root not in path.parents:
+        raise HTTPException(status_code=400, detail="Invalid storage path.")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Stored file not found.")
+
+    filename = row.get("original_filename") or path.name
+    media_type = row.get("content_type") or "application/octet-stream"
+
+    return FileResponse(
+        path=str(path),
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type=disposition,
     )
-    prop = db.execute(stmt).scalar_one_or_none()
-    if not prop:
-        raise HTTPException(status_code=404, detail="Property not found")
-
-    deal = _latest_deal(db, org_id=p.org_id, property_id=int(prop.id))
-    if not deal:
-        raise HTTPException(status_code=404, detail="No deal found for property")
-
-    jr = _pick_jurisdiction_rule(db, org_id=p.org_id, city=prop.city, state=prop.state)
-    friction = compute_friction(jr)
-
-    uw = _latest_underwriting(db, org_id=p.org_id, property_id=int(prop.id))
-
-    checklist_row = db.scalar(
-        select(PropertyChecklist)
-        .where(PropertyChecklist.org_id == p.org_id, PropertyChecklist.property_id == prop.id)
-        .order_by(desc(PropertyChecklist.id))
-        .limit(1)
-    )
-
-    checklist_out: ChecklistOut | None = None
-    if checklist_row:
-        try:
-            parsed = json.loads(checklist_row.items_json or "[]")
-        except Exception:
-            parsed = []
-
-        items = [ChecklistItemOut(**x) for x in parsed if isinstance(x, dict)]
-        items = _merge_checklist_state(db, org_id=p.org_id, property_id=prop.id, items=items)
-        checklist_out = ChecklistOut(property_id=prop.id, city=prop.city, state=prop.state, items=items)
-
-    rent_explain = _rent_explain_for_view(db, org_id=p.org_id, property_id=prop.id, strategy=deal.strategy)
-
-    return PropertyViewOut(
-        property=PropertyOut.model_validate(prop, from_attributes=True),
-        deal=DealOut.model_validate(deal, from_attributes=True),
-        rent_explain=rent_explain,
-        jurisdiction_rule=JurisdictionRuleOut.model_validate(jr, from_attributes=True) if jr else None,
-        jurisdiction_friction={
-            "multiplier": getattr(friction, "multiplier", 1.0),
-            "reasons": getattr(friction, "reasons", []),
-        },
-        last_underwriting_result=UnderwritingResultOut.model_validate(uw) if uw else None,
-        checklist=checklist_out,
-    )
-
-
-@router.get("/{property_id}/bundle", response_model=dict)
-def property_bundle(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    view = property_view(property_id=property_id, db=db, p=p)
-
-    rehab = db.scalars(
-        select(RehabTask)
-        .where(RehabTask.org_id == p.org_id, RehabTask.property_id == property_id)
-        .order_by(desc(RehabTask.id))
-        .limit(500)
-    ).all()
-
-    leases = db.scalars(
-        select(Lease)
-        .where(Lease.org_id == p.org_id, Lease.property_id == property_id)
-        .order_by(desc(Lease.id))
-        .limit(300)
-    ).all()
-
-    txns = db.scalars(
-        select(Transaction)
-        .where(Transaction.org_id == p.org_id, Transaction.property_id == property_id)
-        .order_by(desc(Transaction.id))
-        .limit(1000)
-    ).all()
-
-    vals = db.scalars(
-        select(Valuation)
-        .where(Valuation.org_id == p.org_id, Valuation.property_id == property_id)
-        .order_by(desc(Valuation.id))
-        .limit(300)
-    ).all()
-
-    prop = view.property
-    photo_gallery = _photo_gallery_for_property(db, org_id=p.org_id, property_id=property_id)
-
-    return {
-        "view": view.model_dump() if hasattr(view, "model_dump") else view,
-        "geo": {
-            "lat": getattr(prop, "lat", None),
-            "lng": getattr(prop, "lng", None),
-            "county": getattr(prop, "county", None),
-            "is_red_zone": bool(getattr(prop, "is_red_zone", False)),
-            "crime_density": getattr(prop, "crime_density", None),
-            "crime_score": getattr(prop, "crime_score", None),
-            "offender_count": getattr(prop, "offender_count", None),
-        },
-        "photo_gallery": photo_gallery,
-        "rehab_tasks": [RehabTaskOut.model_validate(x, from_attributes=True).model_dump() for x in rehab],
-        "leases": [LeaseOut.model_validate(x, from_attributes=True).model_dump() for x in leases],
-        "transactions": [TransactionOut.model_validate(x, from_attributes=True).model_dump() for x in txns],
-        "valuations": [ValuationOut.model_validate(x, from_attributes=True).model_dump() for x in vals],
-    }
-
-
-@router.get("/{property_id}/cockpit", response_model=dict)
-def property_cockpit(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="Property not found")
-
-    compute_and_persist_stage(db, org_id=p.org_id, property=prop)
-
-    bundle = property_bundle(property_id=property_id, db=db, p=p)
-    state_payload = get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=True)
-    workflow = build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False)
-
-    return {
-        **bundle,
-        "workflow": workflow,
-        "state": {
-            "current_stage": state_payload.get("current_stage"),
-            "current_stage_label": state_payload.get("current_stage_label"),
-            "normalized_decision": state_payload.get("normalized_decision"),
-            "gate_status": state_payload.get("gate_status"),
-            "gate": state_payload.get("gate"),
-            "constraints": state_payload.get("constraints", {}),
-            "outstanding_tasks": state_payload.get("outstanding_tasks", {}),
-            "next_actions": state_payload.get("next_actions", []),
-            "stage_completion_summary": state_payload.get("stage_completion_summary"),
-        },
-    }

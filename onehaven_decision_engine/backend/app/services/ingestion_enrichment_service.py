@@ -7,7 +7,7 @@ import os
 import time
 from typing import Any, Optional
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -200,6 +200,48 @@ def _timed_step(
         result.setdefault("timings_ms", {})[step_key] = duration_ms
         raise exc
 
+
+
+def _status_from_bool(ok: bool) -> str:
+    return "complete" if ok else "missing"
+
+
+def _update_property_acquisition_completeness(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    pipeline_result: dict[str, Any],
+) -> dict[str, str]:
+    statuses = {
+        "geo": _status_from_bool(bool(pipeline_result.get("geo_ok"))),
+        "rent": "deferred" if bool(pipeline_result.get("rent_deferred")) else _status_from_bool(bool(pipeline_result.get("rent_ok"))),
+        "rehab": "complete" if bool((pipeline_result.get("workflow") or {}).get("summary", {}).get("summary", {}).get("rehab", {}).get("has_plan")) else "missing",
+        "risk": _status_from_bool(bool(pipeline_result.get("risk_ok"))),
+        "jurisdiction": "complete" if bool((pipeline_result.get("workflow") or {}).get("summary", {}).get("summary", {}).get("jurisdiction", {}).get("exists")) else "missing",
+        "cashflow": _status_from_bool(bool(pipeline_result.get("evaluate_ok"))),
+    }
+    db.execute(
+        text(
+            """
+            UPDATE properties
+            SET completeness_geo_status = :geo,
+                completeness_rent_status = :rent,
+                completeness_rehab_status = :rehab,
+                completeness_risk_status = :risk,
+                completeness_jurisdiction_status = :jurisdiction,
+                completeness_cashflow_status = :cashflow
+            WHERE org_id = :org_id AND id = :property_id
+            """
+        ),
+        {"org_id": int(org_id), "property_id": int(property_id), **statuses},
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return statuses
 
 def refresh_property_rent_assumptions(
     db: Session,
@@ -590,6 +632,16 @@ def execute_post_ingestion_pipeline(
         bool(result.get("workflow_ok")),
     ]
     result["partial"] = any(oks) and not all(oks)
+
+    try:
+        result["completeness_status"] = _update_property_acquisition_completeness(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+            pipeline_result=result,
+        )
+    except Exception as e:
+        result["errors"].append(f"completeness:{type(e).__name__}:{e}")
 
     log.info(
         "post_ingestion_pipeline_complete",

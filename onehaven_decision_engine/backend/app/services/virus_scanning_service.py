@@ -41,7 +41,6 @@ def scan_file(path: Path) -> dict[str, Any]:
 
     try:
         with socket.create_connection((host, port), timeout=10) as sock:
-            # INSTREAM protocol
             sock.sendall(b"zINSTREAM\0")
             with path.open("rb") as f:
                 while True:

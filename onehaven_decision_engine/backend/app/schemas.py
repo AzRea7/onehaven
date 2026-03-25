@@ -1335,3 +1335,64 @@ class PropertyStateOut(BaseModel):
 # finalize forward refs
 PropertyOut.model_rebuild()
 DealIntakeOut.model_rebuild()
+
+
+# --------------------
+# Acquisition workflow engine additions (Step 2.2)
+# --------------------
+
+AcquisitionFieldReviewState = Literal["suggested", "accepted", "rejected", "superseded"]
+
+
+class AcquisitionFieldOverrideIn(BaseModel):
+    field_name: str = Field(min_length=1, max_length=128)
+    value: Any
+    source_document_id: int | None = None
+    extraction_version: str | None = "manual_override"
+
+    @field_validator("field_name", mode="before")
+    @classmethod
+    def normalize_field_name(cls, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("field_name is required")
+        return text
+
+
+class AcquisitionParticipantUpsert(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    email: str | None = None
+    phone: str | None = None
+    company: str | None = None
+    notes: str | None = None
+    source_document_id: int | None = None
+    confidence: float | None = None
+    extraction_version: str | None = None
+    manually_overridden: bool = False
+
+    @field_validator("name", "email", "phone", "company", "notes", mode="before")
+    @classmethod
+    def normalize_participant_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+
+class AcquisitionDeadlineUpsert(BaseModel):
+    due_at: str
+    label: str | None = None
+    status: str | None = "open"
+    notes: str | None = None
+    source_document_id: int | None = None
+    confidence: float | None = None
+    extraction_version: str | None = None
+    manually_overridden: bool = False
+
+    @field_validator("due_at", "label", "status", "notes", mode="before")
+    @classmethod
+    def normalize_deadline_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None

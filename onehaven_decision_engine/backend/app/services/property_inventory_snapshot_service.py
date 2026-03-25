@@ -4,12 +4,13 @@ import logging
 import time
 from typing import Any, Optional
 
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..models import Deal, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
 from ..services.runtime_metrics import METRICS
+from .acquisition_tag_service import list_tags_for_properties
 
 log = logging.getLogger("onehaven.inventory_snapshot")
 
@@ -19,15 +20,6 @@ def _safe_float(v: Any, default: float | None = None) -> float | None:
         if v is None:
             return default
         return float(v)
-    except Exception:
-        return default
-
-
-def _safe_int(v: Any, default: int = 0) -> int:
-    try:
-        if v is None:
-            return default
-        return int(v)
     except Exception:
         return default
 
@@ -71,7 +63,6 @@ def _normalized_query_stmt(
     assigned_user_id: Optional[int] = None,
 ):
     stmt = select(Property).where(Property.org_id == org_id)
-
     if state:
         stmt = stmt.where(Property.state == state)
     if county:
@@ -93,26 +84,38 @@ def _normalized_query_stmt(
                 )
             ).like(like)
         )
-
     if assigned_user_id is not None:
-        candidate_columns = [
-            "assigned_user_id",
-            "owner_user_id",
-            "manager_user_id",
-            "agent_user_id",
-            "acquisition_user_id",
-        ]
-        clauses = []
-        for col_name in candidate_columns:
-            if hasattr(Property, col_name):
-                clauses.append(getattr(Property, col_name) == assigned_user_id)
+        candidate_columns = ["assigned_user_id", "owner_user_id", "manager_user_id", "agent_user_id", "acquisition_user_id"]
+        clauses = [getattr(Property, c) == assigned_user_id for c in candidate_columns if hasattr(Property, c)]
         if clauses:
             stmt = stmt.where(or_(*clauses))
-
     return stmt.order_by(desc(Property.id))
 
 
+def _load_property_meta(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    row = db.execute(
+        text(
+            """
+            SELECT acquisition_first_seen_at, acquisition_last_seen_at,
+                   acquisition_source_provider, acquisition_source_slug, acquisition_source_record_id, acquisition_source_url,
+                   completeness_geo_status, completeness_rent_status, completeness_rehab_status,
+                   completeness_risk_status, completeness_jurisdiction_status, completeness_cashflow_status,
+                   acquisition_metadata_json
+            FROM properties
+            WHERE org_id = :org_id AND id = :property_id
+            """
+        ),
+        {"org_id": int(org_id), "property_id": int(property_id)},
+    ).fetchone()
+    return dict(row._mapping) if row is not None else {}
+
+
 def infer_snapshot_completeness(snapshot: dict[str, Any]) -> str:
+    statuses = list((snapshot.get("completeness_status") or {}).values())
+    if statuses and all(x in {"complete", "deferred"} for x in statuses):
+        return "COMPLETE"
+    if any(x == "complete" for x in statuses):
+        return "PARTIAL"
     strong_signals = [
         snapshot.get("asking_price") is not None,
         snapshot.get("market_rent_estimate") is not None,
@@ -122,7 +125,6 @@ def infer_snapshot_completeness(snapshot: dict[str, Any]) -> str:
         snapshot.get("lat") is not None and snapshot.get("lng") is not None,
     ]
     count = len([x for x in strong_signals if x])
-
     if count == len(strong_signals):
         return "COMPLETE"
     if count >= 3:
@@ -130,46 +132,34 @@ def infer_snapshot_completeness(snapshot: dict[str, Any]) -> str:
     return "MISSING"
 
 
-def build_property_inventory_snapshot(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-) -> dict[str, Any]:
+def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
     t0 = time.perf_counter()
     prop = db.scalar(select(Property).where(Property.org_id == org_id, Property.id == property_id))
     if prop is None:
         raise ValueError("property not found")
 
-    deal = _latest_deal(db, org_id=org_id, property_id=property_id)
-    uw = _latest_uw(db, org_id=org_id, property_id=property_id)
-    state_payload = get_state_payload(db, org_id=org_id, property_id=property_id, recompute=False)
-
-    rent_assumption = getattr(prop, "rent_assumption", None)
-    if isinstance(rent_assumption, list):
-        rent_row = rent_assumption[0] if rent_assumption else None
-    else:
-        rent_row = rent_assumption
+    deal = _latest_deal(db, org_id=org_id, property_id=int(prop.id))
+    uw = _latest_uw(db, org_id=org_id, property_id=int(prop.id))
+    state_payload = get_state_payload(db, org_id=org_id, property_id=int(prop.id), recompute=False)
+    rent_row = getattr(prop, "rent_assumption", None)
+    if isinstance(rent_row, list):
+        rent_row = rent_row[0] if rent_row else None
+    meta = _load_property_meta(db, org_id=org_id, property_id=int(prop.id))
+    tags = list_tags_for_properties(db, org_id=org_id, property_ids=[int(prop.id)]).get(int(prop.id), [])
 
     snapshot = {
         "property_id": int(prop.id),
-        "org_id": int(org_id),
         "address": getattr(prop, "address", None),
-        "normalized_address": getattr(prop, "normalized_address", None),
         "city": getattr(prop, "city", None),
         "county": getattr(prop, "county", None),
         "state": getattr(prop, "state", None),
         "zip": getattr(prop, "zip", None),
-        "lat": _safe_float(getattr(prop, "lat", None)),
-        "lng": _safe_float(getattr(prop, "lng", None)),
-        "geocode_confidence": _safe_float(getattr(prop, "geocode_confidence", None)),
-        "crime_score": _safe_float(getattr(prop, "crime_score", None)),
-        "offender_count": _safe_int(getattr(prop, "offender_count", None), 0),
+        "normalized_address": getattr(prop, "normalized_address", None),
+        "lat": getattr(prop, "lat", None),
+        "lng": getattr(prop, "lng", None),
         "is_red_zone": bool(getattr(prop, "is_red_zone", False)),
-        "property_type": getattr(prop, "property_type", None),
-        "bedrooms": _safe_int(getattr(prop, "bedrooms", None), 0),
-        "bathrooms": _safe_float(getattr(prop, "bathrooms", None)),
-        "square_feet": _safe_float(getattr(prop, "square_feet", None)),
+        "crime_score": _safe_float(getattr(prop, "crime_score", None)),
+        "offender_count": getattr(prop, "offender_count", None),
         "asking_price": _asking_price(prop, deal),
         "market_rent_estimate": _safe_float(getattr(rent_row, "market_rent_estimate", None)) if rent_row else None,
         "approved_rent_ceiling": _safe_float(getattr(rent_row, "approved_rent_ceiling", None)) if rent_row else None,
@@ -186,6 +176,24 @@ def build_property_inventory_snapshot(
         "next_actions": state_payload.get("next_actions") or [],
         "blockers": (state_payload.get("outstanding_tasks") or {}).get("blockers") or [],
         "updated_at": state_payload.get("updated_at") or getattr(prop, "updated_at", None),
+        "acquisition_tags": tags,
+        "acquisition_first_seen_at": meta.get("acquisition_first_seen_at"),
+        "acquisition_last_seen_at": meta.get("acquisition_last_seen_at"),
+        "acquisition_source": {
+            "provider": meta.get("acquisition_source_provider"),
+            "slug": meta.get("acquisition_source_slug"),
+            "record_id": meta.get("acquisition_source_record_id"),
+            "url": meta.get("acquisition_source_url"),
+        },
+        "acquisition_metadata": meta.get("acquisition_metadata_json") or {},
+        "completeness_status": {
+            "geo": meta.get("completeness_geo_status") or "missing",
+            "rent": meta.get("completeness_rent_status") or "missing",
+            "rehab": meta.get("completeness_rehab_status") or "missing",
+            "risk": meta.get("completeness_risk_status") or "missing",
+            "jurisdiction": meta.get("completeness_jurisdiction_status") or "missing",
+            "cashflow": meta.get("completeness_cashflow_status") or "missing",
+        },
     }
 
     snapshot["completeness"] = infer_snapshot_completeness(snapshot)
@@ -194,7 +202,6 @@ def build_property_inventory_snapshot(
     duration_ms = round((time.perf_counter() - t0) * 1000, 2)
     METRICS.observe_ms("inventory_snapshot_build_ms", duration_ms, labels={"org_id": org_id})
     METRICS.inc("inventory_snapshot_build_count", labels={"org_id": org_id})
-
     return snapshot
 
 
@@ -210,76 +217,23 @@ def build_inventory_snapshots_for_scope(
     limit: int = 100,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
-
-    stmt = _normalized_query_stmt(
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        q=q,
-        assigned_user_id=assigned_user_id,
-    )
-
+    stmt = _normalized_query_stmt(org_id=org_id, state=state, county=county, city=city, q=q, assigned_user_id=assigned_user_id)
     query_t0 = time.perf_counter()
     props = list(db.scalars(stmt.limit(limit)).all())
     query_ms = round((time.perf_counter() - query_t0) * 1000, 2)
-
     rows: list[dict[str, Any]] = []
     skipped_errors = 0
-
     build_t0 = time.perf_counter()
     for prop in props:
         try:
-            rows.append(
-                build_property_inventory_snapshot(
-                    db,
-                    org_id=org_id,
-                    property_id=int(prop.id),
-                )
-            )
+            rows.append(build_property_inventory_snapshot(db, org_id=org_id, property_id=int(prop.id)))
         except Exception:
             skipped_errors += 1
-            log.exception(
-                "inventory_snapshot_row_failed",
-                extra={"org_id": org_id, "property_id": int(getattr(prop, "id", 0) or 0)},
-            )
-
+            log.exception("inventory_snapshot_row_failed", extra={"org_id": org_id, "property_id": int(getattr(prop, "id", 0) or 0)})
     build_ms = round((time.perf_counter() - build_t0) * 1000, 2)
     total_ms = round((time.perf_counter() - t0) * 1000, 2)
-
     METRICS.observe_ms("inventory_snapshot_scope_query_ms", query_ms, labels={"org_id": org_id})
     METRICS.observe_ms("inventory_snapshot_scope_build_ms", build_ms, labels={"org_id": org_id})
     METRICS.observe_ms("inventory_snapshot_scope_total_ms", total_ms, labels={"org_id": org_id})
-
-    log.info(
-        "inventory_snapshot_scope_complete",
-        extra={
-            "event": "inventory_snapshot_scope_complete",
-            "org_id": org_id,
-            "state": state,
-            "county": county,
-            "city": city,
-            "q": q,
-            "assigned_user_id": assigned_user_id,
-            "limit": limit,
-            "query_rows": len(props),
-            "returned_rows": len(rows),
-            "skipped_errors": skipped_errors,
-            "query_ms": query_ms,
-            "build_ms": build_ms,
-            "total_ms": total_ms,
-        },
-    )
-
-    return {
-        "rows": rows,
-        "count": len(rows),
-        "meta": {
-            "query_rows": len(props),
-            "returned_rows": len(rows),
-            "skipped_errors": skipped_errors,
-            "query_ms": query_ms,
-            "build_ms": build_ms,
-            "total_ms": total_ms,
-        },
-    }
+    log.info("inventory_snapshot_scope_complete", extra={"event": "inventory_snapshot_scope_complete", "org_id": org_id, "state": state, "county": county, "city": city, "q": q, "assigned_user_id": assigned_user_id, "limit": limit, "query_rows": len(props), "returned_rows": len(rows), "skipped_errors": skipped_errors, "query_ms": query_ms, "build_ms": build_ms, "total_ms": total_ms})
+    return {"rows": rows, "count": len(rows), "meta": {"query_rows": len(props), "returned_rows": len(rows), "skipped_errors": skipped_errors, "query_ms": query_ms, "build_ms": build_ms, "total_ms": total_ms}}

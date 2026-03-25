@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,28 @@ def _parse_money(text_value: str | None) -> float | None:
         return float(cleaned)
     except Exception:
         return None
+
+
+def _parse_date(text_value: str | None) -> str | None:
+    if not text_value:
+        return None
+    raw = str(text_value).strip()
+    if not raw:
+        return None
+
+    formats = [
+        "%m/%d/%Y",
+        "%m/%d/%y",
+        "%Y-%m-%d",
+        "%B %d, %Y",
+        "%b %d, %Y",
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(raw, fmt).date().isoformat()
+        except Exception:
+            continue
+    return None
 
 
 def _extract_text_from_txt(path: Path) -> str:
@@ -42,6 +65,7 @@ def _extract_text_from_pdf(path: Path) -> str:
     """
     try:
         from pypdf import PdfReader  # type: ignore
+
         reader = PdfReader(str(path))
         pages = []
         for page in reader.pages[:50]:
@@ -85,7 +109,16 @@ def extract_acquisition_fields(text_blob: str | None) -> dict[str, Any]:
                 return value or None
         return None
 
-    return {
+    def find_date(patterns: list[str]) -> str | None:
+        for pattern in patterns:
+            m = re.search(pattern, text_blob, flags=re.IGNORECASE)
+            if m:
+                value = _parse_date(m.group(1))
+                if value:
+                    return value
+        return None
+
+    fields = {
         "purchase_price": find_money([
             r"purchase price[:\s]+\$?([0-9,]+(?:\.[0-9]{2})?)",
             r"sales price[:\s]+\$?([0-9,]+(?:\.[0-9]{2})?)",
@@ -113,7 +146,41 @@ def extract_acquisition_fields(text_blob: str | None) -> dict[str, Any]:
         "lender_name": find_text([
             r"(?:lender|mortgage company)[:\s]+([A-Za-z0-9&.,'()\- ]+)",
         ]),
+        "title_company": find_text([
+            r"(?:title company|escrow company)[:\s]+([A-Za-z0-9&.,'()\- ]+)",
+        ]),
+        "escrow_officer": find_text([
+            r"(?:escrow officer|closing officer)[:\s]+([A-Za-z0-9&.,'()\- ]+)",
+        ]),
+        "inspection_contingency_date": find_date([
+            r"inspection contingency(?: deadline| date)?[:\s]+([A-Za-z0-9,/\- ]+)",
+        ]),
+        "financing_contingency_date": find_date([
+            r"financing contingency(?: deadline| date)?[:\s]+([A-Za-z0-9,/\- ]+)",
+        ]),
+        "appraisal_deadline": find_date([
+            r"appraisal(?: contingency)?(?: deadline| date)?[:\s]+([A-Za-z0-9,/\- ]+)",
+        ]),
+        "earnest_money_deadline": find_date([
+            r"earnest money(?: deposit)?(?: due| deadline| date)?[:\s]+([A-Za-z0-9,/\- ]+)",
+        ]),
+        "title_objection_deadline": find_date([
+            r"title objection(?: deadline| date)?[:\s]+([A-Za-z0-9,/\- ]+)",
+        ]),
+        "insurance_due_date": find_date([
+            r"insurance(?: binder)?(?: due| deadline| date)?[:\s]+([A-Za-z0-9,/\- ]+)",
+        ]),
+        "walkthrough_datetime": find_date([
+            r"walkthrough(?: date| deadline)?[:\s]+([A-Za-z0-9,/\- ]+)",
+            r"final walkthrough[:\s]+([A-Za-z0-9,/\- ]+)",
+        ]),
+        "closing_datetime": find_date([
+            r"closing(?: date| datetime)?[:\s]+([A-Za-z0-9,/\- ]+)",
+            r"close of escrow[:\s]+([A-Za-z0-9,/\- ]+)",
+        ]),
     }
+
+    return {k: v for k, v in fields.items() if v not in (None, "", [])}
 
 
 def parse_document(path: Path, content_type: str | None) -> dict[str, Any]:

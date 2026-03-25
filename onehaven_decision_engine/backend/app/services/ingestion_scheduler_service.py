@@ -329,3 +329,26 @@ def dispatch_daily_sync_for_org(
         "results": results,
         "markets": markets,
     }
+
+
+def build_runtime_payload_from_saved_filters(filters_json: dict[str, Any] | None) -> dict[str, Any]:
+    filters_json = dict(filters_json or {})
+    payload = build_runtime_payload(
+        state=filters_json.get("state"),
+        county=filters_json.get("county"),
+        city=filters_json.get("city"),
+    )
+    for key in [
+        "min_price",
+        "max_price",
+        "min_bedrooms",
+        "min_bathrooms",
+        "max_units",
+        "property_types",
+        "limit",
+        "q",
+    ]:
+        if filters_json.get(key) is not None:
+            payload[key] = filters_json.get(key)
+    payload["trigger_type"] = filters_json.get("trigger_type") or payload.get("trigger_type") or "daily_refresh"
+    return payload

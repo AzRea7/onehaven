@@ -21,6 +21,14 @@ from ..schemas import (
 from ..services.ingestion_run_execute import execute_source_sync
 from ..services.ingestion_run_service import get_ingestion_overview, list_runs
 from ..services.ingestion_scheduler_service import list_default_daily_markets
+from ..services.portfolio_watchlist_service import (
+    delete_search_preset,
+    delete_watchlist,
+    list_search_presets,
+    list_watchlists,
+    upsert_search_preset,
+    upsert_watchlist,
+)
 from ..services.ingestion_source_service import (
     create_source,
     ensure_default_manual_sources,
@@ -35,6 +43,31 @@ from ..tasks.ingestion_tasks import (
 )
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
+
+
+class WatchlistIn(BaseModel):
+    name: str
+    description: str | None = None
+    filters_json: dict[str, Any] = Field(default_factory=dict)
+    sort_json: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+
+
+class SearchPresetIn(BaseModel):
+    name: str
+    filters_json: dict[str, Any] = Field(default_factory=dict)
+    sort_json: dict[str, Any] = Field(default_factory=dict)
+
+
+def _principal_user_id(p: Any) -> int | None:
+    for attr in ("user_id", "id"):
+        value = getattr(p, attr, None)
+        if value is not None:
+            try:
+                return int(value)
+            except Exception:
+                return None
+    return None
 
 
 def _normalize_optional_text(value: Any) -> str | None:
@@ -420,3 +453,84 @@ async def webhook_ingest(
     out = _run_response(run)
     out["normal_path"] = True
     return out
+
+@router.get("/watchlists", response_model=list[dict])
+def get_watchlists(db: Session = Depends(get_db), p=Depends(get_principal)):
+    return list_watchlists(db, org_id=p.org_id)
+
+
+@router.post("/watchlists", response_model=dict)
+def create_watchlist(payload: WatchlistIn, db: Session = Depends(get_db), p=Depends(get_principal)):
+    return upsert_watchlist(
+        db,
+        org_id=p.org_id,
+        watchlist_id=None,
+        name=payload.name,
+        description=payload.description,
+        filters_json=payload.filters_json,
+        sort_json=payload.sort_json,
+        is_default=payload.is_default,
+        actor_user_id=_principal_user_id(p),
+    )
+
+
+@router.put("/watchlists/{watchlist_id}", response_model=dict)
+def update_watchlist(watchlist_id: int, payload: WatchlistIn, db: Session = Depends(get_db), p=Depends(get_principal)):
+    return upsert_watchlist(
+        db,
+        org_id=p.org_id,
+        watchlist_id=watchlist_id,
+        name=payload.name,
+        description=payload.description,
+        filters_json=payload.filters_json,
+        sort_json=payload.sort_json,
+        is_default=payload.is_default,
+        actor_user_id=_principal_user_id(p),
+    )
+
+
+@router.delete("/watchlists/{watchlist_id}", response_model=dict)
+def remove_watchlist(watchlist_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    deleted = delete_watchlist(db, org_id=p.org_id, watchlist_id=watchlist_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Watchlist not found")
+    return {"ok": True, "deleted": True, "watchlist_id": watchlist_id}
+
+
+@router.get("/search-presets", response_model=list[dict])
+def get_search_presets(db: Session = Depends(get_db), p=Depends(get_principal)):
+    return list_search_presets(db, org_id=p.org_id)
+
+
+@router.post("/search-presets", response_model=dict)
+def create_search_preset(payload: SearchPresetIn, db: Session = Depends(get_db), p=Depends(get_principal)):
+    return upsert_search_preset(
+        db,
+        org_id=p.org_id,
+        preset_id=None,
+        name=payload.name,
+        filters_json=payload.filters_json,
+        sort_json=payload.sort_json,
+        actor_user_id=_principal_user_id(p),
+    )
+
+
+@router.put("/search-presets/{preset_id}", response_model=dict)
+def update_search_preset(preset_id: int, payload: SearchPresetIn, db: Session = Depends(get_db), p=Depends(get_principal)):
+    return upsert_search_preset(
+        db,
+        org_id=p.org_id,
+        preset_id=preset_id,
+        name=payload.name,
+        filters_json=payload.filters_json,
+        sort_json=payload.sort_json,
+        actor_user_id=_principal_user_id(p),
+    )
+
+
+@router.delete("/search-presets/{preset_id}", response_model=dict)
+def remove_search_preset(preset_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    deleted = delete_search_preset(db, org_id=p.org_id, preset_id=preset_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Search preset not found")
+    return {"ok": True, "deleted": True, "preset_id": preset_id}

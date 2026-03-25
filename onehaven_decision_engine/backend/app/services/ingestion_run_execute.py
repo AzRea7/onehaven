@@ -8,8 +8,9 @@ import re
 import socket
 import time
 from typing import Any
+from datetime import datetime, timezone
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -225,6 +226,66 @@ def _set_run_summary(row: Any, summary: dict[str, Any]) -> None:
     if hasattr(row, "summary_json"):
         setattr(row, "summary_json", summary)
 
+
+
+def _persist_property_acquisition_metadata(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    source: Any,
+    payload: dict[str, Any],
+    trigger_type: str,
+) -> None:
+    now = datetime.now(timezone.utc)
+    db.execute(
+        text(
+            """
+            UPDATE properties
+            SET acquisition_first_seen_at = COALESCE(acquisition_first_seen_at, :now_ts),
+                acquisition_last_seen_at = :now_ts,
+                acquisition_source_provider = :provider,
+                acquisition_source_slug = :slug,
+                acquisition_source_record_id = :record_id,
+                acquisition_source_url = COALESCE(:source_url, acquisition_source_url),
+                acquisition_metadata_json = COALESCE(acquisition_metadata_json, '{}'::jsonb) || CAST(:metadata_json AS JSONB)
+            WHERE org_id = :org_id AND id = :property_id
+            """
+        ),
+        {
+            'org_id': int(org_id),
+            'property_id': int(property_id),
+            'now_ts': now,
+            'provider': str(getattr(source, 'provider', '') or '').strip() or None,
+            'slug': str(getattr(source, 'slug', '') or '').strip() or None,
+            'record_id': str(payload.get('external_record_id') or '').strip() or None,
+            'source_url': payload.get('external_url'),
+            'metadata_json': json.dumps({
+                'trigger_type': trigger_type,
+                'last_payload_address': payload.get('address'),
+                'last_payload_city': payload.get('city'),
+                'inventory_count': payload.get('inventory_count'),
+            }, default=str),
+        },
+    )
+
+
+def _seed_missing_completeness_columns(db: Session, *, org_id: int, property_id: int) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE properties
+            SET completeness_geo_status = COALESCE(completeness_geo_status, 'missing'),
+                completeness_rent_status = COALESCE(completeness_rent_status, 'missing'),
+                completeness_rehab_status = COALESCE(completeness_rehab_status, 'missing'),
+                completeness_risk_status = COALESCE(completeness_risk_status, 'missing'),
+                completeness_jurisdiction_status = COALESCE(completeness_jurisdiction_status, 'missing'),
+                completeness_cashflow_status = COALESCE(completeness_cashflow_status, 'missing')
+            WHERE org_id = :org_id AND id = :property_id
+            """
+        ),
+        {'org_id': int(org_id), 'property_id': int(property_id)},
+    )
 
 def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
     existing = find_existing_property(
@@ -728,6 +789,15 @@ def execute_source_sync(
                     raw_json=payload.get("raw_json") or payload,
                     fingerprint=fingerprint,
                 )
+                _persist_property_acquisition_metadata(
+                    db,
+                    org_id=int(org_id),
+                    property_id=int(prop.id),
+                    source=source,
+                    payload=payload,
+                    trigger_type=str(trigger_type),
+                )
+                _seed_missing_completeness_columns(db, org_id=int(org_id), property_id=int(prop.id))
                 db_upsert_ms = round((time.perf_counter() - db_t0) * 1000, 2)
                 summary["timings_ms"]["db_upsert_total"] = round(
                     float(summary["timings_ms"].get("db_upsert_total", 0.0) or 0.0) + db_upsert_ms,
