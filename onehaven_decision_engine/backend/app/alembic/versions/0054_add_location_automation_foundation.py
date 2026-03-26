@@ -1,6 +1,6 @@
 """add location automation foundation
 
-Revision ID: 0054_add_location_automation_foundation
+Revision ID: 0054_location_auto_fdn
 Revises: 0053_add_seen_columns_to_ingestion_record_links
 Create Date: 2026-03-20
 """
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0054_add_location_automation_foundation"
-down_revision = "0053_add_seen_columns_to_ingestion_record_links"
+revision = "0054_location_auto_fdn"
+down_revision = "0053_seen_ingest_links"
 branch_labels = None
 depends_on = None
 

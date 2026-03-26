@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "0030_add_trust_tables"
-down_revision = "0029_create_checklist_template_items"
+down_revision = "0029_checklist_tpl"
 branch_labels = None
 depends_on = None
 

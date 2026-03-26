@@ -1,6 +1,6 @@
 """policy governance + coverage status + source versions
 
-Revision ID: 0046_policy_governance_and_coverage
+Revision ID: 0046_policy_gov_cov
 Revises: 0045_add_policy_sources_and_assertions
 Create Date: 2026-03-06
 """
@@ -10,8 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0046_policy_governance_and_coverage"
-down_revision = "0045_add_policy_sources_and_assertions"
+revision = "0046_policy_gov_cov"
+down_revision = "0045_policy_src_assert"
 branch_labels = None
 depends_on = None
 

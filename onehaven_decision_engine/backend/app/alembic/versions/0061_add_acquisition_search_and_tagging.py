@@ -1,6 +1,6 @@
 """add acquisition search presets, watchlists, tags, and completeness metadata
 
-Revision ID: 0061_add_acquisition_search_and_tagging
+Revision ID: 0061_acq_search_tags
 Revises: 0060_add_acquisition_workflow_tables
 Create Date: 2026-03-24
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy import text
 
-revision = "0061_add_acquisition_search_and_tagging"
-down_revision = "0060_add_acquisition_workflow_tables"
+revision = "0061_acq_search_tags"
+down_revision = "0060_acq_workflow_tbls"
 branch_labels = None
 depends_on = None
 

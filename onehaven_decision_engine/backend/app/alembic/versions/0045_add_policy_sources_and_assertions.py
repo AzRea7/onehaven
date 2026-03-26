@@ -1,7 +1,7 @@
 """
 0045 add policy_sources + policy_assertions (collector/extractor pipeline)
 
-Revision ID: 0045_add_policy_sources_and_assertions
+Revision ID: 0045_policy_src_assert
 Revises: 0044_fix_jp_created_at_default
 Create Date: 2026-03-05
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0045_add_policy_sources_and_assertions"
+revision = "0045_policy_src_assert"
 down_revision = "0044_fix_jp_created_at_default"
 branch_labels = None
 depends_on = None

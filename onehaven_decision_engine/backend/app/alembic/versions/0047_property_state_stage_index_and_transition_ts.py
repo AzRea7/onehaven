@@ -1,6 +1,6 @@
 """property state stage index + last_transitioned_at
 
-Revision ID: 0047_property_state_stage_index_and_transition_ts
+Revision ID: 0047_prop_stage_idx_ts
 Revises: 0046_policy_governance_and_coverage
 Create Date: 2026-03-06
 """
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "0047_property_state_stage_index_and_transition_ts"
-down_revision = "0046_policy_governance_and_coverage"
+revision = "0047_prop_stage_idx_ts"
+down_revision = "0046_policy_gov_cov"
 branch_labels = None
 depends_on = None
 

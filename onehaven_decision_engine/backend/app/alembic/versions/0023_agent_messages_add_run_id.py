@@ -6,7 +6,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "0023_agent_messages_add_run_id"
-down_revision = "0022_agent_runs_reliability_fields"
+down_revision = "0022_agent_runs_rel"
 branch_labels = None
 depends_on = None
 

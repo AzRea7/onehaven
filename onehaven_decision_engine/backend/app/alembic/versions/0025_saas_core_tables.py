@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "0025_saas_core_tables"
+revision = "0025_saas_core"
 down_revision = "0024_add_agent_trace_events"
 branch_labels = None
 depends_on = None

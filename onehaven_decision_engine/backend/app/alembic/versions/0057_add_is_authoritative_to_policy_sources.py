@@ -6,8 +6,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "0057_add_is_authoritative_to_policy_sources"
-down_revision = "0056_add_real_inspection_compliance_foundation"
+revision = "0057_auth_policy_src"
+down_revision = "0056_real_insp_comp_fdn"
 branch_labels = None
 depends_on = None
 

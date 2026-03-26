@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0007_add_deal_strategy"
-down_revision = "0006_compliance_and_rent_policy_fields"
+down_revision = "0006_comp_rent_policy"
 branch_labels = None
 depends_on = None
 

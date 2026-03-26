@@ -4,7 +4,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0022_agent_runs_reliability_fields"
+revision = "0022_agent_runs_rel"
 down_revision = "0021_inspections_add_org_id"
 branch_labels = None
 depends_on = None

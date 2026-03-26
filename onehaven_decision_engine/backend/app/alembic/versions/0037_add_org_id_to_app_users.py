@@ -12,7 +12,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0037_add_org_id_to_app_users"
-down_revision = "0036_add_geo_risk_workflow_pipeline"
+down_revision = "0036_geo_risk_pipe"
 branch_labels = None
 depends_on = None
 

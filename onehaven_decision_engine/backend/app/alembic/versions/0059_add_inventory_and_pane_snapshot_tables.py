@@ -6,7 +6,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "0059_add_inventory_and_pane_snapshot_tables"
+revision = "0059_inventory_snapshots"
 down_revision = "0058_add_org_locks"
 branch_labels = None
 depends_on = None

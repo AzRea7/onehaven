@@ -1,6 +1,6 @@
 """widen alembic_version.version_num so long revision ids work
 
-Revision ID: 0027_widen_alembic_version
+Revision ID: 0027_widen_alembic_ver
 Revises: 0026_add_limits_json_to_plans
 Create Date: 2026-02-26
 """
@@ -10,8 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0027_widen_alembic_version"
-down_revision = "0026_add_limits_json_to_plans"
+revision = "0027_widen_alembic_ver"
+down_revision = "0026_limits_json_plans"
 branch_labels = None
 depends_on = None
 

@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "0015_jurisdiction_org_scope"
-down_revision = "0014_rehab_tasks_and_basic_ops_tables"
+down_revision = "0014_rehab_ops"
 branch_labels = None
 depends_on = None
 

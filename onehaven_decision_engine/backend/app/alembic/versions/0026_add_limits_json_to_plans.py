@@ -1,6 +1,6 @@
 """add limits_json to plans
 
-Revision ID: 0026_add_limits_json_to_plans
+Revision ID: 0026_limits_json_plans
 Revises: 0025_saas_core_tables
 Create Date: 2026-02-26
 """
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "0026_add_limits_json_to_plans"
-down_revision = "0025_saas_core_tables"
+revision = "0026_limits_json_plans"
+down_revision = "0025_saas_core"
 branch_labels = None
 depends_on = None
 

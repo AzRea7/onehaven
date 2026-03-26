@@ -1,7 +1,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0013_property_checklist_items_and_org_scoping"
+revision = "0013_checklist_org"
 down_revision = "0012_fix_org_scoping_not_null"
 branch_labels = None
 depends_on = None

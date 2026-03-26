@@ -1,8 +1,8 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0014_rehab_tasks_and_basic_ops_tables"
-down_revision = "0013_property_checklist_items_and_org_scoping"
+revision = "0014_rehab_ops"
+down_revision = "0013_checklist_org"
 branch_labels = None
 depends_on = None
 

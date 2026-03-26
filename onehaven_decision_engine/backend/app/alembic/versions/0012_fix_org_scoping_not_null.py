@@ -2,7 +2,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0012_fix_org_scoping_not_null"
-down_revision = "0011_multitenant_rbac_audit_eventlog"
+down_revision = "0011_mt_rbac_audit"
 branch_labels = None
 depends_on = None
 

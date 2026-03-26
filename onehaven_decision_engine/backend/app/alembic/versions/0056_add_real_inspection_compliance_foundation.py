@@ -1,7 +1,7 @@
 """
 0056 add real inspection compliance foundation
 
-Revision ID: 0056_add_real_inspection_compliance_foundation
+Revision ID: 0056_real_insp_comp_fdn
 Revises: 0055_add_jurisdiction_finalize_foundation
 Create Date: 2026-03-21
 """
@@ -12,8 +12,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
-revision = "0056_add_real_inspection_compliance_foundation"
-down_revision = "0055_add_jurisdiction_finalize_foundation"
+revision = "0056_real_insp_comp_fdn"
+down_revision = "0055_juris_finalize_fdn"
 branch_labels = None
 depends_on = None
 

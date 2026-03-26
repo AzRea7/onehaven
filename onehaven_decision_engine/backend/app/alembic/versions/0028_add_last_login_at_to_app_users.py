@@ -1,6 +1,6 @@
 """add last_login_at to app_users
 
-Revision ID: 0028_add_last_login_at_to_app_users
+Revision ID: 0028_last_login_users
 Revises: 0027_widen_alembic_version
 Create Date: 2026-02-26
 """
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "0028_add_last_login_at_to_app_users"
-down_revision = "0027_widen_alembic_version"
+revision = "0028_last_login_users"
+down_revision = "0027_widen_alembic_ver"
 branch_labels = None
 depends_on = None
 

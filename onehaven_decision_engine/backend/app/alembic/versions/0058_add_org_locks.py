@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "0058_add_org_locks"
-down_revision = "0057_add_is_authoritative_to_policy_sources"
+down_revision = "0057_auth_policy_src"
 branch_labels = None
 depends_on = None
 

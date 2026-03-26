@@ -5,7 +5,7 @@ This migration "neutralizes" legacy NOT NULL columns created by the earlier
 fat schema (key/name/effective_date/program_type/etc.), so the simplified
 JurisdictionProfile model + policy_seed inserts can succeed.
 
-Revision ID: 0042_repair_jurisdiction_profiles
+Revision ID: 0042_repair_jp
 Revises: 0041_fix_policy_models_schema
 Create Date: 2026-03-05
 """
@@ -15,7 +15,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
-revision = "0042_repair_jurisdiction_profiles"
+revision = "0042_repair_jp"
 down_revision = "0041_fix_policy_models_schema"
 branch_labels = None
 depends_on = None

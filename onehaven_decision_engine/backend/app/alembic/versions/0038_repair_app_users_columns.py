@@ -2,7 +2,7 @@
 """
 0038 safe repair app_users columns (add if missing)
 
-Revision ID: 0038_safe_repair_app_users_columns
+Revision ID: 0038_repair_users_cols
 Revises: 0037_add_org_id_to_app_users
 Create Date: 2026-03-04
 """
@@ -12,7 +12,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import text
 
-revision = "0038_safe_repair_app_users_columns"
+revision = "0038_repair_users_cols"
 down_revision = "0037_add_org_id_to_app_users"
 branch_labels = None
 depends_on = None

@@ -1,6 +1,6 @@
 """create checklist_template_items
 
-Revision ID: 0029_create_checklist_template_items
+Revision ID: 0029_checklist_tpl
 Revises: 0028_add_last_login_at_to_app_users
 Create Date: 2026-02-26
 """
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "0029_create_checklist_template_items"
-down_revision = "0028_add_last_login_at_to_app_users"
+revision = "0029_checklist_tpl"
+down_revision = "0028_last_login_users"
 branch_labels = None
 depends_on = None
 

@@ -1,6 +1,6 @@
 """compliance + rent policy fields
 
-Revision ID: 0006_compliance_and_rent_policy_fields
+Revision ID: 0006_comp_rent_policy
 Revises: 0005_api_usage
 Create Date: 2026-02-10
 """
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0006_compliance_and_rent_policy_fields"
+revision = "0006_comp_rent_policy"
 down_revision = "0005_api_usage"
 branch_labels = None
 depends_on = None

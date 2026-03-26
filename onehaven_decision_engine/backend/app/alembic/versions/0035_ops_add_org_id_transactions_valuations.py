@@ -1,6 +1,6 @@
 """ops org scoping: add org_id to transactions + valuations (backfill from properties)
 
-Revision ID: 0035_ops_add_org_id_transactions_valuations
+Revision ID: 0035_ops_org_tx_vals
 Revises: 0034_add_leases_org_id
 Create Date: 2026-03-03
 """
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
-revision = "0035_ops_add_org_id_transactions_valuations"
+revision = "0035_ops_org_tx_vals"
 down_revision = "0034_add_leases_org_id"
 branch_labels = None
 depends_on = None

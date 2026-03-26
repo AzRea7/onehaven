@@ -1,6 +1,6 @@
 """underwriting_results meta columns
 
-Revision ID: 0009_add_underwriting_result_meta
+Revision ID: 0009_uw_result_meta
 Revises: 0008_ops_and_agents
 Create Date: 2026-02-12
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0009_add_underwriting_result_meta"
+revision = "0009_uw_result_meta"
 down_revision = "0008_ops_and_agents"
 branch_labels = None
 depends_on = None

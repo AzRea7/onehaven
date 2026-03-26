@@ -1,6 +1,6 @@
 """multitenant rbac audit + workflow log
 
-Revision ID: 0011_multitenant_rbac_audit_eventlog
+Revision ID: 0011_mt_rbac_audit
 Revises: 0010_agent_slots
 Create Date: 2026-02-14
 """
@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0011_multitenant_rbac_audit_eventlog"
+revision = "0011_mt_rbac_audit"
 down_revision = "0010_agent_slots"
 branch_labels = None
 depends_on = None

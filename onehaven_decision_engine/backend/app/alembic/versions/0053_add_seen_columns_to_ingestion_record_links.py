@@ -1,6 +1,6 @@
 """0053_add_seen_columns_to_ingestion_record_links
 
-Revision ID: 0053_add_seen_columns_to_ingestion_record_links
+Revision ID: 0053_seen_ingest_links
 Revises: 0052_add_ingestion_tables
 Create Date: 2026-03-17
 """
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0053_add_seen_columns_to_ingestion_record_links"
+revision = "0053_seen_ingest_links"
 down_revision = "0052_add_ingestion_tables"
 branch_labels = None
 depends_on = None

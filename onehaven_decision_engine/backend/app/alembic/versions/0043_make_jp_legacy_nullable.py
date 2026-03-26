@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
 revision = "0043_make_jp_legacy_nullable"
-down_revision = "0042_repair_jurisdiction_profiles"
+down_revision = "0042_repair_jp"
 branch_labels = None
 depends_on = None
 

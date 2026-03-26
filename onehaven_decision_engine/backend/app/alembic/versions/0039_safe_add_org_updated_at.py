@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from sqlalchemy import text
 
 revision = "0039_safe_add_org_updated_at"
-down_revision = "0038_safe_repair_app_users_columns"
+down_revision = "0038_repair_users_cols"
 branch_labels = None
 depends_on = None
 

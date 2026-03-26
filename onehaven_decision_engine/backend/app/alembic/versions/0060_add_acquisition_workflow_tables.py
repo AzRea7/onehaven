@@ -1,6 +1,6 @@
 """add acquisition workflow tables
 
-Revision ID: 0060_add_acquisition_workflow_tables
+Revision ID: 0060_acq_workflow_tbls
 Revises: 0059_add_inventory_and_pane_snapshot_tables
 Create Date: 2026-03-24
 """
@@ -10,8 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0060_add_acquisition_workflow_tables"
-down_revision = "0059_add_inventory_and_pane_snapshot_tables"
+revision = "0060_acq_workflow_tbls"
+down_revision = "0059_inventory_snapshots"
 branch_labels = None
 depends_on = None
 

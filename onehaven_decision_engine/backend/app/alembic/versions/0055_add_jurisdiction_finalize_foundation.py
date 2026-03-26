@@ -1,7 +1,7 @@
 """
 0055 add jurisdiction finalize foundation fields
 
-Revision ID: 0055_add_jurisdiction_finalize_foundation
+Revision ID: 0055_juris_finalize_fdn
 Revises: 0054_add_location_automation_foundation
 Create Date: 2026-03-20
 """
@@ -12,8 +12,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
-revision = "0055_add_jurisdiction_finalize_foundation"
-down_revision = "0054_add_location_automation_foundation"
+revision = "0055_juris_finalize_fdn"
+down_revision = "0054_location_auto_fdn"
 branch_labels = None
 depends_on = None
 

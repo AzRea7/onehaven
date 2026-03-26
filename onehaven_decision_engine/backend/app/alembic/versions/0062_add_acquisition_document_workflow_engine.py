@@ -1,6 +1,6 @@
 """add acquisition workflow engine tables
 
-Revision ID: 0062_add_acquisition_document_workflow_engine
+Revision ID: 0062_acq_doc_workflow
 Revises: 0061_add_acquisition_search_and_tagging
 Create Date: 2026-03-24
 """
@@ -10,8 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0062_add_acquisition_document_workflow_engine"
-down_revision = "0061_add_acquisition_search_and_tagging"
+revision = "0062_acq_doc_workflow"
+down_revision = "0061_acq_search_tags"
 branch_labels = None
 depends_on = None
 

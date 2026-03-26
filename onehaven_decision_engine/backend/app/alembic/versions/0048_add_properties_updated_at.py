@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "0048_add_properties_updated_at"
-down_revision = "0047_property_state_stage_index_and_transition_ts"
+down_revision = "0047_prop_stage_idx_ts"
 branch_labels = None
 depends_on = None
 

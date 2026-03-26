@@ -1,7 +1,7 @@
 # onehaven_decision_engine/backend/app/alembic/versions/0036_add_geo_risk_workflow_pipeline.py
 """0036 add geo/risk fields + workflow pipeline stages
 
-Revision ID: 0036_add_geo_risk_workflow_pipeline
+Revision ID: 0036_geo_risk_pipe
 Revises: 0035_ops_add_org_id_transactions_valuations
 Create Date: 2026-03-04
 """
@@ -10,8 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0036_add_geo_risk_workflow_pipeline"
-down_revision = "0035_ops_add_org_id_transactions_valuations"
+revision = "0036_geo_risk_pipe"
+down_revision = "0035_ops_org_tx_vals"
 branch_labels = None
 depends_on = None
 
