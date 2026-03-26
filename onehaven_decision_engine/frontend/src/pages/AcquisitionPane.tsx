@@ -16,6 +16,10 @@ import {
   Upload,
   User2,
   Paperclip,
+  AlertTriangle,
+  GitCompareArrows,
+  ShieldAlert,
+  Users,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -268,6 +272,141 @@ function QueueRowCard({
   );
 }
 
+function waitingOnCategory(raw?: string) {
+  const text = String(raw || "")
+    .trim()
+    .toLowerCase();
+  if (!text) return "OTHER";
+  if (
+    text.includes("lender") ||
+    text.includes("loan") ||
+    text.includes("finance")
+  ) {
+    return "LENDER";
+  }
+  if (text.includes("title") || text.includes("escrow")) return "TITLE";
+  if (text.includes("seller")) return "SELLER";
+  if (
+    text.includes("document") ||
+    text.includes("doc") ||
+    text.includes("inspection") ||
+    text.includes("binder") ||
+    text.includes("agreement")
+  ) {
+    return "DOCUMENT";
+  }
+  if (
+    text.includes("operator") ||
+    text.includes("review") ||
+    text.includes("internal") ||
+    text.includes("team")
+  ) {
+    return "OPERATOR";
+  }
+  return "OTHER";
+}
+
+function urgencyLabel(days?: number | null, waitingOn?: string) {
+  const n = Number(days);
+  const text = String(waitingOn || "").toLowerCase();
+  if (text.includes("blocked")) return "blocked";
+  if (!Number.isFinite(n)) return "active";
+  if (n < 0) return "overdue";
+  if (n <= 7) return "due soon";
+  return "on track";
+}
+
+function urgencyPillClass(label: string) {
+  if (label === "overdue") return "oh-pill oh-pill-bad";
+  if (label === "due soon") return "oh-pill oh-pill-warn";
+  if (label === "blocked") return "oh-pill oh-pill-bad";
+  return "oh-pill oh-pill-good";
+}
+
+function requiredDocsMissing(detail: AcquisitionDetail | null) {
+  const rows = Array.isArray(detail?.required_documents)
+    ? detail?.required_documents
+    : [];
+  return rows.filter((x) => !x?.present);
+}
+
+function nextRequiredDocument(detail: AcquisitionDetail | null) {
+  const missing = requiredDocsMissing(detail);
+  if (missing.length) return missing[0]?.label || "Required document";
+  return "No missing required documents";
+}
+
+function closeReadiness(detail: AcquisitionDetail | null) {
+  const total = Number(detail?.summary?.required_documents_total || 0);
+  const present = Number(detail?.summary?.required_documents_present || 0);
+  const days = Number(detail?.summary?.days_to_close);
+  const waiting = String(detail?.acquisition?.waiting_on || "").toLowerCase();
+
+  let score = 0;
+
+  if (total > 0) score += Math.round((present / total) * 55);
+  if (detail?.summary?.document_count) {
+    score += Math.min(Number(detail.summary.document_count) * 4, 20);
+  }
+  if (Number.isFinite(days)) {
+    if (days > 14) score += 20;
+    else if (days >= 7) score += 14;
+    else if (days >= 0) score += 8;
+    else score -= 12;
+  }
+  if (waiting.includes("document")) score -= 8;
+  if (waiting.includes("blocked")) score -= 15;
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function readinessTone(score: number) {
+  if (score >= 75) return "text-emerald-300";
+  if (score >= 45) return "text-amber-300";
+  return "text-red-300";
+}
+
+function collectConflicts(detail: AcquisitionDetail | null) {
+  const documents = Array.isArray(detail?.documents) ? detail.documents : [];
+  const fieldMap = new Map<
+    string,
+    Array<{ value: any; documentId: any; documentName: string }>
+  >();
+
+  for (const doc of documents) {
+    const fields = doc?.extracted_fields || {};
+    for (const [key, rawValue] of Object.entries(fields)) {
+      const value = typeof rawValue === "string" ? rawValue.trim() : rawValue;
+      if (value == null || value === "") continue;
+
+      const arr = fieldMap.get(key) || [];
+      arr.push({
+        value,
+        documentId: doc?.id,
+        documentName:
+          doc?.name || doc?.original_filename || `Document #${doc?.id ?? "?"}`,
+      });
+      fieldMap.set(key, arr);
+    }
+  }
+
+  const conflicts: Array<{
+    field: string;
+    values: Array<{ value: any; documentId: any; documentName: string }>;
+  }> = [];
+
+  for (const [field, values] of fieldMap.entries()) {
+    const normalized = new Set(
+      values.map((x) => String(x.value).trim().toLowerCase()),
+    );
+    if (normalized.size > 1) {
+      conflicts.push({ field, values });
+    }
+  }
+
+  return conflicts;
+}
+
 export default function AcquisitionPane() {
   const [q, setQ] = React.useState("");
   const [queue, setQueue] = React.useState<QueueRow[]>([]);
@@ -431,7 +570,10 @@ export default function AcquisitionPane() {
     setImportingDoc(true);
     try {
       await api.post(`/acquisition/properties/${selectedId}/documents`, {
-        kind: docKind,
+        kind:
+          docKind ||
+          DOC_KIND_OPTIONS.find((x) => x.value === docKind)?.label ||
+          "Imported document",
         name:
           docName ||
           DOC_KIND_OPTIONS.find((x) => x.value === docKind)?.label ||
@@ -464,56 +606,56 @@ export default function AcquisitionPane() {
     loadDetail,
   ]);
 
-    const handlePreviewDocument = React.useCallback(
-      async (documentId: number, filename?: string) => {
-        if (!selectedId) return;
+  const handlePreviewDocument = React.useCallback(
+    async (documentId: number, filename?: string) => {
+      if (!selectedId) return;
 
-        try {
-          const blob = await api.get<Blob>(
-            `/acquisition/properties/${selectedId}/documents/${documentId}/preview`,
-            { responseType: "blob" },
-          );
+      try {
+        const blob = await api.get<Blob>(
+          `/acquisition/properties/${selectedId}/documents/${documentId}/preview`,
+          { responseType: "blob" },
+        );
 
-          const url = URL.createObjectURL(blob);
-          window.open(url, "_blank", "noopener,noreferrer");
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank", "noopener,noreferrer");
 
-          setTimeout(() => {
-            URL.revokeObjectURL(url);
-          }, 60_000);
-        } catch (e: any) {
-          setDetailErr(formatApiError(e, "Failed to preview document."));
-        }
-      },
-      [selectedId],
-    );
+        setTimeout(() => {
+          URL.revokeObjectURL(url);
+        }, 60_000);
+      } catch (e: any) {
+        setDetailErr(formatApiError(e, "Failed to preview document."));
+      }
+    },
+    [selectedId],
+  );
 
-    const handleDownloadDocument = React.useCallback(
-      async (documentId: number, filename?: string) => {
-        if (!selectedId) return;
+  const handleDownloadDocument = React.useCallback(
+    async (documentId: number, filename?: string) => {
+      if (!selectedId) return;
 
-        try {
-          const blob = await api.get<Blob>(
-            `/acquisition/properties/${selectedId}/documents/${documentId}/download`,
-            { responseType: "blob" },
-          );
+      try {
+        const blob = await api.get<Blob>(
+          `/acquisition/properties/${selectedId}/documents/${documentId}/download`,
+          { responseType: "blob" },
+        );
 
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = filename || "document";
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename || "document";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
 
-          setTimeout(() => {
-            URL.revokeObjectURL(url);
-          }, 60_000);
-        } catch (e: any) {
-          setDetailErr(formatApiError(e, "Failed to download document."));
-        }
-      },
-      [selectedId],
-    );
+        setTimeout(() => {
+          URL.revokeObjectURL(url);
+        }, 60_000);
+      } catch (e: any) {
+        setDetailErr(formatApiError(e, "Failed to download document."));
+      }
+    },
+    [selectedId],
+  );
 
   const handleUploadFile = React.useCallback(async () => {
     if (!selectedId) return;
@@ -575,17 +717,28 @@ export default function AcquisitionPane() {
   const contacts = Array.isArray(acquisition?.contacts)
     ? acquisition.contacts
     : [];
-  const milestones = Array.isArray(acquisition?.milestones)
-    ? acquisition.milestones
-    : [];
   const documents = Array.isArray(detail?.documents) ? detail.documents : [];
   const requiredDocuments = Array.isArray(detail?.required_documents)
     ? detail.required_documents
     : [];
 
+  const waitingOn = textValue(acquisition?.waiting_on, "Nothing assigned");
+  const waitingCategory = waitingOnCategory(acquisition?.waiting_on);
+  const urgency = urgencyLabel(
+    detail?.summary?.days_to_close,
+    acquisition?.waiting_on,
+  );
+  const missingDocs = requiredDocsMissing(detail);
+  const conflicts = collectConflicts(detail);
+  const readiness = closeReadiness(detail);
+
   return (
     <PageShell>
-      <PageHero title="Acquisition Command Center" />
+      <PageHero
+        eyebrow="Pane 2"
+        title="Acquisition Command Center"
+        subtitle="Operate the file. Surface waiting owner, urgency, missing documents, parsed disagreements, and close readiness."
+      />
 
       <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
         <Surface className="p-4 xl:sticky xl:top-4 xl:h-[calc(100vh-160px)] xl:overflow-hidden">
@@ -732,34 +885,87 @@ export default function AcquisitionPane() {
                   />
                 </div>
 
-                <div className="mt-5 grid gap-3 xl:grid-cols-3">
-                  <div className="rounded-3xl border border-app bg-app px-4 py-4">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                      Waiting on
+                <div className="mt-5">
+                  <div className="grid gap-4 xl:grid-cols-4">
+                    <div className="rounded-3xl border border-app bg-app-panel p-5">
+                      <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        <Users className="h-3.5 w-3.5" />
+                        Waiting on
+                      </div>
+                      <div className="mt-3 text-lg font-semibold text-app-0">
+                        {waitingOn}
+                      </div>
+                      <div className="mt-2">
+                        <span className="oh-pill">
+                          {waitingCategory.toLowerCase()}
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-2 text-base font-medium text-app-1">
-                      {textValue(acquisition?.waiting_on)}
-                    </div>
-                  </div>
 
-                  <div className="rounded-3xl border border-app bg-app px-4 py-4">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                      Next step
+                    <div className="rounded-3xl border border-app bg-app-panel p-5">
+                      <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        <Clock3 className="h-3.5 w-3.5" />
+                        Close timing
+                      </div>
+                      <div
+                        className={`mt-3 text-lg font-semibold ${
+                          Number.isFinite(
+                            Number(detail?.summary?.days_to_close),
+                          )
+                            ? toneForDays(detail?.summary?.days_to_close)
+                            : "text-app-0"
+                        }`}
+                      >
+                        {Number.isFinite(Number(detail?.summary?.days_to_close))
+                          ? Number(detail!.summary.days_to_close) < 0
+                            ? `${Math.abs(Number(detail!.summary.days_to_close))} days overdue`
+                            : `${Number(detail!.summary.days_to_close)} days remaining`
+                          : "No target close date"}
+                      </div>
+                      <div className="mt-2">
+                        <span className={urgencyPillClass(urgency)}>
+                          {urgency}
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-2 text-base font-medium text-app-1">
-                      {textValue(acquisition?.next_step)}
-                    </div>
-                  </div>
 
-                  <div className="rounded-3xl border border-app bg-app px-4 py-4">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                      Target close
+                    <div className="rounded-3xl border border-app bg-app-panel p-5">
+                      <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        <ShieldAlert className="h-3.5 w-3.5" />
+                        Next required document
+                      </div>
+                      <div className="mt-3 text-lg font-semibold text-app-0">
+                        {nextRequiredDocument(detail)}
+                      </div>
+                      <div className="mt-2">
+                        <span className="oh-pill">
+                          {missingDocs.length} missing groups
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-2 text-base font-medium text-app-1">
-                      {formatDate(
-                        acquisition?.target_close_date ||
-                          acquisition?.closing_date,
-                      )}
+
+                    <div className="rounded-3xl border border-app bg-app-panel p-5">
+                      <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Estimated close readiness
+                      </div>
+                      <div
+                        className={`mt-3 text-lg font-semibold ${readinessTone(readiness)}`}
+                      >
+                        {readiness}%
+                      </div>
+                      <div className="mt-2">
+                        <span
+                          className={
+                            conflicts.length
+                              ? "oh-pill oh-pill-warn"
+                              : "oh-pill"
+                          }
+                        >
+                          {conflicts.length} parsed disagreement
+                          {conflicts.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -842,7 +1048,6 @@ export default function AcquisitionPane() {
                         value={editPurchasePrice}
                         onChange={(e) => setEditPurchasePrice(e.target.value)}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
-                        placeholder="145000"
                       />
                     </label>
 
@@ -854,7 +1059,6 @@ export default function AcquisitionPane() {
                         value={editLoanAmount}
                         onChange={(e) => setEditLoanAmount(e.target.value)}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
-                        placeholder="108750"
                       />
                     </label>
 
@@ -866,7 +1070,6 @@ export default function AcquisitionPane() {
                         value={editCashToClose}
                         onChange={(e) => setEditCashToClose(e.target.value)}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
-                        placeholder="17000"
                       />
                     </label>
 
@@ -878,7 +1081,6 @@ export default function AcquisitionPane() {
                         value={editClosingCosts}
                         onChange={(e) => setEditClosingCosts(e.target.value)}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
-                        placeholder="5200"
                       />
                     </label>
 
@@ -931,44 +1133,42 @@ export default function AcquisitionPane() {
 
                   <Surface className="p-5">
                     <div className="text-sm font-semibold text-app-0">
-                      Agent / contact panel
+                      Parsed field disagreements
                     </div>
                     <div className="mt-1 text-xs text-app-4">
-                      Clean role-based visibility for who is involved.
+                      Values extracted from multiple documents that do not
+                      match.
                     </div>
 
-                    {contacts.length === 0 ? (
+                    {!conflicts.length ? (
                       <div className="mt-4 rounded-2xl border border-app bg-app px-4 py-4 text-sm text-app-4">
-                        No structured contacts saved yet. Add lender, title,
-                        agent, attorney, or inspector in a later pass through
-                        contacts JSON.
+                        No parsed conflicts found.
                       </div>
                     ) : (
                       <div className="mt-4 space-y-3">
-                        {contacts.map((c: any, idx: number) => (
+                        {conflicts.map((conflict, idx) => (
                           <div
-                            key={idx}
+                            key={`${conflict.field}-${idx}`}
                             className="rounded-2xl border border-app bg-app px-4 py-4"
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="text-sm font-medium text-app-0">
-                                  {textValue(c?.name)}
-                                </div>
-                                <div className="mt-1 text-xs uppercase tracking-[0.16em] text-app-4">
-                                  {textValue(c?.role)}
-                                </div>
-                              </div>
-                              <User2 className="h-4 w-4 text-app-4" />
+                            <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                              <GitCompareArrows className="h-4 w-4" />
+                              {conflict.field.replace(/_/g, " ")}
                             </div>
-                            <div className="mt-3 space-y-1 text-sm text-app-3">
-                              {c?.email ? <div>{c.email}</div> : null}
-                              {c?.phone ? (
-                                <div className="inline-flex items-center gap-1">
-                                  <Phone className="h-3.5 w-3.5" />
-                                  {c.phone}
+                            <div className="mt-3 space-y-2">
+                              {conflict.values.map((value, valueIdx) => (
+                                <div
+                                  key={`${value.documentId}-${valueIdx}`}
+                                  className="rounded-xl border border-app bg-app-panel px-3 py-2 text-sm text-app-2"
+                                >
+                                  <div className="font-medium text-app-0">
+                                    {String(value.value)}
+                                  </div>
+                                  <div className="mt-1 text-xs text-app-4">
+                                    {value.documentName}
+                                  </div>
                                 </div>
-                              ) : null}
+                              ))}
                             </div>
                           </div>
                         ))}
@@ -1031,28 +1231,12 @@ export default function AcquisitionPane() {
                         ref={fileInputRef}
                         type="file"
                         accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"
-                        onChange={(e) => {
-                          const next = e.target.files?.[0] || null;
-                          setUploadFile(next);
-                          setUploadErr(validateUploadFile(next));
-                        }}
-                        className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none file:mr-3 file:rounded-xl file:border-0 file:bg-app-panel file:px-3 file:py-2 file:text-sm file:text-app-0"
+                        onChange={(e) =>
+                          setUploadFile(e.target.files?.[0] || null)
+                        }
+                        className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
                       />
                     </label>
-
-                    {uploadFile ? (
-                      <div className="rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm text-app-3">
-                        <div className="flex items-center gap-2">
-                          <Paperclip className="h-4 w-4" />
-                          <span className="font-medium text-app-1">
-                            {uploadFile.name}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-xs text-app-4">
-                          {(uploadFile.size / (1024 * 1024)).toFixed(2)} MB
-                        </div>
-                      </div>
-                    ) : null}
 
                     <label className="block">
                       <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
@@ -1063,46 +1247,40 @@ export default function AcquisitionPane() {
                         onChange={(e) => setUploadNotes(e.target.value)}
                         rows={3}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
-                        placeholder="Optional operator notes…"
+                        placeholder="Optional upload notes"
                       />
                     </label>
 
                     {uploadErr ? (
-                      <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                        {uploadErr}
-                      </div>
+                      <div className="text-xs text-red-300">{uploadErr}</div>
                     ) : null}
 
                     <button
+                      type="button"
                       onClick={handleUploadFile}
                       disabled={uploadingFile}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 disabled:opacity-60"
+                      className="oh-btn oh-btn-secondary"
                     >
                       {uploadingFile ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Uploading…
-                        </>
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <>
-                          <Upload className="h-4 w-4" />
-                          Upload file
-                        </>
+                        <Paperclip className="h-4 w-4" />
                       )}
+                      Upload supporting file
                     </button>
                   </div>
                 </Surface>
 
                 <Surface className="p-5">
                   <div className="flex items-center gap-2">
-                    <Upload className="h-4 w-4 text-app-4" />
+                    <FileText className="h-4 w-4 text-app-4" />
                     <div className="text-sm font-semibold text-app-0">
-                      Import extracted text / URL
+                      Import external document
                     </div>
                   </div>
                   <div className="mt-1 text-xs text-app-4">
-                    Use this when you already have OCR text, a doc link, or
-                    parsed contract text.
+                    Register a document by URL or extracted text when it
+                    originated outside the upload flow.
                   </div>
 
                   <div className="mt-5 grid gap-4">
@@ -1125,13 +1303,12 @@ export default function AcquisitionPane() {
 
                     <label className="block">
                       <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
-                        Document name
+                        Name
                       </div>
                       <input
                         value={docName}
                         onChange={(e) => setDocName(e.target.value)}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
-                        placeholder="Signed purchase agreement"
                       />
                     </label>
 
@@ -1143,7 +1320,6 @@ export default function AcquisitionPane() {
                         value={docSourceUrl}
                         onChange={(e) => setDocSourceUrl(e.target.value)}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
-                        placeholder="https://…"
                       />
                     </label>
 
@@ -1154,9 +1330,8 @@ export default function AcquisitionPane() {
                       <textarea
                         value={docExtractedText}
                         onChange={(e) => setDocExtractedText(e.target.value)}
-                        rows={8}
+                        rows={4}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
-                        placeholder="Paste OCR or extracted text from the document here…"
                       />
                     </label>
 
@@ -1169,26 +1344,21 @@ export default function AcquisitionPane() {
                         onChange={(e) => setDocNotes(e.target.value)}
                         rows={3}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
-                        placeholder="Optional notes for operator context…"
                       />
                     </label>
 
                     <button
+                      type="button"
                       onClick={handleImportDoc}
                       disabled={importingDoc}
-                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 disabled:opacity-60"
+                      className="oh-btn oh-btn-secondary"
                     >
                       {importingDoc ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Importing…
-                        </>
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <>
-                          <Upload className="h-4 w-4" />
-                          Import document
-                        </>
+                        <Upload className="h-4 w-4" />
                       )}
+                      Import document
                     </button>
                   </div>
                 </Surface>
@@ -1196,191 +1366,128 @@ export default function AcquisitionPane() {
 
               <Surface className="p-5">
                 <div className="text-sm font-semibold text-app-0">
-                  Imported documents + extracted values
+                  Document stack
                 </div>
                 <div className="mt-1 text-xs text-app-4">
-                  This is the operator-facing file stack for the active
-                  acquisition.
+                  Review current documents, preview them, and download copies.
                 </div>
 
-                {documents.length === 0 ? (
-                  <div className="mt-4 rounded-2xl border border-app bg-app px-4 py-6 text-sm text-app-4">
-                    No acquisition documents imported yet.
+                {!documents.length ? (
+                  <div className="mt-4 rounded-2xl border border-app bg-app px-4 py-4 text-sm text-app-4">
+                    No documents attached yet.
                   </div>
                 ) : (
                   <div className="mt-4 space-y-3">
-                    {documents.map((doc) => {
-                      const extractedFields =
-                        doc?.extracted_fields ||
-                        doc?.extracted_fields_json ||
-                        {};
-                      return (
-                        <div
-                          key={doc.id}
-                          className="rounded-3xl border border-app bg-app px-4 py-4"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium text-app-0">
-                                {textValue(doc?.name)}
-                              </div>
-                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-app-4">
-                                <span className="inline-flex items-center gap-1">
-                                  <FileText className="h-3.5 w-3.5" />
-                                  {textValue(doc?.kind)}
+                    {documents.map((doc: any) => (
+                      <div
+                        key={doc.id}
+                        className="rounded-2xl border border-app bg-app px-4 py-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium text-app-0">
+                              {textValue(doc?.name)}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-app-4">
+                              <span>{textValue(doc?.kind)}</span>
+                              {doc?.original_filename ? (
+                                <span>• {doc.original_filename}</span>
+                              ) : null}
+                              {doc?.file_size_bytes ? (
+                                <span>
+                                  •{" "}
+                                  {(Number(doc.file_size_bytes) / 1024).toFixed(
+                                    1,
+                                  )}{" "}
+                                  KB
                                 </span>
-                                {doc?.original_filename ? (
-                                  <span>• {doc.original_filename}</span>
-                                ) : null}
-                                {doc?.file_size_bytes ? (
-                                  <span>
-                                    •{" "}
-                                    {(
-                                      Number(doc.file_size_bytes) / 1024
-                                    ).toFixed(1)}{" "}
-                                    KB
-                                  </span>
-                                ) : null}
-                              </div>
-
-                              {doc?.scan_status ||
-                              doc?.parse_status ||
-                              doc?.upload_status ? (
-                                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-app-4">
-                                  {doc?.upload_status ? (
-                                    <span className="oh-pill">
-                                      Upload {doc.upload_status}
-                                    </span>
-                                  ) : null}
-                                  {doc?.scan_status ? (
-                                    <span className="oh-pill">
-                                      Scan {doc.scan_status}
-                                    </span>
-                                  ) : null}
-                                  {doc?.parse_status ? (
-                                    <span className="oh-pill">
-                                      Parse {doc.parse_status}
-                                    </span>
-                                  ) : null}
-                                </div>
+                              ) : null}
+                              {doc?.parse_status ? (
+                                <span>• parse {doc.parse_status}</span>
+                              ) : null}
+                              {doc?.scan_status ? (
+                                <span>• scan {doc.scan_status}</span>
                               ) : null}
                             </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                onClick={() =>
-                                  handlePreviewDocument(
-                                    Number(doc.id),
-                                    doc.original_filename || doc.name,
-                                  )
-                                }
-                                className="inline-flex items-center gap-2 rounded-xl border border-app bg-app-panel px-3 py-2 text-xs text-app-0"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                                Preview
-                              </button>
-
-                              <button
-                                onClick={() =>
-                                  handleDownloadDocument(
-                                    Number(doc.id),
-                                    doc.original_filename || doc.name,
-                                  )
-                                }
-                                className="inline-flex items-center gap-2 rounded-xl border border-app bg-app-panel px-3 py-2 text-xs text-app-0"
-                              >
-                                <Download className="h-3.5 w-3.5" />
-                                Download
-                              </button>
-
-                              <span className="oh-pill">
-                                {textValue(
-                                  doc?.upload_status || doc?.status,
-                                  "received",
-                                )}
-                              </span>
-                            </div>
                           </div>
 
-                          {doc?.preview_text ? (
-                            <div className="mt-3 rounded-2xl border border-app-panel bg-app-panel px-3 py-3 text-xs text-app-3">
-                              {String(doc.preview_text).slice(0, 600)}
-                              {String(doc.preview_text).length > 600 ? "…" : ""}
-                            </div>
-                          ) : null}
-
-                          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                            <div className="rounded-2xl border border-app-panel bg-app-panel px-3 py-2 text-xs text-app-3">
-                              Purchase price:{" "}
-                              {money(extractedFields?.purchase_price)}
-                            </div>
-                            <div className="rounded-2xl border border-app-panel bg-app-panel px-3 py-2 text-xs text-app-3">
-                              Loan amount: {money(extractedFields?.loan_amount)}
-                            </div>
-                            <div className="rounded-2xl border border-app-panel bg-app-panel px-3 py-2 text-xs text-app-3">
-                              Cash to close:{" "}
-                              {money(extractedFields?.cash_to_close)}
-                            </div>
-                            <div className="rounded-2xl border border-app-panel bg-app-panel px-3 py-2 text-xs text-app-3">
-                              Closing costs:{" "}
-                              {money(extractedFields?.closing_costs)}
-                            </div>
-                            <div className="rounded-2xl border border-app-panel bg-app-panel px-3 py-2 text-xs text-app-3">
-                              Contract date:{" "}
-                              {formatDate(extractedFields?.contract_date)}
-                            </div>
-                            <div className="rounded-2xl border border-app-panel bg-app-panel px-3 py-2 text-xs text-app-3">
-                              Closing date:{" "}
-                              {formatDate(extractedFields?.closing_date)}
-                            </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handlePreviewDocument(Number(doc.id), doc?.name)
+                              }
+                              className="oh-btn oh-btn-secondary"
+                            >
+                              <Eye className="h-4 w-4" />
+                              Preview
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDownloadDocument(
+                                  Number(doc.id),
+                                  doc?.name,
+                                )
+                              }
+                              className="oh-btn oh-btn-secondary"
+                            >
+                              <Download className="h-4 w-4" />
+                              Download
+                            </button>
                           </div>
-
-                          {doc?.notes ? (
-                            <div className="mt-3 text-sm text-app-4">
-                              {doc.notes}
-                            </div>
-                          ) : null}
                         </div>
-                      );
-                    })}
+
+                        {doc?.preview_text ? (
+                          <div className="mt-3 rounded-2xl border border-app bg-app-panel px-3 py-3 text-xs text-app-3">
+                            {String(doc.preview_text).slice(0, 280)}
+                            {String(doc.preview_text).length > 280 ? "…" : ""}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
                   </div>
                 )}
               </Surface>
 
               <Surface className="p-5">
-                <div className="flex items-center gap-2">
-                  <CalendarClock className="h-4 w-4 text-app-4" />
-                  <div className="text-sm font-semibold text-app-0">
-                    Timeline / milestone area
-                  </div>
+                <div className="text-sm font-semibold text-app-0">
+                  Contact panel
                 </div>
                 <div className="mt-1 text-xs text-app-4">
-                  Simple, non-busy close-tracking view.
+                  Clean role-based visibility for who is involved.
                 </div>
 
-                {milestones.length === 0 ? (
-                  <div className="mt-4 rounded-2xl border border-app bg-app px-4 py-5 text-sm text-app-4">
-                    No milestones saved yet. You can later wire milestone
-                    creation into the acquisition record JSON or a dedicated
-                    milestone table.
+                {contacts.length === 0 ? (
+                  <div className="mt-4 rounded-2xl border border-app bg-app px-4 py-4 text-sm text-app-4">
+                    No structured contacts saved yet.
                   </div>
                 ) : (
-                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    {milestones.map((m: any, idx: number) => (
+                  <div className="mt-4 space-y-3">
+                    {contacts.map((c: any, idx: number) => (
                       <div
                         key={idx}
-                        className="rounded-3xl border border-app bg-app px-4 py-4"
+                        className="rounded-2xl border border-app bg-app px-4 py-4"
                       >
-                        <div className="flex items-center gap-2 text-sm font-medium text-app-0">
-                          {m?.done ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-                          ) : (
-                            <Clock3 className="h-4 w-4 text-amber-300" />
-                          )}
-                          {textValue(m?.label)}
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium text-app-0">
+                              {textValue(c?.name)}
+                            </div>
+                            <div className="mt-1 text-xs uppercase tracking-[0.16em] text-app-4">
+                              {textValue(c?.role)}
+                            </div>
+                          </div>
+                          <User2 className="h-4 w-4 text-app-4" />
                         </div>
-                        <div className="mt-2 text-xs text-app-4">
-                          {formatDate(m?.date)}
+                        <div className="mt-3 space-y-1 text-sm text-app-3">
+                          {c?.email ? <div>{c.email}</div> : null}
+                          {c?.phone ? (
+                            <div className="inline-flex items-center gap-1">
+                              <Phone className="h-3.5 w-3.5" />
+                              {c.phone}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     ))}

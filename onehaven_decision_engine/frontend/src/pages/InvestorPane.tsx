@@ -19,6 +19,12 @@ import {
   ChevronRight,
   BriefcaseBusiness,
   GitBranch,
+  Clock3,
+  AlertTriangle,
+  FileWarning,
+  CheckCircle2,
+  Users,
+  Building2,
 } from "lucide-react";
 
 import PageHero from "../components/PageHero";
@@ -30,11 +36,20 @@ import { api, type SupportedMarket } from "../lib/api";
 
 type Row = any;
 type MarketRow = SupportedMarket;
-type AcquisitionQueueRow = { property_id: number };
+type AcquisitionQueueRow = any;
 
 type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
 type FinancingFilter = "ALL" | "CASH" | "DSCR" | "UNKNOWN";
 type CompletenessFilter = "ALL" | "COMPLETE" | "PARTIAL" | "MISSING";
+type AcquisitionWaitFilter =
+  | "ALL"
+  | "LENDER"
+  | "TITLE"
+  | "OPERATOR"
+  | "SELLER"
+  | "DOCUMENT";
+type AcquisitionStatusFilter = "ALL" | "OVERDUE" | "DUE_SOON" | "BLOCKED";
+
 type SortKey =
   | "BEST_CASHFLOW"
   | "LOWEST_PRICE"
@@ -425,9 +440,7 @@ function buildPagination(currentPage: number, totalPages: number) {
 
   const pages: (number | string)[] = [1];
 
-  if (currentPage > 3) {
-    pages.push("...");
-  }
+  if (currentPage > 3) pages.push("...");
 
   const start = Math.max(2, currentPage - 1);
   const end = Math.min(totalPages - 1, currentPage + 1);
@@ -436,26 +449,153 @@ function buildPagination(currentPage: number, totalPages: number) {
     pages.push(i);
   }
 
-  if (currentPage < totalPages - 2) {
-    pages.push("...");
-  }
+  if (currentPage < totalPages - 2) pages.push("...");
 
   pages.push(totalPages);
   return pages;
 }
 
+function waitingOnLabel(raw: any) {
+  const text = String(raw || "").trim();
+  return text || "Unassigned";
+}
+
+function waitingOnCategory(
+  raw: any,
+): "LENDER" | "TITLE" | "OPERATOR" | "SELLER" | "DOCUMENT" | "OTHER" {
+  const text = String(raw || "")
+    .trim()
+    .toLowerCase();
+
+  if (!text) return "OTHER";
+  if (
+    text.includes("lender") ||
+    text.includes("loan") ||
+    text.includes("finance")
+  ) {
+    return "LENDER";
+  }
+  if (text.includes("title") || text.includes("escrow")) {
+    return "TITLE";
+  }
+  if (text.includes("seller")) {
+    return "SELLER";
+  }
+  if (
+    text.includes("document") ||
+    text.includes("doc") ||
+    text.includes("agreement") ||
+    text.includes("inspection") ||
+    text.includes("binder")
+  ) {
+    return "DOCUMENT";
+  }
+  if (
+    text.includes("operator") ||
+    text.includes("internal") ||
+    text.includes("review") ||
+    text.includes("team")
+  ) {
+    return "OPERATOR";
+  }
+  return "OTHER";
+}
+
+function queueUrgency(row: any): "OVERDUE" | "DUE_SOON" | "BLOCKED" | "NORMAL" {
+  const days = numberOrNull(row?.days_to_close);
+  const waiting = String(row?.waiting_on || "").toLowerCase();
+  const status = String(row?.status || "").toLowerCase();
+  const nextStep = String(row?.next_step || "").toLowerCase();
+
+  if (
+    status.includes("blocked") ||
+    waiting.includes("blocked") ||
+    nextStep.includes("blocked")
+  ) {
+    return "BLOCKED";
+  }
+  if (days != null && days < 0) return "OVERDUE";
+  if (days != null && days <= 7) return "DUE_SOON";
+  return "NORMAL";
+}
+
+function urgencyPillClass(v: ReturnType<typeof queueUrgency>) {
+  if (v === "OVERDUE") return "oh-pill oh-pill-bad";
+  if (v === "DUE_SOON") return "oh-pill oh-pill-warn";
+  if (v === "BLOCKED") return "oh-pill oh-pill-bad";
+  return "oh-pill oh-pill-good";
+}
+
+function queueReadinessScore(row: any) {
+  let score = 0;
+
+  const documentCount = numberOrNull(row?.document_count) ?? 0;
+  const days = numberOrNull(row?.days_to_close);
+  const urgency = queueUrgency(row);
+  const waiting = waitingOnCategory(row?.waiting_on);
+  const status = String(row?.status || "").toLowerCase();
+
+  score += Math.min(documentCount * 12, 48);
+
+  if (status.includes("under_contract")) score += 18;
+  if (status.includes("closing")) score += 22;
+  if (status.includes("review")) score += 8;
+
+  if (days != null) {
+    if (days > 14) score += 18;
+    else if (days >= 7) score += 12;
+    else if (days >= 0) score += 6;
+    else score -= 10;
+  }
+
+  if (urgency === "BLOCKED") score -= 20;
+  if (urgency === "OVERDUE") score -= 18;
+
+  if (waiting === "DOCUMENT") score -= 8;
+  if (waiting === "LENDER") score -= 5;
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function readinessTone(score: number) {
+  if (score >= 75) return "text-emerald-300";
+  if (score >= 45) return "text-amber-300";
+  return "text-red-300";
+}
+
+function nextRequiredDocument(row: any) {
+  const text = String(row?.waiting_on || "").toLowerCase();
+  if (text.includes("inspection")) return "Inspection report";
+  if (text.includes("insurance")) return "Insurance binder";
+  if (text.includes("title")) return "Title / escrow";
+  if (text.includes("loan") || text.includes("lender")) return "Loan documents";
+  if (text.includes("closing")) return "Closing disclosure";
+  if (text.includes("purchase") || text.includes("agreement")) {
+    return "Purchase agreement";
+  }
+  if (text.includes("document") || text.includes("doc")) {
+    return "Required document";
+  }
+  return "Review document stack";
+}
+
 export default function InvestorPane() {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [markets, setMarkets] = React.useState<MarketRow[]>([]);
+  const [acquisitionQueue, setAcquisitionQueue] = React.useState<
+    AcquisitionQueueRow[]
+  >([]);
   const [acquisitionIds, setAcquisitionIds] = React.useState<Set<number>>(
     new Set(),
   );
 
   const [inventoryErr, setInventoryErr] = React.useState<string | null>(null);
   const [marketsErr, setMarketsErr] = React.useState<string | null>(null);
+  const [queueErr, setQueueErr] = React.useState<string | null>(null);
 
   const [inventoryLoading, setInventoryLoading] = React.useState(true);
   const [marketsLoading, setMarketsLoading] = React.useState(false);
+  const [queueLoading, setQueueLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
 
   const [q, setQ] = React.useState("");
@@ -469,34 +609,24 @@ export default function InvestorPane() {
   const [selectedCity, setSelectedCity] = React.useState<string>("ALL");
   const [currentPage, setCurrentPage] = React.useState(1);
 
+  const [queueSearch, setQueueSearch] = React.useState("");
+  const [waitFilter, setWaitFilter] =
+    React.useState<AcquisitionWaitFilter>("ALL");
+  const [queueStatusFilter, setQueueStatusFilter] =
+    React.useState<AcquisitionStatusFilter>("ALL");
+
   const loadInventory = React.useCallback(async () => {
     setInventoryLoading(true);
     setInventoryErr(null);
 
     try {
-      const [propertiesRes, acquisitionRes] = await Promise.all([
-        api.get<any>("/properties", {
-          params: { limit: INITIAL_LIMIT },
-        }),
-        api.get<any>("/acquisition/queue", {
-          params: { limit: 1000 },
-        }),
-      ]);
+      const propertiesRes = await api.get<any>("/properties", {
+        params: { limit: INITIAL_LIMIT },
+      });
 
       const propertyItems =
         propertiesRes?.items || propertiesRes?.rows || propertiesRes || [];
       const normalized = Array.isArray(propertyItems) ? propertyItems : [];
-
-      const acquisitionItems = Array.isArray(acquisitionRes?.items)
-        ? acquisitionRes.items
-        : [];
-      const acquisitionPropertyIds = new Set<number>(
-        acquisitionItems
-          .map((x: AcquisitionQueueRow) => Number(x?.property_id))
-          .filter((n: number) => Number.isFinite(n) && n > 0),
-      );
-
-      setAcquisitionIds(acquisitionPropertyIds);
       setRows(normalized);
     } catch (e: any) {
       setInventoryErr(formatApiError(e, "Failed to load investor inventory."));
@@ -520,11 +650,38 @@ export default function InvestorPane() {
     }
   }, []);
 
+  const loadQueue = React.useCallback(async () => {
+    setQueueLoading(true);
+    setQueueErr(null);
+
+    try {
+      const queueRes = await api.get<any>("/acquisition/queue", {
+        params: { limit: 1000 },
+      });
+
+      const items = Array.isArray(queueRes?.items) ? queueRes.items : [];
+      setAcquisitionQueue(items);
+
+      const propertyIds = new Set<number>(
+        items
+          .map((x: any) => Number(x?.property_id))
+          .filter((n: number) => Number.isFinite(n) && n > 0),
+      );
+      setAcquisitionIds(propertyIds);
+    } catch (e: any) {
+      setQueueErr(formatApiError(e, "Failed to load acquisition queue."));
+      setAcquisitionQueue([]);
+      setAcquisitionIds(new Set());
+    } finally {
+      setQueueLoading(false);
+    }
+  }, []);
+
   const load = React.useCallback(async () => {
     setRefreshing(true);
-    await Promise.allSettled([loadInventory(), loadMarkets()]);
+    await Promise.allSettled([loadInventory(), loadMarkets(), loadQueue()]);
     setRefreshing(false);
-  }, [loadInventory, loadMarkets]);
+  }, [loadInventory, loadMarkets, loadQueue]);
 
   React.useEffect(() => {
     load();
@@ -599,6 +756,38 @@ export default function InvestorPane() {
     sort,
   ]);
 
+  const filteredQueue = React.useMemo(() => {
+    const normalized = String(queueSearch || "")
+      .trim()
+      .toLowerCase();
+
+    return acquisitionQueue.filter((row) => {
+      const wait = waitingOnCategory(row?.waiting_on);
+      const urgency = queueUrgency(row);
+      const haystack = [
+        row?.address,
+        row?.city,
+        row?.state,
+        row?.zip,
+        row?.county,
+        row?.status,
+        row?.waiting_on,
+        row?.next_step,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      if (waitFilter !== "ALL" && wait !== waitFilter) return false;
+      if (queueStatusFilter !== "ALL" && urgency !== queueStatusFilter) {
+        return false;
+      }
+      if (normalized && !haystack.includes(normalized)) return false;
+
+      return true;
+    });
+  }, [acquisitionQueue, queueSearch, waitFilter, queueStatusFilter]);
+
   React.useEffect(() => {
     setCurrentPage(1);
   }, [deferredQ, selectedCity, decision, financing, completeness, sort]);
@@ -631,10 +820,12 @@ export default function InvestorPane() {
     () => baseRows.filter((r) => inferCompleteness(r) === "COMPLETE").length,
     [baseRows],
   );
+
   const positiveCashflowCount = React.useMemo(
     () => baseRows.filter((r) => (inferCashflow(r) ?? 0) > 0).length,
     [baseRows],
   );
+
   const avgCashflow = React.useMemo(() => {
     const values = baseRows
       .map((r) => inferCashflow(r))
@@ -643,13 +834,36 @@ export default function InvestorPane() {
     return values.reduce((sum, v) => sum + v, 0) / values.length;
   }, [baseRows]);
 
+  const overdueCount = React.useMemo(
+    () => acquisitionQueue.filter((r) => queueUrgency(r) === "OVERDUE").length,
+    [acquisitionQueue],
+  );
+
+  const dueSoonCount = React.useMemo(
+    () => acquisitionQueue.filter((r) => queueUrgency(r) === "DUE_SOON").length,
+    [acquisitionQueue],
+  );
+
+  const blockedCount = React.useMemo(
+    () => acquisitionQueue.filter((r) => queueUrgency(r) === "BLOCKED").length,
+    [acquisitionQueue],
+  );
+
+  const lenderWaitCount = React.useMemo(
+    () =>
+      acquisitionQueue.filter(
+        (r) => waitingOnCategory(r?.waiting_on) === "LENDER",
+      ).length,
+    [acquisitionQueue],
+  );
+
   return (
     <PageShell>
       <div className="space-y-6">
         <PageHero
           eyebrow="Pane 1"
           title="Investor pane"
-          subtitle="This is the lifecycle start. Discover, rank, filter, and open properties that should move into acquisition next."
+          subtitle="Discover properties, move strong candidates into acquisition, and monitor what the active deal queue is still waiting on."
           actions={
             <>
               <button onClick={load} className="oh-btn oh-btn-secondary">
@@ -702,8 +916,52 @@ export default function InvestorPane() {
         </div>
 
         <Surface
+          title="Acquisition pressure"
+          subtitle="This is the operational handoff view: what is in motion, what is blocked, and what needs action now."
+        >
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Clock3 className="h-3.5 w-3.5" />
+                Due soon
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-app-0">
+                {dueSoonCount}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Overdue
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-app-0">
+                {overdueCount}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <FileWarning className="h-3.5 w-3.5" />
+                Blocked
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-app-0">
+                {blockedCount}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Building2 className="h-3.5 w-3.5" />
+                Waiting on lender
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-app-0">
+                {lenderWaitCount}
+              </div>
+            </div>
+          </div>
+        </Surface>
+
+        <Surface
           title="Lifecycle handoff"
-          subtitle="This pane exists to decide which properties should move into acquisition."
+          subtitle="This pane exists to decide which properties should move into acquisition, while still keeping a small operational view of the active deal queue."
         >
           <div className="flex flex-wrap gap-2">
             <span className="oh-pill">
@@ -725,6 +983,204 @@ export default function InvestorPane() {
               Market list unavailable: {marketsErr}
             </div>
           ) : null}
+        </Surface>
+
+        <Surface
+          title="Acquisition queue preview"
+          subtitle="What are we waiting on right now?"
+        >
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Search className="h-3.5 w-3.5" />
+                Search queue
+              </div>
+              <input
+                value={queueSearch}
+                onChange={(e) => setQueueSearch(e.target.value)}
+                placeholder="address, city, waiting on..."
+                className="w-full bg-transparent text-sm text-app-0 outline-none"
+              />
+            </label>
+
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Users className="h-3.5 w-3.5" />
+                Waiting on
+              </div>
+              <select
+                value={waitFilter}
+                onChange={(e) =>
+                  setWaitFilter(e.target.value as AcquisitionWaitFilter)
+                }
+                className="w-full bg-transparent text-sm text-app-0 outline-none"
+              >
+                <option value="ALL">All owners</option>
+                <option value="LENDER">Lender</option>
+                <option value="TITLE">Title</option>
+                <option value="OPERATOR">Operator</option>
+                <option value="SELLER">Seller</option>
+                <option value="DOCUMENT">Document</option>
+              </select>
+            </label>
+
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Queue status
+              </div>
+              <select
+                value={queueStatusFilter}
+                onChange={(e) =>
+                  setQueueStatusFilter(
+                    e.target.value as AcquisitionStatusFilter,
+                  )
+                }
+                className="w-full bg-transparent text-sm text-app-0 outline-none"
+              >
+                <option value="ALL">All</option>
+                <option value="OVERDUE">Overdue</option>
+                <option value="DUE_SOON">Due soon</option>
+                <option value="BLOCKED">Blocked</option>
+              </select>
+            </label>
+
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Deals in queue
+              </div>
+              <div className="text-2xl font-semibold text-app-0">
+                {filteredQueue.length}
+              </div>
+            </div>
+          </div>
+
+          {queueLoading ? (
+            <div className="py-10 text-center text-app-4">Loading queue…</div>
+          ) : queueErr ? (
+            <EmptyState
+              compact
+              title="Queue unavailable"
+              description={queueErr}
+            />
+          ) : filteredQueue.length === 0 ? (
+            <EmptyState
+              compact
+              title="No active queue rows"
+              description="Nothing in acquisition matches the current queue filters."
+            />
+          ) : (
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              {filteredQueue.slice(0, 6).map((row, index) => {
+                const propertyId = Number(row?.property_id || 0) || null;
+                const urgency = queueUrgency(row);
+                const readiness = queueReadinessScore(row);
+                const waitOwner = waitingOnCategory(row?.waiting_on);
+
+                return (
+                  <div
+                    key={`${propertyId || "queue"}-${index}`}
+                    className="rounded-3xl border border-app bg-app-panel p-5"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-semibold text-app-0">
+                          {row?.address || "Unknown address"}
+                        </div>
+                        <div className="mt-1 text-sm text-app-4">
+                          {[row?.city, row?.state, row?.zip]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <span className={urgencyPillClass(urgency)}>
+                          {urgency === "DUE_SOON"
+                            ? "due soon"
+                            : urgency.toLowerCase()}
+                        </span>
+                        <span className="oh-pill">
+                          waiting on {waitOwner.toLowerCase()}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                          Waiting on
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-app-0">
+                          {waitingOnLabel(row?.waiting_on)}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                          Next required document
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-app-0">
+                          {nextRequiredDocument(row)}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                          Close readiness
+                        </div>
+                        <div
+                          className={`mt-2 text-sm font-semibold ${readinessTone(readiness)}`}
+                        >
+                          {readiness}%
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {row?.status ? (
+                        <span className="oh-pill">{row.status}</span>
+                      ) : null}
+                      {numberOrNull(row?.days_to_close) != null ? (
+                        <span className="oh-pill">
+                          {Number(row.days_to_close) < 0
+                            ? `${Math.abs(Number(row.days_to_close))}d overdue`
+                            : `${Number(row.days_to_close)}d to close`}
+                        </span>
+                      ) : null}
+                      {numberOrNull(row?.document_count) != null ? (
+                        <span className="oh-pill">
+                          {Number(row.document_count)} docs
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {row?.next_step ? (
+                      <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                          Next action
+                        </div>
+                        <div className="mt-2 text-sm text-app-1">
+                          {row.next_step}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {propertyId ? (
+                      <div className="mt-4">
+                        <Link
+                          to={`/properties/${propertyId}`}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0 transition hover:bg-app-panel"
+                        >
+                          Open property
+                          <ArrowUpRight className="h-4 w-4" />
+                        </Link>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Surface>
 
         <Surface
@@ -887,7 +1343,6 @@ export default function InvestorPane() {
                   const propertyId = resolvePropertyId(r);
                   const price = inferAskingPrice(r);
                   const rent = inferMarketRent(r);
-                  const mortgage = inferMortgage(r);
                   const cashflow = inferCashflow(r);
                   const dscr = inferDscr(r);
                   const completenessValue = inferCompleteness(r);

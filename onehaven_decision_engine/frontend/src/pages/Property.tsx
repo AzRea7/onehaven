@@ -6,6 +6,7 @@ import {
   BadgeDollarSign,
   CheckCircle2,
   ClipboardCheck,
+  Clock3,
   FileWarning,
   GitBranch,
   Home,
@@ -15,6 +16,11 @@ import {
   ShieldAlert,
   Users,
   Wallet,
+  Building2,
+  FileText,
+  TriangleAlert,
+  CheckCheck,
+  GitCompareArrows,
 } from "lucide-react";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
@@ -55,6 +61,29 @@ type PropertyPayload = {
     blocked_count?: number;
     open_failed_items?: number;
   };
+};
+
+type AcquisitionDetail = {
+  property?: any;
+  acquisition?: any;
+  documents?: any[];
+  required_documents?: Array<{
+    kind?: string;
+    label?: string;
+    present?: boolean;
+  }>;
+  summary?: {
+    days_to_close?: number | null;
+    document_count?: number;
+    required_documents_total?: number;
+    required_documents_present?: number;
+  };
+};
+
+type AcquisitionTagsPayload = {
+  property_id?: number;
+  tags?: string[];
+  rows?: Array<{ tag?: string }>;
 };
 
 function money(v?: number | null) {
@@ -103,9 +132,180 @@ function panePillClass(raw?: string) {
   return "oh-pill";
 }
 
+function waitingOnLabel(raw?: string) {
+  const value = String(raw || "").trim();
+  return value || "Nothing assigned";
+}
+
+function waitingOnCategory(
+  raw?: string,
+): "LENDER" | "TITLE" | "OPERATOR" | "SELLER" | "DOCUMENT" | "OTHER" {
+  const text = String(raw || "")
+    .trim()
+    .toLowerCase();
+
+  if (!text) return "OTHER";
+  if (
+    text.includes("lender") ||
+    text.includes("loan") ||
+    text.includes("finance")
+  ) {
+    return "LENDER";
+  }
+  if (text.includes("title") || text.includes("escrow")) {
+    return "TITLE";
+  }
+  if (text.includes("seller")) {
+    return "SELLER";
+  }
+  if (
+    text.includes("document") ||
+    text.includes("doc") ||
+    text.includes("agreement") ||
+    text.includes("inspection") ||
+    text.includes("binder")
+  ) {
+    return "DOCUMENT";
+  }
+  if (
+    text.includes("operator") ||
+    text.includes("internal") ||
+    text.includes("review") ||
+    text.includes("team")
+  ) {
+    return "OPERATOR";
+  }
+  return "OTHER";
+}
+
+function daysToCloseTone(v?: number | null) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "text-app-0";
+  if (n < 0) return "text-red-300";
+  if (n <= 7) return "text-amber-300";
+  return "text-emerald-300";
+}
+
+function urgencyLabel(days?: number | null, waitingOn?: string) {
+  const n = Number(days);
+  const text = String(waitingOn || "").toLowerCase();
+  if (text.includes("blocked")) return "blocked";
+  if (!Number.isFinite(n)) return "active";
+  if (n < 0) return "overdue";
+  if (n <= 7) return "due soon";
+  return "on track";
+}
+
+function urgencyPillClass(label: string) {
+  if (label === "overdue") return "oh-pill oh-pill-bad";
+  if (label === "due soon") return "oh-pill oh-pill-warn";
+  if (label === "blocked") return "oh-pill oh-pill-bad";
+  return "oh-pill oh-pill-good";
+}
+
+function requiredDocsMissing(detail: AcquisitionDetail | null) {
+  const rows = Array.isArray(detail?.required_documents)
+    ? detail.required_documents
+    : [];
+  return rows.filter((x) => !x?.present);
+}
+
+function nextRequiredDocument(detail: AcquisitionDetail | null) {
+  const missing = requiredDocsMissing(detail);
+  if (missing.length) return missing[0]?.label || "Required document";
+  return "No missing required documents";
+}
+
+function closeReadiness(detail: AcquisitionDetail | null) {
+  const total = Number(detail?.summary?.required_documents_total || 0);
+  const present = Number(detail?.summary?.required_documents_present || 0);
+  const days = Number(detail?.summary?.days_to_close);
+  const waiting = String(detail?.acquisition?.waiting_on || "").toLowerCase();
+
+  let score = 0;
+
+  if (total > 0) score += Math.round((present / total) * 55);
+  if (detail?.summary?.document_count) {
+    score += Math.min(Number(detail.summary.document_count) * 4, 20);
+  }
+  if (Number.isFinite(days)) {
+    if (days > 14) score += 20;
+    else if (days >= 7) score += 14;
+    else if (days >= 0) score += 8;
+    else score -= 12;
+  }
+  if (waiting.includes("document")) score -= 8;
+  if (waiting.includes("blocked")) score -= 15;
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function readinessTone(score: number) {
+  if (score >= 75) return "text-emerald-300";
+  if (score >= 45) return "text-amber-300";
+  return "text-red-300";
+}
+
+function collectConflicts(detail: AcquisitionDetail | null) {
+  const documents = Array.isArray(detail?.documents) ? detail.documents : [];
+  const fieldMap = new Map<
+    string,
+    Array<{ value: any; documentId: any; documentName: string }>
+  >();
+
+  for (const doc of documents) {
+    const fields = doc?.extracted_fields || {};
+    for (const [key, rawValue] of Object.entries(fields)) {
+      const value = typeof rawValue === "string" ? rawValue.trim() : rawValue;
+      if (value == null || value === "") continue;
+
+      const arr = fieldMap.get(key) || [];
+      arr.push({
+        value,
+        documentId: doc?.id,
+        documentName:
+          doc?.name || doc?.original_filename || `Document #${doc?.id ?? "?"}`,
+      });
+      fieldMap.set(key, arr);
+    }
+  }
+
+  const conflicts: Array<{
+    field: string;
+    values: Array<{ value: any; documentId: any; documentName: string }>;
+  }> = [];
+
+  for (const [field, values] of fieldMap.entries()) {
+    const normalized = new Set(
+      values.map((x) => String(x.value).trim().toLowerCase()),
+    );
+    if (normalized.size > 1) {
+      conflicts.push({ field, values });
+    }
+  }
+
+  return conflicts;
+}
+
+function participantRows(detail: AcquisitionDetail | null) {
+  const acquisition = detail?.acquisition || {};
+  const contacts = Array.isArray(acquisition?.contacts)
+    ? acquisition.contacts
+    : [];
+  return contacts;
+}
+
+function safeArray<T = any>(v: any): T[] {
+  return Array.isArray(v) ? v : [];
+}
+
 export default function Property() {
   const { id } = useParams();
   const [data, setData] = React.useState<PropertyPayload | null>(null);
+  const [acquisition, setAcquisition] =
+    React.useState<AcquisitionDetail | null>(null);
+  const [acquisitionTags, setAcquisitionTags] =
+    React.useState<AcquisitionTagsPayload | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
 
@@ -114,19 +314,41 @@ export default function Property() {
 
     try {
       setLoading(true);
-      const out = await api.get<PropertyPayload>(`/dashboard/property/${id}`);
-      setData(out);
-      setErr(null);
-    } catch (e: any) {
+
+      let propertyPayload: PropertyPayload | null = null;
+
       try {
-        const fallback = await api.get<PropertyPayload>(
+        propertyPayload = await api.get<PropertyPayload>(
+          `/dashboard/property/${id}`,
+        );
+      } catch {
+        propertyPayload = await api.get<PropertyPayload>(
           `/properties/${id}/view`,
         );
-        setData(fallback);
-        setErr(null);
-      } catch (inner: any) {
-        setErr(String(inner?.message || inner || e?.message || e));
       }
+
+      const [acquisitionDetailRes, tagsRes] = await Promise.allSettled([
+        api.get<AcquisitionDetail>(`/acquisition/properties/${id}`),
+        api.get<AcquisitionTagsPayload>(`/properties/${id}/acquisition-tags`),
+      ]);
+
+      setData(propertyPayload);
+
+      if (acquisitionDetailRes.status === "fulfilled") {
+        setAcquisition(acquisitionDetailRes.value);
+      } else {
+        setAcquisition(null);
+      }
+
+      if (tagsRes.status === "fulfilled") {
+        setAcquisitionTags(tagsRes.value);
+      } else {
+        setAcquisitionTags(null);
+      }
+
+      setErr(null);
+    } catch (e: any) {
+      setErr(String(e?.message || e));
     } finally {
       setLoading(false);
     }
@@ -177,6 +399,26 @@ export default function Property() {
     currentPane !== "management" && suggestedPane === "management";
   const topBlocker = data.blockers?.[0] || null;
   const nextAction = data.next_actions?.[0] || null;
+
+  const daysToClose = Number(acquisition?.summary?.days_to_close);
+  const hasDaysToClose = Number.isFinite(daysToClose);
+  const waitingOn = waitingOnLabel(acquisition?.acquisition?.waiting_on);
+  const waitingCategory = waitingOnCategory(
+    acquisition?.acquisition?.waiting_on,
+  );
+  const urgency = urgencyLabel(
+    acquisition?.summary?.days_to_close,
+    acquisition?.acquisition?.waiting_on,
+  );
+  const missingDocs = requiredDocsMissing(acquisition);
+  const conflicts = collectConflicts(acquisition);
+  const readiness = closeReadiness(acquisition);
+  const participants = participantRows(acquisition);
+  const tags =
+    acquisitionTags?.tags ||
+    safeArray(acquisitionTags?.rows)
+      .map((row: any) => row?.tag)
+      .filter(Boolean);
 
   return (
     <PageShell>
@@ -230,8 +472,7 @@ export default function Property() {
                     {paneLabel(currentPane)}
                   </div>
                   <div className="mt-1 text-sm text-app-4">
-                    stage{" "}
-                    {data.current_stage_label || data.current_stage || "—"}
+                    stage {data.current_stage_label || data.current_stage || "—"}
                   </div>
                 </div>
 
@@ -395,6 +636,91 @@ export default function Property() {
           </div>
         </Surface>
 
+        <Surface
+          title="What am I waiting on?"
+          subtitle="This is the acquisition operator view of the deal: owner, urgency, missing document groups, parsed conflicts, and close readiness."
+        >
+          <div className="grid gap-4 xl:grid-cols-4">
+            <div className="rounded-3xl border border-app bg-app-panel p-5">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Users className="h-3.5 w-3.5" />
+                Waiting on
+              </div>
+              <div className="mt-3 text-lg font-semibold text-app-0">
+                {waitingOn}
+              </div>
+              <div className="mt-2">
+                <span className="oh-pill">{waitingCategory.toLowerCase()}</span>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-app bg-app-panel p-5">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <Clock3 className="h-3.5 w-3.5" />
+                Close timing
+              </div>
+              <div
+                className={`mt-3 text-lg font-semibold ${hasDaysToClose ? daysToCloseTone(daysToClose) : "text-app-0"}`}
+              >
+                {hasDaysToClose
+                  ? daysToClose < 0
+                    ? `${Math.abs(daysToClose)} days overdue`
+                    : `${daysToClose} days remaining`
+                  : "No target close date"}
+              </div>
+              <div className="mt-2">
+                <span className={urgencyPillClass(urgency)}>{urgency}</span>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-app bg-app-panel p-5">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <FileText className="h-3.5 w-3.5" />
+                Next required document
+              </div>
+              <div className="mt-3 text-lg font-semibold text-app-0">
+                {nextRequiredDocument(acquisition)}
+              </div>
+              <div className="mt-2">
+                <span className="oh-pill">
+                  {missingDocs.length} missing groups
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-app bg-app-panel p-5">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                <CheckCheck className="h-3.5 w-3.5" />
+                Estimated close readiness
+              </div>
+              <div
+                className={`mt-3 text-lg font-semibold ${readinessTone(readiness)}`}
+              >
+                {readiness}%
+              </div>
+              <div className="mt-2">
+                <span className="oh-pill">
+                  {Number(
+                    acquisition?.summary?.required_documents_present || 0,
+                  )}
+                  /{Number(acquisition?.summary?.required_documents_total || 0)}{" "}
+                  required docs
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {tags?.length ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {tags.map((tag) => (
+                <span key={tag} className="oh-pill oh-pill-accent">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </Surface>
+
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
           <Surface title="Pane" subtitle="Current operating owner">
             <div className="flex items-center gap-2 text-2xl font-semibold text-app-0">
@@ -483,6 +809,156 @@ export default function Property() {
           </Surface>
         </div>
 
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Surface
+            title="Missing document groups"
+            subtitle="These are the required document groups still missing from the deal file."
+          >
+            {missingDocs.length === 0 ? (
+              <EmptyState compact title="No missing document groups" />
+            ) : (
+              <div className="space-y-3">
+                {missingDocs.map((doc, idx) => (
+                  <div
+                    key={`${doc.kind || doc.label || "missing"}-${idx}`}
+                    className="rounded-2xl border border-app bg-app-panel px-4 py-3"
+                  >
+                    <div className="flex items-center gap-2 text-sm font-medium text-app-0">
+                      <FileWarning className="h-4 w-4" />
+                      {doc.label || doc.kind || "Required document"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Surface>
+
+          <Surface
+            title="Parsed values that disagree"
+            subtitle="Conflicts across uploaded documents that need operator review."
+          >
+            {conflicts.length === 0 ? (
+              <EmptyState compact title="No parsed conflicts detected" />
+            ) : (
+              <div className="space-y-4">
+                {conflicts.map((conflict) => (
+                  <div
+                    key={conflict.field}
+                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
+                  >
+                    <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                      <GitCompareArrows className="h-4 w-4" />
+                      {conflict.field.replace(/_/g, " ")}
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {conflict.values.map((value, idx) => (
+                        <div
+                          key={`${conflict.field}-${idx}`}
+                          className="rounded-2xl border border-app bg-app-muted px-3 py-3 text-sm"
+                        >
+                          <div className="font-medium text-app-0">
+                            {String(value.value)}
+                          </div>
+                          <div className="mt-1 text-xs text-app-4">
+                            {value.documentName}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Surface>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Surface
+            title="Participants"
+            subtitle="Who is currently involved in the acquisition workflow."
+          >
+            {participants.length === 0 ? (
+              <EmptyState compact title="No participants recorded" />
+            ) : (
+              <div className="space-y-3">
+                {participants.map((person: any, idx: number) => (
+                  <div
+                    key={`${person?.email || person?.name || "participant"}-${idx}`}
+                    className="rounded-2xl border border-app bg-app-panel px-4 py-3"
+                  >
+                    <div className="flex items-center gap-2 text-sm font-medium text-app-0">
+                      <Users className="h-4 w-4" />
+                      {person?.name || person?.full_name || "Unnamed contact"}
+                    </div>
+                    <div className="mt-1 text-xs text-app-4">
+                      [
+                        person?.role,
+                        person?.company,
+                        person?.email,
+                        person?.phone,
+                      ]
+                        .filter(Boolean)
+                        .join(" · "){"}"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Surface>
+
+          <Surface
+            title="Document stack"
+            subtitle="Stored acquisition documents and parser/scanner state."
+          >
+            {!safeArray(acquisition?.documents).length ? (
+              <EmptyState compact title="No documents uploaded" />
+            ) : (
+              <div className="space-y-3">
+                {safeArray(acquisition?.documents)
+                  .slice(0, 8)
+                  .map((doc: any) => (
+                    <div
+                      key={doc?.id}
+                      className="rounded-2xl border border-app bg-app-panel px-4 py-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium text-app-0">
+                            {doc?.name ||
+                              doc?.original_filename ||
+                              `Document #${doc?.id}`}
+                          </div>
+                          <div className="mt-1 text-xs text-app-4">
+                            [
+                              doc?.kind,
+                              doc?.parse_status,
+                              doc?.scan_status,
+                              doc?.status,
+                            ]
+                              .filter(Boolean)
+                              .join(" · "){"}"}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {doc?.parse_status ? (
+                            <span className="oh-pill">{doc.parse_status}</span>
+                          ) : null}
+                          {doc?.scan_status === "clean" ? (
+                            <span className="oh-pill oh-pill-good">clean</span>
+                          ) : doc?.scan_status ? (
+                            <span className="oh-pill oh-pill-warn">
+                              {doc.scan_status}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </Surface>
+        </div>
+
         <Surface
           title="Open pane workspace"
           subtitle="Jump directly into the owning queue"
@@ -507,6 +983,10 @@ export default function Property() {
             <Link to="/dashboard" className="oh-btn oh-btn-secondary">
               <BadgeDollarSign className="h-4 w-4" />
               Portfolio dashboard
+            </Link>
+            <Link to="/panes/acquisition" className="oh-btn oh-btn-secondary">
+              <Building2 className="h-4 w-4" />
+              Acquisition queue
             </Link>
           </div>
         </Surface>

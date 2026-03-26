@@ -35,7 +35,7 @@ export function readFilters(params: URLSearchParams): Filters {
   for (const k of FILTER_KEYS) {
     const v = params.get(k);
     if (v != null && v !== "") {
-      (f as any)[k] = v;
+      (f as Record<string, string>)[k] = v;
     }
   }
   return f;
@@ -48,7 +48,7 @@ export function writeFilters(
   const p = new URLSearchParams(params.toString());
 
   for (const k of FILTER_KEYS) {
-    const v = (next as any)[k] as string | undefined;
+    const v = (next as Record<string, string | undefined>)[k];
     if (v == null || v === "") p.delete(k);
     else p.set(k, v);
   }
@@ -59,7 +59,7 @@ export function writeFilters(
 export function toQueryString(filters: Filters): string {
   const p = new URLSearchParams();
   for (const k of FILTER_KEYS) {
-    const v = (filters as any)[k];
+    const v = (filters as Record<string, string | undefined>)[k];
     if (v != null && v !== "") p.set(k, String(v));
   }
   const s = p.toString();
