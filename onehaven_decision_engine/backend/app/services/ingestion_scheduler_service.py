@@ -10,9 +10,9 @@ from sqlalchemy import distinct, or_, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..middleware.structured_logging import emit_structured_log
 from ..models import IngestionSource, Property
 from ..policy_models import JurisdictionProfile
-from ..middleware.structured_logging import emit_structured_log
 from .ingestion_source_service import ensure_default_manual_sources, list_sources
 from .jurisdiction_refresh_service import (
     DEFAULT_JURISDICTION_STALE_DAYS,
@@ -56,19 +56,52 @@ def compute_next_daily_sync(now: datetime | None = None) -> datetime:
     return next_run
 
 
-def build_runtime_payload(*, state: str | None, county: str | None, city: str | None) -> dict[str, Any]:
+def build_runtime_payload(
+    *,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    limit: int | None = None,
+    market_slug: str | None = None,
+    trigger_type: str = "daily_refresh",
+    property_types: list[str] | tuple[str, ...] | None = None,
+    max_price: int | None = None,
+    max_units: int | None = None,
+) -> dict[str, Any]:
+    normalized_property_types = [
+        str(x).strip()
+        for x in (property_types or ["single_family", "multi_family"])
+        if str(x).strip()
+    ]
+
     payload = {
-        "trigger_type": "daily_refresh",
-        "state": (state or "MI").strip(),
-        "limit": int(getattr(settings, "market_sync_default_limit_per_market", 125) or 125),
-        "max_price": int(getattr(settings, "investor_buy_box_max_price", 200_000) or 200_000),
-        "max_units": int(getattr(settings, "investor_buy_box_max_units", 4) or 4),
-        "property_types": ["single_family", "multi_family"],
+        "trigger_type": str(trigger_type or "daily_refresh"),
+        "state": (state or "MI").strip().upper(),
+        "limit": int(
+            limit
+            or getattr(settings, "market_sync_default_limit_per_market", 125)
+            or 125
+        ),
+        "max_price": int(
+            max_price
+            or getattr(settings, "investor_buy_box_max_price", 200_000)
+            or 200_000
+        ),
+        "max_units": int(
+            max_units
+            or getattr(settings, "investor_buy_box_max_units", 4)
+            or 4
+        ),
+        "property_types": normalized_property_types or ["single_family", "multi_family"],
     }
+
     if county:
-        payload["county"] = county.strip()
+        payload["county"] = county.strip().lower()
     if city:
-        payload["city"] = city.strip()
+        payload["city"] = city.strip().lower()
+    if market_slug:
+        payload["idempotency_context"] = {"market_slug": str(market_slug).strip().lower()}
+
     return payload
 
 
@@ -160,7 +193,11 @@ def list_jurisdictions_needing_refresh(
         return []
 
     ids = [int(t.jurisdiction_profile_id) for t in targets]
-    stmt = select(JurisdictionProfile).where(JurisdictionProfile.id.in_(ids)).order_by(JurisdictionProfile.id.asc())
+    stmt = (
+        select(JurisdictionProfile)
+        .where(JurisdictionProfile.id.in_(ids))
+        .order_by(JurisdictionProfile.id.asc())
+    )
     return list(db.scalars(stmt).all())
 
 
@@ -186,7 +223,11 @@ def _dispatch_dedupe_key(
     state = str(market.get("state") or "MI").strip().lower()
     county = str(market.get("county") or "").strip().lower()
     city = str(market.get("city") or "").strip().lower()
-    return f"daily_sync_dispatch:{int(org_id)}:{day_key}:{source_key}:{state}:{county}:{city}"
+    market_slug = str(market.get("slug") or "").strip().lower()
+    return (
+        f"daily_sync_dispatch:{int(org_id)}:{day_key}:{source_key}:"
+        f"{state}:{county}:{city}:{market_slug}"
+    )
 
 
 def _source_key(source: Any) -> str:
@@ -194,9 +235,9 @@ def _source_key(source: Any) -> str:
     slug = str(getattr(source, "slug", "") or "").strip().lower()
     source_id = int(getattr(source, "id", 0) or 0)
     if provider and slug:
-        return f"{provider}:{slug}"
+      return f"{provider}:{slug}"
     if provider:
-        return f"{provider}:{source_id}"
+      return f"{provider}:{source_id}"
     return str(source_id)
 
 
@@ -220,6 +261,7 @@ def build_scheduler_idempotency_context(
         "state": str(market.get("state") or "MI").strip(),
         "county": str(market.get("county") or "").strip(),
         "city": str(market.get("city") or "").strip(),
+        "market_slug": str(market.get("slug") or "").strip(),
         "dispatch_key": str(dispatch_key),
     }
 
@@ -245,6 +287,43 @@ def get_daily_sync_lock_state(
     )
 
 
+def _source_matches_market(source: Any, market: dict[str, Any]) -> bool:
+    config = dict(getattr(source, "config_json", None) or {})
+
+    source_market_slug = str(config.get("market_slug") or "").strip().lower()
+    market_slug = str(market.get("slug") or "").strip().lower()
+    if source_market_slug and market_slug and source_market_slug == market_slug:
+        return True
+
+    source_city = str(config.get("city") or "").strip().lower()
+    source_state = str(config.get("state") or "MI").strip().lower()
+    market_city = str(market.get("city") or "").strip().lower()
+    market_state = str(market.get("state") or "MI").strip().lower()
+
+    if source_city and market_city and source_city == market_city and source_state == market_state:
+        return True
+
+    source_slug = str(getattr(source, "slug", "") or "").strip().lower()
+    if market_slug and market_slug in source_slug:
+        return True
+
+    return False
+
+
+def _matching_sources_for_market(
+    sources: list[Any],
+    market: dict[str, Any],
+) -> list[Any]:
+    exact = [s for s in sources if _source_matches_market(s, market)]
+    if exact:
+        return exact
+
+    return [
+        s for s in sources
+        if str(getattr(s, "provider", "") or "").strip().lower() == "rentcast"
+    ]
+
+
 def dispatch_daily_sync_for_org(
     db: Session,
     *,
@@ -252,7 +331,10 @@ def dispatch_daily_sync_for_org(
     enqueue_sync: Callable[[int, int, str, dict[str, Any]], Any],
 ) -> dict[str, Any]:
     ensure_default_manual_sources(db, org_id=int(org_id))
-    sources = [s for s in list_sources(db, org_id=int(org_id)) if bool(getattr(s, "is_enabled", False))]
+    sources = [
+        s for s in list_sources(db, org_id=int(org_id))
+        if bool(getattr(s, "is_enabled", False))
+    ]
     markets = list_default_daily_markets()
 
     owner = build_lock_owner(prefix="daily_sync")
@@ -261,7 +343,13 @@ def dispatch_daily_sync_for_org(
         org_id=int(org_id),
         lock_key=daily_sync_lock_key(int(org_id)),
         owner=owner,
-        ttl_seconds=int(getattr(settings, "daily_sync_lock_ttl_seconds", DEFAULT_DAILY_SYNC_LOCK_TTL_SECONDS)),
+        ttl_seconds=int(
+            getattr(
+                settings,
+                "daily_sync_lock_ttl_seconds",
+                DEFAULT_DAILY_SYNC_LOCK_TTL_SECONDS,
+            )
+        ),
     )
     if not lock.acquired:
         return {"ok": False, "reason": "daily_sync_lock_not_acquired", "org_id": int(org_id)}
@@ -271,11 +359,7 @@ def dispatch_daily_sync_for_org(
     results: list[dict[str, Any]] = []
 
     for market in markets:
-        city = str(market.get("city") or "").strip().lower()
-        matching_sources = [
-            s for s in sources
-            if city and city in str((getattr(s, "config_json", {}) or {}).get("city") or "").strip().lower()
-        ]
+        matching_sources = _matching_sources_for_market(sources, market)
 
         for source in matching_sources:
             source_key = _source_key(source)
@@ -291,7 +375,13 @@ def dispatch_daily_sync_for_org(
                 org_id=int(org_id),
                 lock_key=dispatch_key,
                 owner=owner,
-                ttl_seconds=int(getattr(settings, "dispatch_dedupe_ttl_seconds", DEFAULT_DISPATCH_DEDUPE_TTL_SECONDS)),
+                ttl_seconds=int(
+                    getattr(
+                        settings,
+                        "dispatch_dedupe_ttl_seconds",
+                        DEFAULT_DISPATCH_DEDUPE_TTL_SECONDS,
+                    )
+                ),
             )
             if not acquire.acquired:
                 continue
@@ -300,6 +390,12 @@ def dispatch_daily_sync_for_org(
                 state=market.get("state"),
                 county=market.get("county"),
                 city=market.get("city"),
+                limit=market.get("sync_limit"),
+                market_slug=market.get("slug"),
+                trigger_type="daily_refresh",
+                property_types=market.get("property_types"),
+                max_price=market.get("max_price"),
+                max_units=market.get("max_units"),
             )
             payload["idempotency_context"] = build_scheduler_idempotency_context(
                 org_id=int(org_id),
@@ -315,6 +411,8 @@ def dispatch_daily_sync_for_org(
                 {
                     "source_id": int(source.id),
                     "source_slug": getattr(source, "slug", None),
+                    "provider": getattr(source, "provider", None),
+                    "market_slug": market.get("slug"),
                     "city": market.get("city"),
                     "county": market.get("county"),
                     "state": market.get("state"),
@@ -337,18 +435,23 @@ def build_runtime_payload_from_saved_filters(filters_json: dict[str, Any] | None
         state=filters_json.get("state"),
         county=filters_json.get("county"),
         city=filters_json.get("city"),
+        limit=filters_json.get("limit"),
+        market_slug=filters_json.get("market_slug"),
+        trigger_type=filters_json.get("trigger_type") or "daily_refresh",
+        property_types=filters_json.get("property_types"),
+        max_price=filters_json.get("max_price"),
+        max_units=filters_json.get("max_units"),
     )
     for key in [
         "min_price",
         "max_price",
         "min_bedrooms",
         "min_bathrooms",
-        "max_units",
-        "property_types",
-        "limit",
         "q",
+        "zip_code",
+        "zip_codes",
     ]:
         if filters_json.get(key) is not None:
             payload[key] = filters_json.get(key)
-    payload["trigger_type"] = filters_json.get("trigger_type") or payload.get("trigger_type") or "daily_refresh"
+
     return payload

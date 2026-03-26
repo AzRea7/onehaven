@@ -1,9 +1,8 @@
-# backend/app/routers/ingestion.py
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -21,6 +20,14 @@ from ..schemas import (
 from ..services.ingestion_run_execute import execute_source_sync
 from ..services.ingestion_run_service import get_ingestion_overview, list_runs
 from ..services.ingestion_scheduler_service import list_default_daily_markets
+from ..services.ingestion_source_service import (
+    create_source,
+    ensure_default_manual_sources,
+    get_source,
+    list_sources,
+    update_source,
+)
+from ..services.market_sync_service import build_supported_market_sync_plan_for_db
 from ..services.portfolio_watchlist_service import (
     delete_search_preset,
     delete_watchlist,
@@ -28,13 +35,6 @@ from ..services.portfolio_watchlist_service import (
     list_watchlists,
     upsert_search_preset,
     upsert_watchlist,
-)
-from ..services.ingestion_source_service import (
-    create_source,
-    ensure_default_manual_sources,
-    get_source,
-    list_sources,
-    update_source,
 )
 from ..tasks.ingestion_tasks import (
     daily_market_refresh_task,
@@ -104,9 +104,7 @@ def _normalize_zip_codes(value: Any) -> list[str] | None:
 
 
 def _normalize_price_buckets(value: Any) -> list[list[float]] | None:
-    if value is None:
-        return None
-    if not isinstance(value, list):
+    if value is None or not isinstance(value, list):
         return None
 
     out: list[list[float]] = []
@@ -181,19 +179,15 @@ class IngestionSyncLaunchRequest(BaseModel):
     state: str | None = "MI"
     county: str | None = None
     city: str | None = None
-
     zip_code: str | None = None
     zip_codes: list[str] | str | None = None
-
     min_price: float | None = None
     max_price: float | None = None
     min_bedrooms: int | None = None
     min_bathrooms: float | None = None
     property_type: str | None = None
-
     price_buckets: list[list[float]] | None = None
     pages_per_shard: int | None = Field(default=1, ge=1, le=3)
-
     limit: int = Field(default=100, ge=1, le=500)
     execute_inline: bool = False
 
@@ -242,6 +236,24 @@ class IngestionSyncLaunchRequest(BaseModel):
         return payload
 
 
+class SupportedMarketSyncRequest(BaseModel):
+    market_slug: str | None = None
+    city: str | None = None
+    state: str = "MI"
+    execute_inline: bool = False
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        self.market_slug = _normalize_optional_text(self.market_slug)
+        self.city = _normalize_optional_text(self.city)
+        self.state = _normalize_optional_text(self.state) or "MI"
+
+        if not self.market_slug and not self.city:
+            raise ValueError("market_slug or city is required")
+
+        return self
+
+
 @router.get("/overview", response_model=IngestionOverviewOut)
 def overview(db: Session = Depends(get_db), p=Depends(get_principal)):
     ensure_default_manual_sources(db, org_id=p.org_id)
@@ -256,8 +268,7 @@ def overview(db: Session = Depends(get_db), p=Depends(get_principal)):
 @router.get("/sources", response_model=list[IngestionSourceOut])
 def sources(db: Session = Depends(get_db), p=Depends(get_principal)):
     ensure_default_manual_sources(db, org_id=p.org_id)
-    rows = list_sources(db, org_id=p.org_id)
-    return rows
+    return list_sources(db, org_id=p.org_id)
 
 
 @router.post("/sources", response_model=IngestionSourceOut)
@@ -324,6 +335,74 @@ def sync_now(
     }
 
 
+@router.post("/sync-market", response_model=dict)
+def sync_supported_market(
+    payload: SupportedMarketSyncRequest,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    plan = build_supported_market_sync_plan_for_db(
+        db,
+        org_id=int(p.org_id),
+        market_slug=payload.market_slug,
+        city=payload.city,
+        state=payload.state or "MI",
+    )
+
+    if not plan["covered"]:
+        raise HTTPException(status_code=404, detail="Supported market not found")
+
+    dispatches = list(plan["dispatches"] or [])
+    if not dispatches:
+        raise HTTPException(status_code=409, detail="No enabled sources available for supported market")
+
+    if payload.execute_inline:
+        runs: list[dict[str, Any]] = []
+        for dispatch in dispatches:
+            row = get_source(db, org_id=p.org_id, source_id=int(dispatch["source_id"]))
+            if not row:
+                continue
+            run = execute_source_sync(
+                db,
+                org_id=int(p.org_id),
+                source=row,
+                trigger_type=str(dispatch["trigger_type"]),
+                runtime_config=dict(dispatch["runtime_config"]),
+            )
+            runs.append(_run_response(run))
+
+        return {
+            "ok": True,
+            "covered": True,
+            "queued": False,
+            "market": plan["market"],
+            "runs": runs,
+            "dispatches": dispatches,
+            "queued_count": len(runs),
+        }
+
+    task_ids: list[str] = []
+    for dispatch in dispatches:
+        job = sync_source_task.delay(
+            int(p.org_id),
+            int(dispatch["source_id"]),
+            str(dispatch["trigger_type"]),
+            dict(dispatch["runtime_config"]),
+        )
+        task_ids.append(str(job.id))
+
+    return {
+        "ok": True,
+        "covered": True,
+        "queued": True,
+        "market": plan["market"],
+        "queued_count": len(task_ids),
+        "task_ids": task_ids,
+        "dispatches": dispatches,
+    }
+
+
 @router.post("/sync-defaults", response_model=dict)
 def sync_default_sources_now(
     payload: IngestionSyncLaunchRequest | None = None,
@@ -336,7 +415,7 @@ def sync_default_sources_now(
     runtime = (payload or IngestionSyncLaunchRequest()).runtime_config()
 
     execute_inline = bool(runtime.pop("execute_inline", False))
-    runtime.pop("trigger_type", None)
+    trigger_type = str(runtime.pop("trigger_type", "manual") or "manual")
 
     if execute_inline:
         runs: list[dict[str, Any]] = []
@@ -345,192 +424,107 @@ def sync_default_sources_now(
                 db,
                 org_id=int(p.org_id),
                 source=row,
-                trigger_type="manual",
+                trigger_type=trigger_type,
                 runtime_config=runtime,
             )
-            item = _run_response(run)
-            item["normal_path"] = True
-            runs.append(item)
-        return {"ok": True, "queued": False, "runs": runs, "normal_path": True}
+            runs.append(_run_response(run))
+        return {
+            "ok": True,
+            "queued": False,
+            "runs": runs,
+            "source_ids": [int(x.id) for x in rows],
+            "normal_path": True,
+        }
 
-    queued: list[int] = []
+    source_ids: list[int] = []
     for row in rows:
-        sync_source_task.delay(int(p.org_id), int(row.id), "manual", runtime)
-        queued.append(int(row.id))
+        sync_source_task.delay(int(p.org_id), int(row.id), trigger_type, runtime)
+        source_ids.append(int(row.id))
+
     return {
         "ok": True,
-        "queued": len(queued),
-        "source_ids": queued,
-        "runtime_config": runtime,
+        "queued": len(source_ids),
+        "source_ids": source_ids,
         "normal_path": True,
+    }
+
+
+@router.post("/refresh-daily", response_model=dict)
+def refresh_daily_markets(
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    job = daily_market_refresh_task.delay(int(p.org_id))
+    return {
+        "ok": True,
+        "queued": True,
+        "task_id": str(job.id),
     }
 
 
 @router.post("/sync-due", response_model=dict)
-def queue_due_sources(_op=Depends(require_operator)):
-    job = sync_due_sources_task.delay()
-    return {"ok": True, "queued": True, "task_id": job.id}
-
-
-@router.post("/daily-refresh", response_model=dict)
-def queue_daily_market_refresh(_op=Depends(require_operator)):
-    job = daily_market_refresh_task.delay()
+def sync_due_sources(
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    job = sync_due_sources_task.delay(int(p.org_id))
     return {
         "ok": True,
         "queued": True,
-        "task_id": job.id,
-        "markets": list_default_daily_markets(),
+        "task_id": str(job.id),
     }
 
 
 @router.get("/runs", response_model=list[IngestionRunListItem])
-def runs(limit: int = 50, db: Session = Depends(get_db), p=Depends(get_principal)):
-    return list_runs(db, org_id=p.org_id, limit=limit)
-
-
-@router.get("/runs/{run_id}", response_model=dict)
-def run_detail(run_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    row = db.get(IngestionRun, int(run_id))
-    if not row or int(row.org_id) != int(p.org_id):
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    summary = dict(row.summary_json or {})
-    return {
-        "id": row.id,
-        "source_id": row.source_id,
-        "trigger_type": row.trigger_type,
-        "status": row.status,
-        "started_at": row.started_at,
-        "finished_at": row.finished_at,
-        "records_seen": row.records_seen,
-        "records_imported": row.records_imported,
-        "properties_created": row.properties_created,
-        "properties_updated": row.properties_updated,
-        "deals_created": row.deals_created,
-        "deals_updated": row.deals_updated,
-        "rent_rows_upserted": row.rent_rows_upserted,
-        "photos_upserted": row.photos_upserted,
-        "duplicates_skipped": row.duplicates_skipped,
-        "invalid_rows": row.invalid_rows,
-        "retry_count": row.retry_count,
-        "error_summary": row.error_summary,
-        "error_json": row.error_json,
-        "summary_json": summary,
-        "pipeline_outcome": _pipeline_outcome(summary),
-        "normal_path": True,
-    }
-
-
-@router.post("/webhooks/{provider}/{source_slug}", response_model=dict)
-async def webhook_ingest(
-    provider: str,
-    source_slug: str,
-    payload: IngestionWebhookIn,
-    request: Request,
-    x_webhook_secret: str | None = Header(default=None, alias="X-Webhook-Secret"),
+def runs(
+    limit: int = 25,
     db: Session = Depends(get_db),
+    p=Depends(get_principal),
 ):
-    rows = list_sources(db, org_id=1)
-    source = next((x for x in rows if x.provider == provider and x.slug == source_slug), None)
-    if source is None:
-        raise HTTPException(status_code=404, detail="Source not found")
+    return list_runs(db, org_id=p.org_id, limit=max(1, min(limit, 200)))
 
-    if source.webhook_secret_hint and not x_webhook_secret:
-        raise HTTPException(status_code=401, detail="Missing webhook secret")
-
-    source.config_json = source.config_json or {}
-    source.config_json["sample_rows"] = [payload.payload]
-    db.add(source)
-    db.commit()
-    db.refresh(source)
-
-    run = execute_source_sync(
-        db,
-        org_id=int(source.org_id),
-        source=source,
-        trigger_type="webhook",
-    )
-    out = _run_response(run)
-    out["normal_path"] = True
-    return out
 
 @router.get("/watchlists", response_model=list[dict])
 def get_watchlists(db: Session = Depends(get_db), p=Depends(get_principal)):
-    return list_watchlists(db, org_id=p.org_id)
+    return list_watchlists(db, org_id=int(p.org_id), user_id=_principal_user_id(p))
 
 
 @router.post("/watchlists", response_model=dict)
-def create_watchlist(payload: WatchlistIn, db: Session = Depends(get_db), p=Depends(get_principal)):
+def save_watchlist(payload: WatchlistIn, db: Session = Depends(get_db), p=Depends(get_principal)):
     return upsert_watchlist(
         db,
-        org_id=p.org_id,
-        watchlist_id=None,
+        org_id=int(p.org_id),
+        user_id=_principal_user_id(p),
         name=payload.name,
         description=payload.description,
         filters_json=payload.filters_json,
         sort_json=payload.sort_json,
         is_default=payload.is_default,
-        actor_user_id=_principal_user_id(p),
     )
 
 
-@router.put("/watchlists/{watchlist_id}", response_model=dict)
-def update_watchlist(watchlist_id: int, payload: WatchlistIn, db: Session = Depends(get_db), p=Depends(get_principal)):
-    return upsert_watchlist(
-        db,
-        org_id=p.org_id,
-        watchlist_id=watchlist_id,
-        name=payload.name,
-        description=payload.description,
-        filters_json=payload.filters_json,
-        sort_json=payload.sort_json,
-        is_default=payload.is_default,
-        actor_user_id=_principal_user_id(p),
-    )
-
-
-@router.delete("/watchlists/{watchlist_id}", response_model=dict)
-def remove_watchlist(watchlist_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    deleted = delete_watchlist(db, org_id=p.org_id, watchlist_id=watchlist_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Watchlist not found")
-    return {"ok": True, "deleted": True, "watchlist_id": watchlist_id}
+@router.delete("/watchlists/{name}", response_model=dict)
+def remove_watchlist(name: str, db: Session = Depends(get_db), p=Depends(get_principal)):
+    return delete_watchlist(db, org_id=int(p.org_id), user_id=_principal_user_id(p), name=name)
 
 
 @router.get("/search-presets", response_model=list[dict])
 def get_search_presets(db: Session = Depends(get_db), p=Depends(get_principal)):
-    return list_search_presets(db, org_id=p.org_id)
+    return list_search_presets(db, org_id=int(p.org_id), user_id=_principal_user_id(p))
 
 
 @router.post("/search-presets", response_model=dict)
-def create_search_preset(payload: SearchPresetIn, db: Session = Depends(get_db), p=Depends(get_principal)):
+def save_search_preset(payload: SearchPresetIn, db: Session = Depends(get_db), p=Depends(get_principal)):
     return upsert_search_preset(
         db,
-        org_id=p.org_id,
-        preset_id=None,
+        org_id=int(p.org_id),
+        user_id=_principal_user_id(p),
         name=payload.name,
         filters_json=payload.filters_json,
         sort_json=payload.sort_json,
-        actor_user_id=_principal_user_id(p),
     )
 
 
-@router.put("/search-presets/{preset_id}", response_model=dict)
-def update_search_preset(preset_id: int, payload: SearchPresetIn, db: Session = Depends(get_db), p=Depends(get_principal)):
-    return upsert_search_preset(
-        db,
-        org_id=p.org_id,
-        preset_id=preset_id,
-        name=payload.name,
-        filters_json=payload.filters_json,
-        sort_json=payload.sort_json,
-        actor_user_id=_principal_user_id(p),
-    )
-
-
-@router.delete("/search-presets/{preset_id}", response_model=dict)
-def remove_search_preset(preset_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    deleted = delete_search_preset(db, org_id=p.org_id, preset_id=preset_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Search preset not found")
-    return {"ok": True, "deleted": True, "preset_id": preset_id}
+@router.delete("/search-presets/{name}", response_model=dict)
+def remove_search_preset(name: str, db: Session = Depends(get_db), p=Depends(get_principal)):
+    return delete_search_preset(db, org_id=int(p.org_id), user_id=_principal_user_id(p), name=name)

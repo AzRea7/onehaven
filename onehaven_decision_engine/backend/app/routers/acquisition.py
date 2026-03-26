@@ -28,12 +28,17 @@ from ..services.acquisition_service import (
     get_acquisition_detail,
     get_document_file_response,
     list_acquisition_queue,
+    promote_property_to_acquisition,
     replace_acquisition_document,
     update_acquisition_record,
     upload_acquisition_document_file,
 )
 
 router = APIRouter(prefix="/acquisition", tags=["acquisition"])
+
+
+class PromoteToAcquisitionIn(AcquisitionRecordUpdate):
+    pass
 
 
 @router.get("/queue")
@@ -74,6 +79,23 @@ def acquisition_property_detail(
         raise HTTPException(status_code=404, detail="Property not found.")
     return payload
 
+
+
+
+@router.post("/properties/{property_id}/promote")
+def acquisition_property_promote(
+    property_id: int,
+    payload: PromoteToAcquisitionIn,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    return promote_property_to_acquisition(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        actor_user_id=getattr(p, "user_id", None),
+        payload=payload.model_dump(exclude_unset=True),
+    )
 
 @router.put("/properties/{property_id}")
 def acquisition_property_update(

@@ -426,10 +426,38 @@ body {
   min-height: 150px;
 }
 
+:root {
+  --oh-header-h: 150px;
+}
+
 .oh-app-header {
   position: sticky;
   top: 0;
   z-index: 40;
+  min-height: var(--oh-header-h);
+}
+
+.oh-main,
+.oh-shell-main {
+  padding-top: 0;
+}
+
+.oh-page-with-header-offset {
+  padding-top: 1rem;
+}
+
+html {
+  scroll-padding-top: calc(var(--oh-header-h) + 16px);
+}
+
+[id] {
+  scroll-margin-top: calc(var(--oh-header-h) + 16px);
+}
+
+@media (max-width: 768px) {
+  :root {
+    --oh-header-h: 170px;
+  }
 }
 
 .oh-app-header-row {

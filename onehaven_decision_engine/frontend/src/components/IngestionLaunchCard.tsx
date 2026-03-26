@@ -1,584 +1,296 @@
 import React from "react";
 import {
-  Bath,
-  BedDouble,
   Calendar,
-  Filter,
+  Loader2,
   MapPinned,
   Play,
+  RefreshCcw,
   SearchCheck,
 } from "lucide-react";
 import GlassCard from "./GlassCard";
-import { ingestionClient, IngestionSource } from "../lib/ingestionClient";
+import { ingestionClient, type SupportedMarket } from "../lib/ingestionClient";
 
 type Props = {
   refreshKey?: number;
+  selectedMarketSlug?: string | null;
+  onMarketChange?: (market: SupportedMarket | null) => void;
   onQueued?: () => void;
 };
 
-const COUNTY_TO_CITIES: Record<string, string[]> = {
-  wayne: [
-    "Detroit",
-    "Dearborn",
-    "Dearborn Heights",
-    "Inkster",
-    "Livonia",
-    "Redford",
-    "Romulus",
-    "Southgate",
-    "Taylor",
-    "Westland",
-    "Wyandotte",
-  ],
-  oakland: [
-    "Pontiac",
-    "Southfield",
-    "Oak Park",
-    "Ferndale",
-    "Royal Oak",
-    "Madison Heights",
-    "Troy",
-    "Farmington Hills",
-  ],
-  macomb: [
-    "Warren",
-    "Sterling Heights",
-    "Clinton Township",
-    "Roseville",
-    "Eastpointe",
-    "St. Clair Shores",
-    "Mount Clemens",
-  ],
-};
-
-const COUNTY_TO_DEFAULT_ZIPS: Record<string, string[]> = {
-  wayne: ["48228", "48224", "48219", "48235", "48227"],
-  oakland: ["48341", "48237", "48220", "48071", "48067"],
-  macomb: ["48089", "48091", "48088", "48093", "48066"],
-};
-
-const PROPERTY_TYPES = [
-  { value: "", label: "Any type" },
-  { value: "single_family", label: "Single-family" },
-  { value: "multi_family", label: "Multi-family" },
-  { value: "condo", label: "Condo" },
-  { value: "townhouse", label: "Townhouse" },
-];
-
-function normalizeLimitInput(value: string) {
-  return value.replace(/[^\d]/g, "").slice(0, 4);
+function toneForTier(tier?: string) {
+  const value = String(tier || "").toLowerCase();
+  if (value === "hot") return "oh-pill oh-pill-good";
+  if (value === "warm") return "oh-pill oh-pill-warn";
+  return "oh-pill";
 }
 
-function normalizeSmallNumberInput(value: string) {
-  return value.replace(/[^\d]/g, "").slice(0, 1);
+function marketLabel(market: SupportedMarket) {
+  return market.label || market.city || market.slug;
 }
 
-function parseLimit(value: string) {
-  const parsed = Number(value || 100);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 100;
-  return Math.round(parsed);
+function marketSubLabel(market?: SupportedMarket | null) {
+  if (!market) return "Select a supported market";
+  return [market.city, market.county, market.state].filter(Boolean).join(" • ");
 }
 
-function parsePagesPerShard(value: string) {
-  const parsed = Number(value || 1);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
-  return Math.max(1, Math.min(3, Math.round(parsed)));
+function relativeTime(raw?: string | null) {
+  if (!raw) return "Never";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  const hours = Math.floor(diffMs / 3600000);
+  const days = Math.floor(diffMs / 86400000);
+
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
 }
 
-function toNumberOrUndefined(value: string) {
-  if (!value.trim()) return undefined;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
-}
+export default function IngestionLaunchCard({
+  refreshKey,
+  selectedMarketSlug,
+  onMarketChange,
+  onQueued,
+}: Props) {
+  const [markets, setMarkets] = React.useState<SupportedMarket[]>([]);
+  const [selectedSlug, setSelectedSlug] = React.useState<string>(
+    selectedMarketSlug || "",
+  );
+  const [overviewLastSyncAt, setOverviewLastSyncAt] = React.useState<
+    string | null | undefined
+  >(null);
 
-function parseZipCodes(value: string) {
-  return value
-    .split(",")
-    .map((z) => z.trim())
-    .filter(Boolean);
-}
+  const [loading, setLoading] = React.useState(true);
+  const [syncing, setSyncing] = React.useState(false);
+  const [refreshingOverview, setRefreshingOverview] = React.useState(false);
 
-function buildPriceBuckets(minPrice?: number, maxPrice?: number) {
-  if (
-    minPrice === undefined ||
-    maxPrice === undefined ||
-    !Number.isFinite(minPrice) ||
-    !Number.isFinite(maxPrice) ||
-    minPrice <= 0 ||
-    maxPrice <= 0 ||
-    minPrice >= maxPrice
-  ) {
-    return undefined;
-  }
-
-  const span = maxPrice - minPrice;
-
-  if (span <= 25_000) {
-    return [[minPrice, maxPrice]];
-  }
-
-  if (span <= 50_000) {
-    const mid = Math.floor((minPrice + maxPrice) / 2);
-    return [
-      [minPrice, mid],
-      [mid + 1, maxPrice],
-    ];
-  }
-
-  const step = Math.floor(span / 3);
-  const a = minPrice;
-  const b = minPrice + step;
-  const c = minPrice + step * 2;
-  const d = maxPrice;
-
-  return [
-    [a, b],
-    [b + 1, c],
-    [c + 1, d],
-  ];
-}
-
-function findBestSource(
-  rows: IngestionSource[],
-  county: string,
-  city: string,
-): IngestionSource | undefined {
-  const enabled = rows.filter((r) => r.is_enabled);
-
-  const normalizedCounty = county.trim().toLowerCase();
-  const normalizedCity = city.trim().toLowerCase();
-
-  if (normalizedCounty) {
-    const byCounty = enabled.find((row) => {
-      const cfg = row.config_json || {};
-      return (
-        String(cfg.county || "")
-          .trim()
-          .toLowerCase() === normalizedCounty
-      );
-    });
-    if (byCounty) return byCounty;
-  }
-
-  if (normalizedCity) {
-    const byCity = enabled.find((row) => {
-      const cfg = row.config_json || {};
-      return (
-        String(cfg.city || "")
-          .trim()
-          .toLowerCase() === normalizedCity
-      );
-    });
-    if (byCity) return byCity;
-  }
-
-  return enabled[0] || rows[0];
-}
-
-function statusTone(status?: string) {
-  const v = String(status || "").toLowerCase();
-  if (v === "connected" || v === "healthy" || v === "ready") {
-    return "border-emerald-400/20 bg-emerald-400/10 text-emerald-100";
-  }
-  if (v === "error" || v === "failed") {
-    return "border-red-400/20 bg-red-400/10 text-red-100";
-  }
-  return "border-amber-400/20 bg-amber-400/10 text-amber-100";
-}
-
-export default function IngestionLaunchCard({ refreshKey, onQueued }: Props) {
-  const [sources, setSources] = React.useState<IngestionSource[]>([]);
-  const [loadingSources, setLoadingSources] = React.useState(true);
-  const [submitting, setSubmitting] = React.useState(false);
-  const [dailyRefreshing, setDailyRefreshing] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  const [state, setState] = React.useState("MI");
-  const [county, setCounty] = React.useState("wayne");
-  const [city, setCity] = React.useState("Detroit");
-  const [zipCodes, setZipCodes] = React.useState(
-    COUNTY_TO_DEFAULT_ZIPS.wayne.join(","),
+  const selectedMarket = React.useMemo(
+    () => markets.find((m) => m.slug === selectedSlug) || null,
+    [markets, selectedSlug],
   );
-  const [minPrice, setMinPrice] = React.useState("");
-  const [maxPrice, setMaxPrice] = React.useState("");
-  const [minBedrooms, setMinBedrooms] = React.useState("");
-  const [minBathrooms, setMinBathrooms] = React.useState("");
-  const [propertyType, setPropertyType] = React.useState("");
-  const [pagesPerShard, setPagesPerShard] = React.useState("1");
-  const [limit, setLimit] = React.useState("100");
 
-  async function loadSources() {
-    setLoadingSources(true);
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
     try {
-      const rows = await ingestionClient.listSources();
-      setSources(rows);
-      setError(null);
+      const [marketRows, overview] = await Promise.all([
+        ingestionClient.listSupportedMarkets(),
+        ingestionClient.overview(),
+      ]);
+
+      setMarkets(marketRows || []);
+      setOverviewLastSyncAt(overview?.last_sync_at);
+
+      const nextSlug =
+        selectedMarketSlug || selectedSlug || marketRows?.[0]?.slug || "";
+
+      setSelectedSlug(nextSlug);
+
+      const nextMarket =
+        marketRows.find((m) => m.slug === nextSlug) || marketRows?.[0] || null;
+
+      onMarketChange?.(nextMarket);
     } catch (err: any) {
-      setError(err?.message || "Could not load intake sources");
+      setError(err?.message || "Could not load supported markets.");
     } finally {
-      setLoadingSources(false);
+      setLoading(false);
     }
-  }
+  }, [onMarketChange, selectedMarketSlug, selectedSlug]);
 
   React.useEffect(() => {
-    loadSources();
-  }, [refreshKey]);
+    load();
+  }, [load, refreshKey]);
 
   React.useEffect(() => {
-    const cityOptions = COUNTY_TO_CITIES[county.toLowerCase()] || [];
-    if (cityOptions.length > 0 && !cityOptions.includes(city)) {
-      setCity(cityOptions[0] || "");
+    if (!selectedMarketSlug) return;
+    setSelectedSlug(selectedMarketSlug);
+  }, [selectedMarketSlug]);
+
+  async function handleSync() {
+    if (!selectedMarket?.slug) {
+      setError("Select a supported market first.");
+      return;
     }
-    setZipCodes((COUNTY_TO_DEFAULT_ZIPS[county.toLowerCase()] || []).join(","));
-  }, [county]);
 
-  const cityOptions = COUNTY_TO_CITIES[county.toLowerCase()] || [];
-  const selectedSource = React.useMemo(
-    () => findBestSource(sources, county, city),
-    [sources, county, city],
-  );
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
+    setSyncing(true);
     setError(null);
     setMessage(null);
 
     try {
-      if (!selectedSource?.id) {
-        throw new Error("No intake source is ready for this market yet.");
+      const res = await ingestionClient.syncMarket({
+        market_slug: selectedMarket.slug,
+      });
+
+      if (!res?.covered) {
+        throw new Error("That market is not in supported coverage.");
       }
 
-      const parsedMinPrice = toNumberOrUndefined(minPrice);
-      const parsedMaxPrice = toNumberOrUndefined(maxPrice);
-      const parsedZipCodes = parseZipCodes(zipCodes);
-      const payload = {
-        trigger_type: "manual" as const,
-        state: state.trim() || "MI",
-        county: county.trim() || undefined,
-        city: city.trim() || undefined,
-        zip_codes: parsedZipCodes.length ? parsedZipCodes : undefined,
-        min_price: parsedMinPrice,
-        max_price: parsedMaxPrice,
-        min_bedrooms: toNumberOrUndefined(minBedrooms),
-        min_bathrooms: toNumberOrUndefined(minBathrooms),
-        property_type: propertyType || undefined,
-        price_buckets: buildPriceBuckets(parsedMinPrice, parsedMaxPrice),
-        pages_per_shard: parsePagesPerShard(pagesPerShard),
-        limit: parseLimit(limit),
-      };
-
-      await ingestionClient.syncSource(Number(selectedSource.id), payload);
-
       setMessage(
-        `Queued intake for ${[payload.city, payload.county, payload.state]
-          .filter(Boolean)
-          .join(
-            ", ",
-          )} using ${parsedZipCodes.length || "city-wide"} targeted search zones.`,
+        `Sync queued for ${marketLabel(selectedMarket)}${
+          typeof res?.queued_count === "number"
+            ? ` (${res.queued_count} source${res.queued_count === 1 ? "" : "s"})`
+            : ""
+        }.`,
       );
+
       onQueued?.();
+
+      setRefreshingOverview(true);
+      try {
+        const overview = await ingestionClient.overview();
+        setOverviewLastSyncAt(overview?.last_sync_at);
+      } finally {
+        setRefreshingOverview(false);
+      }
     } catch (err: any) {
-      setError(err?.message || "Failed to queue intake run");
+      setError(err?.message || "Failed to queue supported-market sync.");
     } finally {
-      setSubmitting(false);
+      setSyncing(false);
     }
   }
 
-  async function handleDailyRefresh() {
-    setDailyRefreshing(true);
-    setError(null);
-    setMessage(null);
-
-    try {
-      await ingestionClient.queueDailyRefresh();
-      setMessage("Queued a full daily market refresh.");
-      onQueued?.();
-    } catch (err: any) {
-      setError(err?.message || "Failed to queue daily refresh");
-    } finally {
-      setDailyRefreshing(false);
-    }
+  function handleSelectChange(nextSlug: string) {
+    setSelectedSlug(nextSlug);
+    const nextMarket = markets.find((m) => m.slug === nextSlug) || null;
+    onMarketChange?.(nextMarket);
   }
 
   return (
     <GlassCard className="p-4">
-      <form onSubmit={handleSubmit} className="space-y-5">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
-              <MapPinned className="h-4 w-4 text-neutral-300" />
-              Intake region
+      <div className="space-y-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-app-0">
+              Supported market sync
             </div>
-
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <label className="block">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  State
-                </div>
-                <input
-                  value={state}
-                  onChange={(e) => setState(e.target.value.toUpperCase())}
-                  maxLength={2}
-                  disabled={submitting || dailyRefreshing}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                  placeholder="MI"
-                />
-              </label>
-
-              <label className="block">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  County
-                </div>
-                <select
-                  value={county}
-                  onChange={(e) => setCounty(e.target.value)}
-                  disabled={submitting || dailyRefreshing}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                >
-                  <option value="wayne">Wayne County</option>
-                  <option value="oakland">Oakland County</option>
-                  <option value="macomb">Macomb County</option>
-                </select>
-              </label>
-
-              <label className="block md:col-span-2">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  City
-                </div>
-                {cityOptions.length > 0 ? (
-                  <select
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    disabled={submitting || dailyRefreshing}
-                    className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                  >
-                    {cityOptions.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    disabled={submitting || dailyRefreshing}
-                    className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                    placeholder="Detroit"
-                  />
-                )}
-              </label>
-
-              <label className="block md:col-span-2">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  Target ZIP codes
-                </div>
-                <textarea
-                  value={zipCodes}
-                  onChange={(e) => setZipCodes(e.target.value)}
-                  disabled={submitting || dailyRefreshing}
-                  rows={2}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                  placeholder="48228,48224,48219,48235,48227"
-                />
-                <div className="mt-1 text-xs text-neutral-500">
-                  Comma-separated ZIPs searched first so intake avoids wasting
-                  time on weak city-wide pages.
-                </div>
-              </label>
+            <div className="mt-1 text-sm text-app-4">
+              Search your own covered inventory first. “Sync now” only refreshes
+              the currently selected supported market.
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
-              <Filter className="h-4 w-4 text-neutral-300" />
-              Smart listing filters
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="oh-btn oh-btn-secondary"
+          >
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+            Reload
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.4fr_1fr_1fr]">
+          <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+            <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+              <MapPinned className="h-3.5 w-3.5" />
+              Supported market
             </div>
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <label className="block">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  Min price
-                </div>
-                <input
-                  value={minPrice}
-                  onChange={(e) => setMinPrice(e.target.value)}
-                  inputMode="numeric"
-                  disabled={submitting || dailyRefreshing}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                  placeholder="60000"
-                />
-              </label>
+            <select
+              value={selectedSlug}
+              onChange={(e) => handleSelectChange(e.target.value)}
+              className="w-full bg-transparent text-sm text-app-0 outline-none"
+              disabled={loading || syncing}
+            >
+              {markets.length === 0 ? (
+                <option value="">No supported markets</option>
+              ) : null}
+              {markets.map((market) => (
+                <option key={market.slug} value={market.slug}>
+                  {marketLabel(market)}
+                </option>
+              ))}
+            </select>
 
-              <label className="block">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  Max price
-                </div>
-                <input
-                  value={maxPrice}
-                  onChange={(e) => setMaxPrice(e.target.value)}
-                  inputMode="numeric"
-                  disabled={submitting || dailyRefreshing}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                  placeholder="150000"
-                />
-              </label>
+            <div className="mt-2 text-xs text-app-4">
+              {marketSubLabel(selectedMarket)}
+            </div>
+          </label>
 
-              <label className="block">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  Min bedrooms
-                </div>
-                <div className="relative">
-                  <BedDouble className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-                  <input
-                    value={minBedrooms}
-                    onChange={(e) => setMinBedrooms(e.target.value)}
-                    inputMode="numeric"
-                    disabled={submitting || dailyRefreshing}
-                    className="w-full rounded-xl border border-white/10 bg-black/20 py-2.5 pl-10 pr-3 text-sm text-white outline-none transition focus:border-white/20"
-                    placeholder="2"
-                  />
-                </div>
-              </label>
+          <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+            <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+              <SearchCheck className="h-3.5 w-3.5" />
+              Coverage
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className={toneForTier(selectedMarket?.coverage_tier)}>
+                {selectedMarket?.coverage_tier || "unknown"} tier
+              </span>
+              {selectedMarket?.max_price ? (
+                <span className="oh-pill">
+                  max price ${Number(selectedMarket.max_price).toLocaleString()}
+                </span>
+              ) : null}
+              {selectedMarket?.property_types?.length ? (
+                <span className="oh-pill">
+                  {selectedMarket.property_types.join(", ")}
+                </span>
+              ) : null}
+            </div>
+          </div>
 
-              <label className="block">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  Min bathrooms
-                </div>
-                <div className="relative">
-                  <Bath className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-                  <input
-                    value={minBathrooms}
-                    onChange={(e) => setMinBathrooms(e.target.value)}
-                    inputMode="decimal"
-                    disabled={submitting || dailyRefreshing}
-                    className="w-full rounded-xl border border-white/10 bg-black/20 py-2.5 pl-10 pr-3 text-sm text-white outline-none transition focus:border-white/20"
-                    placeholder="1"
-                  />
-                </div>
-              </label>
-
-              <label className="block">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  Property type
-                </div>
-                <select
-                  value={propertyType}
-                  onChange={(e) => setPropertyType(e.target.value)}
-                  disabled={submitting || dailyRefreshing}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                >
-                  {PROPERTY_TYPES.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  Pages per shard
-                </div>
-                <input
-                  value={pagesPerShard}
-                  onChange={(e) =>
-                    setPagesPerShard(normalizeSmallNumberInput(e.target.value))
-                  }
-                  onBlur={() =>
-                    setPagesPerShard(String(parsePagesPerShard(pagesPerShard)))
-                  }
-                  inputMode="numeric"
-                  disabled={submitting || dailyRefreshing}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                  placeholder="1"
-                />
-                <div className="mt-1 text-xs text-neutral-500">
-                  Lower is faster. Start with 1.
-                </div>
-              </label>
-
-              <label className="block md:col-span-2">
-                <div className="mb-1.5 text-xs uppercase tracking-[0.12em] text-neutral-400">
-                  Results target
-                </div>
-                <input
-                  value={limit}
-                  onChange={(e) =>
-                    setLimit(normalizeLimitInput(e.target.value))
-                  }
-                  onBlur={() => setLimit(String(parseLimit(limit)))}
-                  inputMode="numeric"
-                  disabled={submitting || dailyRefreshing}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/20"
-                  placeholder="100"
-                />
-              </label>
+          <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+            <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+              <Calendar className="h-3.5 w-3.5" />
+              Inventory freshness
+            </div>
+            <div className="text-sm text-app-0">
+              Last platform sync: {relativeTime(overviewLastSyncAt)}
+            </div>
+            <div className="mt-1 text-xs text-app-4">
+              {refreshingOverview
+                ? "Refreshing freshness..."
+                : "Based on ingestion overview."}
             </div>
           </div>
         </div>
 
-        {selectedSource ? (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-300">
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              Market source: {selectedSource.display_name}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSync}
+            disabled={loading || syncing || !selectedMarket}
+            className="oh-btn"
+          >
+            {syncing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+            Sync now
+          </button>
+
+          {selectedMarket?.sync_limit ? (
+            <span className="text-xs text-app-4">
+              bounded refresh limit: {selectedMarket.sync_limit} listings
             </span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              Provider: {selectedSource.provider}
-            </span>
-            <span
-              className={`rounded-full border px-3 py-1 ${statusTone(
-                selectedSource.status,
-              )}`}
-            >
-              {selectedSource.status}
-            </span>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         {message ? (
-          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
             {message}
           </div>
         ) : null}
 
         {error ? (
-          <div className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
             {error}
           </div>
         ) : null}
-
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
-          <div className="flex items-center gap-2 text-sm text-neutral-400">
-            <SearchCheck className="h-4 w-4" />
-            Uses ZIP-targeted shards and price buckets first before wider
-            filtering.
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleDailyRefresh}
-              disabled={dailyRefreshing || submitting || loadingSources}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Calendar className="h-4 w-4" />
-              {dailyRefreshing ? "Queueing refresh..." : "Daily refresh"}
-            </button>
-
-            <button
-              type="submit"
-              disabled={submitting || loadingSources || !selectedSource?.id}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/15 px-5 text-sm font-semibold text-emerald-50 shadow-lg shadow-emerald-900/20 transition hover:border-emerald-400/40 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Play className="h-4 w-4" />
-              {submitting ? "Queueing intake..." : "Run intake"}
-            </button>
-          </div>
-        </div>
-      </form>
+      </div>
     </GlassCard>
   );
 }

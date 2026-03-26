@@ -1,5 +1,24 @@
 import { API_BASE } from "./api";
 
+export type SupportedMarket = {
+  slug: string;
+  label: string;
+  state: string;
+  county?: string | null;
+  city?: string | null;
+  zip_codes?: string[];
+  coverage_tier?: string;
+  priority?: number;
+  is_active?: boolean;
+  sync_limit?: number;
+  sync_every_hours?: number;
+  min_price?: number | null;
+  max_price?: number | null;
+  property_types?: string[];
+  max_units?: number | null;
+  notes?: string | null;
+};
+
 export type IngestionOverview = {
   sources_connected: number;
   sources_enabled: number;
@@ -132,6 +151,31 @@ export type SyncDefaultSourcesResponse = {
   normal_path?: boolean;
 };
 
+export type SyncMarketPayload = {
+  market_slug?: string;
+  city?: string;
+  state?: string;
+  execute_inline?: boolean;
+};
+
+export type SyncMarketResponse = {
+  ok: boolean;
+  covered: boolean;
+  queued: boolean;
+  city?: string;
+  state?: string;
+  market?: SupportedMarket | null;
+  queued_count?: number;
+  task_ids?: string[];
+  dispatches?: Array<{
+    source_id: number;
+    source_slug: string;
+    provider: string;
+    trigger_type: string;
+    runtime_config: Record<string, any>;
+  }>;
+};
+
 function readOrgSlug(): string {
   const env = (import.meta as any).env || {};
   const envOrg = (env.VITE_ORG_SLUG as string | undefined)?.trim();
@@ -163,7 +207,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const body = await res.json();
       detail = body?.detail || body?.message || detail;
     } catch {
-      // noop
+      // no-op
     }
     throw new Error(detail);
   }
@@ -189,6 +233,33 @@ export const ingestionClient = {
 
   listRuns(limit = 25) {
     return request<IngestionRun[]>(`/ingestion/runs?limit=${limit}`);
+  },
+
+  listSupportedMarkets() {
+    return request<SupportedMarket[]>("/markets/supported");
+  },
+
+  getCoverage(city: string, state = "MI") {
+    const params = new URLSearchParams({ city, state });
+    return request<{
+      ok: boolean;
+      covered: boolean;
+      city: string;
+      state: string;
+      market?: SupportedMarket | null;
+    }>(`/markets/coverage?${params.toString()}`);
+  },
+
+  syncMarket(payload: SyncMarketPayload) {
+    return request<SyncMarketResponse>("/ingestion/sync-market", {
+      method: "POST",
+      body: JSON.stringify({
+        market_slug: payload.market_slug,
+        city: payload.city,
+        state: payload.state ?? "MI",
+        execute_inline: Boolean(payload.execute_inline),
+      }),
+    });
   },
 
   syncSource(sourceId: number, payload: IngestionLaunchPayload = {}) {
@@ -238,41 +309,11 @@ export const ingestionClient = {
   },
 
   queueDailyRefresh() {
-    return request<{
-      ok: boolean;
-      queued: boolean;
-      task_id?: string;
-      markets?: Array<Record<string, any>>;
-    }>("/ingestion/daily-refresh", {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-  },
-
-  runDetail(runId: number) {
-    return request<{
-      id: number;
-      source_id: number;
-      trigger_type: string;
-      status: string;
-      started_at: string;
-      finished_at?: string | null;
-      records_seen: number;
-      records_imported: number;
-      properties_created: number;
-      properties_updated: number;
-      deals_created: number;
-      deals_updated: number;
-      rent_rows_upserted: number;
-      photos_upserted: number;
-      duplicates_skipped: number;
-      invalid_rows: number;
-      retry_count: number;
-      error_summary?: string | null;
-      error_json?: Record<string, any> | null;
-      summary_json?: Record<string, any>;
-      pipeline_outcome?: PipelineOutcome;
-      normal_path?: boolean;
-    }>(`/ingestion/runs/${runId}`);
+    return request<{ ok: boolean; queued: boolean }>(
+      "/ingestion/refresh-daily",
+      {
+        method: "POST",
+      },
+    );
   },
 };

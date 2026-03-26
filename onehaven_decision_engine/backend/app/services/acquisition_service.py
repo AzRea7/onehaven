@@ -20,6 +20,8 @@ from .acquisition_document_review_service import create_field_suggestions_from_d
 from .acquisition_participant_service import list_participants
 from .document_parsing_service import parse_document
 from .virus_scanning_service import scan_file
+from .acquisition_tag_service import list_property_tags, replace_property_tags
+from .property_state_machine import get_state_payload, sync_property_state
 
 DEFAULT_REQUIRED_DOCS = [
     {"kind": "purchase_agreement", "label": "Purchase agreement"},
@@ -30,6 +32,14 @@ DEFAULT_REQUIRED_DOCS = [
     {"kind": "insurance_binder", "label": "Insurance binder"},
     {"kind": "inspection_report", "label": "Inspection / due diligence"},
 ]
+
+
+PROMOTION_REQUIRED_FIELDS = (
+    "purchase_price",
+    "target_close_date",
+    "waiting_on",
+    "next_step",
+)
 
 ALLOWED_UPLOAD_EXTENSIONS = {
     ".pdf": "application/pdf",
@@ -317,6 +327,157 @@ def update_acquisition_record(
     )
     db.commit()
     return ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+
+
+
+
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _as_float_or_none(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid numeric value: {value}") from exc
+
+
+def _validate_promotion_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    cleaned = {
+        "status": _clean_text(payload.get("status")) or "active",
+        "waiting_on": _clean_text(payload.get("waiting_on")),
+        "next_step": _clean_text(payload.get("next_step")),
+        "contract_date": _clean_text(payload.get("contract_date")),
+        "target_close_date": _clean_text(payload.get("target_close_date")),
+        "closing_date": _clean_text(payload.get("closing_date")),
+        "purchase_price": _as_float_or_none(payload.get("purchase_price")),
+        "earnest_money": _as_float_or_none(payload.get("earnest_money")),
+        "loan_amount": _as_float_or_none(payload.get("loan_amount")),
+        "loan_type": _clean_text(payload.get("loan_type")),
+        "interest_rate": _as_float_or_none(payload.get("interest_rate")),
+        "cash_to_close": _as_float_or_none(payload.get("cash_to_close")),
+        "closing_costs": _as_float_or_none(payload.get("closing_costs")),
+        "seller_credits": _as_float_or_none(payload.get("seller_credits")),
+        "title_company": _clean_text(payload.get("title_company")),
+        "escrow_officer": _clean_text(payload.get("escrow_officer")),
+        "notes": _clean_text(payload.get("notes")),
+    }
+
+    missing: list[str] = []
+    for key in PROMOTION_REQUIRED_FIELDS:
+        value = cleaned.get(key)
+        if value in (None, ""):
+            missing.append(key)
+
+    purchase_price = cleaned.get("purchase_price")
+    if purchase_price is not None and purchase_price <= 0:
+        raise HTTPException(status_code=422, detail="purchase_price must be greater than 0.")
+
+    loan_type = str(cleaned.get("loan_type") or "").strip().lower()
+    allowed_loan_types = {"cash", "dscr", "conventional", "hard_money", "private_money", "seller_finance"}
+    if loan_type and loan_type not in allowed_loan_types:
+        raise HTTPException(status_code=422, detail="loan_type is invalid.")
+
+    if loan_type and loan_type != "cash":
+        loan_amount = cleaned.get("loan_amount")
+        if loan_amount in (None, ""):
+            missing.append("loan_amount")
+        elif isinstance(loan_amount, (int, float)) and loan_amount <= 0:
+            raise HTTPException(status_code=422, detail="loan_amount must be greater than 0 for financed deals.")
+
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "acquisition_setup_required",
+                "message": "Required acquisition setup fields are missing.",
+                "missing_fields": sorted(set(missing)),
+            },
+        )
+
+    return cleaned
+
+
+def promote_property_to_acquisition(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    actor_user_id: int | None,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    prop = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select id, org_id, address, city, state, zip, county, asking_price
+                from properties
+                where org_id = :org_id and id = :property_id
+                limit 1
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        ).fetchone()
+    )
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found.")
+
+    state = get_state_payload(db, org_id=int(org_id), property_id=int(property_id), recompute=True)
+    decision_bucket = str(
+        state.get("decision_bucket") or state.get("normalized_decision") or prop.get("normalized_decision") or "REVIEW"
+    ).upper()
+    if decision_bucket == "REJECT":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "rejected_property_cannot_enter_acquisition",
+                "message": "Rejected properties cannot be moved into acquisition until assumptions change.",
+                "decision_bucket": decision_bucket,
+                "next_actions": state.get("next_actions") or [],
+            },
+        )
+
+    cleaned = _validate_promotion_payload(payload)
+    acquisition = update_acquisition_record(
+        db,
+        org_id=int(org_id),
+        property_id=int(property_id),
+        payload=cleaned,
+    )
+
+    existing_tags = [
+        row.get("tag")
+        for row in list_property_tags(db, org_id=int(org_id), property_id=int(property_id))
+        if row.get("tag")
+    ]
+    merged_tags = sorted(set(existing_tags) | {"offer_candidate"})
+
+    replace_property_tags(
+        db,
+        org_id=int(org_id),
+        property_id=int(property_id),
+        tags=merged_tags,
+        actor_user_id=actor_user_id,
+        source="operator",
+    )
+
+    sync_property_state(db, org_id=int(org_id), property_id=int(property_id))
+    db.commit()
+
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "property": prop,
+        "acquisition": acquisition,
+        "detail": get_acquisition_detail(db, org_id=int(org_id), property_id=int(property_id)),
+        "state": get_state_payload(db, org_id=int(org_id), property_id=int(property_id), recompute=True),
+        "tags": merged_tags,
+    }
 
 
 def add_acquisition_document(

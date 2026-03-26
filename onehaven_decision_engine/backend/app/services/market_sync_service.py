@@ -1,4 +1,3 @@
-# backend/app/services/market_sync_service.py
 from __future__ import annotations
 
 from typing import Any
@@ -6,29 +5,24 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..db import SessionLocal
 from .ingestion_scheduler_service import build_runtime_payload
 from .ingestion_source_service import ensure_default_manual_sources, list_sources
 from .market_catalog_service import (
     find_market_by_city,
+    get_market,
     list_active_supported_markets,
     list_markets_by_tier,
 )
 
-
 """
-This service prepares market sync plans.
+This service prepares supported-market sync plans.
 
-Why this exists:
-- Keeps router logic thin
-- Keeps Celery task logic thin
-- Makes it easy to swap market catalog from code -> DB later
-- Gives one place to implement scaling rules
-
-Future scaling:
-- Add per-market source preferences
-- Add freshness / staleness based scheduling
-- Add demand-based boosts from user searches or favorites
-- Add org-specific market enablement
+Principles:
+- frontend only chooses a supported market
+- backend resolves that market from a single source of truth
+- runtime payload is bounded to the market definition
+- matching sources are reused from the same logic used by daily sync
 """
 
 
@@ -50,7 +44,9 @@ def get_default_market_limit_per_sync() -> int:
 
 
 def list_selected_daily_markets() -> list[dict[str, Any]]:
-    tier = _normalize_tier_limit(getattr(settings, "market_sync_daily_tier_filter", "all"))
+    tier = _normalize_tier_limit(
+        getattr(settings, "market_sync_daily_tier_filter", "all")
+    )
 
     if tier == "all":
         markets = list_active_supported_markets()
@@ -66,6 +62,11 @@ def build_market_runtime_payload(market: dict[str, Any]) -> dict[str, Any]:
         county=str(market.get("county") or "") or None,
         city=str(market.get("city") or "") or None,
         limit=int(market.get("sync_limit") or get_default_market_limit_per_sync()),
+        market_slug=str(market.get("slug") or "") or None,
+        trigger_type="daily_refresh",
+        property_types=list(market.get("property_types") or ["single_family", "multi_family"]),
+        max_price=int(market.get("max_price") or getattr(settings, "investor_buy_box_max_price", 200_000)),
+        max_units=int(market.get("max_units") or getattr(settings, "investor_buy_box_max_units", 4)),
     )
 
 
@@ -91,7 +92,12 @@ def _source_matches_market(source: Any, market: dict[str, Any]) -> bool:
     source_state = _norm_text(config.get("state") or "MI")
     market_state = _norm_text(market.get("state") or "MI")
 
-    if source_city and market_city and source_city == market_city and source_state == market_state:
+    if (
+        source_city
+        and market_city
+        and source_city == market_city
+        and source_state == market_state
+    ):
         return True
 
     source_slug = _norm_text(getattr(source, "slug", ""))
@@ -106,12 +112,24 @@ def _matching_sources_for_market(sources: list[Any], market: dict[str, Any]) -> 
     if exact:
         return exact
 
-    # Fallback only if exact match is unavailable.
     return [
         source
         for source in sources
         if _norm_text(getattr(source, "provider", "")) == "rentcast"
     ]
+
+
+def resolve_supported_market(
+    *,
+    market_slug: str | None = None,
+    city: str | None = None,
+    state: str = "MI",
+) -> dict[str, Any] | None:
+    if market_slug:
+        return get_market(str(market_slug).strip().lower())
+    if city:
+        return find_market_by_city(city=city, state=state)
+    return None
 
 
 def build_daily_dispatch_plan(db: Session, *, org_id: int) -> list[dict[str, Any]]:
@@ -124,27 +142,33 @@ def build_daily_dispatch_plan(db: Session, *, org_id: int) -> list[dict[str, Any
         matched_sources = _matching_sources_for_market(sources, market)
 
         for source in matched_sources:
-            dispatches.append(
-                {
-                    "market": market,
-                    "source_id": int(source.id),
-                    "source_slug": str(getattr(source, "slug", "")),
-                    "provider": str(getattr(source, "provider", "")),
-                    "trigger_type": "daily_refresh",
-                    "runtime_config": runtime_config,
-                }
-            )
+          dispatches.append(
+              {
+                  "market": market,
+                  "source_id": int(source.id),
+                  "source_slug": str(getattr(source, "slug", "")),
+                  "provider": str(getattr(source, "provider", "")),
+                  "trigger_type": "daily_refresh",
+                  "runtime_config": runtime_config,
+              }
+          )
     return dispatches
 
 
-def build_city_dispatch_plan(
+def build_supported_market_sync_plan_for_db(
     db: Session,
     *,
     org_id: int,
-    city: str,
+    market_slug: str | None = None,
+    city: str | None = None,
     state: str = "MI",
 ) -> dict[str, Any]:
-    market = find_market_by_city(city=city, state=state)
+    market = resolve_supported_market(
+        market_slug=market_slug,
+        city=city,
+        state=state,
+    )
+
     if market is None:
         return {
             "ok": False,
@@ -157,6 +181,8 @@ def build_city_dispatch_plan(
 
     sources = get_enabled_sources_for_org(db, org_id=int(org_id))
     runtime_config = build_market_runtime_payload(market)
+    runtime_config["trigger_type"] = "manual_market_sync"
+
     matched_sources = _matching_sources_for_market(sources, market)
 
     dispatches = [
@@ -174,8 +200,28 @@ def build_city_dispatch_plan(
     return {
         "ok": True,
         "covered": True,
-        "city": city,
-        "state": state,
+        "city": market.get("city"),
+        "state": market.get("state"),
         "market": market,
         "dispatches": dispatches,
     }
+
+
+def build_supported_market_sync_plan(
+    *,
+    org_id: int,
+    market_slug: str | None = None,
+    city: str | None = None,
+    state: str = "MI",
+) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        return build_supported_market_sync_plan_for_db(
+            db,
+            org_id=org_id,
+            market_slug=market_slug,
+            city=city,
+            state=state,
+        )
+    finally:
+        db.close()

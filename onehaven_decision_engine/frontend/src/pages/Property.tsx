@@ -21,6 +21,7 @@ import {
   TriangleAlert,
   CheckCheck,
   GitCompareArrows,
+  X,
 } from "lucide-react";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
@@ -84,6 +85,33 @@ type AcquisitionTagsPayload = {
   property_id?: number;
   tags?: string[];
   rows?: Array<{ tag?: string }>;
+};
+
+type PromoteFormState = {
+  status: string;
+  waiting_on: string;
+  next_step: string;
+  target_close_date: string;
+  purchase_price: string;
+  loan_type: string;
+  loan_amount: string;
+  cash_to_close: string;
+  title_company: string;
+  escrow_officer: string;
+  notes: string;
+};
+
+type PromoteResponse = {
+  ok?: boolean;
+  property_id?: number;
+  tags?: string[];
+  state?: {
+    current_stage?: string;
+    current_pane?: string;
+    suggested_pane?: string;
+    decision_bucket?: string;
+  };
+  detail?: AcquisitionDetail;
 };
 
 function money(v?: number | null) {
@@ -295,8 +323,67 @@ function participantRows(detail: AcquisitionDetail | null) {
   return contacts;
 }
 
-function safeArray<T = any>(v: any): T[] {
-  return Array.isArray(v) ? v : [];
+function safeArray<T = any>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function extractTags(
+  payload: AcquisitionTagsPayload | null | undefined,
+): string[] {
+  if (!payload) return [];
+
+  if (Array.isArray(payload.tags)) {
+    return payload.tags.map((tag) => String(tag || "").trim()).filter(Boolean);
+  }
+
+  if (Array.isArray(payload.rows)) {
+    return payload.rows
+      .map((row) => String(row?.tag || "").trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function buildPromoteDraft(
+  property: PropertyPayload | null,
+  detail: AcquisitionDetail | null,
+): PromoteFormState {
+  const acq = detail?.acquisition || {};
+
+  return {
+    status: String(acq.status || "active"),
+    waiting_on: String(acq.waiting_on || "Purchase agreement"),
+    next_step: String(acq.next_step || "Open acquisition execution"),
+    target_close_date: String(acq.target_close_date || ""),
+    purchase_price:
+      acq.purchase_price != null
+        ? String(acq.purchase_price)
+        : property?.asking_price != null
+          ? String(property.asking_price)
+          : "",
+    loan_type: String(acq.loan_type || "dscr"),
+    loan_amount: acq.loan_amount != null ? String(acq.loan_amount) : "",
+    cash_to_close: acq.cash_to_close != null ? String(acq.cash_to_close) : "",
+    title_company: String(acq.title_company || ""),
+    escrow_officer: String(acq.escrow_officer || ""),
+    notes: String(acq.notes || ""),
+  };
+}
+
+function detailMessage(error: any, fallback: string) {
+  const raw = error?.message || error?.response?.data?.detail || fallback;
+
+  if (typeof raw === "string") return raw;
+
+  if (raw && typeof raw === "object") {
+    if (typeof raw.message === "string") return raw.message;
+    if (Array.isArray(raw.missing_fields) && raw.missing_fields.length) {
+      return `Missing required fields: ${raw.missing_fields.join(", ")}`;
+    }
+  }
+
+  return fallback;
 }
 
 export default function Property() {
@@ -308,6 +395,22 @@ export default function Property() {
     React.useState<AcquisitionTagsPayload | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
+  const [showPromoteModal, setShowPromoteModal] = React.useState(false);
+  const [promoteSaving, setPromoteSaving] = React.useState(false);
+  const [promoteError, setPromoteError] = React.useState<string | null>(null);
+  const [promoteForm, setPromoteForm] = React.useState<PromoteFormState>({
+    status: "active",
+    waiting_on: "Purchase agreement",
+    next_step: "Open acquisition execution",
+    target_close_date: "",
+    purchase_price: "",
+    loan_type: "dscr",
+    loan_amount: "",
+    cash_to_close: "",
+    title_company: "",
+    escrow_officer: "",
+    notes: "",
+  });
 
   const refresh = React.useCallback(async () => {
     if (!id) return;
@@ -353,6 +456,68 @@ export default function Property() {
       setLoading(false);
     }
   }, [id]);
+
+  const openPromoteModal = React.useCallback(() => {
+    setPromoteForm(buildPromoteDraft(data, acquisition));
+    setPromoteError(null);
+    setShowPromoteModal(true);
+  }, [data, acquisition]);
+
+  const closePromoteModal = React.useCallback(() => {
+    if (promoteSaving) return;
+    setShowPromoteModal(false);
+    setPromoteError(null);
+  }, [promoteSaving]);
+
+  async function handlePromoteToAcquisition() {
+    if (!id) return;
+
+    setPromoteSaving(true);
+    setPromoteError(null);
+
+    try {
+      const payload = {
+        status: promoteForm.status || "active",
+        waiting_on: promoteForm.waiting_on,
+        next_step: promoteForm.next_step,
+        target_close_date: promoteForm.target_close_date,
+        purchase_price:
+          promoteForm.purchase_price === ""
+            ? null
+            : Number(promoteForm.purchase_price),
+        loan_type: promoteForm.loan_type || null,
+        loan_amount:
+          promoteForm.loan_amount === ""
+            ? null
+            : Number(promoteForm.loan_amount),
+        cash_to_close:
+          promoteForm.cash_to_close === ""
+            ? null
+            : Number(promoteForm.cash_to_close),
+        title_company: promoteForm.title_company || null,
+        escrow_officer: promoteForm.escrow_officer || null,
+        notes: promoteForm.notes || null,
+      };
+
+      const out = await api.post<PromoteResponse>(
+        `/acquisition/properties/${id}/promote`,
+        payload,
+      );
+
+      if (out?.detail) {
+        setAcquisition(out.detail);
+      }
+
+      await refresh();
+      setShowPromoteModal(false);
+    } catch (error: any) {
+      setPromoteError(
+        detailMessage(error, "Failed to move property into acquisition."),
+      );
+    } finally {
+      setPromoteSaving(false);
+    }
+  }
 
   React.useEffect(() => {
     refresh();
@@ -414,11 +579,25 @@ export default function Property() {
   const conflicts = collectConflicts(acquisition);
   const readiness = closeReadiness(acquisition);
   const participants = participantRows(acquisition);
-  const tags =
-    acquisitionTags?.tags ||
-    safeArray(acquisitionTags?.rows)
-      .map((row: any) => row?.tag)
-      .filter(Boolean);
+  const tags = extractTags(acquisitionTags);
+  const hasOfferCandidateTag = Array.isArray(tags)
+    ? tags.includes("offer_candidate")
+    : false;
+
+  const acquisitionStatus = String(
+    acquisition?.acquisition?.status || "",
+  ).toLowerCase();
+  const isAlreadyInAcquisition =
+    hasOfferCandidateTag ||
+    !!acquisition?.acquisition ||
+    ["active", "under_contract", "closing"].includes(acquisitionStatus);
+
+  const decisionBucket = String(
+    data.normalized_decision || "REVIEW",
+  ).toUpperCase();
+  const promoteButtonLabel = isAlreadyInAcquisition
+    ? "Update acquisition setup"
+    : "Move to acquisition";
 
   return (
     <PageShell>
@@ -447,6 +626,15 @@ export default function Property() {
                 <RefreshCcw className="h-4 w-4" />
                 Refresh property
               </button>
+
+              <button
+                onClick={openPromoteModal}
+                className="oh-btn oh-btn-primary"
+              >
+                <Wallet className="h-4 w-4" />
+                {promoteButtonLabel}
+              </button>
+
               <Link
                 to={`/panes/${currentPane}`}
                 className="oh-btn oh-btn-secondary"
@@ -472,7 +660,8 @@ export default function Property() {
                     {paneLabel(currentPane)}
                   </div>
                   <div className="mt-1 text-sm text-app-4">
-                    stage {data.current_stage_label || data.current_stage || "—"}
+                    stage{" "}
+                    {data.current_stage_label || data.current_stage || "—"}
                   </div>
                 </div>
 
@@ -891,14 +1080,14 @@ export default function Property() {
                       {person?.name || person?.full_name || "Unnamed contact"}
                     </div>
                     <div className="mt-1 text-xs text-app-4">
-                      [
+                      {[
                         person?.role,
                         person?.company,
                         person?.email,
                         person?.phone,
                       ]
                         .filter(Boolean)
-                        .join(" · "){"}"}
+                        .join(" · ") || "No contact details"}
                     </div>
                   </div>
                 ))}
@@ -929,14 +1118,14 @@ export default function Property() {
                               `Document #${doc?.id}`}
                           </div>
                           <div className="mt-1 text-xs text-app-4">
-                            [
+                            {[
                               doc?.kind,
                               doc?.parse_status,
                               doc?.scan_status,
                               doc?.status,
                             ]
                               .filter(Boolean)
-                              .join(" · "){"}"}
+                              .join(" · ") || "No document metadata"}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -990,6 +1179,246 @@ export default function Property() {
             </Link>
           </div>
         </Surface>
+        {showPromoteModal ? (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4 py-6">
+            <div className="w-full max-w-3xl rounded-[28px] border border-app bg-app-panel shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-app px-6 py-5">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    Acquisition setup
+                  </div>
+                  <div className="mt-2 text-xl font-semibold text-app-0">
+                    {promoteButtonLabel}
+                  </div>
+                  <div className="mt-1 text-sm text-app-3">
+                    Required before this property enters acquisition execution.
+                  </div>
+                </div>
+
+                <button
+                  onClick={closePromoteModal}
+                  className="rounded-full border border-app p-2 text-app-4 hover:text-app-0"
+                  disabled={promoteSaving}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="px-6 py-5">
+                {promoteError ? (
+                  <div className="mb-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                    {promoteError}
+                  </div>
+                ) : null}
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                      Purchase price *
+                    </div>
+                    <input
+                      value={promoteForm.purchase_price}
+                      onChange={(e) =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          purchase_price: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                      placeholder="145000"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                      Target close date *
+                    </div>
+                    <input
+                      type="date"
+                      value={promoteForm.target_close_date}
+                      onChange={(e) =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          target_close_date: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                      Waiting on *
+                    </div>
+                    <input
+                      value={promoteForm.waiting_on}
+                      onChange={(e) =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          waiting_on: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                      placeholder="Purchase agreement"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                      Next step *
+                    </div>
+                    <input
+                      value={promoteForm.next_step}
+                      onChange={(e) =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          next_step: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                      placeholder="Open title and collect contract"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                      Loan type
+                    </div>
+                    <select
+                      value={promoteForm.loan_type}
+                      onChange={(e) =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          loan_type: e.target.value,
+                          loan_amount:
+                            e.target.value === "cash" ? "" : prev.loan_amount,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                    >
+                      <option value="dscr">DSCR</option>
+                      <option value="conventional">Conventional</option>
+                      <option value="hard_money">Hard money</option>
+                      <option value="private_money">Private money</option>
+                      <option value="seller_finance">Seller finance</option>
+                      <option value="cash">Cash</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                      Loan amount
+                    </div>
+                    <input
+                      value={promoteForm.loan_amount}
+                      onChange={(e) =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          loan_amount: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                      placeholder="110000"
+                      disabled={promoteForm.loan_type === "cash"}
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                      Cash to close
+                    </div>
+                    <input
+                      value={promoteForm.cash_to_close}
+                      onChange={(e) =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          cash_to_close: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                      placeholder="38000"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                      Title company
+                    </div>
+                    <input
+                      value={promoteForm.title_company}
+                      onChange={(e) =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          title_company: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                      placeholder="ABC Title"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                      Escrow officer
+                    </div>
+                    <input
+                      value={promoteForm.escrow_officer}
+                      onChange={(e) =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          escrow_officer: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                      placeholder="Jane Smith"
+                    />
+                  </label>
+                </div>
+
+                <label className="mt-4 block">
+                  <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                    Notes
+                  </div>
+                  <textarea
+                    value={promoteForm.notes}
+                    onChange={(e) =>
+                      setPromoteForm((prev) => ({
+                        ...prev,
+                        notes: e.target.value,
+                      }))
+                    }
+                    className="min-h-[110px] w-full rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-0 outline-none"
+                    placeholder="Anything the acquisition team should know before execution starts."
+                  />
+                </label>
+
+                <div className="mt-5 rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-3">
+                  Required fields: purchase price, target close date, waiting
+                  on, next step, and loan amount for non-cash deals.
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 border-t border-app px-6 py-5">
+                <button
+                  onClick={closePromoteModal}
+                  className="oh-btn oh-btn-secondary"
+                  disabled={promoteSaving}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={handlePromoteToAcquisition}
+                  className="oh-btn oh-btn-primary"
+                  disabled={promoteSaving}
+                >
+                  <Wallet className="h-4 w-4" />
+                  {promoteSaving ? "Saving…" : "Save and move to acquisition"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </PageShell>
   );

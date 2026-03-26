@@ -56,7 +56,12 @@ from ..services.property_state_machine import (
 )
 from ..services.workflow_gate_service import build_workflow_summary
 from ..services.acquisition_tag_service import list_property_tags, replace_property_tags
-from ..services.property_inventory_snapshot_service import build_property_inventory_snapshot
+
+# NEW: use inventory snapshots as the investor-pane source instead of raw Property row ordering.
+from ..services.property_inventory_snapshot_service import (
+    build_property_inventory_snapshot,
+    build_inventory_snapshots_for_scope,
+)
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 log = logging.getLogger("onehaven.properties")
@@ -94,7 +99,6 @@ def _property_acquisition_meta(db: Session, *, org_id: int, property_id: int) ->
     return dict(row._mapping) if row is not None else {}
 
 
-
 def _safe_float(v: Any, default: float = 0.0) -> float:
     try:
         if v is None:
@@ -102,7 +106,6 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
         return float(v)
     except Exception:
         return default
-
 
 
 def _crime_label(score: Any) -> str:
@@ -116,7 +119,6 @@ def _crime_label(score: Any) -> str:
     return "LOW"
 
 
-
 def _asking_price(prop: Property, deal: Deal | None) -> float | None:
     for attr in ("asking_price", "list_price", "price", "offer_price", "purchase_price"):
         if deal is not None and getattr(deal, attr, None) is not None:
@@ -127,15 +129,12 @@ def _asking_price(prop: Property, deal: Deal | None) -> float | None:
     return None
 
 
-
 def _norm_city(s: str) -> str:
     return (s or "").strip().title()
 
 
-
 def _norm_state(s: str) -> str:
     return (s or "MI").strip().upper()
-
 
 
 def _maybe_geo_enrich_property(db: Session, *, org_id: int, property_id: int, force: bool = False) -> dict[str, Any]:
@@ -158,7 +157,6 @@ def _maybe_geo_enrich_property(db: Session, *, org_id: int, property_id: int, fo
             extra={"org_id": org_id, "property_id": property_id, "force": force},
         )
         return {"ok": False, "error": str(e)}
-
 
 
 def _pick_jurisdiction_rule(db: Session, org_id: int, city: str, state: str) -> JurisdictionRule | None:
@@ -184,7 +182,6 @@ def _pick_jurisdiction_rule(db: Session, org_id: int, city: str, state: str) -> 
     )
 
 
-
 def _latest_deal(db: Session, *, org_id: int, property_id: int) -> Deal | None:
     return db.scalar(
         select(Deal)
@@ -192,7 +189,6 @@ def _latest_deal(db: Session, *, org_id: int, property_id: int) -> Deal | None:
         .order_by(desc(Deal.updated_at), desc(Deal.id))
         .limit(1)
     )
-
 
 
 def _latest_underwriting(db: Session, *, org_id: int, property_id: int) -> UnderwritingResult | None:
@@ -203,7 +199,6 @@ def _latest_underwriting(db: Session, *, org_id: int, property_id: int) -> Under
         .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
         .limit(1)
     )
-
 
 
 def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strategy: str) -> RentExplainOut:
@@ -262,7 +257,6 @@ def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strate
     )
 
 
-
 def _merge_checklist_state(db: Session, org_id: int, property_id: int, items: list[ChecklistItemOut]) -> list[ChecklistItemOut]:
     state_rows = db.scalars(
         select(PropertyChecklistItem).where(
@@ -290,7 +284,6 @@ def _merge_checklist_state(db: Session, org_id: int, property_id: int, items: li
                 item.marked_by = users_by_id.get(state_row.marked_by_user_id)
         out.append(item)
     return out
-
 
 
 def _extract_urls_from_any(value: Any, out: list[str]) -> None:
@@ -330,7 +323,6 @@ def _extract_urls_from_any(value: Any, out: list[str]) -> None:
         return
 
 
-
 def _dedupe_keep_order(items: list[str]) -> list[str]:
     seen = set()
     out: list[str] = []
@@ -341,7 +333,6 @@ def _dedupe_keep_order(items: list[str]) -> list[str]:
         seen.add(value)
         out.append(value)
     return out
-
 
 
 def _extract_zillow_photo_urls(source_raw_json: Optional[str]) -> list[str]:
@@ -365,7 +356,6 @@ def _extract_zillow_photo_urls(source_raw_json: Optional[str]) -> list[str]:
     return cleaned[:50]
 
 
-
 def _latest_zillow_deal(db: Session, *, org_id: int, property_id: int) -> Deal | None:
     return db.scalar(
         select(Deal)
@@ -379,7 +369,6 @@ def _latest_zillow_deal(db: Session, *, org_id: int, property_id: int) -> Deal |
     )
 
 
-
 def _photo_gallery_for_property(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
     zdeal = _latest_zillow_deal(db, org_id=org_id, property_id=property_id)
     photos = _extract_zillow_photo_urls(getattr(zdeal, "source_raw_json", None)) if zdeal else []
@@ -389,7 +378,6 @@ def _photo_gallery_for_property(db: Session, *, org_id: int, property_id: int) -
         "count": len(photos),
         "source": "zillow_import" if photos else None,
     }
-
 
 
 def _build_property_list_item(
@@ -486,123 +474,209 @@ def list_properties(
     max_crime_score: Optional[float] = Query(default=None),
     min_offender_count: Optional[int] = Query(default=None),
     max_offender_count: Optional[int] = Query(default=None),
-    sort: Optional[str] = Query(default=None),
+    sort: Optional[str] = Query(default="relevance"),
     limit: int = Query(default=100, ge=1, le=1000),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
     req_t0 = time.perf_counter()
 
-    stmt = (
-        select(Property)
-        .where(Property.org_id == p.org_id)
-        .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
+    # OLD PATH KEPT FOR REFERENCE ONLY:
+    #
+    # stmt = (
+    #     select(Property)
+    #     .where(Property.org_id == p.org_id)
+    #     .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
+    # )
+    #
+    # if state:
+    #     stmt = stmt.where(Property.state == state)
+    # if city:
+    #     stmt = stmt.where(func.lower(Property.city) == city.lower())
+    # if county:
+    #     stmt = stmt.where(func.lower(Property.county) == county.lower())
+    #
+    # if q:
+    #     like = f"%{q.strip().lower()}%"
+    #     stmt = stmt.where(
+    #         func.lower(
+    #             func.concat(
+    #                 Property.address,
+    #                 " ",
+    #                 Property.city,
+    #                 " ",
+    #                 Property.state,
+    #                 " ",
+    #                 Property.zip,
+    #             )
+    #         ).like(like)
+    #     )
+    #
+    # if only_red_zone:
+    #     stmt = stmt.where(Property.is_red_zone.is_(True))
+    # elif exclude_red_zone:
+    #     stmt = stmt.where((Property.is_red_zone.is_(False)) | (Property.is_red_zone.is_(None)))
+    #
+    # if min_crime_score is not None:
+    #     stmt = stmt.where(Property.crime_score.is_not(None))
+    #     stmt = stmt.where(Property.crime_score >= float(min_crime_score))
+    #
+    # if max_crime_score is not None:
+    #     stmt = stmt.where(Property.crime_score.is_not(None))
+    #     stmt = stmt.where(Property.crime_score <= float(max_crime_score))
+    #
+    # if min_offender_count is not None:
+    #     stmt = stmt.where(Property.offender_count.is_not(None))
+    #     stmt = stmt.where(Property.offender_count >= int(min_offender_count))
+    #
+    # if max_offender_count is not None:
+    #     stmt = stmt.where(Property.offender_count.is_not(None))
+    #     stmt = stmt.where(Property.offender_count <= int(max_offender_count))
+    #
+    # if sort == "oldest":
+    #     stmt = stmt.order_by(asc(Property.id))
+    # elif sort == "address_asc":
+    #     stmt = stmt.order_by(asc(Property.address), desc(Property.id))
+    # elif sort == "address_desc":
+    #     stmt = stmt.order_by(desc(Property.address), desc(Property.id))
+    # elif sort == "crime_desc":
+    #     stmt = stmt.order_by(desc(Property.crime_score).nullslast(), desc(Property.id))
+    # elif sort == "crime_asc":
+    #     stmt = stmt.order_by(asc(Property.crime_score).nullslast(), desc(Property.id))
+    # elif sort == "offenders_desc":
+    #     stmt = stmt.order_by(desc(Property.offender_count).nullslast(), desc(Property.id))
+    # elif sort == "offenders_asc":
+    #     stmt = stmt.order_by(asc(Property.offender_count).nullslast(), desc(Property.id))
+    # else:
+    #     stmt = stmt.order_by(desc(Property.id))
+    #
+    # query_t0 = time.perf_counter()
+    # rows = db.scalars(stmt.limit(limit)).unique().all()
+    # query_ms = round((time.perf_counter() - query_t0) * 1000, 2)
+    #
+    # wanted_stage = (stage or "").strip().lower() or None
+    # wanted_decision = normalize_decision_bucket(decision) if decision else None
+    #
+    # out: list[dict] = []
+    # skipped_errors = 0
+    # skipped_stage = 0
+    # skipped_decision = 0
+    #
+    # build_t0 = time.perf_counter()
+    # for prop in rows:
+    #     try:
+    #         item = _build_property_list_item(
+    #             db,
+    #             org_id=p.org_id,
+    #             prop=prop,
+    #             recompute_state=False,
+    #         )
+    #
+    #         if wanted_stage and str(item.get("current_workflow_stage") or "").lower() != wanted_stage:
+    #             skipped_stage += 1
+    #             continue
+    #         if wanted_decision and str(item.get("normalized_decision") or "").upper() != wanted_decision:
+    #             skipped_decision += 1
+    #             continue
+    #
+    #         out.append(item)
+    #     except Exception:
+    #         skipped_errors += 1
+    #         log.exception(
+    #             "properties_list_item_build_failed",
+    #             extra={"org_id": p.org_id, "property_id": int(getattr(prop, "id", 0) or 0)},
+    #         )
+    #         continue
+
+    scope = build_inventory_snapshots_for_scope(
+        db,
+        org_id=int(p.org_id),
+        state=state,
+        county=county,
+        city=city,
+        q=q,
+        assigned_user_id=_principal_user_id(p),
+        limit=limit,
     )
 
-    if state:
-        stmt = stmt.where(Property.state == state)
-    if city:
-        stmt = stmt.where(func.lower(Property.city) == city.lower())
-    if county:
-        stmt = stmt.where(func.lower(Property.county) == county.lower())
+    rows = list(scope.get("items") or [])
 
-    if q:
-        like = f"%{q.strip().lower()}%"
-        stmt = stmt.where(
-            func.lower(
-                func.concat(
-                    Property.address,
-                    " ",
-                    Property.city,
-                    " ",
-                    Property.state,
-                    " ",
-                    Property.zip,
-                )
-            ).like(like)
+    def keep(row: dict[str, Any]) -> bool:
+        row_stage = str(row.get("current_workflow_stage") or "").strip().lower()
+        row_decision = str(row.get("normalized_decision") or "").strip().upper()
+        crime_score = row.get("crime_score")
+        offender_count = row.get("offender_count")
+        is_red_zone = row.get("is_red_zone")
+
+        if stage and row_stage != str(stage).strip().lower():
+            return False
+
+        if decision:
+            wanted = normalize_decision_bucket(decision)
+            normalized = normalize_decision_bucket(row_decision)
+            if normalized != wanted:
+                return False
+
+        if only_red_zone and not bool(is_red_zone):
+            return False
+
+        if exclude_red_zone and bool(is_red_zone):
+            return False
+
+        if min_crime_score is not None:
+            if crime_score is None or float(crime_score) < float(min_crime_score):
+                return False
+
+        if max_crime_score is not None:
+            if crime_score is None or float(crime_score) > float(max_crime_score):
+                return False
+
+        if min_offender_count is not None:
+            if offender_count is None or int(offender_count) < int(min_offender_count):
+                return False
+
+        if max_offender_count is not None:
+            if offender_count is None or int(offender_count) > int(max_offender_count):
+                return False
+
+        return True
+
+    rows = [row for row in rows if keep(row)]
+
+    wanted_sort = str(sort or "relevance").strip().lower()
+
+    if wanted_sort == "best_cashflow":
+        rows.sort(
+            key=lambda item: float(item.get("projected_monthly_cashflow") or float("-inf")),
+            reverse=True,
         )
-
-    if only_red_zone:
-        stmt = stmt.where(Property.is_red_zone.is_(True))
-    elif exclude_red_zone:
-        stmt = stmt.where((Property.is_red_zone.is_(False)) | (Property.is_red_zone.is_(None)))
-
-    if min_crime_score is not None:
-        stmt = stmt.where(Property.crime_score.is_not(None))
-        stmt = stmt.where(Property.crime_score >= float(min_crime_score))
-
-    if max_crime_score is not None:
-        stmt = stmt.where(Property.crime_score.is_not(None))
-        stmt = stmt.where(Property.crime_score <= float(max_crime_score))
-
-    if min_offender_count is not None:
-        stmt = stmt.where(Property.offender_count.is_not(None))
-        stmt = stmt.where(Property.offender_count >= int(min_offender_count))
-
-    if max_offender_count is not None:
-        stmt = stmt.where(Property.offender_count.is_not(None))
-        stmt = stmt.where(Property.offender_count <= int(max_offender_count))
-
-    if sort == "oldest":
-        stmt = stmt.order_by(asc(Property.id))
-    elif sort == "address_asc":
-        stmt = stmt.order_by(asc(Property.address), desc(Property.id))
-    elif sort == "address_desc":
-        stmt = stmt.order_by(desc(Property.address), desc(Property.id))
-    elif sort == "crime_desc":
-        stmt = stmt.order_by(desc(Property.crime_score).nullslast(), desc(Property.id))
-    elif sort == "crime_asc":
-        stmt = stmt.order_by(asc(Property.crime_score).nullslast(), desc(Property.id))
-    elif sort == "offenders_desc":
-        stmt = stmt.order_by(desc(Property.offender_count).nullslast(), desc(Property.id))
-    elif sort == "offenders_asc":
-        stmt = stmt.order_by(asc(Property.offender_count).nullslast(), desc(Property.id))
+    elif wanted_sort == "lowest_price":
+        rows.sort(key=lambda item: float(item.get("asking_price") or float("inf")))
+    elif wanted_sort == "highest_price":
+        rows.sort(
+            key=lambda item: float(item.get("asking_price") or float("-inf")),
+            reverse=True,
+        )
+    elif wanted_sort == "best_dscr":
+        rows.sort(key=lambda item: float(item.get("dscr") or float("-inf")), reverse=True)
+    elif wanted_sort == "newest":
+        rows.sort(
+            key=lambda item: str(
+                item.get("source_updated_at")
+                or item.get("acquisition_last_seen_at")
+                or item.get("updated_at")
+                or item.get("created_at")
+                or ""
+            ),
+            reverse=True,
+        )
     else:
-        stmt = stmt.order_by(desc(Property.id))
+        rows.sort(key=lambda item: int(item.get("relevance_score") or 0), reverse=True)
 
-    query_t0 = time.perf_counter()
-    rows = db.scalars(stmt.limit(limit)).unique().all()
-    query_ms = round((time.perf_counter() - query_t0) * 1000, 2)
-
-    wanted_stage = (stage or "").strip().lower() or None
-    wanted_decision = normalize_decision_bucket(decision) if decision else None
-
-    out: list[dict] = []
-    skipped_errors = 0
-    skipped_stage = 0
-    skipped_decision = 0
-
-    build_t0 = time.perf_counter()
-    for prop in rows:
-        try:
-            item = _build_property_list_item(
-                db,
-                org_id=p.org_id,
-                prop=prop,
-                recompute_state=False,
-            )
-
-            if wanted_stage and str(item.get("current_workflow_stage") or "").lower() != wanted_stage:
-                skipped_stage += 1
-                continue
-            if wanted_decision and str(item.get("normalized_decision") or "").upper() != wanted_decision:
-                skipped_decision += 1
-                continue
-
-            out.append(item)
-        except Exception:
-            skipped_errors += 1
-            log.exception(
-                "properties_list_item_build_failed",
-                extra={"org_id": p.org_id, "property_id": int(getattr(prop, "id", 0) or 0)},
-            )
-            continue
-
-    build_ms = round((time.perf_counter() - build_t0) * 1000, 2)
     total_ms = round((time.perf_counter() - req_t0) * 1000, 2)
 
     log.info(
-        "properties_list_complete",
+        "properties_list_complete_inventory_snapshot",
         extra={
             "org_id": p.org_id,
             "state": state,
@@ -611,20 +685,14 @@ def list_properties(
             "q": q,
             "stage": stage,
             "decision": decision,
-            "sort": sort,
+            "sort": wanted_sort,
             "limit": limit,
-            "query_rows": len(rows),
-            "returned_rows": len(out),
-            "skipped_errors": skipped_errors,
-            "skipped_stage": skipped_stage,
-            "skipped_decision": skipped_decision,
-            "query_ms": query_ms,
-            "build_ms": build_ms,
+            "returned_rows": len(rows),
             "total_ms": total_ms,
         },
     )
 
-    return out
+    return rows[: max(1, int(limit))]
 
 
 @router.get("/{property_id}", response_model=PropertyOut)
@@ -744,92 +812,46 @@ def property_bundle(property_id: int, db: Session = Depends(get_db), p=Depends(g
         select(Valuation)
         .where(Valuation.org_id == p.org_id, Valuation.property_id == property_id)
         .order_by(desc(Valuation.id))
-        .limit(300)
+        .limit(100)
     ).all()
 
-    prop = view.property
-    photo_gallery = _photo_gallery_for_property(db, org_id=p.org_id, property_id=property_id)
+    gallery = _photo_gallery_for_property(db, org_id=p.org_id, property_id=property_id)
+    snapshot = build_property_inventory_snapshot(db, org_id=p.org_id, property_id=property_id)
 
     return {
-        "view": view.model_dump() if hasattr(view, "model_dump") else view,
-        "acquisition": build_property_inventory_snapshot(db, org_id=p.org_id, property_id=property_id),
-        "geo": {
-            "lat": getattr(prop, "lat", None),
-            "lng": getattr(prop, "lng", None),
-            "county": getattr(prop, "county", None),
-            "is_red_zone": bool(getattr(prop, "is_red_zone", False)),
-            "crime_density": getattr(prop, "crime_density", None),
-            "crime_score": getattr(prop, "crime_score", None),
-            "offender_count": getattr(prop, "offender_count", None),
-        },
-        "photo_gallery": photo_gallery,
+        "view": view.model_dump(),
         "rehab_tasks": [RehabTaskOut.model_validate(x, from_attributes=True).model_dump() for x in rehab],
         "leases": [LeaseOut.model_validate(x, from_attributes=True).model_dump() for x in leases],
         "transactions": [TransactionOut.model_validate(x, from_attributes=True).model_dump() for x in txns],
         "valuations": [ValuationOut.model_validate(x, from_attributes=True).model_dump() for x in vals],
+        "gallery": gallery,
+        "inventory_snapshot": snapshot,
     }
 
 
-@router.get("/{property_id}/cockpit", response_model=dict)
-def property_cockpit(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
+@router.get("/{property_id}/tags", response_model=list[dict])
+def property_tags(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+    prop = db.scalar(select(Property).where(Property.org_id == p.org_id, Property.id == property_id))
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return list_property_tags(db, org_id=p.org_id, property_id=property_id)
+
+
+@router.put("/{property_id}/tags", response_model=dict)
+def update_property_tags(
+    property_id: int,
+    payload: AcquisitionTagsIn,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = db.scalar(select(Property).where(Property.org_id == p.org_id, Property.id == property_id))
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    compute_and_persist_stage(db, org_id=p.org_id, property=prop)
-
-    bundle = property_bundle(property_id=property_id, db=db, p=p)
-    state_payload = get_state_payload(db, org_id=p.org_id, property_id=property_id, recompute=True)
-    workflow = build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=False)
-
-    return {
-        **bundle,
-        "workflow": workflow,
-        "state": {
-            "current_stage": state_payload.get("current_stage"),
-            "current_stage_label": state_payload.get("current_stage_label"),
-            "normalized_decision": state_payload.get("normalized_decision"),
-            "gate_status": state_payload.get("gate_status"),
-            "gate": state_payload.get("gate"),
-            "constraints": state_payload.get("constraints", {}),
-            "outstanding_tasks": state_payload.get("outstanding_tasks", {}),
-            "next_actions": state_payload.get("next_actions", []),
-            "stage_completion_summary": state_payload.get("stage_completion_summary"),
-        },
-    }
-
-
-@router.get("/{property_id}/acquisition")
-def property_acquisition_snapshot(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="Property not found")
-    return build_property_inventory_snapshot(db, org_id=p.org_id, property_id=property_id)
-
-
-@router.get("/{property_id}/acquisition-tags")
-def get_property_acquisition_tags(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="Property not found")
-    rows = list_property_tags(db, org_id=p.org_id, property_id=property_id)
-    return {"property_id": property_id, "tags": [row.get("tag") for row in rows], "rows": rows}
-
-
-@router.put("/{property_id}/acquisition-tags")
-def set_property_acquisition_tags(property_id: int, payload: AcquisitionTagsIn, db: Session = Depends(get_db), p=Depends(get_principal)):
-    prop = db.scalar(select(Property).where(Property.id == property_id, Property.org_id == p.org_id))
-    if not prop:
-        raise HTTPException(status_code=404, detail="Property not found")
-    try:
-        rows = replace_property_tags(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            tags=list(payload.tags or []),
-            actor_user_id=_principal_user_id(p),
-            source="operator",
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    return {"property_id": property_id, "tags": [row.get("tag") for row in rows], "rows": rows}
+    tags = replace_property_tags(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        tags=payload.tags,
+    )
+    return {"ok": True, "property_id": property_id, "tags": tags}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import desc, func, or_, select, text
@@ -63,6 +64,7 @@ def _normalized_query_stmt(
     assigned_user_id: Optional[int] = None,
 ):
     stmt = select(Property).where(Property.org_id == org_id)
+
     if state:
         stmt = stmt.where(Property.state == state)
     if county:
@@ -81,15 +83,29 @@ def _normalized_query_stmt(
                     func.coalesce(Property.state, ""),
                     " ",
                     func.coalesce(Property.zip, ""),
+                    " ",
+                    func.coalesce(Property.county, ""),
                 )
             ).like(like)
         )
+
     if assigned_user_id is not None:
-        candidate_columns = ["assigned_user_id", "owner_user_id", "manager_user_id", "agent_user_id", "acquisition_user_id"]
-        clauses = [getattr(Property, c) == assigned_user_id for c in candidate_columns if hasattr(Property, c)]
+        candidate_columns = [
+            "assigned_user_id",
+            "owner_user_id",
+            "manager_user_id",
+            "agent_user_id",
+            "acquisition_user_id",
+        ]
+        clauses = [
+            getattr(Property, c) == assigned_user_id
+            for c in candidate_columns
+            if hasattr(Property, c)
+        ]
         if clauses:
             stmt = stmt.where(or_(*clauses))
-    return stmt.order_by(desc(Property.id))
+
+    return stmt.order_by(desc(Property.updated_at).nullslast(), desc(Property.id))
 
 
 def _load_property_meta(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
@@ -116,6 +132,7 @@ def infer_snapshot_completeness(snapshot: dict[str, Any]) -> str:
         return "COMPLETE"
     if any(x == "complete" for x in statuses):
         return "PARTIAL"
+
     strong_signals = [
         snapshot.get("asking_price") is not None,
         snapshot.get("market_rent_estimate") is not None,
@@ -132,6 +149,203 @@ def infer_snapshot_completeness(snapshot: dict[str, Any]) -> str:
     return "MISSING"
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        raw = str(value).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(raw)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _freshness_score(snapshot: dict[str, Any]) -> int:
+    latest = (
+        _parse_dt(snapshot.get("source_updated_at"))
+        or _parse_dt(snapshot.get("acquisition_last_seen_at"))
+        or _parse_dt(snapshot.get("updated_at"))
+        or _parse_dt(snapshot.get("created_at"))
+    )
+    if latest is None:
+        return 0
+
+    age_days = max(0.0, (_utcnow() - latest).total_seconds() / 86400.0)
+
+    if age_days <= 1:
+        return 20
+    if age_days <= 3:
+        return 16
+    if age_days <= 7:
+        return 12
+    if age_days <= 14:
+        return 8
+    if age_days <= 30:
+        return 4
+    return 0
+
+
+def _text_match_score(snapshot: dict[str, Any], q: str | None) -> int:
+    if not q:
+        return 0
+    wanted = q.strip().lower()
+    if not wanted:
+        return 0
+
+    haystack = " ".join(
+        [
+            str(snapshot.get("address") or ""),
+            str(snapshot.get("city") or ""),
+            str(snapshot.get("county") or ""),
+            str(snapshot.get("state") or ""),
+            str(snapshot.get("zip") or ""),
+            str(snapshot.get("normalized_address") or ""),
+        ]
+    ).lower()
+
+    if wanted in haystack:
+        return 18
+
+    parts = [x for x in wanted.split() if x]
+    if not parts:
+        return 0
+
+    hits = sum(1 for token in parts if token in haystack)
+    return min(16, hits * 4)
+
+
+def _market_match_score(snapshot: dict[str, Any], *, state: str | None, county: str | None, city: str | None) -> int:
+    score = 0
+
+    snap_state = str(snapshot.get("state") or "").strip().lower()
+    snap_county = str(snapshot.get("county") or "").strip().lower()
+    snap_city = str(snapshot.get("city") or "").strip().lower()
+
+    if state and snap_state == str(state).strip().lower():
+        score += 8
+    if county and snap_county == str(county).strip().lower():
+        score += 18
+    if city and snap_city == str(city).strip().lower():
+        score += 24
+
+    return score
+
+
+def _buy_box_score(snapshot: dict[str, Any]) -> int:
+    score = 0
+    asking_price = _safe_float(snapshot.get("asking_price"))
+    max_price = 200_000
+    property_type = str(snapshot.get("property_type") or "").strip().lower()
+    max_units = 4
+    units = int(_safe_float(snapshot.get("units"), 1) or 1)
+
+    if asking_price is not None:
+        if asking_price <= max_price:
+            score += 14
+        elif asking_price <= max_price * 1.25:
+            score += 4
+        else:
+            score -= 8
+    else:
+        score -= 10
+
+    if property_type in {"single_family", "multi_family"}:
+        score += 10
+    elif property_type:
+        score -= 6
+
+    if units <= max_units:
+        score += 4
+    else:
+        score -= 6
+
+    return score
+
+
+def _data_quality_score(snapshot: dict[str, Any]) -> int:
+    score = 0
+
+    if snapshot.get("address"):
+        score += 6
+    else:
+        score -= 10
+
+    if snapshot.get("normalized_address"):
+        score += 5
+
+    if snapshot.get("lat") is not None and snapshot.get("lng") is not None:
+        score += 6
+
+    if snapshot.get("market_rent_estimate") is not None:
+        score += 8
+
+    if snapshot.get("projected_monthly_cashflow") is not None:
+        score += 8
+
+    dscr = _safe_float(snapshot.get("dscr"))
+    if dscr is not None:
+        score += 8
+        if dscr >= 1.2:
+            score += 4
+
+    completeness = str(snapshot.get("completeness") or "").upper()
+    if completeness == "COMPLETE":
+        score += 12
+    elif completeness == "PARTIAL":
+        score += 5
+    else:
+        score -= 4
+
+    return score
+
+
+def _decision_score(snapshot: dict[str, Any]) -> int:
+    value = str(snapshot.get("normalized_decision") or "").strip().upper()
+    if value == "GOOD":
+        return 18
+    if value == "GOOD_DEAL":
+        return 18
+    if value == "REVIEW":
+        return 8
+    if value == "REJECT":
+        return -18
+    return 0
+
+
+def compute_relevance_score(
+    snapshot: dict[str, Any],
+    *,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    q: str | None = None,
+) -> int:
+    score = 0
+    score += _market_match_score(snapshot, state=state, county=county, city=city)
+    score += _text_match_score(snapshot, q)
+    score += _buy_box_score(snapshot)
+    score += _data_quality_score(snapshot)
+    score += _decision_score(snapshot)
+    score += _freshness_score(snapshot)
+
+    cashflow = _safe_float(snapshot.get("projected_monthly_cashflow"))
+    if cashflow is not None:
+        if cashflow > 250:
+            score += 10
+        elif cashflow > 0:
+            score += 6
+        elif cashflow < 0:
+            score -= 4
+
+    return int(round(score))
+
+
 def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
     t0 = time.perf_counter()
     prop = db.scalar(select(Property).where(Property.org_id == org_id, Property.id == property_id))
@@ -144,10 +358,12 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
     rent_row = getattr(prop, "rent_assumption", None)
     if isinstance(rent_row, list):
         rent_row = rent_row[0] if rent_row else None
+
     meta = _load_property_meta(db, org_id=org_id, property_id=int(prop.id))
     tags = list_tags_for_properties(db, org_id=org_id, property_ids=[int(prop.id)]).get(int(prop.id), [])
 
     snapshot = {
+        "id": int(prop.id),
         "property_id": int(prop.id),
         "address": getattr(prop, "address", None),
         "city": getattr(prop, "city", None),
@@ -157,26 +373,28 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
         "normalized_address": getattr(prop, "normalized_address", None),
         "lat": getattr(prop, "lat", None),
         "lng": getattr(prop, "lng", None),
-        "is_red_zone": bool(getattr(prop, "is_red_zone", False)),
-        "crime_score": _safe_float(getattr(prop, "crime_score", None)),
-        "offender_count": getattr(prop, "offender_count", None),
+        "property_type": getattr(prop, "property_type", None),
+        "units": getattr(prop, "units", None),
+        "bedrooms": getattr(prop, "bedrooms", None),
+        "bathrooms": getattr(prop, "bathrooms", None),
         "asking_price": _asking_price(prop, deal),
-        "market_rent_estimate": _safe_float(getattr(rent_row, "market_rent_estimate", None)) if rent_row else None,
-        "approved_rent_ceiling": _safe_float(getattr(rent_row, "approved_rent_ceiling", None)) if rent_row else None,
-        "section8_fmr": _safe_float(getattr(rent_row, "section8_fmr", None)) if rent_row else None,
-        "projected_monthly_cashflow": _safe_float(getattr(uw, "cash_flow", None)) if uw else None,
-        "dscr": _safe_float(getattr(uw, "dscr", None)) if uw else None,
-        "current_stage": state_payload.get("current_stage"),
-        "current_stage_label": state_payload.get("current_stage_label"),
-        "current_pane": state_payload.get("current_pane"),
-        "current_pane_label": state_payload.get("current_pane_label"),
+        "market_rent_estimate": getattr(rent_row, "market_rent_estimate", None) if rent_row is not None else None,
+        "approved_rent_ceiling": getattr(rent_row, "approved_rent_ceiling", None) if rent_row is not None else None,
+        "projected_monthly_cashflow": getattr(uw, "cash_flow", None) if uw is not None else None,
+        "dscr": getattr(uw, "dscr", None) if uw is not None else None,
+        "crime_score": getattr(prop, "crime_score", None),
+        "offender_count": getattr(prop, "offender_count", None),
+        "is_red_zone": getattr(prop, "is_red_zone", None),
         "normalized_decision": state_payload.get("normalized_decision"),
-        "gate_status": state_payload.get("gate_status"),
-        "route_reason": state_payload.get("route_reason"),
+        "pane": state_payload.get("primary_pane"),
+        "current_workflow_stage": state_payload.get("current_stage"),
+        "current_workflow_stage_label": state_payload.get("current_stage_label"),
         "next_actions": state_payload.get("next_actions") or [],
-        "blockers": (state_payload.get("outstanding_tasks") or {}).get("blockers") or [],
-        "updated_at": state_payload.get("updated_at") or getattr(prop, "updated_at", None),
-        "acquisition_tags": tags,
+        "workflow_state": state_payload,
+        "tags": tags,
+        "source_updated_at": getattr(prop, "source_updated_at", None),
+        "updated_at": getattr(prop, "updated_at", None),
+        "created_at": getattr(prop, "created_at", None),
         "acquisition_first_seen_at": meta.get("acquisition_first_seen_at"),
         "acquisition_last_seen_at": meta.get("acquisition_last_seen_at"),
         "acquisition_source": {
@@ -217,23 +435,89 @@ def build_inventory_snapshots_for_scope(
     limit: int = 100,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
-    stmt = _normalized_query_stmt(org_id=org_id, state=state, county=county, city=city, q=q, assigned_user_id=assigned_user_id)
+
+    overfetch = max(limit, min(1000, int(limit) * 3))
+    stmt = _normalized_query_stmt(
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        q=q,
+        assigned_user_id=assigned_user_id,
+    )
+
     query_t0 = time.perf_counter()
-    props = list(db.scalars(stmt.limit(limit)).all())
+    props = list(db.scalars(stmt.limit(overfetch)).all())
     query_ms = round((time.perf_counter() - query_t0) * 1000, 2)
+
     rows: list[dict[str, Any]] = []
     skipped_errors = 0
+
     build_t0 = time.perf_counter()
     for prop in props:
         try:
-            rows.append(build_property_inventory_snapshot(db, org_id=org_id, property_id=int(prop.id)))
+            snapshot = build_property_inventory_snapshot(
+                db,
+                org_id=org_id,
+                property_id=int(prop.id),
+            )
+            snapshot["relevance_score"] = compute_relevance_score(
+                snapshot,
+                state=state,
+                county=county,
+                city=city,
+                q=q,
+            )
+            rows.append(snapshot)
         except Exception:
             skipped_errors += 1
-            log.exception("inventory_snapshot_row_failed", extra={"org_id": org_id, "property_id": int(getattr(prop, "id", 0) or 0)})
+            log.exception(
+                "inventory_snapshot_row_failed",
+                extra={"org_id": org_id, "property_id": int(getattr(prop, "id", 0) or 0)},
+            )
+
+    rows.sort(
+        key=lambda item: (
+            -int(item.get("relevance_score") or 0),
+            -int(bool(item.get("source_updated_at"))),
+            -int(item.get("id") or 0),
+        )
+    )
+    rows = rows[: max(1, int(limit))]
+
     build_ms = round((time.perf_counter() - build_t0) * 1000, 2)
     total_ms = round((time.perf_counter() - t0) * 1000, 2)
+
     METRICS.observe_ms("inventory_snapshot_scope_query_ms", query_ms, labels={"org_id": org_id})
     METRICS.observe_ms("inventory_snapshot_scope_build_ms", build_ms, labels={"org_id": org_id})
     METRICS.observe_ms("inventory_snapshot_scope_total_ms", total_ms, labels={"org_id": org_id})
-    log.info("inventory_snapshot_scope_complete", extra={"event": "inventory_snapshot_scope_complete", "org_id": org_id, "state": state, "county": county, "city": city, "q": q, "assigned_user_id": assigned_user_id, "limit": limit, "query_rows": len(props), "returned_rows": len(rows), "skipped_errors": skipped_errors, "query_ms": query_ms, "build_ms": build_ms, "total_ms": total_ms})
-    return {"rows": rows, "count": len(rows), "meta": {"query_rows": len(props), "returned_rows": len(rows), "skipped_errors": skipped_errors, "query_ms": query_ms, "build_ms": build_ms, "total_ms": total_ms}}
+
+    log.info(
+        "inventory_snapshot_scope_complete",
+        extra={
+            "event": "inventory_snapshot_scope_complete",
+            "org_id": org_id,
+            "state": state,
+            "county": county,
+            "city": city,
+            "q": q,
+            "assigned_user_id": assigned_user_id,
+            "limit": limit,
+            "query_rows": len(props),
+            "returned_rows": len(rows),
+            "skipped_errors": skipped_errors,
+            "query_ms": query_ms,
+            "build_ms": build_ms,
+            "total_ms": total_ms,
+        },
+    )
+
+    return {
+        "items": rows,
+        "query_rows": len(props),
+        "returned_rows": len(rows),
+        "skipped_errors": skipped_errors,
+        "query_ms": query_ms,
+        "build_ms": build_ms,
+        "total_ms": total_ms,
+    }

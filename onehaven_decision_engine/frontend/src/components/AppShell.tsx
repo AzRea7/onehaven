@@ -15,6 +15,8 @@ import AppHeader from "./AppHeader";
 type ThemeMode = "light" | "dark";
 
 const STORAGE_KEY = "onehaven-theme";
+const HEADER_OFFSET_CLASS = "pt-4 md:pt-5";
+const HEADER_HEIGHT_CSS_VAR = "--oh-header-h";
 
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
@@ -61,12 +63,44 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { principal, logout, loading } = useAuth();
   const [theme, setTheme] = React.useState<ThemeMode>(() => getInitialTheme());
+  const headerRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const applyHeaderHeight = () => {
+      const el = headerRef.current;
+      const height = el ? Math.ceil(el.getBoundingClientRect().height) : 0;
+      document.documentElement.style.setProperty(
+        HEADER_HEIGHT_CSS_VAR,
+        `${height}px`,
+      );
+    };
+
+    applyHeaderHeight();
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => applyHeaderHeight())
+        : null;
+
+    if (headerRef.current && resizeObserver) {
+      resizeObserver.observe(headerRef.current);
+    }
+
+    window.addEventListener("resize", applyHeaderHeight);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", applyHeaderHeight);
+    };
+  }, [location.pathname]);
 
   const isAuthPage =
     location.pathname.startsWith("/login") ||
@@ -196,14 +230,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </aside>
 
-          <div className="oh-shell-main min-w-0">
-            <AppHeader
-              theme={theme}
-              onToggleTheme={() =>
-                setTheme((prev) => (prev === "dark" ? "light" : "dark"))
-              }
-            />
-            <main className="oh-main w-full">{children}</main>
+          <div className="oh-shell-main flex min-w-0 flex-1 flex-col">
+            <div ref={headerRef} className="oh-shell-header">
+              <AppHeader
+                theme={theme}
+                onToggleTheme={() =>
+                  setTheme((prev) => (prev === "dark" ? "light" : "dark"))
+                }
+              />
+            </div>
+
+            <main
+              className={`oh-main w-full min-w-0 ${HEADER_OFFSET_CLASS}`}
+              style={{
+                minHeight: "calc(100vh - var(--oh-header-h, 0px))",
+              }}
+            >
+              <div className="w-full px-4 pb-8 md:px-6 xl:px-8">{children}</div>
+            </main>
           </div>
         </div>
       )}
