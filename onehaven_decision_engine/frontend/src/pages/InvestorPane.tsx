@@ -1,5 +1,5 @@
 import React from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   Search,
   RefreshCcw,
@@ -7,9 +7,7 @@ import {
   MapPin,
   BedDouble,
   Bath,
-  Ruler,
   Wallet,
-  Banknote,
   Landmark,
   ShieldAlert,
   ArrowUpRight,
@@ -20,13 +18,8 @@ import {
   BriefcaseBusiness,
   GitBranch,
   Clock3,
-  AlertTriangle,
-  FileWarning,
   CheckCircle2,
-  Users,
-  Building2,
   Settings2,
-  Bug,
 } from "lucide-react";
 
 import PageHero from "../components/PageHero";
@@ -34,34 +27,37 @@ import PageShell from "../components/PageShell";
 import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
 import PaneSwitcher from "../components/PaneSwitcher";
-import { api, type SupportedMarket } from "../lib/api";
 import IngestionErrorsDrawer from "../components/IngestionErrorsDrawer";
 import MarketSourcePackModal from "../components/MarketSourcePackModal";
+import IngestionLaunchCard from "../components/IngestionLaunchCard";
+import { api, type SupportedMarket } from "../lib/api";
 
 type Row = any;
 type MarketRow = SupportedMarket;
-type AcquisitionQueueRow = any;
+// type AcquisitionQueueRow = any; // kept out of active use; old queue behavior preserved below in comments
 
 type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
 type FinancingFilter = "ALL" | "CASH" | "DSCR" | "UNKNOWN";
 type CompletenessFilter = "ALL" | "COMPLETE" | "PARTIAL" | "MISSING";
-type AcquisitionWaitFilter =
-  | "ALL"
-  | "LENDER"
-  | "TITLE"
-  | "OPERATOR"
-  | "SELLER"
-  | "DOCUMENT";
-type AcquisitionStatusFilter = "ALL" | "OVERDUE" | "DUE_SOON" | "BLOCKED";
+
+// type AcquisitionWaitFilter =
+//   | "ALL"
+//   | "LENDER"
+//   | "TITLE"
+//   | "OPERATOR"
+//   | "SELLER"
+//   | "DOCUMENT";
+// type AcquisitionStatusFilter = "ALL" | "OVERDUE" | "DUE_SOON" | "BLOCKED";
 
 type SortKey =
+  | "RELEVANCE"
   | "BEST_CASHFLOW"
   | "LOWEST_PRICE"
   | "HIGHEST_PRICE"
   | "BEST_DSCR"
   | "NEWEST";
 
-const INITIAL_LIMIT = 1000;
+const INITIAL_LIMIT = 500;
 const PAGE_SIZE = 25;
 
 function money(v: any) {
@@ -209,12 +205,19 @@ function inferLng(r: any) {
 }
 
 function getFinancingType(price?: number | null) {
-  if (price == null || !Number.isFinite(Number(price))) return "Unknown";
-  if (Number(price) < 75000) return "Cash";
+  if (price == null || !Number.isFinite(Number(price))) return "UNKNOWN";
+  if (Number(price) < 75000) return "CASH";
   return "DSCR";
 }
 
 function inferCompleteness(r: any): "COMPLETE" | "PARTIAL" | "MISSING" {
+  const explicit = String(r?.completeness || "")
+    .trim()
+    .toUpperCase();
+  if (["COMPLETE", "PARTIAL", "MISSING"].includes(explicit)) {
+    return explicit as "COMPLETE" | "PARTIAL" | "MISSING";
+  }
+
   const price = inferAskingPrice(r);
   const rent = inferMarketRent(r);
   const cashflow = inferCashflow(r);
@@ -299,6 +302,8 @@ function safeDate(raw: any) {
 
 function inferUpdatedAt(r: any) {
   return (
+    r?.source_updated_at ||
+    r?.acquisition_last_seen_at ||
     r?.updated_at ||
     r?.last_synced_at ||
     r?.last_enriched_at ||
@@ -338,7 +343,7 @@ function inferTags(r: any): string[] {
   ) {
     tags.add("Good deal");
   }
-  if (financing === "Cash") tags.add("Cash");
+  if (financing === "CASH") tags.add("Cash");
   if (financing === "DSCR") tags.add("DSCR");
   if (cashflow != null && cashflow > 0) tags.add("Cash flow positive");
   if (dscr != null && dscr >= 1.2) tags.add("Strong DSCR");
@@ -352,34 +357,26 @@ function inferTags(r: any): string[] {
   return Array.from(tags).slice(0, 5);
 }
 
-function sortRows(rows: Row[], sort: SortKey) {
-  const copy = [...rows];
+function buildPagination(currentPage: number, totalPages: number) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
 
-  copy.sort((a, b) => {
-    if (sort === "BEST_CASHFLOW") {
-      return (inferCashflow(b) ?? -Infinity) - (inferCashflow(a) ?? -Infinity);
-    }
-    if (sort === "LOWEST_PRICE") {
-      return (
-        (inferAskingPrice(a) ?? Infinity) - (inferAskingPrice(b) ?? Infinity)
-      );
-    }
-    if (sort === "HIGHEST_PRICE") {
-      return (
-        (inferAskingPrice(b) ?? -Infinity) - (inferAskingPrice(a) ?? -Infinity)
-      );
-    }
-    if (sort === "BEST_DSCR") {
-      return (inferDscr(b) ?? -Infinity) - (inferDscr(a) ?? -Infinity);
-    }
+  const pages: (number | string)[] = [1];
 
-    return (
-      (safeDate(inferUpdatedAt(b))?.getTime() ?? 0) -
-      (safeDate(inferUpdatedAt(a))?.getTime() ?? 0)
-    );
-  });
+  if (currentPage > 3) pages.push("...");
 
-  return copy;
+  const start = Math.max(2, currentPage - 1);
+  const end = Math.min(totalPages - 1, currentPage + 1);
+
+  for (let i = start; i <= end; i += 1) {
+    pages.push(i);
+  }
+
+  if (currentPage < totalPages - 2) pages.push("...");
+
+  pages.push(totalPages);
+  return pages;
 }
 
 function Photo({ url, alt }: { url: string | null; alt: string }) {
@@ -427,166 +424,10 @@ function formatApiError(e: any, fallback: string) {
   }`;
 }
 
-function uniqueCities(rows: Row[]) {
-  const values = new Set<string>();
-  for (const r of rows) {
-    const p = inferProperty(r);
-    const city = String(p?.city || r?.city || "").trim();
-    if (city) values.add(city);
-  }
-  return Array.from(values).sort((a, b) => a.localeCompare(b));
-}
-
-function buildPagination(currentPage: number, totalPages: number) {
-  if (totalPages <= 7) {
-    return Array.from({ length: totalPages }, (_, i) => i + 1);
-  }
-
-  const pages: (number | string)[] = [1];
-
-  if (currentPage > 3) pages.push("...");
-
-  const start = Math.max(2, currentPage - 1);
-  const end = Math.min(totalPages - 1, currentPage + 1);
-
-  for (let i = start; i <= end; i += 1) {
-    pages.push(i);
-  }
-
-  if (currentPage < totalPages - 2) pages.push("...");
-
-  pages.push(totalPages);
-  return pages;
-}
-
-function waitingOnLabel(raw: any) {
-  const text = String(raw || "").trim();
-  return text || "Unassigned";
-}
-
-function waitingOnCategory(
-  raw: any,
-): "LENDER" | "TITLE" | "OPERATOR" | "SELLER" | "DOCUMENT" | "OTHER" {
-  const text = String(raw || "")
-    .trim()
-    .toLowerCase();
-
-  if (!text) return "OTHER";
-  if (
-    text.includes("lender") ||
-    text.includes("loan") ||
-    text.includes("finance")
-  ) {
-    return "LENDER";
-  }
-  if (text.includes("title") || text.includes("escrow")) {
-    return "TITLE";
-  }
-  if (text.includes("seller")) {
-    return "SELLER";
-  }
-  if (
-    text.includes("document") ||
-    text.includes("doc") ||
-    text.includes("agreement") ||
-    text.includes("inspection") ||
-    text.includes("binder")
-  ) {
-    return "DOCUMENT";
-  }
-  if (
-    text.includes("operator") ||
-    text.includes("internal") ||
-    text.includes("review") ||
-    text.includes("team")
-  ) {
-    return "OPERATOR";
-  }
-  return "OTHER";
-}
-
-function queueUrgency(row: any): "OVERDUE" | "DUE_SOON" | "BLOCKED" | "NORMAL" {
-  const days = numberOrNull(row?.days_to_close);
-  const waiting = String(row?.waiting_on || "").toLowerCase();
-  const status = String(row?.status || "").toLowerCase();
-  const nextStep = String(row?.next_step || "").toLowerCase();
-
-  if (
-    status.includes("blocked") ||
-    waiting.includes("blocked") ||
-    nextStep.includes("blocked")
-  ) {
-    return "BLOCKED";
-  }
-  if (days != null && days < 0) return "OVERDUE";
-  if (days != null && days <= 7) return "DUE_SOON";
-  return "NORMAL";
-}
-
-function urgencyPillClass(v: ReturnType<typeof queueUrgency>) {
-  if (v === "OVERDUE") return "oh-pill oh-pill-bad";
-  if (v === "DUE_SOON") return "oh-pill oh-pill-warn";
-  if (v === "BLOCKED") return "oh-pill oh-pill-bad";
-  return "oh-pill oh-pill-good";
-}
-
-function queueReadinessScore(row: any) {
-  let score = 0;
-
-  const documentCount = numberOrNull(row?.document_count) ?? 0;
-  const days = numberOrNull(row?.days_to_close);
-  const urgency = queueUrgency(row);
-  const waiting = waitingOnCategory(row?.waiting_on);
-  const status = String(row?.status || "").toLowerCase();
-
-  score += Math.min(documentCount * 12, 48);
-
-  if (status.includes("under_contract")) score += 18;
-  if (status.includes("closing")) score += 22;
-  if (status.includes("review")) score += 8;
-
-  if (days != null) {
-    if (days > 14) score += 18;
-    else if (days >= 7) score += 12;
-    else if (days >= 0) score += 6;
-    else score -= 10;
-  }
-
-  if (urgency === "BLOCKED") score -= 20;
-  if (urgency === "OVERDUE") score -= 18;
-
-  if (waiting === "DOCUMENT") score -= 8;
-  if (waiting === "LENDER") score -= 5;
-
-  return Math.max(0, Math.min(100, Math.round(score)));
-}
-
-function readinessTone(score: number) {
-  if (score >= 75) return "text-emerald-300";
-  if (score >= 45) return "text-amber-300";
-  return "text-red-300";
-}
-
-function nextRequiredDocument(row: any) {
-  const text = String(row?.waiting_on || "").toLowerCase();
-  if (text.includes("inspection")) return "Inspection report";
-  if (text.includes("insurance")) return "Insurance binder";
-  if (text.includes("title")) return "Title / escrow";
-  if (text.includes("loan") || text.includes("lender")) return "Loan documents";
-  if (text.includes("closing")) return "Closing disclosure";
-  if (text.includes("purchase") || text.includes("agreement")) {
-    return "Purchase agreement";
-  }
-  if (text.includes("document") || text.includes("doc")) {
-    return "Required document";
-  }
-  return "Review document stack";
-}
-
 function marketDisplayName(market: any) {
   return (
-    market?.city ||
     market?.label ||
+    market?.city ||
     [market?.county, market?.state].filter(Boolean).join(", ") ||
     market?.state ||
     "Market"
@@ -602,20 +443,12 @@ function marketSubLabel(market: any) {
 export default function InvestorPane() {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [markets, setMarkets] = React.useState<MarketRow[]>([]);
-  const [acquisitionQueue, setAcquisitionQueue] = React.useState<
-    AcquisitionQueueRow[]
-  >([]);
-  const [acquisitionIds, setAcquisitionIds] = React.useState<Set<number>>(
-    new Set(),
-  );
 
   const [inventoryErr, setInventoryErr] = React.useState<string | null>(null);
   const [marketsErr, setMarketsErr] = React.useState<string | null>(null);
-  const [queueErr, setQueueErr] = React.useState<string | null>(null);
 
   const [inventoryLoading, setInventoryLoading] = React.useState(true);
-  const [marketsLoading, setMarketsLoading] = React.useState(false);
-  const [queueLoading, setQueueLoading] = React.useState(true);
+  const [marketsLoading, setMarketsLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
 
   const [q, setQ] = React.useState("");
@@ -625,41 +458,64 @@ export default function InvestorPane() {
   const [financing, setFinancing] = React.useState<FinancingFilter>("ALL");
   const [completeness, setCompleteness] =
     React.useState<CompletenessFilter>("ALL");
-  const [sort, setSort] = React.useState<SortKey>("BEST_CASHFLOW");
-  const [selectedCity, setSelectedCity] = React.useState<string>("ALL");
+  const [sort, setSort] = React.useState<SortKey>("RELEVANCE");
   const [currentPage, setCurrentPage] = React.useState(1);
+
+  // OLD CITY-ONLY FILTER KEPT FOR REFERENCE
+  // const [selectedCity, setSelectedCity] = React.useState<string>("ALL");
 
   const [activeRunId, setActiveRunId] = React.useState<number | null>(null);
   const [sourcePackMarket, setSourcePackMarket] =
     React.useState<SupportedMarket | null>(null);
+  const [selectedMarket, setSelectedMarket] =
+    React.useState<SupportedMarket | null>(null);
+  const [marketRefreshNonce, setMarketRefreshNonce] = React.useState(0);
 
-  const location = useLocation();
-
-  const [queueSearch, setQueueSearch] = React.useState("");
-  const [waitFilter, setWaitFilter] =
-    React.useState<AcquisitionWaitFilter>("ALL");
-  const [queueStatusFilter, setQueueStatusFilter] =
-    React.useState<AcquisitionStatusFilter>("ALL");
+  // OLD ACQUISITION QUEUE STATE KEPT FOR REFERENCE
+  // const [acquisitionQueue, setAcquisitionQueue] = React.useState<AcquisitionQueueRow[]>([]);
+  // const [acquisitionIds, setAcquisitionIds] = React.useState<Set<number>>(new Set());
+  // const [queueErr, setQueueErr] = React.useState<string | null>(null);
+  // const [queueLoading, setQueueLoading] = React.useState(false);
+  // const [queueSearch, setQueueSearch] = React.useState("");
+  // const [waitFilter, setWaitFilter] =
+  //   React.useState<AcquisitionWaitFilter>("ALL");
+  // const [queueStatusFilter, setQueueStatusFilter] =
+  //   React.useState<AcquisitionStatusFilter>("ALL");
 
   const loadInventory = React.useCallback(async () => {
     setInventoryLoading(true);
     setInventoryErr(null);
 
     try {
-      const propertiesRes = await api.get<any>("/properties", {
-        params: { limit: INITIAL_LIMIT },
-      });
+      const params: Record<string, any> = {
+        limit: INITIAL_LIMIT,
+      };
 
+      if (selectedMarket?.state) params.state = selectedMarket.state;
+      if (selectedMarket?.county) params.county = selectedMarket.county;
+      if (selectedMarket?.city) params.city = selectedMarket.city;
+      if (deferredQ.trim()) params.q = deferredQ.trim();
+
+      // keep backend sort names aligned to router contract
+      if (sort === "RELEVANCE") params.sort = "relevance";
+      if (sort === "BEST_CASHFLOW") params.sort = "best_cashflow";
+      if (sort === "LOWEST_PRICE") params.sort = "lowest_price";
+      if (sort === "HIGHEST_PRICE") params.sort = "highest_price";
+      if (sort === "BEST_DSCR") params.sort = "best_dscr";
+      if (sort === "NEWEST") params.sort = "newest";
+
+      const propertiesRes = await api.get<any>("/properties", { params });
       const propertyItems =
         propertiesRes?.items || propertiesRes?.rows || propertiesRes || [];
       const normalized = Array.isArray(propertyItems) ? propertyItems : [];
       setRows(normalized);
     } catch (e: any) {
       setInventoryErr(formatApiError(e, "Failed to load investor inventory."));
+      setRows([]);
     } finally {
       setInventoryLoading(false);
     }
-  }, []);
+  }, [deferredQ, selectedMarket, sort]);
 
   const loadMarkets = React.useCallback(async () => {
     setMarketsLoading(true);
@@ -667,184 +523,161 @@ export default function InvestorPane() {
 
     try {
       const marketsRes = await api.supportedMarkets();
-      setMarkets(Array.isArray(marketsRes) ? marketsRes : []);
+      const normalized = Array.isArray(marketsRes) ? marketsRes : [];
+      setMarkets(normalized);
+
+      setSelectedMarket((prev) => {
+        if (prev?.slug) {
+          return (
+            normalized.find((m) => m.slug === prev.slug) ||
+            normalized[0] ||
+            null
+          );
+        }
+        return normalized[0] || null;
+      });
     } catch (e: any) {
       setMarketsErr(formatApiError(e, "Failed to load markets."));
       setMarkets([]);
+      setSelectedMarket(null);
     } finally {
       setMarketsLoading(false);
     }
   }, []);
 
-  const loadQueue = React.useCallback(async () => {
-    setQueueLoading(true);
-    setQueueErr(null);
-
-    try {
-      const queueRes = await api.get<any>("/acquisition/queue", {
-        params: { limit: 1000 },
-      });
-
-      const items = Array.isArray(queueRes?.items) ? queueRes.items : [];
-      setAcquisitionQueue(items);
-
-      const propertyIds = new Set<number>(
-        items
-          .map((x: any) => Number(x?.property_id))
-          .filter((n: number) => Number.isFinite(n) && n > 0),
-      );
-      setAcquisitionIds(propertyIds);
-    } catch (e: any) {
-      setQueueErr(formatApiError(e, "Failed to load acquisition queue."));
-      setAcquisitionQueue([]);
-      setAcquisitionIds(new Set());
-    } finally {
-      setQueueLoading(false);
-    }
-  }, []);
+  // OLD QUEUE LOAD PATH KEPT FOR REFERENCE
+  // const loadQueue = React.useCallback(async () => {
+  //   setQueueLoading(true);
+  //   setQueueErr(null);
+  //
+  //   try {
+  //     const queueRes = await api.get<any>("/acquisition/queue", {
+  //       params: { limit: 1000 },
+  //     });
+  //
+  //     const items = Array.isArray(queueRes?.items) ? queueRes.items : [];
+  //     setAcquisitionQueue(items);
+  //
+  //     const propertyIds = new Set<number>(
+  //       items
+  //         .map((x: any) => Number(x?.property_id))
+  //         .filter((n: number) => Number.isFinite(n) && n > 0),
+  //     );
+  //     setAcquisitionIds(propertyIds);
+  //   } catch (e: any) {
+  //     setQueueErr(formatApiError(e, "Failed to load acquisition queue."));
+  //     setAcquisitionQueue([]);
+  //     setAcquisitionIds(new Set());
+  //   } finally {
+  //     setQueueLoading(false);
+  //   }
+  // }, []);
 
   const load = React.useCallback(async () => {
     setRefreshing(true);
-    await Promise.allSettled([loadInventory(), loadMarkets(), loadQueue()]);
+    await Promise.allSettled([
+      loadInventory(),
+      loadMarkets(),
+      // loadQueue(),
+    ]);
     setRefreshing(false);
-  }, [loadInventory, loadMarkets, loadQueue]);
+  }, [loadInventory, loadMarkets]);
 
   React.useEffect(() => {
-    load();
-  }, [load]);
+    loadMarkets();
+  }, [loadMarkets]);
 
   React.useEffect(() => {
-    setActiveRunId(null);
-    setSourcePackMarket(null);
-  }, [location.pathname]);
+    loadInventory();
+  }, [loadInventory, marketRefreshNonce]);
 
-  const baseRows = React.useMemo(() => {
-    return rows.filter((r) => {
-      const propertyId = resolvePropertyId(r);
-      if (!propertyId) return true;
-      return !acquisitionIds.has(propertyId);
-    });
-  }, [rows, acquisitionIds]);
-
-  const filtered = React.useMemo(() => {
-    const normalizedQuery = String(deferredQ || "")
-      .trim()
-      .toLowerCase();
-
-    let next = baseRows.filter((r) => {
-      const property = inferProperty(r);
-      const price = inferAskingPrice(r);
-      const financingType = getFinancingType(price);
-      const rowDecision = normalizeDecision(
-        r?.normalized_decision || r?.classification || r?.decision,
-      );
-      const rowCompleteness = inferCompleteness(r);
-      const city = String(property?.city || r?.city || "").trim();
-
-      if (
-        selectedCity !== "ALL" &&
-        city.toLowerCase() !== selectedCity.toLowerCase()
-      ) {
-        return false;
-      }
-
-      if (decision !== "ALL" && rowDecision !== decision) return false;
-      if (financing !== "ALL" && financingType.toUpperCase() !== financing) {
-        return false;
-      }
-      if (completeness !== "ALL" && rowCompleteness !== completeness) {
-        return false;
-      }
-
-      if (!normalizedQuery) return true;
-
-      const haystack = [
-        property?.address,
-        property?.city,
-        property?.state,
-        property?.zip,
-        property?.county,
-        r?.classification,
-        r?.decision,
-        ...(inferTags(r) || []),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(normalizedQuery);
-    });
-
-    next = sortRows(next, sort);
-    return next;
+  React.useEffect(() => {
+    setCurrentPage(1);
   }, [
-    baseRows,
     deferredQ,
-    selectedCity,
     decision,
     financing,
     completeness,
     sort,
+    selectedMarket?.slug,
   ]);
 
-  const filteredQueue = React.useMemo(() => {
-    const normalized = String(queueSearch || "")
-      .trim()
-      .toLowerCase();
+  const baseRows = React.useMemo(() => {
+    return rows.filter((r) => {
+      const normalizedDecision = normalizeDecision(
+        r?.normalized_decision || r?.classification || r?.decision,
+      );
+      const financingType = getFinancingType(inferAskingPrice(r));
+      const completion = inferCompleteness(r);
 
-    return acquisitionQueue.filter((row) => {
-      const wait = waitingOnCategory(row?.waiting_on);
-      const urgency = queueUrgency(row);
-      const haystack = [
-        row?.address,
-        row?.city,
-        row?.state,
-        row?.zip,
-        row?.county,
-        row?.status,
-        row?.waiting_on,
-        row?.next_step,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      if (waitFilter !== "ALL" && wait !== waitFilter) return false;
-      if (queueStatusFilter !== "ALL" && urgency !== queueStatusFilter) {
-        return false;
-      }
-      if (normalized && !haystack.includes(normalized)) return false;
+      if (decision !== "ALL" && normalizedDecision !== decision) return false;
+      if (financing !== "ALL" && financingType !== financing) return false;
+      if (completeness !== "ALL" && completion !== completeness) return false;
 
       return true;
     });
-  }, [acquisitionQueue, queueSearch, waitFilter, queueStatusFilter]);
+  }, [rows, decision, financing, completeness]);
 
-  React.useEffect(() => {
-    setCurrentPage(1);
-  }, [deferredQ, selectedCity, decision, financing, completeness, sort]);
+  const sortedRows = React.useMemo(() => {
+    const copy = [...baseRows];
 
-  const cityOptions = React.useMemo(() => uniqueCities(baseRows), [baseRows]);
+    copy.sort((a, b) => {
+      if (sort === "RELEVANCE") {
+        return (
+          (numberOrNull(b?.relevance_score) ?? -Infinity) -
+          (numberOrNull(a?.relevance_score) ?? -Infinity)
+        );
+      }
+      if (sort === "BEST_CASHFLOW") {
+        return (
+          (inferCashflow(b) ?? -Infinity) - (inferCashflow(a) ?? -Infinity)
+        );
+      }
+      if (sort === "LOWEST_PRICE") {
+        return (
+          (inferAskingPrice(a) ?? Infinity) - (inferAskingPrice(b) ?? Infinity)
+        );
+      }
+      if (sort === "HIGHEST_PRICE") {
+        return (
+          (inferAskingPrice(b) ?? -Infinity) -
+          (inferAskingPrice(a) ?? -Infinity)
+        );
+      }
+      if (sort === "BEST_DSCR") {
+        return (inferDscr(b) ?? -Infinity) - (inferDscr(a) ?? -Infinity);
+      }
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+      return (
+        (safeDate(inferUpdatedAt(b))?.getTime() ?? 0) -
+        (safeDate(inferUpdatedAt(a))?.getTime() ?? 0)
+      );
+    });
+
+    return copy;
+  }, [baseRows, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
-  const startIndex = (safeCurrentPage - 1) * PAGE_SIZE;
-  const endIndex = startIndex + PAGE_SIZE;
-  const pagedRows = filtered.slice(startIndex, endIndex);
+  const pageStart = (safeCurrentPage - 1) * PAGE_SIZE;
+  const pageRows = sortedRows.slice(pageStart, pageStart + PAGE_SIZE);
   const pagination = buildPagination(safeCurrentPage, totalPages);
 
   const counts = React.useMemo(() => {
-    const c: Record<"GOOD_DEAL" | "REVIEW" | "REJECT", number> = {
+    const next = {
       GOOD_DEAL: 0,
       REVIEW: 0,
       REJECT: 0,
     };
-    for (const r of baseRows || []) {
+
+    for (const row of baseRows) {
       const d = normalizeDecision(
-        r?.normalized_decision || r?.classification || r?.decision,
-      ) as "GOOD_DEAL" | "REVIEW" | "REJECT";
-      c[d] += 1;
+        row?.normalized_decision || row?.classification || row?.decision,
+      );
+      next[d] += 1;
     }
-    return c;
+
+    return next;
   }, [baseRows]);
 
   const enrichedCount = React.useMemo(
@@ -865,28 +698,23 @@ export default function InvestorPane() {
     return values.reduce((sum, v) => sum + v, 0) / values.length;
   }, [baseRows]);
 
-  const overdueCount = React.useMemo(
-    () => acquisitionQueue.filter((r) => queueUrgency(r) === "OVERDUE").length,
-    [acquisitionQueue],
+
+  const handleMarketChange = React.useCallback(
+    (market: SupportedMarket | null) => {
+      setSelectedMarket((prev) => {
+        const prevSlug = prev?.slug || null;
+        const nextSlug = market?.slug || null;
+        if (prevSlug === nextSlug) return prev;
+        return market;
+      });
+    },
+    [],
   );
 
-  const dueSoonCount = React.useMemo(
-    () => acquisitionQueue.filter((r) => queueUrgency(r) === "DUE_SOON").length,
-    [acquisitionQueue],
-  );
-
-  const blockedCount = React.useMemo(
-    () => acquisitionQueue.filter((r) => queueUrgency(r) === "BLOCKED").length,
-    [acquisitionQueue],
-  );
-
-  const lenderWaitCount = React.useMemo(
-    () =>
-      acquisitionQueue.filter(
-        (r) => waitingOnCategory(r?.waiting_on) === "LENDER",
-      ).length,
-    [acquisitionQueue],
-  );
+  const handleQueued = React.useCallback(() => {
+    setMarketRefreshNonce((n) => n + 1);
+    loadInventory();
+  }, [loadInventory]);
 
   return (
     <PageShell>
@@ -894,7 +722,7 @@ export default function InvestorPane() {
         <PageHero
           eyebrow="Pane 1"
           title="Investor pane"
-          subtitle="Discover properties, move strong candidates into acquisition, and monitor what the active deal queue is still waiting on."
+          subtitle="Browse covered inventory, sync only supported markets, and rank results by relevance instead of raw provider order."
           actions={
             <>
               <button onClick={load} className="oh-btn oh-btn-secondary">
@@ -917,12 +745,13 @@ export default function InvestorPane() {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
           <Surface
             title="Investor inventory"
-            subtitle="Visible acquisition candidates"
+            subtitle="Visible supported listings"
           >
             <div className="text-3xl font-semibold text-app-0">
               {baseRows.length.toLocaleString()}
             </div>
           </Surface>
+
           <Surface
             title="Good deals"
             subtitle="Underwriting-positive candidates"
@@ -931,11 +760,13 @@ export default function InvestorPane() {
               {counts.GOOD_DEAL.toLocaleString()}
             </div>
           </Surface>
+
           <Surface title="Fully enriched" subtitle="Ready for deeper review">
             <div className="text-3xl font-semibold text-app-0">
               {enrichedCount.toLocaleString()}
             </div>
           </Surface>
+
           <Surface
             title="Cashflow positive"
             subtitle="Monthly upside candidates"
@@ -946,53 +777,16 @@ export default function InvestorPane() {
           </Surface>
         </div>
 
-        <Surface
-          title="Acquisition pressure"
-          subtitle="This is the operational handoff view: what is in motion, what is blocked, and what needs action now."
-        >
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <Clock3 className="h-3.5 w-3.5" />
-                Due soon
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-app-0">
-                {dueSoonCount}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                Overdue
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-app-0">
-                {overdueCount}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <FileWarning className="h-3.5 w-3.5" />
-                Blocked
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-app-0">
-                {blockedCount}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-              <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <Building2 className="h-3.5 w-3.5" />
-                Waiting on lender
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-app-0">
-                {lenderWaitCount}
-              </div>
-            </div>
-          </div>
-        </Surface>
+        <IngestionLaunchCard
+          refreshKey={marketRefreshNonce}
+          selectedMarketSlug={selectedMarket?.slug || null}
+          onMarketChange={handleMarketChange}
+          onQueued={handleQueued}
+        />
 
         <Surface
           title="Lifecycle handoff"
-          subtitle="This pane exists to decide which properties should move into acquisition, while still keeping a small operational view of the active deal queue."
+          subtitle="This pane now acts as a supported-market inventory page first, while acquisition operations stay downstream."
         >
           <div className="flex flex-wrap gap-2">
             <span className="oh-pill">
@@ -1001,11 +795,12 @@ export default function InvestorPane() {
             <span className="oh-pill oh-pill-accent">
               next stage acquisition
             </span>
-            <span className="oh-pill oh-pill-warn">
-              blocker incomplete underwriting or enrichment
-            </span>
             <span className="oh-pill">
-              {acquisitionIds.size} already moved to acquisition
+              active market{" "}
+              {selectedMarket ? marketDisplayName(selectedMarket) : "none"}
+            </span>
+            <span className="oh-pill oh-pill-warn">
+              blocker incomplete enrichment or weak underwriting
             </span>
           </div>
 
@@ -1016,240 +811,47 @@ export default function InvestorPane() {
           ) : null}
         </Surface>
 
+        {/* OLD ACQUISITION PRESSURE + QUEUE PREVIEW BLOCKS KEPT FOR REFERENCE.
+            The prior InvestorPane mixed inventory with acquisition operations.
+            Keeping that code commented makes it easy to restore later if you want
+            a split-screen investor/acquisition operational variant.
+
+        <Surface
+          title="Acquisition pressure"
+          subtitle="This is the operational handoff view: what is in motion, what is blocked, and what needs action now."
+        >
+          ...
+        </Surface>
+
         <Surface
           title="Acquisition queue preview"
           subtitle="What are we waiting on right now?"
         >
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <Search className="h-3.5 w-3.5" />
-                Search queue
-              </div>
-              <input
-                value={queueSearch}
-                onChange={(e) => setQueueSearch(e.target.value)}
-                placeholder="address, city, waiting on..."
-                className="w-full bg-transparent text-sm text-app-0 outline-none"
-              />
-            </label>
-
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <Users className="h-3.5 w-3.5" />
-                Waiting on
-              </div>
-              <select
-                value={waitFilter}
-                onChange={(e) =>
-                  setWaitFilter(e.target.value as AcquisitionWaitFilter)
-                }
-                className="w-full bg-transparent text-sm text-app-0 outline-none"
-              >
-                <option value="ALL">All owners</option>
-                <option value="LENDER">Lender</option>
-                <option value="TITLE">Title</option>
-                <option value="OPERATOR">Operator</option>
-                <option value="SELLER">Seller</option>
-                <option value="DOCUMENT">Document</option>
-              </select>
-            </label>
-
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                Queue status
-              </div>
-              <select
-                value={queueStatusFilter}
-                onChange={(e) =>
-                  setQueueStatusFilter(
-                    e.target.value as AcquisitionStatusFilter,
-                  )
-                }
-                className="w-full bg-transparent text-sm text-app-0 outline-none"
-              >
-                <option value="ALL">All</option>
-                <option value="OVERDUE">Overdue</option>
-                <option value="DUE_SOON">Due soon</option>
-                <option value="BLOCKED">Blocked</option>
-              </select>
-            </label>
-
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Deals in queue
-              </div>
-              <div className="text-2xl font-semibold text-app-0">
-                {filteredQueue.length}
-              </div>
-            </div>
-          </div>
-
-          {queueLoading ? (
-            <div className="py-10 text-center text-app-4">Loading queue…</div>
-          ) : queueErr ? (
-            <EmptyState
-              compact
-              title="Queue unavailable"
-              description={queueErr}
-            />
-          ) : filteredQueue.length === 0 ? (
-            <EmptyState
-              compact
-              title="No active queue rows"
-              description="Nothing in acquisition matches the current queue filters."
-            />
-          ) : (
-            <div className="mt-4 grid gap-4 xl:grid-cols-2">
-              {filteredQueue.slice(0, 6).map((row, index) => {
-                const propertyId = Number(row?.property_id || 0) || null;
-                const urgency = queueUrgency(row);
-                const readiness = queueReadinessScore(row);
-                const waitOwner = waitingOnCategory(row?.waiting_on);
-                const runId =
-                  numberOrNull(row?.run_id) ??
-                  numberOrNull(row?.ingestion_run_id) ??
-                  null;
-
-                return (
-                  <div
-                    key={`${propertyId || "queue"}-${index}`}
-                    className="rounded-3xl border border-app bg-app-panel p-5"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="text-lg font-semibold text-app-0">
-                          {row?.address || "Unknown address"}
-                        </div>
-                        <div className="mt-1 text-sm text-app-4">
-                          {[row?.city, row?.state, row?.zip]
-                            .filter(Boolean)
-                            .join(", ")}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <span className={urgencyPillClass(urgency)}>
-                          {urgency === "DUE_SOON"
-                            ? "due soon"
-                            : urgency.toLowerCase()}
-                        </span>
-                        <span className="oh-pill">
-                          waiting on {waitOwner.toLowerCase()}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid gap-3 md:grid-cols-3">
-                      <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                          Waiting on
-                        </div>
-                        <div className="mt-2 text-sm font-semibold text-app-0">
-                          {waitingOnLabel(row?.waiting_on)}
-                        </div>
-                      </div>
-                      <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                          Next required document
-                        </div>
-                        <div className="mt-2 text-sm font-semibold text-app-0">
-                          {nextRequiredDocument(row)}
-                        </div>
-                      </div>
-                      <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                          Close readiness
-                        </div>
-                        <div
-                          className={`mt-2 text-sm font-semibold ${readinessTone(readiness)}`}
-                        >
-                          {readiness}%
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {row?.status ? (
-                        <span className="oh-pill">{row.status}</span>
-                      ) : null}
-                      {numberOrNull(row?.days_to_close) != null ? (
-                        <span className="oh-pill">
-                          {Number(row.days_to_close) < 0
-                            ? `${Math.abs(Number(row.days_to_close))}d overdue`
-                            : `${Number(row.days_to_close)}d to close`}
-                        </span>
-                      ) : null}
-                      {numberOrNull(row?.document_count) != null ? (
-                        <span className="oh-pill">
-                          {Number(row.document_count)} docs
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {row?.next_step ? (
-                      <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                          Next action
-                        </div>
-                        <div className="mt-2 text-sm text-app-1">
-                          {row.next_step}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {propertyId ? (
-                        <Link
-                          to={`/properties/${propertyId}`}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0 transition hover:bg-app-panel"
-                        >
-                          Open property
-                          <ArrowUpRight className="h-4 w-4" />
-                        </Link>
-                      ) : null}
-
-                      {runId ? (
-                        <button
-                          type="button"
-                          onClick={() => setActiveRunId(runId)}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0 transition hover:bg-app-panel"
-                        >
-                          Run errors
-                          <Bug className="h-4 w-4" />
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          ...
         </Surface>
+        */}
 
         <Surface
-          title="Filters"
-          subtitle="Investor pane-specific shortlist controls"
+          title="Inventory filters"
+          subtitle="Filter your covered local inventory"
         >
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3 xl:col-span-2">
               <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
                 <Search className="h-3.5 w-3.5" />
-                Search
+                Search inventory
               </div>
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="address, city, county, tag…"
+                placeholder="address, city, zip"
                 className="w-full bg-transparent text-sm text-app-0 outline-none"
               />
             </label>
 
             <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
               <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <ShieldAlert className="h-3.5 w-3.5" />
+                <SlidersHorizontal className="h-3.5 w-3.5" />
                 Decision
               </div>
               <select
@@ -1266,7 +868,7 @@ export default function InvestorPane() {
 
             <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
               <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <Banknote className="h-3.5 w-3.5" />
+                <BriefcaseBusiness className="h-3.5 w-3.5" />
                 Financing
               </div>
               <select
@@ -1285,7 +887,7 @@ export default function InvestorPane() {
 
             <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
               <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <SlidersHorizontal className="h-3.5 w-3.5" />
+                <ShieldAlert className="h-3.5 w-3.5" />
                 Completeness
               </div>
               <select
@@ -1301,25 +903,25 @@ export default function InvestorPane() {
                 <option value="MISSING">Missing</option>
               </select>
             </label>
+          </div>
 
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
               <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <Landmark className="h-3.5 w-3.5" />
-                City
+                <MapPin className="h-3.5 w-3.5" />
+                Market
               </div>
-              <select
-                value={selectedCity}
-                onChange={(e) => setSelectedCity(e.target.value)}
-                className="w-full bg-transparent text-sm text-app-0 outline-none"
-              >
-                <option value="ALL">All cities</option>
-                {cityOptions.map((city) => (
-                  <option key={city} value={city}>
-                    {city}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <div className="text-sm font-semibold text-app-0">
+                {selectedMarket
+                  ? marketDisplayName(selectedMarket)
+                  : "No market selected"}
+              </div>
+              <div className="mt-1 text-xs text-app-4">
+                {selectedMarket
+                  ? marketSubLabel(selectedMarket)
+                  : "Choose a supported market above"}
+              </div>
+            </div>
 
             <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
               <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
@@ -1331,6 +933,7 @@ export default function InvestorPane() {
                 onChange={(e) => setSort(e.target.value as SortKey)}
                 className="w-full bg-transparent text-sm text-app-0 outline-none"
               >
+                <option value="RELEVANCE">Relevance</option>
                 <option value="BEST_CASHFLOW">Best cashflow</option>
                 <option value="LOWEST_PRICE">Lowest price</option>
                 <option value="HIGHEST_PRICE">Highest price</option>
@@ -1338,218 +941,248 @@ export default function InvestorPane() {
                 <option value="NEWEST">Newest</option>
               </select>
             </label>
+
+            <Surface
+              title="Average cashflow"
+              subtitle="Across visible investor inventory"
+            >
+              <div
+                className={`text-3xl font-semibold ${metricTone(avgCashflow)}`}
+              >
+                {money(avgCashflow)}
+              </div>
+            </Surface>
+
+            <Surface
+              title="Next lifecycle move"
+              subtitle="What this pane should do"
+            >
+              <div className="space-y-3 text-sm text-app-2">
+                <div className="flex items-center gap-2">
+                  <BriefcaseBusiness className="h-4 w-4" />
+                  Move shortlisted and reviewable assets into acquisition.
+                </div>
+                <div className="flex items-center gap-2">
+                  <GitBranch className="h-4 w-4" />
+                  The main blocker here is missing enrichment or weak
+                  underwriting.
+                </div>
+              </div>
+            </Surface>
           </div>
         </Surface>
 
-        <Surface className="p-4">
+        <Surface
+          title="Available investment inventory"
+          subtitle="Showing 25 properties per page from supported-market inventory."
+        >
           <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-app-0">
-                Available investment inventory
-              </div>
-              <div className="text-xs text-app-4">
-                Showing 25 properties per page. Active acquisition files are
-                excluded from this list.
-              </div>
-            </div>
             <div className="text-xs text-app-4">
-              {filtered.length.toLocaleString()} results
+              {sortedRows.length} matching properties
             </div>
+
+            <button
+              type="button"
+              onClick={() => setSourcePackMarket(selectedMarket)}
+              className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-xs font-medium text-app-0 transition hover:bg-app-panel"
+              disabled={!selectedMarket}
+            >
+              <Settings2 className="h-4 w-4" />
+              Source pack
+            </button>
           </div>
 
-          {inventoryLoading ? (
-            <div className="py-16 text-center text-app-4">
+          {inventoryLoading || marketsLoading ? (
+            <div className="py-10 text-center text-app-4">
               Loading inventory…
             </div>
           ) : inventoryErr ? (
             <EmptyState
-              title="Investor page failed to load"
+              compact
+              title="Inventory unavailable"
               description={inventoryErr}
             />
-          ) : filtered.length === 0 ? (
+          ) : pageRows.length === 0 ? (
             <EmptyState
-              title="No matching inventory"
-              description="Try changing filters."
+              compact
+              title="No inventory matches the current filters"
+              description="Try clearing filters or switching to another supported market."
             />
           ) : (
             <>
-              <div className="mb-4 flex items-center justify-between gap-3 text-xs text-app-4">
-                <div>
-                  Showing {startIndex + 1}-{Math.min(endIndex, filtered.length)}{" "}
-                  of {filtered.length}
-                </div>
-                <div>
-                  Page {safeCurrentPage} of {totalPages}
-                </div>
-              </div>
-
-              <div className="grid gap-4 xl:grid-cols-2">
-                {pagedRows.map((r, index) => {
-                  const property = inferProperty(r);
-                  const propertyId = resolvePropertyId(r);
-                  const price = inferAskingPrice(r);
-                  const rent = inferMarketRent(r);
-                  const cashflow = inferCashflow(r);
-                  const dscr = inferDscr(r);
-                  const completenessValue = inferCompleteness(r);
-                  const photoUrl = inferPhotoUrl(r);
-                  const tags = inferTags(r);
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+                {pageRows.map((row) => {
+                  const p = inferProperty(row);
+                  const propertyId = resolvePropertyId(row);
+                  const price = inferAskingPrice(row);
+                  const rent = inferMarketRent(row);
+                  const cashflow = inferCashflow(row);
+                  const dscr = inferDscr(row);
+                  const confidence = inferLocationConfidence(row);
+                  const completeness = inferCompleteness(row);
+                  const photoUrl = inferPhotoUrl(row);
+                  const tags = inferTags(row);
 
                   return (
                     <div
-                      key={`${propertyId || property?.address || "row"}-${startIndex + index}`}
+                      key={
+                        propertyId ||
+                        `${p?.address || "property"}-${inferUpdatedAt(row) || ""}`
+                      }
                       className="overflow-hidden rounded-3xl border border-app bg-app-panel"
                     >
-                      <div className="grid md:grid-cols-[240px_1fr]">
-                        <div className="h-56 md:h-full">
-                          <Photo
-                            url={photoUrl}
-                            alt={property?.address || "Property photo"}
-                          />
+                      <div className="h-56 overflow-hidden border-b border-app bg-app-muted">
+                        <Photo url={photoUrl} alt={p?.address || "Property"} />
+                      </div>
+
+                      <div className="space-y-4 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-base font-semibold text-app-0">
+                              {p?.address || row?.address || "Unknown address"}
+                            </div>
+                            <div className="mt-1 flex items-center gap-2 text-sm text-app-4">
+                              <MapPin className="h-4 w-4" />
+                              {[
+                                p?.city || row?.city,
+                                p?.state || row?.state,
+                                p?.zip || row?.zip,
+                              ]
+                                .filter(Boolean)
+                                .join(", ")}
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <div className="text-lg font-semibold text-app-0">
+                              {money(price)}
+                            </div>
+                            <div className="text-xs text-app-4">
+                              refreshed {relativeTime(inferUpdatedAt(row))}
+                            </div>
+                          </div>
                         </div>
 
-                        <div className="p-5">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="text-lg font-semibold text-app-0">
-                                {property?.address || "Unknown address"}
-                              </div>
-                              <div className="mt-1 flex items-center gap-1 text-sm text-app-4">
-                                <MapPin className="h-4 w-4" />
-                                {[
-                                  property?.city,
-                                  property?.state,
-                                  property?.zip,
-                                ]
-                                  .filter(Boolean)
-                                  .join(", ")}
-                              </div>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              <span
-                                className={decisionPillClass(
-                                  r?.normalized_decision || r?.classification,
-                                )}
-                              >
-                                {normalizeDecision(
-                                  r?.normalized_decision || r?.classification,
-                                ).replace("_", " ")}
-                              </span>
-                              <span
-                                className={completenessPillClass(
-                                  completenessValue,
-                                )}
-                              >
-                                {completenessLabel(completenessValue)}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
-                            <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
-                              <div className="flex items-center gap-2 text-xs text-app-4">
-                                <Wallet className="h-3.5 w-3.5" />
-                                Price
-                              </div>
-                              <div className="mt-2 text-sm font-semibold text-app-0">
-                                {money(price)}
-                              </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
-                              <div className="flex items-center gap-2 text-xs text-app-4">
-                                <Banknote className="h-3.5 w-3.5" />
-                                Rent
-                              </div>
-                              <div className="mt-2 text-sm font-semibold text-app-0">
-                                {money(rent)}
-                              </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
-                              <div className="flex items-center gap-2 text-xs text-app-4">
-                                <Wallet className="h-3.5 w-3.5" />
-                                Cashflow
-                              </div>
-                              <div
-                                className={`mt-2 text-sm font-semibold ${metricTone(cashflow)}`}
-                              >
-                                {money(cashflow)}
-                              </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
-                              <div className="flex items-center gap-2 text-xs text-app-4">
-                                <Landmark className="h-3.5 w-3.5" />
-                                DSCR
-                              </div>
-                              <div className="mt-2 text-sm font-semibold text-app-0">
-                                {dscr != null ? dscr.toFixed(2) : "—"}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {property?.bedrooms != null ? (
-                              <span className="oh-pill">
-                                <BedDouble className="mr-1 h-3.5 w-3.5" />
-                                {property.bedrooms} bd
-                              </span>
-                            ) : null}
-                            {property?.bathrooms != null ? (
-                              <span className="oh-pill">
-                                <Bath className="mr-1 h-3.5 w-3.5" />
-                                {property.bathrooms} ba
-                              </span>
-                            ) : null}
-                            {property?.square_feet != null ? (
-                              <span className="oh-pill">
-                                <Ruler className="mr-1 h-3.5 w-3.5" />
-                                {Number(
-                                  property.square_feet,
-                                ).toLocaleString()}{" "}
-                                sf
-                              </span>
-                            ) : null}
+                        <div className="flex flex-wrap gap-2">
+                          <span
+                            className={decisionPillClass(
+                              row?.normalized_decision || row?.classification,
+                            )}
+                          >
+                            {normalizeDecision(
+                              row?.normalized_decision || row?.classification,
+                            )}
+                          </span>
+                          <span className={completenessPillClass(completeness)}>
+                            {completenessLabel(completeness)}
+                          </span>
+                          <span className="oh-pill">
+                            {getFinancingType(price)}
+                          </span>
+                          {row?.relevance_score != null ? (
                             <span className="oh-pill">
-                              {getFinancingType(price)}
+                              Score {row.relevance_score}
                             </span>
-                            {inferCrime(r) != null ? (
-                              <span className="oh-pill">
-                                crime {inferCrime(r)}
-                              </span>
-                            ) : null}
-                          </div>
-
-                          {tags.length ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {tags.map((tag) => (
-                                <span key={tag} className="oh-pill">
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
                           ) : null}
+                        </div>
 
-                          <div className="mt-4 flex items-center justify-between gap-3 text-xs text-app-4">
-                            <div>
-                              updated {relativeTime(inferUpdatedAt(r))}
-                              {inferLocationConfidence(r) != null
-                                ? ` · geocode ${inferLocationConfidence(r)?.toFixed(2)}`
-                                : ""}
-                            </div>
-
-                            {propertyId ? (
-                              <Link
-                                to={`/properties/${propertyId}`}
-                                className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0 transition hover:bg-app-panel"
-                              >
-                                Open lifecycle
-                                <ArrowUpRight className="h-4 w-4" />
-                              </Link>
-                            ) : null}
+                        {tags.length ? (
+                          <div className="flex flex-wrap gap-2">
+                            {tags.map((tag) => (
+                              <span key={tag} className="oh-pill">
+                                {tag}
+                              </span>
+                            ))}
                           </div>
+                        ) : null}
+
+                        <div className="grid grid-cols-2 gap-3 text-sm text-app-0">
+                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
+                            <div className="flex items-center gap-2 text-app-4">
+                              <BedDouble className="h-4 w-4" />
+                              Beds
+                            </div>
+                            <div className="mt-1 font-medium">
+                              {p?.bedrooms ?? "—"}
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
+                            <div className="flex items-center gap-2 text-app-4">
+                              <Bath className="h-4 w-4" />
+                              Baths
+                            </div>
+                            <div className="mt-1 font-medium">
+                              {p?.bathrooms ?? "—"}
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
+                            <div className="flex items-center gap-2 text-app-4">
+                              <Wallet className="h-4 w-4" />
+                              Cashflow
+                            </div>
+                            <div
+                              className={`mt-1 font-medium ${metricTone(cashflow)}`}
+                            >
+                              {money(cashflow)}
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
+                            <div className="flex items-center gap-2 text-app-4">
+                              <Landmark className="h-4 w-4" />
+                              DSCR
+                            </div>
+                            <div className="mt-1 font-medium">
+                              {dscr != null ? dscr.toFixed(2) : "—"}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 text-sm text-app-0">
+                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
+                            <div className="text-app-4">Estimated rent</div>
+                            <div className="mt-1 font-medium">
+                              {money(rent)}
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
+                            <div className="text-app-4">Location quality</div>
+                            <div className="mt-1 font-medium">
+                              {confidence != null ? confidence.toFixed(2) : "—"}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setSourcePackMarket(selectedMarket)}
+                            className="oh-btn oh-btn-secondary"
+                            disabled={!selectedMarket}
+                          >
+                            Source pack
+                          </button>
+
+                          {propertyId ? (
+                            <Link
+                              to={`/properties/${propertyId}`}
+                              className="oh-btn"
+                            >
+                              Open property
+                              <ArrowUpRight className="h-4 w-4" />
+                            </Link>
+                          ) : (
+                            <button
+                              type="button"
+                              className="oh-btn oh-btn-secondary"
+                              disabled
+                            >
+                              Missing property id
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1557,40 +1190,38 @@ export default function InvestorPane() {
                 })}
               </div>
 
-              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+              <div className="mt-5 flex items-center justify-between gap-3">
                 <button
                   type="button"
-                  onClick={() =>
-                    setCurrentPage((prev) => Math.max(1, prev - 1))
-                  }
+                  className="oh-btn oh-btn-secondary"
                   disabled={safeCurrentPage <= 1}
-                  className="oh-btn oh-btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   Previous
                 </button>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {pagination.map((page, idx) =>
-                    typeof page === "string" ? (
+                  {pagination.map((token, index) =>
+                    typeof token === "string" ? (
                       <span
-                        key={`${page}-${idx}`}
+                        key={`ellipsis-${index}`}
                         className="px-2 text-sm text-app-4"
                       >
-                        …
+                        {token}
                       </span>
                     ) : (
                       <button
-                        key={page}
+                        key={token}
                         type="button"
-                        onClick={() => setCurrentPage(page)}
-                        className={`inline-flex h-10 min-w-10 items-center justify-center rounded-2xl border px-3 text-sm ${
-                          page === safeCurrentPage
-                            ? "border-app-strong bg-app-panel text-app-0"
-                            : "border-app bg-app-muted text-app-3"
-                        }`}
+                        className={
+                          token === safeCurrentPage
+                            ? "oh-btn"
+                            : "oh-btn oh-btn-secondary"
+                        }
+                        onClick={() => setCurrentPage(token)}
                       >
-                        {page}
+                        {token}
                       </button>
                     ),
                   )}
@@ -1598,11 +1229,11 @@ export default function InvestorPane() {
 
                 <button
                   type="button"
-                  onClick={() =>
-                    setCurrentPage((prev) => Math.min(totalPages, prev + 1))
-                  }
+                  className="oh-btn oh-btn-secondary"
                   disabled={safeCurrentPage >= totalPages}
-                  className="oh-btn oh-btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(totalPages, p + 1))
+                  }
                 >
                   Next
                   <ChevronRight className="h-4 w-4" />
@@ -1611,73 +1242,6 @@ export default function InvestorPane() {
             </>
           )}
         </Surface>
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <Surface title="Market coverage" subtitle="Supported intake markets">
-            {marketsLoading ? (
-              <div className="text-sm text-app-4">Loading markets…</div>
-            ) : markets.length ? (
-              <div className="grid gap-3">
-                {markets.slice(0, 8).map((market: any, idx) => (
-                  <div
-                    key={`${market?.city || market?.label || idx}`}
-                    className="rounded-2xl border border-app bg-app-panel px-4 py-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-app-0">
-                          {marketDisplayName(market)}
-                        </div>
-                        <div className="mt-1 text-xs text-app-4">
-                          {marketSubLabel(market) || "Supported market"}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setSourcePackMarket(market)}
-                        className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-xs font-medium text-app-0 transition hover:bg-app-panel"
-                      >
-                        <Settings2 className="h-4 w-4" />
-                        Source pack
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState compact title="No markets loaded" />
-            )}
-          </Surface>
-
-          <Surface
-            title="Average cashflow"
-            subtitle="Across visible investor inventory"
-          >
-            <div
-              className={`text-3xl font-semibold ${metricTone(avgCashflow)}`}
-            >
-              {money(avgCashflow)}
-            </div>
-          </Surface>
-
-          <Surface
-            title="Next lifecycle move"
-            subtitle="What this pane should do"
-          >
-            <div className="space-y-3 text-sm text-app-2">
-              <div className="flex items-center gap-2">
-                <BriefcaseBusiness className="h-4 w-4" />
-                Move shortlisted and reviewable assets into acquisition.
-              </div>
-              <div className="flex items-center gap-2">
-                <GitBranch className="h-4 w-4" />
-                The main blocker here is missing enrichment or weak
-                underwriting.
-              </div>
-            </div>
-          </Surface>
-        </div>
       </div>
 
       <IngestionErrorsDrawer
@@ -1691,7 +1255,6 @@ export default function InvestorPane() {
         onClose={() => setSourcePackMarket(null)}
         onChanged={load}
       />
-      
     </PageShell>
   );
 }

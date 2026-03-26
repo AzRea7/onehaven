@@ -89,7 +89,9 @@ def _safe_int(value: Any) -> int | None:
 
 def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str, Any]:
     payload = dict(runtime_config or {})
-    limit = _safe_int(payload.get("limit")) or int(getattr(settings, "market_sync_default_limit_per_market", 125))
+    limit = _safe_int(payload.get("limit")) or int(
+        getattr(settings, "market_sync_default_limit_per_market", 125)
+    )
     payload["limit"] = max(1, limit)
 
     payload["state"] = _normalize_optional_filter_value(payload.get("state")) or "MI"
@@ -217,6 +219,10 @@ def _build_lock_owner(*, org_id: int, source_id: int, idempotency_key: str) -> s
     return f"ingestion:{host}:{pid}:{int(org_id)}:{int(source_id)}:{idempotency_key}"
 
 
+def _execution_lock_key(*, source_id: int) -> str:
+    return f"ingestion:source:{int(source_id)}"
+
+
 def _set_run_status(row: Any, status: str) -> None:
     if hasattr(row, "status"):
         setattr(row, "status", status)
@@ -225,7 +231,6 @@ def _set_run_status(row: Any, status: str) -> None:
 def _set_run_summary(row: Any, summary: dict[str, Any]) -> None:
     if hasattr(row, "summary_json"):
         setattr(row, "summary_json", summary)
-
 
 
 def _persist_property_acquisition_metadata(
@@ -253,19 +258,22 @@ def _persist_property_acquisition_metadata(
             """
         ),
         {
-            'org_id': int(org_id),
-            'property_id': int(property_id),
-            'now_ts': now,
-            'provider': str(getattr(source, 'provider', '') or '').strip() or None,
-            'slug': str(getattr(source, 'slug', '') or '').strip() or None,
-            'record_id': str(payload.get('external_record_id') or '').strip() or None,
-            'source_url': payload.get('external_url'),
-            'metadata_json': json.dumps({
-                'trigger_type': trigger_type,
-                'last_payload_address': payload.get('address'),
-                'last_payload_city': payload.get('city'),
-                'inventory_count': payload.get('inventory_count'),
-            }, default=str),
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "now_ts": now,
+            "provider": str(getattr(source, "provider", "") or "").strip() or None,
+            "slug": str(getattr(source, "slug", "") or "").strip() or None,
+            "record_id": str(payload.get("external_record_id") or "").strip() or None,
+            "source_url": payload.get("external_url"),
+            "metadata_json": json.dumps(
+                {
+                    "trigger_type": trigger_type,
+                    "last_payload_address": payload.get("address"),
+                    "last_payload_city": payload.get("city"),
+                    "inventory_count": payload.get("inventory_count"),
+                },
+                default=str,
+            ),
         },
     )
 
@@ -284,8 +292,9 @@ def _seed_missing_completeness_columns(db: Session, *, org_id: int, property_id:
             WHERE org_id = :org_id AND id = :property_id
             """
         ),
-        {'org_id': int(org_id), 'property_id': int(property_id)},
+        {"org_id": int(org_id), "property_id": int(property_id)},
     )
+
 
 def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
     existing = find_existing_property(
@@ -429,7 +438,7 @@ def _upsert_photos(db: Session, *, org_id: int, property_id: int, provider: str,
 
 
 def _starting_cursor(source, trigger_type: str) -> dict[str, Any]:
-    if trigger_type in {"manual", "daily_refresh", "scheduled"}:
+    if trigger_type in {"manual", "daily_refresh", "scheduled", "manual_market_sync"}:
         return {"page": 1}
     return dict(source.cursor_json or {})
 
@@ -549,6 +558,9 @@ def execute_source_sync(
     runtime_config = _normalize_runtime_config(runtime_config)
     runtime_config["trigger_type"] = str(trigger_type or "manual")
 
+    source_id = int(getattr(source, "id"))
+    execution_lock_key = _execution_lock_key(source_id=source_id)
+
     provider_fetch_limit = min(
         int(runtime_config.get("limit") or 100),
         int(getattr(settings, "market_sync_default_limit_per_market", 125) or 125),
@@ -563,7 +575,7 @@ def execute_source_sync(
 
     lock_owner = _build_lock_owner(
         org_id=int(org_id),
-        source_id=int(getattr(source, "id")),
+        source_id=source_id,
         idempotency_key=idempotency_key,
     )
 
@@ -571,7 +583,7 @@ def execute_source_sync(
         {
             "event": "ingestion_sync_start",
             "org_id": int(org_id),
-            "source_id": int(getattr(source, "id")),
+            "source_id": source_id,
             "provider": str(getattr(source, "provider", "") or ""),
             "trigger_type": str(trigger_type),
             "provider_fetch_limit": provider_fetch_limit,
@@ -583,16 +595,23 @@ def execute_source_sync(
     execution_lock = acquire_ingestion_execution_lock(
         db,
         org_id=int(org_id),
-        lock_key=f"ingestion:source:{int(getattr(source, 'id'))}",
+        source_id=source_id,
+        idempotency_key=idempotency_key,
         owner=lock_owner,
-        ttl_seconds=int(getattr(settings, "ingestion_execution_lock_ttl_seconds", DEFAULT_EXECUTION_LOCK_TTL_SECONDS)),
+        ttl_seconds=int(
+            getattr(
+                settings,
+                "ingestion_execution_lock_ttl_seconds",
+                DEFAULT_EXECUTION_LOCK_TTL_SECONDS,
+            )
+        ),
     )
     if not execution_lock.acquired:
         _emit(
             {
                 "event": "ingestion_sync_skipped_locked",
                 "org_id": int(org_id),
-                "source_id": int(getattr(source, "id")),
+                "source_id": source_id,
                 "idempotency_key": idempotency_key,
             },
             level=logging.WARNING,
@@ -600,7 +619,7 @@ def execute_source_sync(
         return start_run(
             db,
             org_id=int(org_id),
-            source_id=int(getattr(source, "id")),
+            source_id=source_id,
             trigger_type=str(trigger_type),
             runtime_config=runtime_config,
             status="skipped_locked",
@@ -610,21 +629,27 @@ def execute_source_sync(
     if has_completed_ingestion_dataset(
         db,
         org_id=int(org_id),
-        key=idempotency_key,
+        source_id=source_id,
+        idempotency_key=idempotency_key,
     ):
-        release_lock(db, org_id=int(org_id), lock_key=f"ingestion:source:{int(getattr(source, 'id'))}", owner=lock_owner)
+        release_lock(
+            db,
+            org_id=int(org_id),
+            lock_key=execution_lock_key,
+            owner=lock_owner,
+        )
         _emit(
             {
                 "event": "ingestion_sync_skipped_duplicate_dataset",
                 "org_id": int(org_id),
-                "source_id": int(getattr(source, "id")),
+                "source_id": source_id,
                 "idempotency_key": idempotency_key,
             }
         )
         return start_run(
             db,
             org_id=int(org_id),
-            source_id=int(getattr(source, "id")),
+            source_id=source_id,
             trigger_type=str(trigger_type),
             runtime_config=runtime_config,
             status="skipped_duplicate_dataset",
@@ -634,7 +659,7 @@ def execute_source_sync(
     run = start_run(
         db,
         org_id=int(org_id),
-        source_id=int(getattr(source, "id")),
+        source_id=source_id,
         trigger_type=str(trigger_type),
         runtime_config=runtime_config,
     )
@@ -665,7 +690,10 @@ def execute_source_sync(
 
     try:
         cursor = _starting_cursor(source, trigger_type)
-        max_pages = max(1, int(getattr(settings, "ingestion_provider_max_pages_per_shard", 3) or 3))
+        max_pages = max(
+            1,
+            int(getattr(settings, "ingestion_provider_max_pages_per_shard", 3) or 3),
+        )
         pages_scanned = 0
 
         while cursor and pages_scanned < max_pages:
@@ -706,7 +734,7 @@ def execute_source_sync(
                 {
                     "event": "ingestion_page_loaded",
                     "org_id": int(org_id),
-                    "source_id": int(getattr(source, "id")),
+                    "source_id": source_id,
                     "page_number": pages_scanned,
                     "raw_count": int(raw_count or 0),
                     "rows_returned": len(rows),
@@ -735,7 +763,9 @@ def execute_source_sync(
                 if reason:
                     summary["filtered_out"] += 1
                     page_stat["filtered_out"] += 1
-                    summary["filter_reason_counts"][reason] = int(summary["filter_reason_counts"].get(reason, 0)) + 1
+                    summary["filter_reason_counts"][reason] = int(
+                        summary["filter_reason_counts"].get(reason, 0)
+                    ) + 1
                     continue
 
                 external_link = find_existing_by_external_id(
@@ -767,8 +797,18 @@ def execute_source_sync(
 
                 db_t0 = time.perf_counter()
                 prop, prop_created = _upsert_property(db, org_id=int(org_id), payload=payload)
-                deal, deal_created = _upsert_deal(db, org_id=int(org_id), property_id=int(prop.id), payload=payload)
-                rent, rent_created = _upsert_rent_assumption(db, org_id=int(org_id), property_id=int(prop.id), payload=payload)
+                deal, deal_created = _upsert_deal(
+                    db,
+                    org_id=int(org_id),
+                    property_id=int(prop.id),
+                    payload=payload,
+                )
+                rent, rent_created = _upsert_rent_assumption(
+                    db,
+                    org_id=int(org_id),
+                    property_id=int(prop.id),
+                    payload=payload,
+                )
                 photos_added = _upsert_photos(
                     db,
                     org_id=int(org_id),
@@ -781,7 +821,7 @@ def execute_source_sync(
                     db,
                     org_id=int(org_id),
                     provider=str(source.provider),
-                    source_id=int(getattr(source, "id")),
+                    source_id=source_id,
                     external_record_id=str(payload["external_record_id"]),
                     external_url=payload.get("external_url"),
                     property_id=int(prop.id),
@@ -797,7 +837,11 @@ def execute_source_sync(
                     payload=payload,
                     trigger_type=str(trigger_type),
                 )
-                _seed_missing_completeness_columns(db, org_id=int(org_id), property_id=int(prop.id))
+                _seed_missing_completeness_columns(
+                    db,
+                    org_id=int(org_id),
+                    property_id=int(prop.id),
+                )
                 db_upsert_ms = round((time.perf_counter() - db_t0) * 1000, 2)
                 summary["timings_ms"]["db_upsert_total"] = round(
                     float(summary["timings_ms"].get("db_upsert_total", 0.0) or 0.0) + db_upsert_ms,
@@ -837,7 +881,7 @@ def execute_source_sync(
                         {
                             "event": "ingestion_property_pipeline_complete",
                             "org_id": int(org_id),
-                            "source_id": int(getattr(source, "id")),
+                            "source_id": source_id,
                             "property_id": int(prop.id),
                             "external_record_id": external_record_id,
                             "prop_created": bool(prop_created),
@@ -846,8 +890,12 @@ def execute_source_sync(
                             "photos_added": int(photos_added),
                             "db_upsert_ms": db_upsert_ms,
                             "pipeline_ms": pipeline_ms,
-                            "pipeline_partial": bool((pipeline_summary or {}).get("partial")) if isinstance(pipeline_summary, dict) else None,
-                            "pipeline_errors": list((pipeline_summary or {}).get("errors") or []) if isinstance(pipeline_summary, dict) else [],
+                            "pipeline_partial": bool((pipeline_summary or {}).get("partial"))
+                            if isinstance(pipeline_summary, dict)
+                            else None,
+                            "pipeline_errors": list((pipeline_summary or {}).get("errors") or [])
+                            if isinstance(pipeline_summary, dict)
+                            else [],
                         }
                     )
                 except Exception as exc:
@@ -874,8 +922,16 @@ def execute_source_sync(
         mark_ingestion_dataset_completed(
             db,
             org_id=int(org_id),
-            key=idempotency_key,
-            ttl_seconds=int(getattr(settings, "ingestion_completion_lock_ttl_seconds", DEFAULT_COMPLETION_LOCK_TTL_SECONDS)),
+            source_id=source_id,
+            idempotency_key=idempotency_key,
+            owner=lock_owner,
+            ttl_seconds=int(
+                getattr(
+                    settings,
+                    "ingestion_completion_lock_ttl_seconds",
+                    DEFAULT_COMPLETION_LOCK_TTL_SECONDS,
+                )
+            ),
         )
 
         summary["timings_ms"]["run_total"] = round((time.perf_counter() - run_t0) * 1000, 2)
@@ -888,7 +944,7 @@ def execute_source_sync(
             {
                 "event": "ingestion_sync_completed",
                 "org_id": int(org_id),
-                "source_id": int(getattr(source, "id")),
+                "source_id": source_id,
                 "run_id": int(getattr(run, "id")),
                 "summary": summary,
             }
@@ -906,7 +962,7 @@ def execute_source_sync(
             {
                 "event": "ingestion_sync_failed",
                 "org_id": int(org_id),
-                "source_id": int(getattr(source, "id")),
+                "source_id": source_id,
                 "run_id": int(getattr(run, "id")),
                 "error": str(exc),
                 "summary": summary,
@@ -918,7 +974,7 @@ def execute_source_sync(
         release_lock(
             db,
             org_id=int(org_id),
-            lock_key=f"ingestion:source:{int(getattr(source, 'id'))}",
+            lock_key=execution_lock_key,
             owner=lock_owner,
         )
         

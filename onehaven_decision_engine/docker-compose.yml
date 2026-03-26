@@ -77,42 +77,42 @@ services:
       - "8000:8000"
     restart: unless-stopped
 
-  # agent-worker:
-  #   build: ./backend
-  #   working_dir: /app
-  #   user: "1000:1000"
-  #   env_file:
-  #     - .env
-  #   volumes:
-  #     - ./backend:/app
-  #   environment:
-  #     DATABASE_URL: ${DATABASE_URL}
-  #     APP_ENV: ${APP_ENV:-dev}
+  agent-worker:
+    build: ./backend
+    working_dir: /app
+    user: "1000:1000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      APP_ENV: ${APP_ENV:-dev}
 
-  #     # ✅ keep auth mode consistent (workers sometimes call app code paths)
-  #     AUTH_MODE: ${AUTH_MODE:-dev}
-  #     DEV_AUTO_PROVISION: ${DEV_AUTO_PROVISION:-1}
-  #     DEV_AUTO_VERIFY_EMAIL: ${DEV_AUTO_VERIFY_EMAIL:-1}
+      # ✅ keep auth mode consistent (workers sometimes call app code paths)
+      AUTH_MODE: ${AUTH_MODE:-dev}
+      DEV_AUTO_PROVISION: ${DEV_AUTO_PROVISION:-1}
+      DEV_AUTO_VERIFY_EMAIL: ${DEV_AUTO_VERIFY_EMAIL:-1}
 
-  #     ENABLE_API_KEYS: ${ENABLE_API_KEYS:-0}
-  #     API_KEY_PEPPER: ${API_KEY_PEPPER:-dev-pepper-change-me}
-  #     API_KEY_PREFIX_LEN: ${API_KEY_PREFIX_LEN:-10}
-  #     DEFAULT_PLAN_CODE: ${DEFAULT_PLAN_CODE:-free}
+      ENABLE_API_KEYS: ${ENABLE_API_KEYS:-0}
+      API_KEY_PEPPER: ${API_KEY_PEPPER:-dev-pepper-change-me}
+      API_KEY_PREFIX_LEN: ${API_KEY_PREFIX_LEN:-10}
+      DEFAULT_PLAN_CODE: ${DEFAULT_PLAN_CODE:-free}
 
-  #     CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-  #     CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
-  #     CELERY_QUEUE: ${CELERY_QUEUE:-celery}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      CELERY_QUEUE: ${CELERY_QUEUE:-celery}
 
-  #     AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
-  #     AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
-  #     TRACE_MIRROR_TO_MESSAGES: ${TRACE_MIRROR_TO_MESSAGES:-0}
-  #   command: bash -lc "celery -A app.workers.celery_app:celery_app worker -l INFO -Q ${CELERY_QUEUE:-celery}"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_started
-  #   restart: unless-stopped
+      AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
+      AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
+      TRACE_MIRROR_TO_MESSAGES: ${TRACE_MIRROR_TO_MESSAGES:-0}
+    command: bash -lc "celery -A app.workers.celery_app:celery_app worker -l INFO -Q ${CELERY_QUEUE:-celery}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
 
   # celery-beat:
   #   build: ./backend

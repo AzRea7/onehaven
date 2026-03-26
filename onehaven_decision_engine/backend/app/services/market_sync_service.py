@@ -56,17 +56,29 @@ def list_selected_daily_markets() -> list[dict[str, Any]]:
     return markets[: get_daily_market_limit()]
 
 
-def build_market_runtime_payload(market: dict[str, Any]) -> dict[str, Any]:
+def build_market_runtime_payload(
+    market: dict[str, Any],
+    *,
+    trigger_type: str = "daily_refresh",
+) -> dict[str, Any]:
     return build_runtime_payload(
         state=str(market.get("state") or "MI"),
         county=str(market.get("county") or "") or None,
         city=str(market.get("city") or "") or None,
         limit=int(market.get("sync_limit") or get_default_market_limit_per_sync()),
         market_slug=str(market.get("slug") or "") or None,
-        trigger_type="daily_refresh",
-        property_types=list(market.get("property_types") or ["single_family", "multi_family"]),
-        max_price=int(market.get("max_price") or getattr(settings, "investor_buy_box_max_price", 200_000)),
-        max_units=int(market.get("max_units") or getattr(settings, "investor_buy_box_max_units", 4)),
+        trigger_type=trigger_type,
+        property_types=list(
+            market.get("property_types") or ["single_family", "multi_family"]
+        ),
+        max_price=int(
+            market.get("max_price")
+            or getattr(settings, "investor_buy_box_max_price", 200_000)
+        ),
+        max_units=int(
+            market.get("max_units")
+            or getattr(settings, "investor_buy_box_max_units", 4)
+        ),
     )
 
 
@@ -107,7 +119,10 @@ def _source_matches_market(source: Any, market: dict[str, Any]) -> bool:
     return False
 
 
-def _matching_sources_for_market(sources: list[Any], market: dict[str, Any]) -> list[Any]:
+def _matching_sources_for_market(
+    sources: list[Any],
+    market: dict[str, Any],
+) -> list[Any]:
     exact = [source for source in sources if _source_matches_market(source, market)]
     if exact:
         return exact
@@ -138,21 +153,80 @@ def build_daily_dispatch_plan(db: Session, *, org_id: int) -> list[dict[str, Any
 
     dispatches: list[dict[str, Any]] = []
     for market in markets:
-        runtime_config = build_market_runtime_payload(market)
+        runtime_config = build_market_runtime_payload(
+            market,
+            trigger_type="daily_refresh",
+        )
         matched_sources = _matching_sources_for_market(sources, market)
 
         for source in matched_sources:
-          dispatches.append(
-              {
-                  "market": market,
-                  "source_id": int(source.id),
-                  "source_slug": str(getattr(source, "slug", "")),
-                  "provider": str(getattr(source, "provider", "")),
-                  "trigger_type": "daily_refresh",
-                  "runtime_config": runtime_config,
-              }
-          )
+            dispatches.append(
+                {
+                    "market": market,
+                    "source_id": int(source.id),
+                    "source_slug": str(getattr(source, "slug", "")),
+                    "provider": str(getattr(source, "provider", "")),
+                    "trigger_type": "daily_refresh",
+                    "runtime_config": runtime_config,
+                }
+            )
     return dispatches
+
+
+# def build_city_dispatch_plan(
+#     db: Session,
+#     *,
+#     org_id: int,
+#     city: str,
+#     state: str = "MI",
+# ) -> dict[str, Any]:
+#     """
+#     Compatibility function for market_sync_tasks.py.
+
+#     The task module expects a city-scoped dispatch planner. We already have the
+#     broader supported-market planner, so this function resolves the city to a
+#     supported market and returns the same dispatch shape the task expects.
+#     """
+#     market = resolve_supported_market(city=city, state=state)
+
+#     if market is None:
+#         return {
+#             "ok": False,
+#             "covered": False,
+#             "city": city,
+#             "state": state,
+#             "market": None,
+#             "dispatches": [],
+#         }
+
+#     sources = get_enabled_sources_for_org(db, org_id=int(org_id))
+#     matched_sources = _matching_sources_for_market(sources, market)
+
+#     runtime_config = build_market_runtime_payload(
+#         market,
+#         trigger_type="manual_market_sync",
+#     )
+
+#     dispatches = [
+#         {
+#             "market": market,
+#             "source_id": int(source.id),
+#             "source_slug": str(getattr(source, "slug", "")),
+#             "provider": str(getattr(source, "provider", "")),
+#             "trigger_type": "manual_market_sync",
+#             "runtime_config": dict(runtime_config),
+#         }
+#         for source in matched_sources
+#     ]
+
+#     return {
+#         "ok": True,
+#         "covered": True,
+#         "city": market.get("city"),
+#         "state": market.get("state"),
+#         "market": market,
+#         "dispatches": dispatches,
+#     }
 
 
 def build_supported_market_sync_plan_for_db(
@@ -180,8 +254,10 @@ def build_supported_market_sync_plan_for_db(
         }
 
     sources = get_enabled_sources_for_org(db, org_id=int(org_id))
-    runtime_config = build_market_runtime_payload(market)
-    runtime_config["trigger_type"] = "manual_market_sync"
+    runtime_config = build_market_runtime_payload(
+        market,
+        trigger_type="manual_market_sync",
+    )
 
     matched_sources = _matching_sources_for_market(sources, market)
 
@@ -192,7 +268,7 @@ def build_supported_market_sync_plan_for_db(
             "source_slug": str(getattr(source, "slug", "")),
             "provider": str(getattr(source, "provider", "")),
             "trigger_type": "manual_market_sync",
-            "runtime_config": runtime_config,
+            "runtime_config": dict(runtime_config),
         }
         for source in matched_sources
     ]

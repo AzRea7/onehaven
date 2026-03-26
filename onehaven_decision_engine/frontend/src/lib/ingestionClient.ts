@@ -105,6 +105,31 @@ export type IngestionRun = {
   pipeline_outcome?: PipelineOutcome;
 };
 
+export type IngestionRunDetail = {
+  id: number;
+  source_id: number;
+  trigger_type: string;
+  status: string;
+  started_at: string;
+  finished_at?: string | null;
+  records_seen: number;
+  records_imported: number;
+  properties_created?: number;
+  properties_updated?: number;
+  deals_created?: number;
+  deals_updated?: number;
+  rent_rows_upserted?: number;
+  photos_upserted?: number;
+  duplicates_skipped: number;
+  invalid_rows: number;
+  retry_count?: number;
+  error_summary?: string | null;
+  error_json?: Record<string, any> | null;
+  summary_json?: Record<string, any> | null;
+  pipeline_outcome?: PipelineOutcome;
+  normal_path?: boolean;
+};
+
 export type IngestionLaunchPayload = {
   trigger_type?: "manual" | "scheduled" | "webhook" | "daily_refresh";
   state?: string;
@@ -233,6 +258,10 @@ export const ingestionClient = {
 
   listRuns(limit = 25) {
     return request<IngestionRun[]>(`/ingestion/runs?limit=${limit}`);
+  },
+
+  runDetail(runId: number) {
+    return request<IngestionRunDetail>(`/ingestion/runs/${runId}`);
   },
 
   listSupportedMarkets() {

@@ -96,17 +96,19 @@ export default function IngestionLaunchCard({
       const nextMarket =
         marketRows.find((m) => m.slug === nextSlug) || marketRows?.[0] || null;
 
-      onMarketChange?.(nextMarket);
+      if ((nextMarket?.slug || null) !== (selectedMarketSlug || null)) {
+        onMarketChange?.(nextMarket);
+      }
     } catch (err: any) {
       setError(err?.message || "Could not load supported markets.");
     } finally {
       setLoading(false);
     }
-  }, [onMarketChange, selectedMarketSlug, selectedSlug]);
+  }, [selectedMarketSlug, selectedSlug, onMarketChange]);
 
   React.useEffect(() => {
     load();
-  }, [load, refreshKey]);
+  }, [refreshKey, selectedMarketSlug]);
 
   React.useEffect(() => {
     if (!selectedMarketSlug) return;

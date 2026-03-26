@@ -76,38 +76,38 @@ def sync_supported_market_route(
     }
 
 
-@router.post("/sync-city", response_model=dict)
-def sync_supported_city_route(
-    city: str = Query(...),
-    state: str = Query("MI"),
-    p=Depends(get_principal),
-    _op=Depends(require_operator),
-):
-    market = find_market_by_city(city=city, state=state)
-    if market is None:
-        raise HTTPException(status_code=404, detail="Supported market not found")
+# @router.post("/sync-city", response_model=dict)
+# def sync_supported_city_route(
+#     city: str = Query(...),
+#     state: str = Query("MI"),
+#     p=Depends(get_principal),
+#     _op=Depends(require_operator),
+# ):
+#     market = find_market_by_city(city=city, state=state)
+#     if market is None:
+#         raise HTTPException(status_code=404, detail="Supported market not found")
 
-    plan = build_supported_market_sync_plan(
-        org_id=int(p.org_id),
-        market_slug=str(market["slug"]),
-    )
+#     plan = build_supported_market_sync_plan(
+#         org_id=int(p.org_id),
+#         market_slug=str(market["slug"]),
+#     )
 
-    task_ids: list[str] = []
-    for dispatch in plan["dispatches"]:
-        job = sync_source_task.delay(
-            int(p.org_id),
-            int(dispatch["source_id"]),
-            str(dispatch["trigger_type"]),
-            dict(dispatch["runtime_config"]),
-        )
-        task_ids.append(str(job.id))
+#     task_ids: list[str] = []
+#     for dispatch in plan["dispatches"]:
+#         job = sync_source_task.delay(
+#             int(p.org_id),
+#             int(dispatch["source_id"]),
+#             str(dispatch["trigger_type"]),
+#             dict(dispatch["runtime_config"]),
+#         )
+#         task_ids.append(str(job.id))
 
-    return {
-        "ok": True,
-        "queued": True,
-        "city": city,
-        "state": state,
-        "market": market,
-        "task_ids": task_ids,
-        "queued_count": len(task_ids),
-    }
+#     return {
+#         "ok": True,
+#         "queued": True,
+#         "city": city,
+#         "state": state,
+#         "market": market,
+#         "task_ids": task_ids,
+#         "queued_count": len(task_ids),
+#     }
