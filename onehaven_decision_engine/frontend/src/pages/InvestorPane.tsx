@@ -1,5 +1,5 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import {
   Search,
   RefreshCcw,
@@ -25,6 +25,8 @@ import {
   CheckCircle2,
   Users,
   Building2,
+  Settings2,
+  Bug,
 } from "lucide-react";
 
 import PageHero from "../components/PageHero";
@@ -33,6 +35,8 @@ import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
 import PaneSwitcher from "../components/PaneSwitcher";
 import { api, type SupportedMarket } from "../lib/api";
+import IngestionErrorsDrawer from "../components/IngestionErrorsDrawer";
+import MarketSourcePackModal from "../components/MarketSourcePackModal";
 
 type Row = any;
 type MarketRow = SupportedMarket;
@@ -579,6 +583,22 @@ function nextRequiredDocument(row: any) {
   return "Review document stack";
 }
 
+function marketDisplayName(market: any) {
+  return (
+    market?.city ||
+    market?.label ||
+    [market?.county, market?.state].filter(Boolean).join(", ") ||
+    market?.state ||
+    "Market"
+  );
+}
+
+function marketSubLabel(market: any) {
+  return [market?.city, market?.county, market?.state]
+    .filter(Boolean)
+    .join(" • ");
+}
+
 export default function InvestorPane() {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [markets, setMarkets] = React.useState<MarketRow[]>([]);
@@ -608,6 +628,12 @@ export default function InvestorPane() {
   const [sort, setSort] = React.useState<SortKey>("BEST_CASHFLOW");
   const [selectedCity, setSelectedCity] = React.useState<string>("ALL");
   const [currentPage, setCurrentPage] = React.useState(1);
+
+  const [activeRunId, setActiveRunId] = React.useState<number | null>(null);
+  const [sourcePackMarket, setSourcePackMarket] =
+    React.useState<SupportedMarket | null>(null);
+
+  const location = useLocation();
 
   const [queueSearch, setQueueSearch] = React.useState("");
   const [waitFilter, setWaitFilter] =
@@ -686,6 +712,11 @@ export default function InvestorPane() {
   React.useEffect(() => {
     load();
   }, [load]);
+
+  React.useEffect(() => {
+    setActiveRunId(null);
+    setSourcePackMarket(null);
+  }, [location.pathname]);
 
   const baseRows = React.useMemo(() => {
     return rows.filter((r) => {
@@ -1077,6 +1108,10 @@ export default function InvestorPane() {
                 const urgency = queueUrgency(row);
                 const readiness = queueReadinessScore(row);
                 const waitOwner = waitingOnCategory(row?.waiting_on);
+                const runId =
+                  numberOrNull(row?.run_id) ??
+                  numberOrNull(row?.ingestion_run_id) ??
+                  null;
 
                 return (
                   <div
@@ -1165,8 +1200,8 @@ export default function InvestorPane() {
                       </div>
                     ) : null}
 
-                    {propertyId ? (
-                      <div className="mt-4">
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {propertyId ? (
                         <Link
                           to={`/properties/${propertyId}`}
                           className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0 transition hover:bg-app-panel"
@@ -1174,8 +1209,19 @@ export default function InvestorPane() {
                           Open property
                           <ArrowUpRight className="h-4 w-4" />
                         </Link>
-                      </div>
-                    ) : null}
+                      ) : null}
+
+                      {runId ? (
+                        <button
+                          type="button"
+                          onClick={() => setActiveRunId(runId)}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0 transition hover:bg-app-panel"
+                        >
+                          Run errors
+                          <Bug className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}
@@ -1571,14 +1617,32 @@ export default function InvestorPane() {
             {marketsLoading ? (
               <div className="text-sm text-app-4">Loading markets…</div>
             ) : markets.length ? (
-              <div className="flex flex-wrap gap-2">
-                {markets.slice(0, 16).map((market: any, idx) => (
-                  <span
+              <div className="grid gap-3">
+                {markets.slice(0, 8).map((market: any, idx) => (
+                  <div
                     key={`${market?.city || market?.label || idx}`}
-                    className="oh-pill"
+                    className="rounded-2xl border border-app bg-app-panel px-4 py-3"
                   >
-                    {market?.city || market?.label || "market"}
-                  </span>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-app-0">
+                          {marketDisplayName(market)}
+                        </div>
+                        <div className="mt-1 text-xs text-app-4">
+                          {marketSubLabel(market) || "Supported market"}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setSourcePackMarket(market)}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-xs font-medium text-app-0 transition hover:bg-app-panel"
+                      >
+                        <Settings2 className="h-4 w-4" />
+                        Source pack
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
             ) : (
@@ -1615,6 +1679,19 @@ export default function InvestorPane() {
           </Surface>
         </div>
       </div>
+
+      <IngestionErrorsDrawer
+        runId={activeRunId}
+        onClose={() => setActiveRunId(null)}
+      />
+
+      <MarketSourcePackModal
+        open={Boolean(sourcePackMarket)}
+        market={sourcePackMarket}
+        onClose={() => setSourcePackMarket(null)}
+        onChanged={load}
+      />
+      
     </PageShell>
   );
 }

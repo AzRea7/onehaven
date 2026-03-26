@@ -1,4 +1,3 @@
-// frontend/src/lib/auth.tsx
 import React from "react";
 import {
   api,
@@ -48,6 +47,29 @@ function must(v: string, name: string) {
   return s;
 }
 
+function getReadableError(e: any): string {
+  const status = e?.response?.status;
+  const detail =
+    e?.response?.data?.detail ||
+    e?.response?.data?.message ||
+    e?.message ||
+    "Unknown authentication error";
+
+  if (status === 502) {
+    return "Authentication backend is unavailable (502 Bad Gateway). Check whether the backend service is running and whether nginx is proxying to the correct upstream.";
+  }
+
+  if (status === 401) {
+    return "Your session is not authenticated.";
+  }
+
+  if (status === 403) {
+    return "You do not have access to this organization.";
+  }
+
+  return status ? `${detail} (${status})` : String(detail);
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<AuthState>({
     loading: true,
@@ -55,11 +77,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     error: null,
   });
 
-  // ✅ must be inside component
   const logoutInFlight = React.useRef(false);
 
   async function refresh() {
-    // If we're in the middle of logging out, don't spam /auth/me
     if (logoutInFlight.current) {
       setState({ loading: false, principal: null, error: null });
       return;
@@ -71,12 +91,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const me = (await api.authMe()) as Principal | null;
 
       if (me?.org_slug) setOrgSlug(me.org_slug);
-      setState({ loading: false, principal: me, error: null });
-    } catch {
-      // If auth fails, clear stale org context so we stop sending "demo"
+
+      setState({
+        loading: false,
+        principal: me,
+        error: null,
+      });
+    } catch (e: any) {
       clearOrgSlug();
       clearApiCache();
-      setState({ loading: false, principal: null, error: null });
+
+      setState({
+        loading: false,
+        principal: null,
+        error: getReadableError(e),
+      });
     }
   }
 
@@ -95,7 +124,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const password = must(args.password, "password");
       const org_slug = must(args.org_slug, "org_slug");
 
-      // set local org first (so header is correct immediately)
       setOrgSlug(org_slug);
 
       await api.authLogin({ email, password, org_slug });
@@ -107,12 +135,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e: any) {
       clearOrgSlug();
       clearApiCache();
+
+      const message = getReadableError(e);
+
       setState({
         loading: false,
         principal: null,
-        error: String(e?.message || e),
+        error: message,
       });
-      throw e;
+
+      throw new Error(message);
     }
   }
 
@@ -144,12 +176,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e: any) {
       clearOrgSlug();
       clearApiCache();
+
+      const message = getReadableError(e);
+
       setState({
         loading: false,
         principal: null,
-        error: String(e?.message || e),
+        error: message,
       });
-      throw e;
+
+      throw new Error(message);
     }
   }
 
@@ -179,18 +215,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const slug = must(org_slug, "org_slug");
 
       await api.authSelectOrg(slug);
-
-      // set the context immediately so refresh sends X-Org-Slug
       setOrgSlug(slug);
 
       await refresh();
     } catch (e: any) {
+      const message = getReadableError(e);
+
       setState((s) => ({
         ...s,
         loading: false,
-        error: String(e?.message || e),
+        error: message,
       }));
-      throw e;
+
+      throw new Error(message);
     }
   }
 
@@ -220,7 +257,13 @@ export function useAuth() {
 }
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const { loading, principal } = useAuth();
+  const { loading, principal, error } = useAuth();
+
+  React.useEffect(() => {
+    if (!loading && !principal) {
+      window.location.href = "/login";
+    }
+  }, [loading, principal]);
 
   if (loading) {
     return (
@@ -231,8 +274,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (!principal) {
-    window.location.href = "/login";
-    return null;
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center px-6">
+        <div className="max-w-xl rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
+          {error || "You are not authenticated. Redirecting to login..."}
+        </div>
+      </div>
+    );
   }
 
   return <>{children}</>;
