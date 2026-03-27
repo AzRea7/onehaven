@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
+from ..config import settings
 from ..db import SessionLocal
 from ..services.geo_enrichment import enrich_property_geo
+from ..services.ingestion_enrichment_service import (
+    execute_post_ingestion_pipeline,
+    refresh_property_rent_assumptions,
+)
 from ..services.ingestion_run_execute import execute_source_sync
 from ..services.ingestion_scheduler_service import (
     build_jurisdiction_refresh_payload,
     build_location_refresh_payload,
+    build_lock_owner,
     dispatch_daily_sync_for_org,
     list_jurisdictions_needing_refresh,
     list_org_ids_with_enabled_sources,
@@ -27,10 +36,11 @@ from ..services.jurisdiction_refresh_service import (
     DEFAULT_JURISDICTION_STALE_DAYS,
     refresh_jurisdiction_profile,
 )
-from ..workers.celery_app import celery_app
-
-from ..config import settings
-from ..services.ingestion_enrichment_service import refresh_property_rent_assumptions
+from ..services.locks_service import (
+    acquire_lock,
+    is_lock_active,
+    release_lock,
+)
 from ..services.market_sync_service import (
     get_market_sync_state_by_id,
     mark_backfill_completed,
@@ -39,8 +49,13 @@ from ..services.rent_refresh_queue_service import (
     list_properties_for_budgeted_rent_refresh,
     should_queue_rent_refresh_after_sync,
 )
+from ..workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_TASK_LOCK_TTL_SECONDS = 60 * 30
+DEFAULT_TASK_DONE_TTL_SECONDS = 60 * 60 * 24
+DEFAULT_BACKFILL_ENQUEUE_LOCK_TTL_SECONDS = 60 * 15
 
 
 def _retry_enabled() -> bool:
@@ -94,7 +109,46 @@ def _pipeline_outcome(summary_json: dict | None) -> dict:
         "normal_path": bool(summary.get("normal_path", True)),
         "market_exhausted": bool(summary.get("market_exhausted", False)),
         "stop_reason": summary.get("stop_reason"),
+        "post_sync_enrichment_queued": int(summary.get("post_sync_enrichment_queued", 0) or 0),
+        "post_sync_property_ids": list(summary.get("post_sync_property_ids") or []),
     }
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+
+    if hasattr(value, "model_dump"):
+        try:
+            return _json_safe(value.model_dump())
+        except Exception:
+            pass
+
+    if hasattr(value, "dict"):
+        try:
+            return _json_safe(value.dict())
+        except Exception:
+            pass
+
+    if hasattr(value, "__dict__"):
+        try:
+            return _json_safe(
+                {
+                    k: v
+                    for k, v in vars(value).items()
+                    if not str(k).startswith("_")
+                }
+            )
+        except Exception:
+            pass
+
+    return str(value)
 
 
 def _recover_source_for_task(
@@ -134,6 +188,157 @@ def _recover_source_for_task(
     return enabled[0]
 
 
+def _task_lock_ttl_seconds() -> int:
+    return int(
+        getattr(settings, "ingestion_property_task_lock_ttl_seconds", DEFAULT_TASK_LOCK_TTL_SECONDS)
+        or DEFAULT_TASK_LOCK_TTL_SECONDS
+    )
+
+
+def _task_done_ttl_seconds() -> int:
+    return int(
+        getattr(settings, "ingestion_property_task_done_ttl_seconds", DEFAULT_TASK_DONE_TTL_SECONDS)
+        or DEFAULT_TASK_DONE_TTL_SECONDS
+    )
+
+
+def _backfill_enqueue_lock_ttl_seconds() -> int:
+    return int(
+        getattr(settings, "ingestion_backfill_enqueue_lock_ttl_seconds", DEFAULT_BACKFILL_ENQUEUE_LOCK_TTL_SECONDS)
+        or DEFAULT_BACKFILL_ENQUEUE_LOCK_TTL_SECONDS
+    )
+
+
+def _task_lock_owner(prefix: str) -> str:
+    return build_lock_owner(prefix=prefix)
+
+
+def _property_enrich_lock_key(org_id: int, property_id: int) -> str:
+    return f"property_enrich:{int(org_id)}:{int(property_id)}"
+
+
+def _property_enrich_done_key(org_id: int, property_id: int) -> str:
+    return f"property_enrich_done:{int(org_id)}:{int(property_id)}"
+
+
+def _rent_refresh_lock_key(org_id: int, property_id: int) -> str:
+    return f"rent_refresh:{int(org_id)}:{int(property_id)}"
+
+
+def _location_refresh_lock_key(org_id: int, property_id: int) -> str:
+    return f"location_refresh:{int(org_id)}:{int(property_id)}"
+
+
+def _jurisdiction_refresh_lock_key(org_id: int, jurisdiction_code: str) -> str:
+    return f"jurisdiction_refresh:{int(org_id)}:{str(jurisdiction_code).strip().lower()}"
+
+
+def _city_backfill_lock_key(org_id: int, city: str, state: str, zip_codes: list[str], limit: int) -> str:
+    normalized_zips = sorted(str(z).strip() for z in (zip_codes or []) if str(z).strip())
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "org_id": int(org_id),
+                "city": str(city).strip().lower(),
+                "state": str(state).strip().upper(),
+                "zip_codes": normalized_zips,
+                "limit": int(limit),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    return f"backfill_city:{int(org_id)}:{str(state).strip().upper()}:{str(city).strip().lower()}:{digest}"
+
+
+def _jurisdiction_backfill_lock_key(org_id: int, jurisdiction_code: str, limit: int) -> str:
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "org_id": int(org_id),
+                "jurisdiction_code": str(jurisdiction_code).strip().lower(),
+                "limit": int(limit),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    return f"backfill_jurisdiction:{int(org_id)}:{str(jurisdiction_code).strip().lower()}:{digest}"
+
+
+def _property_needs_enrichment(db, *, org_id: int, property_id: int) -> bool:
+    row = db.execute(
+        text(
+            """
+            SELECT id
+            FROM properties
+            WHERE org_id = :org_id
+              AND id = :property_id
+              AND (
+                    COALESCE(completeness_geo_status, 'missing') = 'missing'
+                 OR COALESCE(completeness_rent_status, 'missing') = 'missing'
+                 OR COALESCE(completeness_risk_status, 'missing') = 'missing'
+                 OR COALESCE(completeness_jurisdiction_status, 'missing') = 'missing'
+                 OR COALESCE(completeness_cashflow_status, 'missing') = 'missing'
+              )
+            LIMIT 1
+            """
+        ),
+        {
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+        },
+    ).fetchone()
+    return row is not None
+
+
+def _enqueue_enrichment_if_needed(
+    *,
+    db,
+    org_id: int,
+    property_id: int,
+    source_id: int | None,
+    run_id: int | None,
+) -> bool:
+    if not _property_needs_enrichment(db, org_id=int(org_id), property_id=int(property_id)):
+        return False
+
+    if is_lock_active(
+        db,
+        org_id=int(org_id),
+        lock_key=_property_enrich_lock_key(int(org_id), int(property_id)),
+    ):
+        return False
+
+    if is_lock_active(
+        db,
+        org_id=int(org_id),
+        lock_key=_property_enrich_done_key(int(org_id), int(property_id)),
+    ):
+        return False
+
+    enrich_property_after_sync_task.delay(
+        org_id=int(org_id),
+        property_id=int(property_id),
+        source_id=source_id,
+        run_id=run_id,
+    )
+    return True
+
+
+def _finalize_json_result(
+    *,
+    ok: bool,
+    base: dict[str, Any],
+    result: Any = None,
+) -> dict[str, Any]:
+    payload = dict(base)
+    payload["ok"] = bool(ok)
+    if result is not None:
+        payload["result"] = _json_safe(result)
+    return _json_safe(payload)
+
+
 @celery_app.task(
     name="ingestion.sync_source",
     bind=True,
@@ -158,12 +363,14 @@ def sync_source_task(
             runtime_config=runtime_config,
         )
         if source is None:
-            return {
-                "ok": False,
-                "error": "source_not_found",
-                "source_id": int(source_id),
-                "market_slug": str((runtime_config or {}).get("market_slug") or "").strip().lower() or None,
-            }
+            return _finalize_json_result(
+                ok=False,
+                base={
+                    "error": "source_not_found",
+                    "source_id": int(source_id),
+                    "market_slug": str((runtime_config or {}).get("market_slug") or "").strip().lower() or None,
+                },
+            )
 
         effective_runtime_config = dict(runtime_config or {})
         sync_mode = str(effective_runtime_config.get("sync_mode") or "refresh").strip().lower()
@@ -201,23 +408,151 @@ def sync_source_task(
                 post_sync_rent_queued += 1
                 post_sync_rent_property_ids.append(int(property_id))
 
-        return {
-            "ok": True,
-            "run_id": getattr(run, "id", None),
-            "status": getattr(run, "status", None),
-            "source_id": int(getattr(source, "id")),
-            "sync_mode": sync_mode,
-            "post_sync_rent_queued": post_sync_rent_queued,
-            "post_sync_rent_property_ids": post_sync_rent_property_ids,
-            "summary_json": summary,
-            "pipeline_outcome": _pipeline_outcome(summary),
-        }
+        return _finalize_json_result(
+            ok=True,
+            base={
+                "run_id": getattr(run, "id", None),
+                "status": getattr(run, "status", None),
+                "source_id": int(getattr(source, "id")),
+                "sync_mode": sync_mode,
+                "post_sync_rent_queued": post_sync_rent_queued,
+                "post_sync_rent_property_ids": post_sync_rent_property_ids,
+                "summary_json": _json_safe(summary),
+                "pipeline_outcome": _json_safe(_pipeline_outcome(summary)),
+            },
+        )
     except Exception as exc:
         logger.exception("sync_source_task_failed", extra={"org_id": int(org_id), "source_id": int(source_id)})
         if _retry_enabled() and _is_transient_error(exc) and int(getattr(self.request, "retries", 0) or 0) < _max_retries():
             raise self.retry(exc=exc, countdown=_retry_delay_seconds())
         raise
     finally:
+        db.close()
+
+
+@celery_app.task(name="ingestion.enrich_property_after_sync")
+def enrich_property_after_sync_task(
+    *,
+    org_id: int,
+    property_id: int,
+    source_id: int | None = None,
+    run_id: int | None = None,
+):
+    db = SessionLocal()
+    owner = _task_lock_owner("property_enrich")
+    lock_key = _property_enrich_lock_key(int(org_id), int(property_id))
+    done_key = _property_enrich_done_key(int(org_id), int(property_id))
+
+    try:
+        if is_lock_active(db, org_id=int(org_id), lock_key=done_key):
+            return _finalize_json_result(
+                ok=True,
+                base={
+                    "org_id": int(org_id),
+                    "property_id": int(property_id),
+                    "source_id": source_id,
+                    "run_id": run_id,
+                    "skipped": True,
+                    "reason": "already_enriched_or_marked_done",
+                },
+            )
+
+        if not _property_needs_enrichment(db, org_id=int(org_id), property_id=int(property_id)):
+            acquire_lock(
+                db,
+                org_id=int(org_id),
+                lock_key=done_key,
+                owner=owner,
+                ttl_seconds=_task_done_ttl_seconds(),
+            )
+            db.commit()
+            return _finalize_json_result(
+                ok=True,
+                base={
+                    "org_id": int(org_id),
+                    "property_id": int(property_id),
+                    "source_id": source_id,
+                    "run_id": run_id,
+                    "skipped": True,
+                    "reason": "property_already_complete",
+                },
+            )
+
+        lock = acquire_lock(
+            db,
+            org_id=int(org_id),
+            lock_key=lock_key,
+            owner=owner,
+            ttl_seconds=_task_lock_ttl_seconds(),
+        )
+        if not lock.acquired:
+            return _finalize_json_result(
+                ok=True,
+                base={
+                    "org_id": int(org_id),
+                    "property_id": int(property_id),
+                    "source_id": source_id,
+                    "run_id": run_id,
+                    "skipped": True,
+                    "reason": "property_enrichment_lock_not_acquired",
+                },
+            )
+
+        result = execute_post_ingestion_pipeline(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+            actor_user_id=None,
+            emit_events=False,
+        )
+
+        acquire_lock(
+            db,
+            org_id=int(org_id),
+            lock_key=done_key,
+            owner=owner,
+            ttl_seconds=_task_done_ttl_seconds(),
+        )
+
+        release_lock(
+            db,
+            org_id=int(org_id),
+            lock_key=lock_key,
+            owner=owner,
+            force=True,
+        )
+
+        db.commit()
+
+        return _finalize_json_result(
+            ok=True,
+            base={
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+                "source_id": source_id,
+                "run_id": run_id,
+            },
+            result=result or {},
+        )
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "enrich_property_after_sync_task_failed",
+            extra={"org_id": int(org_id), "property_id": int(property_id)},
+        )
+        raise
+    finally:
+        try:
+            release_lock(
+                db,
+                org_id=int(org_id),
+                lock_key=lock_key,
+                owner=owner,
+                force=False,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
         db.close()
 
 
@@ -235,7 +570,7 @@ def sync_due_sources_task(org_id: int | None = None):
                     continue
                 sync_source_task.delay(int(scoped_org_id), int(source.id), "scheduled", {})
                 queued += 1
-        return {"ok": True, "queued": queued}
+        return _finalize_json_result(ok=True, base={"queued": queued})
     finally:
         db.close()
 
@@ -246,7 +581,7 @@ def daily_market_refresh_task(org_id: int | None = None):
     try:
         org_ids = _org_scope(org_id, list_org_ids_with_enabled_sources(db))
         queued = 0
-        runs: list[dict] = []
+        runs: list[dict[str, Any]] = []
 
         for scoped_org_id in org_ids:
             result = dispatch_daily_sync_for_org(
@@ -261,9 +596,12 @@ def daily_market_refresh_task(org_id: int | None = None):
                 ),
             )
             queued += int(result.get("queued", 0) or 0)
-            runs.append(result)
+            runs.append(_json_safe(result))
 
-        return {"ok": True, "queued": queued, "sync_mode": "refresh", "runs": runs}
+        return _finalize_json_result(
+            ok=True,
+            base={"queued": queued, "sync_mode": "refresh", "runs": runs},
+        )
     finally:
         db.close()
 
@@ -274,19 +612,53 @@ def refresh_property_rent_task(
     property_id: int,
 ):
     db = SessionLocal()
+    owner = _task_lock_owner("rent_refresh")
+    lock_key = _rent_refresh_lock_key(int(org_id), int(property_id))
     try:
+        lock = acquire_lock(
+            db,
+            org_id=int(org_id),
+            lock_key=lock_key,
+            owner=owner,
+            ttl_seconds=_task_lock_ttl_seconds(),
+        )
+        if not lock.acquired:
+            return _finalize_json_result(
+                ok=True,
+                base={
+                    "org_id": int(org_id),
+                    "property_id": int(property_id),
+                    "skipped": True,
+                    "reason": "rent_refresh_lock_not_acquired",
+                },
+            )
+
         result = refresh_property_rent_assumptions(
             db,
             org_id=int(org_id),
             property_id=int(property_id),
         )
-        return {
-            "ok": bool(result.get("ok")),
-            "org_id": int(org_id),
-            "property_id": int(property_id),
-            "result": result,
-        }
+        db.commit()
+        return _finalize_json_result(
+            ok=bool((result or {}).get("ok", True)),
+            base={
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+            },
+            result=result or {},
+        )
     finally:
+        try:
+            release_lock(
+                db,
+                org_id=int(org_id),
+                lock_key=lock_key,
+                owner=owner,
+                force=False,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
         db.close()
 
 
@@ -311,16 +683,20 @@ def refresh_budgeted_rent_batch_task(
         )
 
         queued = 0
+        queued_property_ids: list[int] = []
         for property_id in property_ids:
             refresh_property_rent_task.delay(int(org_id), int(property_id))
             queued += 1
+            queued_property_ids.append(int(property_id))
 
-        return {
-            "ok": True,
-            "org_id": int(org_id),
-            "queued": queued,
-            "property_ids": [int(x) for x in property_ids],
-        }
+        return _finalize_json_result(
+            ok=True,
+            base={
+                "org_id": int(org_id),
+                "queued": queued,
+                "property_ids": queued_property_ids,
+            },
+        )
     finally:
         db.close()
 
@@ -339,22 +715,52 @@ def refresh_stale_locations_task(org_id: int = 1, force: bool = False, batch_siz
         property_ids: list[int] = []
 
         for row in rows:
-            result = enrich_property_geo(
+            property_id = int(row.id)
+            owner = _task_lock_owner("location_refresh")
+            lock_key = _location_refresh_lock_key(int(org_id), property_id)
+
+            lock = acquire_lock(
                 db,
                 org_id=int(org_id),
-                property_id=int(row.id),
-                force=bool(payload["force"]),
+                lock_key=lock_key,
+                owner=owner,
+                ttl_seconds=_task_lock_ttl_seconds(),
             )
-            if bool(result.get("updated")):
-                refreshed += 1
-            property_ids.append(int(row.id))
+            if not lock.acquired:
+                continue
 
-        return {
-            "ok": True,
-            "org_id": int(org_id),
-            "refreshed": refreshed,
-            "property_ids": property_ids,
-        }
+            try:
+                result = enrich_property_geo(
+                    db,
+                    org_id=int(org_id),
+                    property_id=property_id,
+                    force=bool(payload["force"]),
+                )
+                if bool((result or {}).get("updated")):
+                    refreshed += 1
+                property_ids.append(property_id)
+                db.commit()
+            finally:
+                try:
+                    release_lock(
+                        db,
+                        org_id=int(org_id),
+                        lock_key=lock_key,
+                        owner=owner,
+                        force=False,
+                    )
+                    db.commit()
+                except Exception:
+                    db.rollback()
+
+        return _finalize_json_result(
+            ok=True,
+            base={
+                "org_id": int(org_id),
+                "refreshed": refreshed,
+                "property_ids": property_ids,
+            },
+        )
     finally:
         db.close()
 
@@ -373,16 +779,47 @@ def refresh_stale_jurisdictions_task(org_id: int = 1, stale_days: int = DEFAULT_
         results: list[dict[str, Any]] = []
 
         for row in rows:
-            result = refresh_jurisdiction_profile(
+            jurisdiction_code = str(row.jurisdiction_code)
+            owner = _task_lock_owner("jurisdiction_refresh")
+            lock_key = _jurisdiction_refresh_lock_key(int(org_id), jurisdiction_code)
+
+            lock = acquire_lock(
                 db,
                 org_id=int(org_id),
-                jurisdiction_code=str(row.jurisdiction_code),
+                lock_key=lock_key,
+                owner=owner,
+                ttl_seconds=_task_lock_ttl_seconds(),
             )
-            results.append(result)
-            if bool(result.get("ok")):
-                refreshed += 1
+            if not lock.acquired:
+                continue
 
-        return {"ok": True, "org_id": int(org_id), "refreshed": refreshed, "results": results}
+            try:
+                result = refresh_jurisdiction_profile(
+                    db,
+                    org_id=int(org_id),
+                    jurisdiction_code=jurisdiction_code,
+                )
+                results.append(_json_safe(result))
+                if bool((result or {}).get("ok")):
+                    refreshed += 1
+                db.commit()
+            finally:
+                try:
+                    release_lock(
+                        db,
+                        org_id=int(org_id),
+                        lock_key=lock_key,
+                        owner=owner,
+                        force=False,
+                    )
+                    db.commit()
+                except Exception:
+                    db.rollback()
+
+        return _finalize_json_result(
+            ok=True,
+            base={"org_id": int(org_id), "refreshed": refreshed, "results": results},
+        )
     finally:
         db.close()
 
@@ -391,10 +828,260 @@ def refresh_stale_jurisdictions_task(org_id: int = 1, stale_days: int = DEFAULT_
 def notify_stale_jurisdictions_task(org_id: int = 1, stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS):
     db = SessionLocal()
     try:
-        return notify_stale_jurisdictions(
+        result = notify_stale_jurisdictions(
             db,
             org_id=int(org_id),
             stale_days=int(stale_days),
         )
+        return _finalize_json_result(ok=True, base={"org_id": int(org_id)}, result=result)
     finally:
         db.close()
+
+
+@celery_app.task(name="ingestion.backfill_missing_enrichment_for_city")
+def backfill_missing_enrichment_for_city_task(
+    org_id: int = 1,
+    *,
+    city: str,
+    state: str = "MI",
+    zip_codes: list[str] | None = None,
+    limit: int | None = None,
+):
+    db = SessionLocal()
+    owner = _task_lock_owner("backfill_city")
+    try:
+        effective_limit = int(limit or 500)
+        zips = [str(z).strip() for z in (zip_codes or []) if str(z).strip()]
+
+        lock_key = _city_backfill_lock_key(
+            int(org_id),
+            str(city),
+            str(state),
+            zips,
+            effective_limit,
+        )
+        lock = acquire_lock(
+            db,
+            org_id=int(org_id),
+            lock_key=lock_key,
+            owner=owner,
+            ttl_seconds=_backfill_enqueue_lock_ttl_seconds(),
+        )
+        if not lock.acquired:
+            return _finalize_json_result(
+                ok=True,
+                base={
+                    "org_id": int(org_id),
+                    "city": city,
+                    "state": state,
+                    "queued": 0,
+                    "property_ids": [],
+                    "skipped": True,
+                    "reason": "city_backfill_enqueue_lock_not_acquired",
+                },
+            )
+
+        if zips:
+            rows = list(
+                db.execute(
+                    text(
+                        """
+                        SELECT id
+                        FROM properties
+                        WHERE org_id = :org_id
+                          AND lower(city) = lower(:city)
+                          AND upper(state) = upper(:state)
+                          AND zip = ANY(:zip_codes)
+                          AND (
+                                COALESCE(completeness_geo_status, 'missing') = 'missing'
+                             OR COALESCE(completeness_rent_status, 'missing') = 'missing'
+                             OR COALESCE(completeness_risk_status, 'missing') = 'missing'
+                             OR COALESCE(completeness_jurisdiction_status, 'missing') = 'missing'
+                             OR COALESCE(completeness_cashflow_status, 'missing') = 'missing'
+                          )
+                        ORDER BY id
+                        LIMIT :limit
+                        """
+                    ),
+                    {
+                        "org_id": int(org_id),
+                        "city": city,
+                        "state": state,
+                        "zip_codes": zips,
+                        "limit": effective_limit,
+                    },
+                ).fetchall()
+            )
+        else:
+            rows = list(
+                db.execute(
+                    text(
+                        """
+                        SELECT id
+                        FROM properties
+                        WHERE org_id = :org_id
+                          AND lower(city) = lower(:city)
+                          AND upper(state) = upper(:state)
+                          AND (
+                                COALESCE(completeness_geo_status, 'missing') = 'missing'
+                             OR COALESCE(completeness_rent_status, 'missing') = 'missing'
+                             OR COALESCE(completeness_risk_status, 'missing') = 'missing'
+                             OR COALESCE(completeness_jurisdiction_status, 'missing') = 'missing'
+                             OR COALESCE(completeness_cashflow_status, 'missing') = 'missing'
+                          )
+                        ORDER BY id
+                        LIMIT :limit
+                        """
+                    ),
+                    {
+                        "org_id": int(org_id),
+                        "city": city,
+                        "state": state,
+                        "limit": effective_limit,
+                    },
+                ).fetchall()
+            )
+
+        queued = 0
+        property_ids: list[int] = []
+
+        for row in rows:
+            property_id = int(row[0] if not hasattr(row, "id") else row.id)
+            if _enqueue_enrichment_if_needed(
+                db=db,
+                org_id=int(org_id),
+                property_id=property_id,
+                source_id=None,
+                run_id=None,
+            ):
+                queued += 1
+                property_ids.append(property_id)
+
+        db.commit()
+
+        return _finalize_json_result(
+            ok=True,
+            base={
+                "org_id": int(org_id),
+                "city": city,
+                "state": state,
+                "queued": queued,
+                "property_ids": property_ids,
+            },
+        )
+    finally:
+        try:
+            release_lock(
+                db,
+                org_id=int(org_id),
+                lock_key=lock_key,
+                owner=owner,
+                force=False,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        db.close()
+
+
+@celery_app.task(name="ingestion.backfill_missing_enrichment_for_jurisdiction")
+def backfill_missing_enrichment_for_jurisdiction_task(
+    org_id: int = 1,
+    *,
+    jurisdiction_code: str,
+    limit: int | None = None,
+):
+    db = SessionLocal()
+    owner = _task_lock_owner("backfill_jurisdiction")
+    try:
+        effective_limit = int(limit or 500)
+        code = str(jurisdiction_code).strip()
+
+        lock_key = _jurisdiction_backfill_lock_key(int(org_id), code, effective_limit)
+        lock = acquire_lock(
+            db,
+            org_id=int(org_id),
+            lock_key=lock_key,
+            owner=owner,
+            ttl_seconds=_backfill_enqueue_lock_ttl_seconds(),
+        )
+        if not lock.acquired:
+            return _finalize_json_result(
+                ok=True,
+                base={
+                    "org_id": int(org_id),
+                    "jurisdiction_code": code,
+                    "queued": 0,
+                    "property_ids": [],
+                    "skipped": True,
+                    "reason": "jurisdiction_backfill_enqueue_lock_not_acquired",
+                },
+            )
+
+        rows = list(
+            db.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM properties
+                    WHERE org_id = :org_id
+                      AND lower(COALESCE(jurisdiction_code, '')) = lower(:jurisdiction_code)
+                      AND (
+                            COALESCE(completeness_geo_status, 'missing') = 'missing'
+                         OR COALESCE(completeness_rent_status, 'missing') = 'missing'
+                         OR COALESCE(completeness_risk_status, 'missing') = 'missing'
+                         OR COALESCE(completeness_jurisdiction_status, 'missing') = 'missing'
+                         OR COALESCE(completeness_cashflow_status, 'missing') = 'missing'
+                      )
+                    ORDER BY id
+                    LIMIT :limit
+                    """
+                ),
+                {
+                    "org_id": int(org_id),
+                    "jurisdiction_code": code,
+                    "limit": effective_limit,
+                },
+            ).fetchall()
+        )
+
+        queued = 0
+        property_ids: list[int] = []
+
+        for row in rows:
+            property_id = int(row[0] if not hasattr(row, "id") else row.id)
+            if _enqueue_enrichment_if_needed(
+                db=db,
+                org_id=int(org_id),
+                property_id=property_id,
+                source_id=None,
+                run_id=None,
+            ):
+                queued += 1
+                property_ids.append(property_id)
+
+        db.commit()
+
+        return _finalize_json_result(
+            ok=True,
+            base={
+                "org_id": int(org_id),
+                "jurisdiction_code": code,
+                "queued": queued,
+                "property_ids": property_ids,
+            },
+        )
+    finally:
+        try:
+            release_lock(
+                db,
+                org_id=int(org_id),
+                lock_key=lock_key,
+                owner=owner,
+                force=False,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        db.close()
+        

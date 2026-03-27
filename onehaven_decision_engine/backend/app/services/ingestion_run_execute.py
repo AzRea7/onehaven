@@ -48,6 +48,7 @@ from ..services.rentcast_listing_source import (
     RentCastListingFetchResult,
     RentCastListingSource,
 )
+from ..workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,27 @@ def _utcnow_naive() -> datetime:
     return datetime.utcnow()
 
 
+def _coerce_zip_codes(value: Any) -> list[str]:
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        raw = [x.strip() for x in value.split(",") if x.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        raw = [str(x).strip() for x in value if str(x).strip()]
+    else:
+        raw = [str(value).strip()] if str(value).strip() else []
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
 def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str, Any]:
     payload = dict(runtime_config or {})
     limit = _safe_int(payload.get("limit")) or int(
@@ -133,7 +155,7 @@ def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str
 
     payload["max_price"] = _safe_float(payload.get("max_price"))
     if payload.get("max_price") is None:
-        payload["max_price"] = float(getattr(settings, "investor_buy_box_max_price", 200_000))
+        payload["max_price"] = 200000.0
 
     payload["sync_mode"] = str(payload.get("sync_mode") or "refresh").strip().lower() or "refresh"
     payload["market_slug"] = _normalize_optional_filter_value(payload.get("market_slug"))
@@ -145,6 +167,11 @@ def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str
             getattr(settings, "ingestion_defer_optional_post_pipeline", True),
         )
     )
+
+    zip_codes = _coerce_zip_codes(payload.get("zip_codes"))
+    if payload.get("market_slug") == "pontiac-oakland" and not zip_codes:
+        zip_codes = ["48340", "48341", "48342", "48343"]
+    payload["zip_codes"] = zip_codes
 
     payload.pop("zip_code", None)
     payload.pop("address", None)
@@ -198,6 +225,7 @@ def _runtime_for_idempotency(runtime_config: dict[str, Any]) -> dict[str, Any]:
         "state": runtime_config.get("state"),
         "county": runtime_config.get("county"),
         "city": runtime_config.get("city"),
+        "zip_codes": runtime_config.get("zip_codes"),
         "property_types": runtime_config.get("property_types"),
         "max_price": runtime_config.get("max_price"),
         "limit": runtime_config.get("limit"),
@@ -317,6 +345,31 @@ def _seed_missing_completeness_columns(db: Session, *, org_id: int, property_id:
         ),
         {"org_id": int(org_id), "property_id": int(property_id)},
     )
+
+
+def _mark_property_enrichment_queued(db: Session, *, org_id: int, property_id: int) -> None:
+    # Keep this best-effort so ingest does not fail if these columns are not present yet.
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE properties
+                SET enrichment_status = COALESCE(enrichment_status, 'queued'),
+                    enrichment_requested_at = COALESCE(enrichment_requested_at, :requested_at)
+                WHERE org_id = :org_id AND id = :property_id
+                """
+            ),
+            {
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+                "requested_at": _utcnow_naive(),
+            },
+        )
+    except Exception:
+        logger.debug(
+            "property_enrichment_queue_columns_not_available",
+            extra={"org_id": int(org_id), "property_id": int(property_id)},
+        )
 
 
 def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
@@ -467,7 +520,7 @@ def _starting_cursor(source, trigger_type: str, runtime_config: dict[str, Any] |
         return dict(market_cursor)
 
     if trigger_type in {"manual", "daily_refresh", "scheduled", "manual_market_sync", "market_backfill"}:
-        return dict(getattr(source, "cursor_json", None) or {"page": 1})
+        return dict(getattr(source, "cursor_json", None) or {"page": 1, "shard": 1, "sort_mode": "newest"})
 
     return dict(getattr(source, "cursor_json", None) or {})
 
@@ -483,19 +536,25 @@ def _filter_reason(
 
     state = _normalize_optional_filter_value(runtime_config.get("state"))
     runtime_city = _normalize_optional_filter_value(runtime_config.get("city"))
+    runtime_zip_codes = set(_coerce_zip_codes(runtime_config.get("zip_codes")))
     active_variant = dict(query_variant or {})
 
     query_city = _normalize_optional_filter_value(active_variant.get("city"))
     query_county = _normalize_optional_filter_value(active_variant.get("county"))
+    query_zip_code = _normalize_optional_filter_value(active_variant.get("zip_code"))
 
     payload_state = _normalize_optional_filter_value(payload.get("state"))
     payload_city = _normalize_optional_filter_value(payload.get("city"))
     payload_county = _normalize_optional_filter_value(payload.get("county"))
+    payload_zip = _normalize_optional_filter_value(payload.get("zip"))
 
     if state and _norm_text(payload_state) != _norm_text(state):
         return "state"
 
-    if query_city:
+    if query_zip_code:
+        if payload_zip != query_zip_code:
+            return "zip_code"
+    elif query_city:
         if _norm_text(payload_city) != _norm_text(query_city):
             return "city"
     elif query_county and payload_county:
@@ -504,6 +563,9 @@ def _filter_reason(
     elif runtime_city:
         if _norm_text(payload_city) != _norm_text(runtime_city):
             return "city"
+
+    if runtime_zip_codes and payload_zip and payload_zip not in runtime_zip_codes:
+        return "zip_scope"
 
     asking_price = _safe_float(payload.get("asking_price")) or 0.0
     max_price = runtime_config.get("max_price")
@@ -529,105 +591,6 @@ def _is_valid_payload(payload: dict[str, Any]) -> bool:
     )
 
 
-def _title_city_variants(value: Any) -> list[str]:
-    raw = str(value or "").strip()
-    if not raw:
-        return []
-
-    variants: list[str] = []
-    seen: set[str] = set()
-
-    candidates = [raw, raw.lower(), raw.title()]
-
-    for item in candidates:
-        normalized = str(item or "").strip()
-        if normalized and normalized.lower() not in seen:
-            seen.add(normalized.lower())
-            variants.append(normalized)
-
-    return variants
-
-
-def _build_query_variants(
-    *,
-    source: Any,
-    runtime_config: dict[str, Any],
-    provider_fetch_limit: int,
-) -> list[dict[str, Any]]:
-    base_config = dict(source.config_json or {})
-    merged = {**base_config, **dict(runtime_config or {})}
-    merged["limit"] = int(provider_fetch_limit)
-
-    city = _normalize_optional_filter_value(merged.get("city"))
-    county = _normalize_optional_filter_value(merged.get("county"))
-    state = _normalize_optional_filter_value(merged.get("state")) or "MI"
-    market_slug = _normalize_optional_filter_value(merged.get("market_slug"))
-    max_price = _safe_float(merged.get("max_price"))
-    property_types = list(merged.get("property_types") or [])
-
-    city_variants = _title_city_variants(city)
-
-    variants: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    is_market_scoped = bool(market_slug or city)
-    allow_county_variant = bool(county and not is_market_scoped)
-    allow_statewide_fallback = bool(
-        runtime_config.get("allow_statewide_fallback", False)
-    ) and not is_market_scoped and not county
-
-    def add_variant(
-        *,
-        city_value: str | None,
-        county_value: str | None,
-        include_property_type: bool,
-    ) -> None:
-        cfg = dict(merged)
-
-        cfg["state"] = state
-        cfg["city"] = city_value
-        cfg["county"] = county_value
-        cfg["max_price"] = max_price
-
-        if include_property_type:
-            cfg["property_types"] = list(property_types)
-        else:
-            cfg["property_types"] = []
-            cfg.pop("property_type", None)
-
-        variant_label = {
-            "state": cfg.get("state"),
-            "city": cfg.get("city"),
-            "county": cfg.get("county"),
-            "max_price": cfg.get("max_price"),
-            "property_types": list(cfg.get("property_types") or []),
-        }
-
-        key = json.dumps(variant_label, sort_keys=True, default=str)
-        if key in seen:
-            return
-
-        cfg["_query_variant"] = dict(variant_label)
-        seen.add(key)
-        variants.append(cfg)
-
-    if city_variants:
-        for city_value in city_variants:
-            add_variant(city_value=city_value, county_value=None, include_property_type=True)
-        for city_value in city_variants:
-            add_variant(city_value=city_value, county_value=None, include_property_type=False)
-
-    if allow_county_variant:
-        add_variant(city_value=None, county_value=county, include_property_type=True)
-        add_variant(city_value=None, county_value=county, include_property_type=False)
-
-    if allow_statewide_fallback:
-        add_variant(city_value=None, county_value=None, include_property_type=True)
-        add_variant(city_value=None, county_value=None, include_property_type=False)
-
-    return variants
-
-
 def _load_rows_page(
     source,
     *,
@@ -642,108 +605,15 @@ def _load_rows_page(
     if bool(getattr(settings, "ingestion_disable_county_fallback_variants", True)):
         merged_config["county"] = None
 
-    sample_rows = merged_config.get("sample_rows")
-    if isinstance(sample_rows, list):
-        rows = [x for x in sample_rows if isinstance(x, dict)]
-        return RentCastListingFetchResult(
-            rows=rows,
-            next_cursor={"page": (_safe_int(cursor.get("page")) or 1) + 1},
-            raw_count=len(rows),
-            page_scanned=_safe_int(cursor.get("page")) or 1,
-            shard_scanned=_safe_int(cursor.get("shard")) or 1,
-            sort_mode=str(cursor.get("sort_mode") or "newest"),
-            exhausted=len(rows) < int(provider_fetch_limit),
-            page_fingerprint=None,
-            page_changed=True,
-            provider_cursor=None,
-            query_variant=None,
-        )
-
     adapter = PROVIDER_ADAPTERS.get(source.provider)
     if adapter is None:
         raise ValueError(f"No adapter registered for provider={source.provider}")
 
-    if str(getattr(source, "provider", "") or "").strip().lower() != "rentcast":
-        return adapter.load_rows_page(
-            credentials=dict(getattr(source, "credentials_json", None) or {}),
-            runtime_config=merged_config,
-            cursor=cursor,
-        )
-
-    query_variants = _build_query_variants(
-        source=source,
-        runtime_config=runtime_config,
-        provider_fetch_limit=provider_fetch_limit,
+    return adapter.load_rows_page(
+        credentials=dict(getattr(source, "credentials_json", None) or {}),
+        runtime_config=merged_config,
+        cursor=cursor,
     )
-
-    last_result: RentCastListingFetchResult | None = None
-
-    for idx, variant_config in enumerate(query_variants, start=1):
-        variant_label = dict(variant_config.get("_query_variant") or {})
-        variant_label["attempt"] = idx
-
-        _emit(
-            {
-                "event": "ingestion_query_variant_attempt",
-                "provider": str(getattr(source, "provider", "") or ""),
-                "source_id": int(getattr(source, "id")),
-                "variant": variant_label,
-                "cursor": dict(cursor or {}),
-            }
-        )
-
-        result = adapter.load_rows_page(
-            credentials=dict(getattr(source, "credentials_json", None) or {}),
-            runtime_config=variant_config,
-            cursor=cursor,
-        )
-        last_result = result
-
-        rows = list(result.rows or [])
-        raw_count = int(result.raw_count or 0)
-
-        if raw_count > 0 or rows:
-            runtime_city = _normalize_optional_filter_value(runtime_config.get("city"))
-            runtime_county = _normalize_optional_filter_value(runtime_config.get("county"))
-            runtime_market_slug = _normalize_optional_filter_value(runtime_config.get("market_slug"))
-
-            selected_city = _normalize_optional_filter_value(variant_config.get("city"))
-            selected_county = _normalize_optional_filter_value(variant_config.get("county"))
-
-            is_scoped_sync = bool(runtime_market_slug or runtime_city or runtime_county)
-            selected_is_broad = not selected_city and not selected_county
-
-            if is_scoped_sync and selected_is_broad:
-                _emit(
-                    {
-                        "event": "ingestion_query_variant_rejected",
-                        "provider": str(getattr(source, "provider", "") or ""),
-                        "source_id": int(getattr(source, "id")),
-                        "variant": variant_label,
-                        "reason": "broad_fallback_not_allowed_for_scoped_sync",
-                        "runtime_market_slug": runtime_market_slug,
-                        "runtime_city": runtime_city,
-                        "runtime_county": runtime_county,
-                        "raw_count": raw_count,
-                        "rows_returned": len(rows),
-                    }
-                )
-                continue
-
-            _emit(
-                {
-                    "event": "ingestion_query_variant_selected",
-                    "provider": str(getattr(source, "provider", "") or ""),
-                    "source_id": int(getattr(source, "id")),
-                    "variant": variant_label,
-                    "raw_count": raw_count,
-                    "rows_returned": len(rows),
-                }
-            )
-            return result
-
-    assert last_result is not None
-    return last_result
 
 
 def _append_property_error(summary: dict[str, Any], *, property_id: int | None, external_record_id: str | None, reason: str) -> None:
@@ -807,8 +677,8 @@ def _run_optional_post_pipeline(
             db,
             org_id=int(org_id),
             property_id=int(property_row.id),
-            deal_id=int(deal_row.id),
-            payload=payload,
+            actor_user_id=None,
+            emit_events=False,
         )
         apply_pipeline_summary(summary, result or {})
         was_partial = bool((result or {}).get("partial", False))
@@ -837,6 +707,36 @@ def _run_optional_post_pipeline(
     return was_partial, pipeline_errors, elapsed_ms
 
 
+def _queue_post_sync_enrichment(
+    *,
+    org_id: int,
+    source_id: int,
+    run_id: int,
+    property_ids: list[int],
+) -> int:
+    queued = 0
+    seen: set[int] = set()
+
+    for property_id in property_ids:
+        pid = int(property_id)
+        if pid <= 0 or pid in seen:
+            continue
+        seen.add(pid)
+
+        celery_app.send_task(
+            "ingestion.enrich_property_after_sync",
+            kwargs={
+                "org_id": int(org_id),
+                "property_id": pid,
+                "source_id": int(source_id),
+                "run_id": int(run_id),
+            },
+        )
+        queued += 1
+
+    return queued
+
+
 def execute_source_sync(
     db: Session,
     *,
@@ -853,13 +753,10 @@ def execute_source_sync(
     source_id = int(getattr(source, "id"))
 
     requested_new_records = int(runtime_config.get("limit") or 1)
-    provider_fetch_limit = min(
-        max(1, requested_new_records),
-        int(getattr(settings, "market_sync_default_limit_per_market", 125) or 125),
-    )
+    provider_fetch_limit = min(max(1, requested_new_records), 500)
     max_pages_budget = _safe_int(runtime_config.get("max_pages_budget")) or max(
         1,
-        int(getattr(settings, "ingestion_provider_max_pages_per_shard", 3) or 3),
+        int(getattr(settings, "ingestion_provider_max_pages_per_shard", 12) or 12),
     )
 
     market_sync_state = get_market_sync_state_by_id(
@@ -914,6 +811,7 @@ def execute_source_sync(
             "ingestion_execution_lock_ttl_seconds",
             DEFAULT_EXECUTION_LOCK_TTL_SECONDS,
         )
+        or DEFAULT_EXECUTION_LOCK_TTL_SECONDS
     )
 
     execution_lock = acquire_ingestion_execution_lock(
@@ -949,7 +847,9 @@ def execute_source_sync(
                 ttl_seconds=execution_lock_ttl_seconds,
             )
 
-    if execution_lock.acquired and bool(getattr(settings, "ingestion_commit_execution_lock_on_acquire", True)):
+    if execution_lock.acquired and bool(
+        getattr(settings, "ingestion_commit_execution_lock_on_acquire", True)
+    ):
         try:
             db.commit()
         except Exception:
@@ -1000,22 +900,6 @@ def execute_source_sync(
         source_id=source_id,
         dataset_key=dataset_key,
     ):
-        release_ingestion_execution_lock(
-            db,
-            org_id=int(org_id),
-            source_id=source_id,
-            dataset_key=dataset_key,
-            owner=lock_owner,
-        )
-        _emit(
-            {
-                "event": "ingestion_sync_skipped_duplicate_dataset",
-                "org_id": int(org_id),
-                "source_id": source_id,
-                "dataset_key": dataset_key,
-                "dataset_identity": dataset_identity,
-            }
-        )
         return start_run(
             db,
             org_id=int(org_id),
@@ -1024,7 +908,7 @@ def execute_source_sync(
             runtime_config=runtime_config,
             status="skipped_duplicate_dataset",
             summary_json={
-                "reason": "already_completed",
+                "reason": "dataset_already_completed",
                 "dataset_key": dataset_key,
                 "dataset_identity": dataset_identity,
                 "market_slug": runtime_config.get("market_slug") or dataset_identity.get("market_slug"),
@@ -1086,7 +970,11 @@ def execute_source_sync(
             "post_pipeline_total": 0.0,
             "run_total": 0.0,
         },
+        "post_sync_enrichment_queued": 0,
+        "post_sync_property_ids": [],
     }
+
+    properties_to_enrich: list[int] = []
 
     try:
         if market_sync_state is not None:
@@ -1107,16 +995,16 @@ def execute_source_sync(
                 summary["stop_reason"] = "requested_new_records_satisfied"
                 break
 
-            if market_exhausted:
-                summary["stop_reason"] = "market_exhausted"
-                break
-
             if _budget_exhausted(
                 provider_pages_scanned=provider_pages_scanned,
                 max_pages_budget=max_pages_budget,
             ):
                 summary["budget_boundary_hit"] = True
                 summary["stop_reason"] = "provider_page_budget_exhausted"
+                break
+
+            if market_exhausted:
+                summary["stop_reason"] = "market_exhausted"
                 break
 
             page_t0 = time.perf_counter()
@@ -1172,45 +1060,66 @@ def execute_source_sync(
                 "runtime_county": runtime_config.get("county"),
             }
 
-            if not bool(fetch_result.page_changed) and raw_count > 0:
-                summary["unchanged_pages_skipped"] += 1
-                page_stat["skipped_unchanged_page"] = True
-                page_stat["page_total_ms"] = round((time.perf_counter() - page_t0) * 1000, 2)
-                summary["page_stats"].append(page_stat)
-                summary["stop_reason"] = "unchanged_page_repeat"
-                cursor = dict(fetch_result.next_cursor or cursor)
-                break
-
-            for raw_row in rows:
-                payload = canonical_listing_payload(raw_row)
-                query_variant = dict(fetch_result.query_variant or {})
-
-                if not _is_valid_payload(payload):
-                    summary["invalid_rows"] += 1
-                    page_stat["invalid_rows"] += 1
-                    continue
-
-                reason = _filter_reason(payload, runtime_config, query_variant=query_variant)
+            for row in rows:
+                payload = canonical_listing_payload(row)
+                reason = _filter_reason(
+                    payload,
+                    runtime_config,
+                    query_variant=dict(fetch_result.query_variant or {}).get("post_filter"),
+                )
                 if reason:
                     summary["filtered_out"] += 1
-                    page_stat["filtered_out"] += 1
                     counts = dict(summary.get("filter_reason_counts") or {})
                     counts[reason] = int(counts.get(reason, 0) or 0) + 1
                     summary["filter_reason_counts"] = counts
+                    examples = dict(summary.get("filter_reason_examples") or {})
+                    if reason not in examples:
+                        examples[reason] = payload.get("address")
+                    summary["filter_reason_examples"] = examples
+                    page_stat["filtered_out"] += 1
                     continue
 
                 summary["records_candidate_after_filtering"] += 1
                 page_stat["records_candidate_after_filtering"] += 1
 
-                existing_link = find_existing_by_external_id(
+                if not _is_valid_payload(payload):
+                    summary["invalid_rows"] += 1
+                    page_stat["invalid_rows"] += 1
+                    _append_property_error(
+                        summary,
+                        property_id=None,
+                        external_record_id=payload.get("external_record_id"),
+                        reason="invalid_payload",
+                    )
+                    continue
+
+                existing_record = find_existing_by_external_id(
                     db,
                     org_id=int(org_id),
                     provider=str(getattr(source, "provider", "") or ""),
                     external_record_id=str(payload.get("external_record_id") or ""),
                 )
-                already_linked = existing_link is not None
 
-                db_t0 = time.perf_counter()
+                prop_row, prop_created = _upsert_property(db, org_id=int(org_id), payload=payload)
+                deal_row, deal_created = _upsert_deal(
+                    db,
+                    org_id=int(org_id),
+                    property_id=int(prop_row.id),
+                    payload=payload,
+                )
+                _, rent_created = _upsert_rent_assumption(
+                    db,
+                    org_id=int(org_id),
+                    property_id=int(prop_row.id),
+                    payload=payload,
+                )
+                photos_upserted = _upsert_photos(
+                    db,
+                    org_id=int(org_id),
+                    property_id=int(prop_row.id),
+                    provider=str(getattr(source, "provider", "") or "rentcast"),
+                    photos=list(payload.get("photos") or []),
+                )
 
                 fingerprint = build_property_fingerprint(
                     address=payload["address"],
@@ -1219,70 +1128,41 @@ def execute_source_sync(
                     zip_code=payload["zip"],
                 )
 
-                property_row, property_created = _upsert_property(
-                    db,
-                    org_id=int(org_id),
-                    payload=payload,
-                )
-                _seed_missing_completeness_columns(
-                    db,
-                    org_id=int(org_id),
-                    property_id=int(property_row.id),
-                )
-                _persist_property_acquisition_metadata(
-                    db,
-                    org_id=int(org_id),
-                    property_id=int(property_row.id),
-                    source=source,
-                    payload=payload,
-                    trigger_type=str(trigger_type),
-                )
                 upsert_record_link(
                     db,
                     org_id=int(org_id),
                     provider=str(getattr(source, "provider", "") or ""),
+                    source_id=int(getattr(source, "id")),
                     external_record_id=str(payload.get("external_record_id") or ""),
-                    property_id=int(property_row.id),
+                    external_url=payload.get("external_url"),
+                    property_id=int(prop_row.id),
+                    deal_id=int(deal_row.id) if deal_row is not None else None,
+                    raw_json=payload.get("raw_json") or payload,
                     fingerprint=fingerprint,
                 )
 
-                deal_row, deal_created = _upsert_deal(
+                _persist_property_acquisition_metadata(
                     db,
                     org_id=int(org_id),
-                    property_id=int(property_row.id),
+                    property_id=int(prop_row.id),
+                    source=source,
                     payload=payload,
+                    trigger_type=str(trigger_type),
                 )
-                _, rent_created = _upsert_rent_assumption(
+                _seed_missing_completeness_columns(
                     db,
                     org_id=int(org_id),
-                    property_id=int(property_row.id),
-                    payload=payload,
+                    property_id=int(prop_row.id),
                 )
-                photos_added = _upsert_photos(
+                _mark_property_enrichment_queued(
                     db,
                     org_id=int(org_id),
-                    property_id=int(property_row.id),
-                    provider=str(getattr(source, "provider", "") or ""),
-                    photos=list(payload.get("photos") or []),
+                    property_id=int(prop_row.id),
                 )
+                properties_to_enrich.append(int(prop_row.id))
 
-                db_upsert_ms = round((time.perf_counter() - db_t0) * 1000, 2)
-                summary["timings_ms"]["db_upsert_total"] = round(
-                    float(summary["timings_ms"].get("db_upsert_total", 0.0) or 0.0) + db_upsert_ms,
-                    2,
-                )
-
-                summary["records_imported"] += 1
-                page_stat["imported"] += 1
-
-                if not already_linked:
-                    summary["new_records_imported"] += 1
-                    page_stat["new_records_imported"] += 1
-
-                if property_created:
+                if prop_created:
                     summary["properties_created"] += 1
-                    summary["new_listings_imported"] += 1
-                    page_stat["new_listings_imported"] += 1
                 else:
                     summary["properties_updated"] += 1
 
@@ -1294,59 +1174,68 @@ def execute_source_sync(
                 if rent_created:
                     summary["rent_rows_upserted"] += 1
 
-                if photos_added:
-                    summary["photos_upserted"] += int(photos_added)
+                summary["photos_upserted"] += int(photos_upserted or 0)
 
-                pipeline_partial, pipeline_errors, pipeline_ms = _run_optional_post_pipeline(
+                if existing_record is None:
+                    summary["new_records_imported"] += 1
+                    summary["new_listings_imported"] += 1
+                    page_stat["new_records_imported"] += 1
+                    page_stat["new_listings_imported"] += 1
+                else:
+                    summary["already_seen_skipped"] += 1
+                    page_stat["already_seen_skipped"] += 1
+
+                summary["records_imported"] += 1
+                page_stat["imported"] += 1
+
+                _, pipeline_errors, post_pipeline_ms = _run_optional_post_pipeline(
                     db,
                     org_id=int(org_id),
-                    property_row=property_row,
+                    property_row=prop_row,
                     deal_row=deal_row,
                     payload=payload,
                     runtime_config=runtime_config,
                     summary=summary,
                 )
                 summary["timings_ms"]["post_pipeline_total"] = round(
-                    float(summary["timings_ms"].get("post_pipeline_total", 0.0) or 0.0) + pipeline_ms,
+                    float(summary["timings_ms"].get("post_pipeline_total", 0.0) or 0.0) + post_pipeline_ms,
                     2,
                 )
+                if pipeline_errors:
+                    page_stat["pipeline_failures"] += 1
 
-                _emit(
-                    {
-                        "event": "ingestion_property_pipeline_complete",
-                        "org_id": int(org_id),
-                        "source_id": source_id,
-                        "property_id": int(property_row.id),
-                        "external_record_id": payload.get("external_record_id"),
-                        "prop_created": bool(property_created),
-                        "deal_created": bool(deal_created),
-                        "photos_added": int(photos_added),
-                        "db_upsert_ms": db_upsert_ms,
-                        "pipeline_ms": pipeline_ms,
-                        "pipeline_partial": bool(pipeline_partial),
-                        "pipeline_errors": pipeline_errors,
-                        "dataset_key": dataset_key,
-                    }
-                )
+                last_seen_provider_record_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-                last_seen_provider_record_at = _utcnow_naive()
-
-                if summary["new_records_imported"] >= requested_new_records:
-                    break
-
-            market_exhausted = bool(fetch_result.exhausted) or raw_count == 0
-            page_stat["market_exhausted"] = bool(market_exhausted)
+            next_cursor = dict(fetch_result.next_cursor or {})
             page_stat["page_total_ms"] = round((time.perf_counter() - page_t0) * 1000, 2)
             summary["page_stats"].append(page_stat)
+            summary["cursor_advanced_to"] = _cursor_summary(next_cursor)
 
-            cursor = dict(fetch_result.next_cursor or cursor)
-            summary["cursor_advanced_to"] = _cursor_summary(cursor)
+            current_page = _safe_int(cursor.get("page")) or 1
+            current_shard = _safe_int(cursor.get("shard")) or 1
+            next_page = _safe_int(next_cursor.get("page")) or current_page
+            next_shard = _safe_int(next_cursor.get("shard")) or current_shard
 
-            if summary["new_records_imported"] >= requested_new_records:
-                summary["stop_reason"] = "requested_new_records_satisfied"
-                break
+            advanced_to_new_variant = next_shard != current_shard
+            advanced_within_variant = next_page != current_page
+            market_exhausted = bool(fetch_result.exhausted)
+
+            cursor = next_cursor
+
+            if market_exhausted and (advanced_to_new_variant or advanced_within_variant):
+                market_exhausted = False
 
         summary["market_exhausted"] = bool(market_exhausted)
+
+        if int(summary.get("records_imported", 0) or 0) > 0:
+            queued_count = _queue_post_sync_enrichment(
+                org_id=int(org_id),
+                source_id=source_id,
+                run_id=int(getattr(run, "id")),
+                property_ids=properties_to_enrich,
+            )
+            summary["post_sync_enrichment_queued"] = int(queued_count)
+            summary["post_sync_property_ids"] = sorted(set(int(x) for x in properties_to_enrich))
 
         if market_sync_state is not None:
             advance_market_cursor(
@@ -1379,6 +1268,7 @@ def execute_source_sync(
                 org_id=int(org_id),
                 source_id=source_id,
                 dataset_key=dataset_key,
+                owner=lock_owner,
                 ttl_seconds=completion_ttl,
             )
 
@@ -1426,4 +1316,3 @@ def execute_source_sync(
                 )
         except Exception:
             logger.exception("release_ingestion_execution_lock_failed")
-            

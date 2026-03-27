@@ -77,6 +77,33 @@ def _normalize_tier_limit(raw: str | None) -> str:
     return value if value in {"hot", "warm", "cold"} else "all"
 
 
+def _coerce_zip_codes(value: Any) -> list[str]:
+    if value is None:
+        return []
+
+    raw_items: list[Any]
+    if isinstance(value, str):
+        raw_items = [part.strip() for part in value.split(",") if part.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        raw_items = [value]
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    for item in raw_items:
+        zip_code = str(item or "").strip()
+        if not zip_code:
+            continue
+        if zip_code in seen:
+            continue
+        seen.add(zip_code)
+        out.append(zip_code)
+
+    return out
+
+
 def normalize_sync_mode(sync_mode: str | None) -> MarketSyncMode:
     value = _norm_text(sync_mode)
     return "backfill" if value == "backfill" else "refresh"
@@ -612,8 +639,10 @@ def get_sync_mode_runtime_overrides(
     market: dict[str, Any],
     sync_state: MarketSyncState | None,
     limit_override: int | None = None,
+    trigger_type: str | None = None,
 ) -> dict[str, Any]:
     normalized_mode = normalize_sync_mode(sync_mode)
+    normalized_trigger = _norm_text(trigger_type)
 
     if normalized_mode == "backfill":
         market_slug = str(market.get("slug") or "").strip().lower() or None
@@ -644,11 +673,37 @@ def get_sync_mode_runtime_overrides(
             "mark_backfill_complete_on_exhaustion": True,
         }
 
+    if normalized_trigger == "manual_market_sync":
+        market_slug = str(market.get("slug") or "").strip().lower() or None
+        limit = _safe_int(
+            limit_override
+            or market.get("backfill_limit")
+            or market.get("sync_limit")
+            or get_default_backfill_limit_per_sync(),
+            get_default_backfill_limit_per_sync(),
+        )
+        max_pages_budget = _safe_int(
+            market.get("manual_max_pages_budget")
+            or market.get("backfill_max_pages_budget")
+            or get_default_backfill_max_pages_budget(),
+            get_default_backfill_max_pages_budget(),
+        )
+
+        return {
+            "sync_mode": "refresh",
+            "limit": limit,
+            "market_cursor": build_fresh_backfill_cursor(market_slug=market_slug),
+            "reset_market_cursor_on_start": True,
+            "max_pages_budget": max_pages_budget,
+            "backfill_target_records": None,
+            "mark_backfill_complete_on_exhaustion": False,
+        }
+
     limit = _safe_int(
         limit_override
         or market.get("sync_limit")
         or get_default_market_limit_per_sync(),
-        get_default_market_limit_per_sync(),
+        get_default_market_LIMIT_per_sync() if False else get_default_market_limit_per_sync(),
     )
     max_pages_budget = _safe_int(
         market.get("refresh_max_pages_budget")
@@ -680,6 +735,7 @@ def build_market_runtime_payload(
         market=market,
         sync_state=sync_state,
         limit_override=limit_override,
+        trigger_type=trigger_type,
     )
 
     payload = build_runtime_payload(
@@ -689,13 +745,8 @@ def build_market_runtime_payload(
         limit=int(mode_overrides["limit"]),
         market_slug=str(market.get("slug") or "") or None,
         trigger_type=trigger_type,
-        property_types=list(
-            market.get("property_types") or ["single_family", "multi_family"]
-        ),
-        max_price=int(
-            market.get("max_price")
-            or getattr(settings, "investor_buy_box_max_price", 200_000)
-        ),
+        property_types=["single_family", "multi_family"],
+        max_price=200000,
         max_units=int(
             market.get("max_units")
             or getattr(settings, "investor_buy_box_max_units", 4)
@@ -713,6 +764,22 @@ def build_market_runtime_payload(
         supported_market=True,
         mark_backfill_complete_on_exhaustion=bool(mode_overrides["mark_backfill_complete_on_exhaustion"]),
     )
+
+    zip_codes = _coerce_zip_codes(
+        market.get("zip_codes") or market.get("zips") or market.get("zipCodes")
+    )
+
+    if str(market.get("slug") or "").strip().lower() == "pontiac-oakland":
+        forced_pontiac_zips = ["48340", "48341", "48342", "48343"]
+        zip_codes = forced_pontiac_zips
+
+    if zip_codes:
+        payload["zip_codes"] = zip_codes
+
+    payload["query_strategy"] = "city_plus_zip_sweep"
+    payload["max_price"] = 200000
+    payload["property_types"] = ["single_family", "multi_family"]
+
     return payload
 
 
@@ -811,8 +878,6 @@ def resolve_supported_market(*, market_slug: str) -> dict[str, Any] | None:
 
 
 def get_enabled_sources_for_org(db: Session, *, org_id: int) -> list[Any]:
-    # Normalize and persist supported sources first so downstream selection is working
-    # against rows that are already visible to other sessions.
     ensure_market_slug_on_sources(db, org_id=int(org_id))
     ensure_sources_for_supported_markets(db, org_id=int(org_id))
     ensure_default_manual_sources(db, org_id=int(org_id))
@@ -917,6 +982,17 @@ def build_supported_market_sync_plan_for_db(
             "sync_mode": normalized_mode,
         }
 
+    if str(market.get("slug") or "").strip().lower() == "pontiac-oakland":
+        market = {
+            **market,
+            "zip_codes": ["48340", "48341", "48342", "48343"],
+            "city": "pontiac",
+            "state": "MI",
+            "county": "oakland",
+            "max_price": 200000,
+            "property_types": ["single_family", "multi_family"],
+        }
+
     get_enabled_sources_for_org(db, org_id=int(org_id))
 
     matched_sources = resolve_sources_for_market(
@@ -936,7 +1012,6 @@ def build_supported_market_sync_plan_for_db(
 
     matched_sources.sort(key=lambda s: _source_sort_key(s, market))
     source = matched_sources[0]
-
     sync_state = get_or_create_market_sync_state(
         db,
         org_id=int(org_id),

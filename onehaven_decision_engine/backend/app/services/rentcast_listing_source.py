@@ -117,20 +117,9 @@ class RentCastListingSource:
             return "Single Family"
         if norm == "multi_family":
             return "Multi Family"
-        if norm == "condo":
-            return "Condo"
-        if norm == "townhouse":
-            return "Townhouse"
-        if norm == "manufactured":
-            return "Manufactured"
-        if norm == "land":
-            return "Land"
         return None
 
-    def _provider_property_type_param(
-        self,
-        config: dict[str, Any],
-    ) -> str | None:
+    def _provider_property_type_param(self, config: dict[str, Any]) -> str | None:
         property_types = config.get("property_types")
         if isinstance(property_types, str):
             property_types = [x.strip() for x in property_types.split(",") if x.strip()]
@@ -277,6 +266,7 @@ class RentCastListingSource:
 
     def _pick_update_marker(self, item: dict[str, Any]) -> str | None:
         for key in (
+            "lastSeenDate",
             "lastSeen",
             "updatedAt",
             "updatedDate",
@@ -321,7 +311,7 @@ class RentCastListingSource:
         explicit_sort_mode: str | None,
     ) -> dict[str, Any]:
         runtime_cursor = runtime_config.get("market_cursor")
-        base = {}
+        base: dict[str, Any] = {}
         if isinstance(runtime_cursor, dict):
             base.update(runtime_cursor)
         if isinstance(cursor, dict):
@@ -391,28 +381,140 @@ class RentCastListingSource:
             "raw_json": item,
         }
 
+    def _build_query_variants(self, config: dict[str, Any]) -> list[dict[str, Any]]:
+        state = self._normalize_optional_text(config.get("state")) or "MI"
+        city = self._normalize_optional_text(config.get("city"))
+        county = self._normalize_optional_text(config.get("county"))
+        zip_codes = self._coerce_zip_codes(config)
+
+        variants: list[dict[str, Any]] = []
+
+        if city:
+            variants.append(
+                {
+                    "key": f"city:{state.lower()}:{city.lower()}",
+                    "scope": "city",
+                    "query": {"state": state, "city": city},
+                    "post_filter": {
+                        "state": state,
+                        "city": city,
+                        "county": county,
+                        "zip_codes": zip_codes,
+                    },
+                }
+            )
+
+        for zip_code in zip_codes:
+            variants.append(
+                {
+                    "key": f"zip:{state.lower()}:{zip_code}",
+                    "scope": "zip",
+                    "query": {"state": state, "zipCode": zip_code},
+                    "post_filter": {
+                        "state": state,
+                        "zip_code": zip_code,
+                        "county": county,
+                    },
+                }
+            )
+
+        if not variants:
+            variants.append(
+                {
+                    "key": f"state:{state.lower()}",
+                    "scope": "state",
+                    "query": {"state": state},
+                    "post_filter": {"state": state, "city": city, "county": county},
+                }
+            )
+
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for variant in variants:
+            key = str(variant.get("key") or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(variant)
+
+        return deduped
+
+    def _variant_for_shard(self, variants: list[dict[str, Any]], shard: int) -> dict[str, Any]:
+        if not variants:
+            raise ValueError("No query variants available for RentCast fetch.")
+        index = max(0, int(shard) - 1)
+        if index >= len(variants):
+            index = len(variants) - 1
+        return variants[index]
+
+    def _row_matches_variant(self, item: dict[str, Any], variant: dict[str, Any]) -> bool:
+        post_filter = dict(variant.get("post_filter") or {})
+        expected_state = self._normalize_optional_text(post_filter.get("state"))
+        expected_city = self._normalize_optional_text(post_filter.get("city"))
+        expected_county = self._normalize_optional_text(post_filter.get("county"))
+        expected_zip = self._normalize_optional_text(post_filter.get("zip_code"))
+        expected_zip_codes = post_filter.get("zip_codes") or []
+        scope = str(variant.get("scope") or "").strip().lower()
+
+        row_state = self._normalize_optional_text(self._pick_state(item))
+        row_city = self._normalize_optional_text(self._pick_city(item))
+        row_county = self._normalize_optional_text(self._pick_county(item))
+        row_zip = self._normalize_optional_text(self._pick_zip(item))
+
+        if expected_state and (row_state or "").lower() != expected_state.lower():
+            return False
+
+        if scope == "city":
+            if expected_city and (row_city or "").lower() != expected_city.lower():
+                return False
+            if expected_zip_codes and row_zip and row_zip not in set(str(z) for z in expected_zip_codes):
+                return False
+            return True
+
+        if scope == "zip":
+            if expected_zip and (row_zip or "") != expected_zip:
+                return False
+            return True
+
+        if expected_city and row_city and row_city.lower() != expected_city.lower():
+            return False
+        if expected_county and row_county and row_county.lower() != expected_county.lower():
+            return False
+
+        return True
+
+    def _parse_total_count(self, response: httpx.Response) -> int | None:
+        raw = response.headers.get("X-Total-Count")
+        if raw is None:
+            return None
+        return self._safe_int(raw, None)
+
     def _build_query_params(
         self,
         config: dict[str, Any],
+        variant: dict[str, Any],
         page: int,
         limit: int,
         sort_mode: str | None = None,
     ) -> dict[str, Any]:
+        offset = max(0, (max(1, int(page)) - 1) * max(1, min(int(limit), 500)))
         params: dict[str, Any] = {
-            "page": max(1, int(page)),
             "limit": max(1, min(int(limit), 500)),
+            "offset": offset,
             "status": "Active",
+            "includeTotalCount": "true",
         }
 
-        state = self._normalize_optional_text(config.get("state")) or "MI"
-        city = self._normalize_optional_text(config.get("city"))
-        county = self._normalize_optional_text(config.get("county"))
+        query = dict(variant.get("query") or {})
+        state = self._normalize_optional_text(query.get("state")) or "MI"
+        city = self._normalize_optional_text(query.get("city"))
+        zip_code = self._normalize_optional_text(query.get("zipCode"))
 
         params["state"] = state
         if city:
             params["city"] = city
-        elif county:
-            params["county"] = county
+        if zip_code:
+            params["zipCode"] = zip_code
 
         provider_property_type = self._provider_property_type_param(config)
         if provider_property_type:
@@ -462,19 +564,29 @@ class RentCastListingSource:
 
         page_num = self._safe_int(resolved_cursor.get("page"), 1) or 1
         shard_num = self._safe_int(resolved_cursor.get("shard"), 1) or 1
-        sort_mode_value = str(resolved_cursor.get("sort_mode") or "newest")
+        sort_mode_value = str(resolved_cursor.get("sort_mode") or "newest").strip().lower() or "newest"
         limit_value = self._safe_int(
             limit if limit is not None else config.get("limit"),
             getattr(settings, "ingestion_provider_page_limit", 50),
         ) or 50
 
-        params = self._build_query_params(config, page_num, limit_value, sort_mode_value)
+        variants = self._build_query_variants(config)
+        active_variant = self._variant_for_shard(variants, shard_num)
+
+        params = self._build_query_params(
+            config=config,
+            variant=active_variant,
+            page=page_num,
+            limit=limit_value,
+            sort_mode=sort_mode_value,
+        )
 
         logger.info(
-            "rentcast_fetch params=%s cursor=%s market_slug=%s",
+            "rentcast_fetch params=%s cursor=%s market_slug=%s variant=%s",
             params,
             resolved_cursor,
             config.get("market_slug"),
+            active_variant,
         )
 
         with httpx.Client(timeout=30.0) as client:
@@ -494,21 +606,79 @@ class RentCastListingSource:
         else:
             raw_rows = []
 
-        rows = [self._to_canonical_row(item) for item in raw_rows]
-        page_fingerprint = self._build_page_fingerprint(raw_rows)
-        prior_fingerprint = str(resolved_cursor.get("page_fingerprint") or "").strip() or None
-        page_changed = prior_fingerprint != page_fingerprint if prior_fingerprint else True
-        exhausted = len(raw_rows) < int(limit_value)
+        matched_raw_rows = [item for item in raw_rows if self._row_matches_variant(item, active_variant)]
+        rows = [self._to_canonical_row(item) for item in matched_raw_rows]
 
-        next_cursor = {
-            "market_slug": str(config.get("market_slug") or "").strip().lower() or None,
-            "page": page_num if exhausted else page_num + 1,
-            "shard": shard_num,
-            "sort_mode": sort_mode_value,
-            "page_fingerprint": page_fingerprint,
-            "page_changed": page_changed,
-            "provider_cursor": None,
-        }
+        page_fingerprint = self._build_page_fingerprint(matched_raw_rows)
+
+        prior_fingerprint = str(resolved_cursor.get("page_fingerprint") or "").strip() or None
+        prior_provider_cursor = dict(resolved_cursor.get("provider_cursor") or {})
+        prior_variant_key = str(prior_provider_cursor.get("variant_key") or "").strip() or None
+        current_variant_key = str(active_variant.get("key") or "").strip() or None
+
+        if prior_variant_key and prior_variant_key != current_variant_key:
+            page_changed = True
+        else:
+            page_changed = prior_fingerprint != page_fingerprint if prior_fingerprint else True
+
+        total_count = self._parse_total_count(response)
+        offset = max(0, (page_num - 1) * limit_value)
+
+        variant_exhausted = False
+        if total_count is not None:
+            variant_exhausted = (offset + len(raw_rows)) >= total_count
+        if len(raw_rows) < int(limit_value):
+            variant_exhausted = True
+        if len(raw_rows) == 0:
+            variant_exhausted = True
+
+        has_more_variants = shard_num < len(variants)
+
+        if variant_exhausted and has_more_variants:
+            next_cursor = {
+                "market_slug": str(config.get("market_slug") or "").strip().lower() or None,
+                "page": 1,
+                "shard": shard_num + 1,
+                "sort_mode": sort_mode_value,
+                "page_fingerprint": None,
+                "page_changed": True,
+                "provider_cursor": {
+                    "variant_key": str(variants[shard_num].get("key") or "").strip() or None,
+                    "total_count": total_count,
+                    "offset": 0,
+                },
+            }
+            exhausted = False
+        elif variant_exhausted:
+            next_cursor = {
+                "market_slug": str(config.get("market_slug") or "").strip().lower() or None,
+                "page": page_num,
+                "shard": shard_num,
+                "sort_mode": sort_mode_value,
+                "page_fingerprint": page_fingerprint,
+                "page_changed": page_changed,
+                "provider_cursor": {
+                    "variant_key": current_variant_key,
+                    "total_count": total_count,
+                    "offset": offset,
+                },
+            }
+            exhausted = True
+        else:
+            next_cursor = {
+                "market_slug": str(config.get("market_slug") or "").strip().lower() or None,
+                "page": page_num + 1,
+                "shard": shard_num,
+                "sort_mode": sort_mode_value,
+                "page_fingerprint": page_fingerprint,
+                "page_changed": page_changed,
+                "provider_cursor": {
+                    "variant_key": current_variant_key,
+                    "total_count": total_count,
+                    "offset": offset + limit_value,
+                },
+            }
+            exhausted = False
 
         return RentCastListingFetchResult(
             rows=rows,
@@ -520,6 +690,6 @@ class RentCastListingSource:
             exhausted=exhausted,
             page_fingerprint=page_fingerprint,
             page_changed=page_changed,
-            provider_cursor=None,
-            query_variant=dict(config.get("_query_variant") or {}) or None,
+            provider_cursor=dict(next_cursor.get("provider_cursor") or {}),
+            query_variant=dict(active_variant),
         )
