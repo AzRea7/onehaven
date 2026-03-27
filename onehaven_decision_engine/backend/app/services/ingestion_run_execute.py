@@ -13,6 +13,8 @@ from typing import Any
 from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
+from ..db import rollback_quietly
+
 from ..config import settings
 from ..middleware.structured_logging import emit_structured_log
 from ..models import Deal, Property, PropertyPhoto, RentAssumption
@@ -28,7 +30,7 @@ from ..services.ingestion_enrichment_service import (
     derive_photo_kind,
     execute_post_ingestion_pipeline,
 )
-from ..services.ingestion_run_service import finish_run, start_run
+from ..services.ingestion_run_service import finish_run, finish_run_in_new_session, start_run
 from ..services.locks_service import (
     acquire_ingestion_execution_lock,
     build_ingestion_execution_lock_key,
@@ -36,6 +38,7 @@ from ..services.locks_service import (
     has_completed_ingestion_dataset,
     mark_ingestion_dataset_completed,
     release_ingestion_execution_lock,
+    release_ingestion_execution_lock_in_new_session,
 )
 from ..services.market_sync_service import (
     advance_market_cursor,
@@ -61,6 +64,19 @@ DEFAULT_COMPLETION_LOCK_TTL_SECONDS = 60 * 60 * 24 * 14
 def _emit(payload: dict[str, Any], level: int = logging.INFO) -> None:
     emit_structured_log("onehaven.ingestion", payload, level=level)
 
+
+
+
+def _probe_session(db: Session, *, phase: str, org_id: int, source_id: int) -> None:
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception(
+            "ingestion_session_probe_failed",
+            extra={"org_id": int(org_id), "source_id": int(source_id), "phase": phase},
+        )
+        rollback_quietly(db)
+        raise
 
 def _norm_text(value: Any) -> str:
     return str(value or "").strip().lower()
@@ -348,28 +364,7 @@ def _seed_missing_completeness_columns(db: Session, *, org_id: int, property_id:
 
 
 def _mark_property_enrichment_queued(db: Session, *, org_id: int, property_id: int) -> None:
-    # Keep this best-effort so ingest does not fail if these columns are not present yet.
-    try:
-        db.execute(
-            text(
-                """
-                UPDATE properties
-                SET enrichment_status = COALESCE(enrichment_status, 'queued'),
-                    enrichment_requested_at = COALESCE(enrichment_requested_at, :requested_at)
-                WHERE org_id = :org_id AND id = :property_id
-                """
-            ),
-            {
-                "org_id": int(org_id),
-                "property_id": int(property_id),
-                "requested_at": _utcnow_naive(),
-            },
-        )
-    except Exception:
-        logger.debug(
-            "property_enrichment_queue_columns_not_available",
-            extra={"org_id": int(org_id), "property_id": int(property_id)},
-        )
+   return
 
 
 def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
@@ -664,6 +659,9 @@ def _run_optional_post_pipeline(
 
     This function intentionally allows the caller to skip expensive optional stages
     for faster ingestion. The import path remains property-first either way.
+
+    Important: the optional pipeline is isolated behind a savepoint so any failure
+    inside it cannot leave the shared ingestion session in an aborted state.
     """
     if bool(runtime_config.get("defer_optional_post_pipeline", False)):
         return True, ["optional_post_pipeline_deferred"], 0.0
@@ -673,13 +671,14 @@ def _run_optional_post_pipeline(
     was_partial = False
 
     try:
-        result = execute_post_ingestion_pipeline(
-            db,
-            org_id=int(org_id),
-            property_id=int(property_row.id),
-            actor_user_id=None,
-            emit_events=False,
-        )
+        with db.begin_nested():
+            result = execute_post_ingestion_pipeline(
+                db,
+                org_id=int(org_id),
+                property_id=int(property_row.id),
+                actor_user_id=None,
+                emit_events=False,
+            )
         apply_pipeline_summary(summary, result or {})
         was_partial = bool((result or {}).get("partial", False))
         pipeline_errors = list((result or {}).get("errors") or [])
@@ -691,6 +690,7 @@ def _run_optional_post_pipeline(
         was_partial = True
         pipeline_errors = [f"optional_module_missing:{getattr(exc, 'name', 'unknown')}"]
         summary["post_import_partials"] = int(summary.get("post_import_partials", 0) or 0) + 1
+        rollback_quietly(db)
     except Exception as exc:
         logger.exception(
             "optional_post_pipeline_failed",
@@ -702,6 +702,7 @@ def _run_optional_post_pipeline(
         errors = list(summary.get("post_import_errors") or [])
         errors.append({"property_id": int(property_row.id), "error": str(exc)})
         summary["post_import_errors"] = errors[:200]
+        rollback_quietly(db)
 
     elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
     return was_partial, pipeline_errors, elapsed_ms
@@ -854,11 +855,10 @@ def execute_source_sync(
             db.commit()
         except Exception:
             logger.exception("commit_after_execution_lock_acquire_failed")
-            try:
-                db.rollback()
-            except Exception:
-                logger.exception("rollback_after_execution_lock_acquire_commit_failed")
+            rollback_quietly(db)
             raise
+
+    _probe_session(db, phase="after_execution_lock_setup", org_id=int(org_id), source_id=source_id)
 
     if not execution_lock.acquired:
         _emit(
@@ -923,6 +923,7 @@ def execute_source_sync(
         trigger_type=str(trigger_type),
         runtime_config=runtime_config,
     )
+    _probe_session(db, phase="after_start_run", org_id=int(org_id), source_id=source_id)
 
     summary = {
         "records_seen": 0,
@@ -984,6 +985,7 @@ def execute_source_sync(
                 requested_limit=requested_new_records,
                 status="running",
             )
+            _probe_session(db, phase="after_mark_market_sync_started", org_id=int(org_id), source_id=source_id)
 
         cursor = dict(starting_cursor or {})
         provider_pages_scanned = 0
@@ -1017,6 +1019,7 @@ def execute_source_sync(
                 cursor=cursor,
                 provider_fetch_limit=provider_fetch_limit,
             )
+            _probe_session(db, phase="after_provider_fetch_before_row_loop", org_id=int(org_id), source_id=source_id)
             provider_ms = round((time.perf_counter() - provider_t0) * 1000, 2)
             summary["timings_ms"]["provider_load_total"] = round(
                 float(summary["timings_ms"].get("provider_load_total", 0.0) or 0.0) + provider_ms,
@@ -1093,6 +1096,12 @@ def execute_source_sync(
                     )
                     continue
 
+                _probe_session(
+                    db,
+                    phase="before_find_existing_by_external_id",
+                    org_id=int(org_id),
+                    source_id=source_id,
+                )
                 existing_record = find_existing_by_external_id(
                     db,
                     org_id=int(org_id),
@@ -1294,25 +1303,49 @@ def execute_source_sync(
         )
 
         return run
-    except Exception:
+    except Exception as exc:
         logger.exception("execute_source_sync_failed", extra={"org_id": int(org_id), "source_id": source_id})
         summary["timings_ms"]["run_total"] = round((time.perf_counter() - run_t0) * 1000, 2)
-        finish_run(
-            db,
-            run,
-            status="failed",
-            summary_json=summary,
-        )
+        summary.setdefault("error", str(exc))
+        error_summary = str(exc)
+        error_json = {
+            "error_type": exc.__class__.__name__,
+            "error": str(exc),
+        }
+
+        rollback_quietly(db)
+
+        try:
+            finish_run(
+                db,
+                run,
+                status="failed",
+                summary_json=summary,
+                error_summary=error_summary,
+                error_json=error_json,
+            )
+        except Exception:
+            logger.exception(
+                "execute_source_sync_finish_run_failed",
+                extra={"org_id": int(org_id), "source_id": source_id, "run_id": int(getattr(run, "id"))},
+            )
+            finish_run_in_new_session(
+                run_id=int(getattr(run, "id")),
+                status="failed",
+                summary_json=summary,
+                error_summary=error_summary,
+                error_json=error_json,
+            )
         raise
     finally:
         try:
             if bool(getattr(settings, "ingestion_force_release_lock_on_finish", True)):
-                release_ingestion_execution_lock(
-                    db,
+                release_ingestion_execution_lock_in_new_session(
                     org_id=int(org_id),
                     source_id=source_id,
                     dataset_key=dataset_key,
                     owner=lock_owner,
+                    force=True,
                 )
         except Exception:
             logger.exception("release_ingestion_execution_lock_failed")

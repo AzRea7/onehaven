@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..db import SessionLocal
+from ..db import SessionLocal, rollback_quietly
 from ..models import MarketSyncState
 from .ingestion_scheduler_service import build_runtime_payload
 from .ingestion_source_service import (
@@ -370,31 +370,46 @@ def get_resume_cursor(sync_state: MarketSyncState | None) -> dict[str, Any]:
     return saved
 
 
+
+
+def _state_write(db: Session, fn):
+    try:
+        return fn()
+    except Exception:
+        rollback_quietly(db)
+        raise
+
 def mark_backfill_completed(
     db: Session,
     *,
     sync_state: MarketSyncState,
     completed_at: datetime | None = None,
 ) -> MarketSyncState:
-    sync_state.backfill_completed_at = completed_at or _utcnow()
-    sync_state.updated_at = _utcnow()
-    db.add(sync_state)
-    db.flush()
-    return sync_state
+    def _op() -> MarketSyncState:
+        sync_state.backfill_completed_at = completed_at or _utcnow()
+        sync_state.updated_at = _utcnow()
+        db.add(sync_state)
+        db.flush()
+        return sync_state
 
 
+
+    return _state_write(db, _op)
 def clear_backfill_completed(
     db: Session,
     *,
     sync_state: MarketSyncState,
 ) -> MarketSyncState:
-    sync_state.backfill_completed_at = None
-    sync_state.updated_at = _utcnow()
-    db.add(sync_state)
-    db.flush()
-    return sync_state
+    def _op() -> MarketSyncState:
+        sync_state.backfill_completed_at = None
+        sync_state.updated_at = _utcnow()
+        db.add(sync_state)
+        db.flush()
+        return sync_state
 
 
+
+    return _state_write(db, _op)
 def list_selected_daily_markets() -> list[dict[str, Any]]:
     tier = _normalize_tier_limit(
         getattr(settings, "market_sync_daily_tier_filter", "all")
@@ -445,40 +460,43 @@ def get_or_create_market_sync_state(
     source: Any,
     market: dict[str, Any],
 ) -> MarketSyncState:
-    market_slug = str(market.get("slug") or "").strip().lower()
-    existing = get_market_sync_state(
-        db,
-        org_id=int(org_id),
-        source_id=int(getattr(source, "id")),
-        market_slug=market_slug,
-    )
-    if existing is not None:
-        if not existing.cursor_json:
-            existing.cursor_json = normalize_market_cursor(None, market_slug=market_slug)
-            db.add(existing)
-            db.flush()
-        return existing
+    def _op() -> MarketSyncState:
+        market_slug = str(market.get("slug") or "").strip().lower()
+        existing = get_market_sync_state(
+            db,
+            org_id=int(org_id),
+            source_id=int(getattr(source, "id")),
+            market_slug=market_slug,
+        )
+        if existing is not None:
+            if not existing.cursor_json:
+                existing.cursor_json = normalize_market_cursor(None, market_slug=market_slug)
+                db.add(existing)
+                db.flush()
+            return existing
 
-    row = MarketSyncState(
-        org_id=int(org_id),
-        source_id=int(getattr(source, "id")),
-        provider=str(getattr(source, "provider", "") or "").strip().lower(),
-        market_slug=market_slug,
-        state=str(market.get("state") or "MI").strip().upper(),
-        county=str(market.get("county") or "").strip().lower() or None,
-        city=str(market.get("city") or "").strip().lower() or None,
-        status="idle",
-        cursor_json=normalize_market_cursor(None, market_slug=market_slug),
-        last_page=1,
-        last_shard=1,
-        last_sort_mode=DEFAULT_CURSOR_SORT_MODE,
-        market_exhausted=False,
-    )
-    db.add(row)
-    db.flush()
-    return row
+        row = MarketSyncState(
+            org_id=int(org_id),
+            source_id=int(getattr(source, "id")),
+            provider=str(getattr(source, "provider", "") or "").strip().lower(),
+            market_slug=market_slug,
+            state=str(market.get("state") or "MI").strip().upper(),
+            county=str(market.get("county") or "").strip().lower() or None,
+            city=str(market.get("city") or "").strip().lower() or None,
+            status="idle",
+            cursor_json=normalize_market_cursor(None, market_slug=market_slug),
+            last_page=1,
+            last_shard=1,
+            last_sort_mode=DEFAULT_CURSOR_SORT_MODE,
+            market_exhausted=False,
+        )
+        db.add(row)
+        db.flush()
+        return row
 
 
+
+    return _state_write(db, _op)
 def mark_market_sync_started(
     db: Session,
     *,
@@ -486,17 +504,20 @@ def mark_market_sync_started(
     requested_limit: int | None = None,
     status: str = "running",
 ) -> MarketSyncState:
-    sync_state.status = str(status or "running")
-    sync_state.last_requested_limit = (
-        int(requested_limit) if requested_limit is not None else sync_state.last_requested_limit
-    )
-    sync_state.last_sync_started_at = _utcnow()
-    sync_state.updated_at = _utcnow()
-    db.add(sync_state)
-    db.flush()
-    return sync_state
+    def _op() -> MarketSyncState:
+        sync_state.status = str(status or "running")
+        sync_state.last_requested_limit = (
+            int(requested_limit) if requested_limit is not None else sync_state.last_requested_limit
+        )
+        sync_state.last_sync_started_at = _utcnow()
+        sync_state.updated_at = _utcnow()
+        db.add(sync_state)
+        db.flush()
+        return sync_state
 
 
+
+    return _state_write(db, _op)
 def mark_market_sync_completed(
     db: Session,
     *,
@@ -505,21 +526,24 @@ def mark_market_sync_completed(
     seen_provider_record_at: datetime | None = None,
     status: str = "idle",
 ) -> MarketSyncState:
-    sync_state.status = str(status or "idle")
-    sync_state.last_sync_completed_at = _utcnow()
-    sync_state.updated_at = _utcnow()
+    def _op() -> MarketSyncState:
+        sync_state.status = str(status or "idle")
+        sync_state.last_sync_completed_at = _utcnow()
+        sync_state.updated_at = _utcnow()
 
-    if market_exhausted is not None:
-        sync_state.market_exhausted = bool(market_exhausted)
+        if market_exhausted is not None:
+            sync_state.market_exhausted = bool(market_exhausted)
 
-    if seen_provider_record_at is not None:
-        sync_state.last_seen_provider_record_at = seen_provider_record_at
+        if seen_provider_record_at is not None:
+            sync_state.last_seen_provider_record_at = seen_provider_record_at
 
-    db.add(sync_state)
-    db.flush()
-    return sync_state
+        db.add(sync_state)
+        db.flush()
+        return sync_state
 
 
+
+    return _state_write(db, _op)
 def advance_market_cursor(
     db: Session,
     *,
@@ -533,51 +557,54 @@ def advance_market_cursor(
     exhausted: bool | None = None,
     seen_provider_record_at: datetime | None = None,
 ) -> MarketSyncState:
-    merged = normalize_market_cursor(
-        {
-            **dict(sync_state.cursor_json or {}),
-            **dict(next_cursor or {}),
-            "page_fingerprint": page_fingerprint
-            or dict(next_cursor or {}).get("page_fingerprint"),
-            "page_changed": (
-                bool(page_changed)
-                if page_changed is not None
-                else dict(next_cursor or {}).get("page_changed", True)
-            ),
-            "sort_mode": sort_mode
-            or dict(next_cursor or {}).get("sort_mode")
-            or sync_state.last_sort_mode
-            or DEFAULT_CURSOR_SORT_MODE,
-        },
-        market_slug=sync_state.market_slug,
-    )
+    def _op() -> MarketSyncState:
+        merged = normalize_market_cursor(
+            {
+                **dict(sync_state.cursor_json or {}),
+                **dict(next_cursor or {}),
+                "page_fingerprint": page_fingerprint
+                or dict(next_cursor or {}).get("page_fingerprint"),
+                "page_changed": (
+                    bool(page_changed)
+                    if page_changed is not None
+                    else dict(next_cursor or {}).get("page_changed", True)
+                ),
+                "sort_mode": sort_mode
+                or dict(next_cursor or {}).get("sort_mode")
+                or sync_state.last_sort_mode
+                or DEFAULT_CURSOR_SORT_MODE,
+            },
+            market_slug=sync_state.market_slug,
+        )
 
-    sync_state.cursor_json = merged
-    sync_state.last_page = _safe_int(
-        page_scanned if page_scanned is not None else merged.get("page"),
-        DEFAULT_CURSOR_PAGE,
-    )
-    sync_state.last_shard = _safe_int(
-        shard_scanned if shard_scanned is not None else merged.get("shard"),
-        DEFAULT_CURSOR_SHARD,
-    )
-    sync_state.last_sort_mode = str(merged.get("sort_mode") or DEFAULT_CURSOR_SORT_MODE)
-    sync_state.last_page_fingerprint = (
-        str(page_fingerprint or merged.get("page_fingerprint") or "").strip() or None
-    )
-    sync_state.market_exhausted = (
-        bool(exhausted) if exhausted is not None else bool(sync_state.market_exhausted)
-    )
-    sync_state.updated_at = _utcnow()
+        sync_state.cursor_json = merged
+        sync_state.last_page = _safe_int(
+            page_scanned if page_scanned is not None else merged.get("page"),
+            DEFAULT_CURSOR_PAGE,
+        )
+        sync_state.last_shard = _safe_int(
+            shard_scanned if shard_scanned is not None else merged.get("shard"),
+            DEFAULT_CURSOR_SHARD,
+        )
+        sync_state.last_sort_mode = str(merged.get("sort_mode") or DEFAULT_CURSOR_SORT_MODE)
+        sync_state.last_page_fingerprint = (
+            str(page_fingerprint or merged.get("page_fingerprint") or "").strip() or None
+        )
+        sync_state.market_exhausted = (
+            bool(exhausted) if exhausted is not None else bool(sync_state.market_exhausted)
+        )
+        sync_state.updated_at = _utcnow()
 
-    if seen_provider_record_at is not None:
-        sync_state.last_seen_provider_record_at = seen_provider_record_at
+        if seen_provider_record_at is not None:
+            sync_state.last_seen_provider_record_at = seen_provider_record_at
 
-    db.add(sync_state)
-    db.flush()
-    return sync_state
+        db.add(sync_state)
+        db.flush()
+        return sync_state
 
 
+
+    return _state_write(db, _op)
 def reset_market_cursor(
     db: Session,
     *,
@@ -587,52 +614,58 @@ def reset_market_cursor(
     sort_mode: str = DEFAULT_CURSOR_SORT_MODE,
     clear_exhausted: bool = True,
 ) -> MarketSyncState:
-    sync_state.cursor_json = normalize_market_cursor(
-        {
-            "market_slug": sync_state.market_slug,
-            "page": max(1, int(page)),
-            "shard": max(1, int(shard)),
-            "sort_mode": (
-                str(sort_mode or DEFAULT_CURSOR_SORT_MODE).strip().lower()
-                or DEFAULT_CURSOR_SORT_MODE
-            ),
-            "refresh_window_pages": get_default_refresh_window_pages(),
-            "page_fingerprint": None,
-            "page_changed": True,
-            "provider_cursor": None,
-        },
-        market_slug=sync_state.market_slug,
-    )
-    sync_state.last_page = max(1, int(page))
-    sync_state.last_shard = max(1, int(shard))
-    sync_state.last_sort_mode = (
-        str(sort_mode or DEFAULT_CURSOR_SORT_MODE).strip().lower()
-        or DEFAULT_CURSOR_SORT_MODE
-    )
-    sync_state.last_page_fingerprint = None
-    sync_state.updated_at = _utcnow()
+    def _op() -> MarketSyncState:
+        sync_state.cursor_json = normalize_market_cursor(
+            {
+                "market_slug": sync_state.market_slug,
+                "page": max(1, int(page)),
+                "shard": max(1, int(shard)),
+                "sort_mode": (
+                    str(sort_mode or DEFAULT_CURSOR_SORT_MODE).strip().lower()
+                    or DEFAULT_CURSOR_SORT_MODE
+                ),
+                "refresh_window_pages": get_default_refresh_window_pages(),
+                "page_fingerprint": None,
+                "page_changed": True,
+                "provider_cursor": None,
+            },
+            market_slug=sync_state.market_slug,
+        )
+        sync_state.last_page = max(1, int(page))
+        sync_state.last_shard = max(1, int(shard))
+        sync_state.last_sort_mode = (
+            str(sort_mode or DEFAULT_CURSOR_SORT_MODE).strip().lower()
+            or DEFAULT_CURSOR_SORT_MODE
+        )
+        sync_state.last_page_fingerprint = None
+        sync_state.updated_at = _utcnow()
 
-    if clear_exhausted:
-        sync_state.market_exhausted = False
+        if clear_exhausted:
+            sync_state.market_exhausted = False
 
-    db.add(sync_state)
-    db.flush()
-    return sync_state
+        db.add(sync_state)
+        db.flush()
+        return sync_state
 
 
+
+    return _state_write(db, _op)
 def mark_market_exhausted(
     db: Session,
     *,
     sync_state: MarketSyncState,
     exhausted: bool = True,
 ) -> MarketSyncState:
-    sync_state.market_exhausted = bool(exhausted)
-    sync_state.updated_at = _utcnow()
-    db.add(sync_state)
-    db.flush()
-    return sync_state
+    def _op() -> MarketSyncState:
+        sync_state.market_exhausted = bool(exhausted)
+        sync_state.updated_at = _utcnow()
+        db.add(sync_state)
+        db.flush()
+        return sync_state
 
 
+
+    return _state_write(db, _op)
 def get_sync_mode_runtime_overrides(
     *,
     sync_mode: str | None,
@@ -1082,3 +1115,4 @@ def build_supported_market_sync_plan(
     finally:
         db.close()
         
+

@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from ..config import settings
-from ..db import SessionLocal
+from ..db import SessionLocal, rollback_quietly
 from ..services.geo_enrichment import enrich_property_geo
 from ..services.ingestion_enrichment_service import (
     execute_post_ingestion_pipeline,
@@ -40,6 +40,7 @@ from ..services.locks_service import (
     acquire_lock,
     is_lock_active,
     release_lock,
+    release_ingestion_execution_lock_in_new_session,
 )
 from ..services.market_sync_service import (
     get_market_sync_state_by_id,
@@ -292,6 +293,59 @@ def _property_needs_enrichment(db, *, org_id: int, property_id: int) -> bool:
     return row is not None
 
 
+def _property_completion_snapshot(db, *, org_id: int, property_id: int) -> dict[str, Any] | None:
+    row = db.execute(
+        text(
+            """
+            SELECT
+                id,
+                COALESCE(completeness_geo_status, 'missing') AS completeness_geo_status,
+                COALESCE(completeness_rent_status, 'missing') AS completeness_rent_status,
+                COALESCE(completeness_risk_status, 'missing') AS completeness_risk_status,
+                COALESCE(completeness_jurisdiction_status, 'missing') AS completeness_jurisdiction_status,
+                COALESCE(completeness_cashflow_status, 'missing') AS completeness_cashflow_status
+            FROM properties
+            WHERE org_id = :org_id AND id = :property_id
+            LIMIT 1
+            """
+        ),
+        {"org_id": int(org_id), "property_id": int(property_id)},
+    ).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def _property_is_complete(snapshot: dict[str, Any] | None) -> bool:
+    if not snapshot:
+        return False
+    required = (
+        "completeness_geo_status",
+        "completeness_rent_status",
+        "completeness_risk_status",
+        "completeness_jurisdiction_status",
+        "completeness_cashflow_status",
+    )
+    return all(str(snapshot.get(key) or "").strip().lower() == "complete" for key in required)
+
+
+def _clear_false_done_marker(db, *, org_id: int, property_id: int, owner: str) -> bool:
+    done_key = _property_enrich_done_key(int(org_id), int(property_id))
+    if not is_lock_active(db, org_id=int(org_id), lock_key=done_key):
+        return False
+
+    snapshot = _property_completion_snapshot(db, org_id=int(org_id), property_id=int(property_id))
+    if _property_is_complete(snapshot):
+        return False
+
+    release_lock(
+        db,
+        org_id=int(org_id),
+        lock_key=done_key,
+        owner=owner,
+        force=True,
+    )
+    return True
+
+
 def _enqueue_enrichment_if_needed(
     *,
     db,
@@ -315,7 +369,13 @@ def _enqueue_enrichment_if_needed(
         org_id=int(org_id),
         lock_key=_property_enrich_done_key(int(org_id), int(property_id)),
     ):
-        return False
+        if not _clear_false_done_marker(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+            owner=_task_lock_owner("property_enrich"),
+        ):
+            return False
 
     enrich_property_after_sync_task.delay(
         org_id=int(org_id),
@@ -422,6 +482,7 @@ def sync_source_task(
             },
         )
     except Exception as exc:
+        rollback_quietly(db)
         logger.exception("sync_source_task_failed", extra={"org_id": int(org_id), "source_id": int(source_id)})
         if _retry_enabled() and _is_transient_error(exc) and int(getattr(self.request, "retries", 0) or 0) < _max_retries():
             raise self.retry(exc=exc, countdown=_retry_delay_seconds())
@@ -444,20 +505,17 @@ def enrich_property_after_sync_task(
     done_key = _property_enrich_done_key(int(org_id), int(property_id))
 
     try:
-        if is_lock_active(db, org_id=int(org_id), lock_key=done_key):
-            return _finalize_json_result(
-                ok=True,
-                base={
-                    "org_id": int(org_id),
-                    "property_id": int(property_id),
-                    "source_id": source_id,
-                    "run_id": run_id,
-                    "skipped": True,
-                    "reason": "already_enriched_or_marked_done",
-                },
-            )
+        cleared_false_done = _clear_false_done_marker(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+            owner=owner,
+        )
+        if cleared_false_done:
+            db.commit()
 
-        if not _property_needs_enrichment(db, org_id=int(org_id), property_id=int(property_id)):
+        snapshot = _property_completion_snapshot(db, org_id=int(org_id), property_id=int(property_id))
+        if _property_is_complete(snapshot):
             acquire_lock(
                 db,
                 org_id=int(org_id),
@@ -498,6 +556,35 @@ def enrich_property_after_sync_task(
                 },
             )
 
+        snapshot = _property_completion_snapshot(db, org_id=int(org_id), property_id=int(property_id))
+        if _property_is_complete(snapshot):
+            acquire_lock(
+                db,
+                org_id=int(org_id),
+                lock_key=done_key,
+                owner=owner,
+                ttl_seconds=_task_done_ttl_seconds(),
+            )
+            release_lock(
+                db,
+                org_id=int(org_id),
+                lock_key=lock_key,
+                owner=owner,
+                force=True,
+            )
+            db.commit()
+            return _finalize_json_result(
+                ok=True,
+                base={
+                    "org_id": int(org_id),
+                    "property_id": int(property_id),
+                    "source_id": source_id,
+                    "run_id": run_id,
+                    "skipped": True,
+                    "reason": "property_already_complete",
+                },
+            )
+
         result = execute_post_ingestion_pipeline(
             db,
             org_id=int(org_id),
@@ -506,13 +593,24 @@ def enrich_property_after_sync_task(
             emit_events=False,
         )
 
-        acquire_lock(
-            db,
-            org_id=int(org_id),
-            lock_key=done_key,
-            owner=owner,
-            ttl_seconds=_task_done_ttl_seconds(),
-        )
+        snapshot = _property_completion_snapshot(db, org_id=int(org_id), property_id=int(property_id))
+        completed = _property_is_complete(snapshot)
+        if completed:
+            acquire_lock(
+                db,
+                org_id=int(org_id),
+                lock_key=done_key,
+                owner=owner,
+                ttl_seconds=_task_done_ttl_seconds(),
+            )
+        else:
+            release_lock(
+                db,
+                org_id=int(org_id),
+                lock_key=done_key,
+                owner=owner,
+                force=True,
+            )
 
         release_lock(
             db,
@@ -531,6 +629,8 @@ def enrich_property_after_sync_task(
                 "property_id": int(property_id),
                 "source_id": source_id,
                 "run_id": run_id,
+                "completed": bool(completed),
+                "needs_followup": not bool(completed),
             },
             result=result or {},
         )
@@ -548,7 +648,7 @@ def enrich_property_after_sync_task(
                 org_id=int(org_id),
                 lock_key=lock_key,
                 owner=owner,
-                force=False,
+                force=True,
             )
             db.commit()
         except Exception:
@@ -849,6 +949,7 @@ def backfill_missing_enrichment_for_city_task(
 ):
     db = SessionLocal()
     owner = _task_lock_owner("backfill_city")
+    lock_key = ""
     try:
         effective_limit = int(limit or 500)
         zips = [str(z).strip() for z in (zip_codes or []) if str(z).strip()]
@@ -970,17 +1071,18 @@ def backfill_missing_enrichment_for_city_task(
             },
         )
     finally:
-        try:
-            release_lock(
-                db,
-                org_id=int(org_id),
-                lock_key=lock_key,
-                owner=owner,
-                force=False,
-            )
-            db.commit()
-        except Exception:
-            db.rollback()
+        if lock_key:
+            try:
+                release_lock(
+                    db,
+                    org_id=int(org_id),
+                    lock_key=lock_key,
+                    owner=owner,
+                    force=False,
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
         db.close()
 
 
@@ -993,6 +1095,7 @@ def backfill_missing_enrichment_for_jurisdiction_task(
 ):
     db = SessionLocal()
     owner = _task_lock_owner("backfill_jurisdiction")
+    lock_key = ""
     try:
         effective_limit = int(limit or 500)
         code = str(jurisdiction_code).strip()
@@ -1072,16 +1175,16 @@ def backfill_missing_enrichment_for_jurisdiction_task(
             },
         )
     finally:
-        try:
-            release_lock(
-                db,
-                org_id=int(org_id),
-                lock_key=lock_key,
-                owner=owner,
-                force=False,
-            )
-            db.commit()
-        except Exception:
-            db.rollback()
+        if lock_key:
+            try:
+                release_lock(
+                    db,
+                    org_id=int(org_id),
+                    lock_key=lock_key,
+                    owner=owner,
+                    force=False,
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
         db.close()
-        

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
 
@@ -25,6 +25,15 @@ SessionLocal = sessionmaker(
 )
 
 
+def rollback_quietly(db: Session | None) -> None:
+    if db is None:
+        return
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
 def get_db():
     """
     IMPORTANT (Postgres):
@@ -38,11 +47,7 @@ def get_db():
     try:
         yield db
     except Exception:
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        rollback_quietly(db)
         raise
     finally:
         db.close()
-        

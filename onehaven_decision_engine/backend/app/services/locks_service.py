@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..db import SessionLocal, rollback_quietly
 from app.models import OrgLock
 
 
@@ -128,48 +129,52 @@ def acquire_lock(
     ttl_seconds: int,
     now: datetime | None = None,
 ) -> LockResult:
-    now = now or _now()
-    ttl_seconds = max(1, int(ttl_seconds))
-    expires_at = now + timedelta(seconds=ttl_seconds)
+    try:
+        now = now or _now()
+        ttl_seconds = max(1, int(ttl_seconds))
+        expires_at = now + timedelta(seconds=ttl_seconds)
 
-    row = db.scalar(
-        select(OrgLock).where(
-            OrgLock.org_id == int(org_id),
-            OrgLock.lock_key == str(lock_key),
+        row = db.scalar(
+            select(OrgLock).where(
+                OrgLock.org_id == int(org_id),
+                OrgLock.lock_key == str(lock_key),
+            )
         )
-    )
 
-    if row is None:
-        row = OrgLock(
-            org_id=int(org_id),
-            lock_key=str(lock_key),
-        )
-        _set_holder(row, owner)
-        _set_expiry(row, expires_at)
-        _touch_timestamps(row, now=now, acquired=True)
-        db.add(row)
-        db.flush()
-        return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
+        if row is None:
+            row = OrgLock(
+                org_id=int(org_id),
+                lock_key=str(lock_key),
+            )
+            _set_holder(row, owner)
+            _set_expiry(row, expires_at)
+            _touch_timestamps(row, now=now, acquired=True)
+            db.add(row)
+            db.flush()
+            return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
 
-    if _is_stale(row, now=now):
-        _set_holder(row, owner)
-        _set_expiry(row, expires_at)
-        _touch_timestamps(row, now=now, acquired=True)
-        db.add(row)
-        db.flush()
-        return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
+        if _is_stale(row, now=now):
+            _set_holder(row, owner)
+            _set_expiry(row, expires_at)
+            _touch_timestamps(row, now=now, acquired=True)
+            db.add(row)
+            db.flush()
+            return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
 
-    current_holder = _get_holder(row)
-    desired_holder = str(owner or "").strip() or "system"
-    if (current_holder or "") == desired_holder:
-        _set_holder(row, desired_holder)
-        _set_expiry(row, expires_at)
-        _touch_timestamps(row, now=now, acquired=True)
-        db.add(row)
-        db.flush()
-        return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
+        current_holder = _get_holder(row)
+        desired_holder = str(owner or "").strip() or "system"
+        if (current_holder or "") == desired_holder:
+            _set_holder(row, desired_holder)
+            _set_expiry(row, expires_at)
+            _touch_timestamps(row, now=now, acquired=True)
+            db.add(row)
+            db.flush()
+            return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
 
-    return _row_to_result(row, acquired=False, org_id=int(org_id), lock_key=str(lock_key))
+        return _row_to_result(row, acquired=False, org_id=int(org_id), lock_key=str(lock_key))
+    except Exception:
+        rollback_quietly(db)
+        raise
 
 
 def renew_lock(
@@ -200,39 +205,43 @@ def release_lock(
     force: bool = False,
     now: datetime | None = None,
 ) -> LockResult:
-    now = now or _now()
+    try:
+        now = now or _now()
 
-    row = db.scalar(
-        select(OrgLock).where(
-            OrgLock.org_id == int(org_id),
-            OrgLock.lock_key == str(lock_key),
-        )
-    )
-
-    if row is None:
-        return LockResult(
-            acquired=False,
-            lock_key=str(lock_key),
-            holder=None,
-            expires_at=None,
-            stale=False,
-            org_id=int(org_id),
+        row = db.scalar(
+            select(OrgLock).where(
+                OrgLock.org_id == int(org_id),
+                OrgLock.lock_key == str(lock_key),
+            )
         )
 
-    current_holder = _get_holder(row)
-    desired_holder = str(owner or "").strip() or "system"
+        if row is None:
+            return LockResult(
+                acquired=False,
+                lock_key=str(lock_key),
+                holder=None,
+                expires_at=None,
+                stale=False,
+                org_id=int(org_id),
+            )
 
-    if not force and owner and current_holder and current_holder != desired_holder:
-        return _row_to_result(row, acquired=False, org_id=int(org_id), lock_key=str(lock_key))
+        current_holder = _get_holder(row)
+        desired_holder = str(owner or "").strip() or "system"
 
-    _set_expiry(row, now - timedelta(seconds=1))
-    if force or not owner or current_holder == desired_holder:
-        _set_holder(row, desired_holder)
-    _touch_timestamps(row, now=now, acquired=True)
-    db.add(row)
-    db.flush()
+        if not force and owner and current_holder and current_holder != desired_holder:
+            return _row_to_result(row, acquired=False, org_id=int(org_id), lock_key=str(lock_key))
 
-    return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
+        _set_expiry(row, now - timedelta(seconds=1))
+        if force or not owner or current_holder == desired_holder:
+            _set_holder(row, desired_holder)
+        _touch_timestamps(row, now=now, acquired=True)
+        db.add(row)
+        db.flush()
+
+        return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
+    except Exception:
+        rollback_quietly(db)
+        raise
 
 
 def clear_stale_lock(
@@ -242,31 +251,35 @@ def clear_stale_lock(
     lock_key: str,
     now: datetime | None = None,
 ) -> LockResult:
-    now = now or _now()
-    row = db.scalar(
-        select(OrgLock).where(
-            OrgLock.org_id == int(org_id),
-            OrgLock.lock_key == str(lock_key),
+    try:
+        now = now or _now()
+        row = db.scalar(
+            select(OrgLock).where(
+                OrgLock.org_id == int(org_id),
+                OrgLock.lock_key == str(lock_key),
+            )
         )
-    )
-    if row is None:
-        return LockResult(
-            acquired=False,
-            lock_key=str(lock_key),
-            holder=None,
-            expires_at=None,
-            stale=False,
-            org_id=int(org_id),
-        )
+        if row is None:
+            return LockResult(
+                acquired=False,
+                lock_key=str(lock_key),
+                holder=None,
+                expires_at=None,
+                stale=False,
+                org_id=int(org_id),
+            )
 
-    if not _is_stale(row, now=now):
-        return _row_to_result(row, acquired=False, org_id=int(org_id), lock_key=str(lock_key))
+        if not _is_stale(row, now=now):
+            return _row_to_result(row, acquired=False, org_id=int(org_id), lock_key=str(lock_key))
 
-    _set_expiry(row, now - timedelta(seconds=1))
-    _touch_timestamps(row, now=now, acquired=True)
-    db.add(row)
-    db.flush()
-    return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
+        _set_expiry(row, now - timedelta(seconds=1))
+        _touch_timestamps(row, now=now, acquired=True)
+        db.add(row)
+        db.flush()
+        return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
+    except Exception:
+        rollback_quietly(db)
+        raise
 
 
 def is_lock_active(
@@ -353,6 +366,36 @@ def release_ingestion_execution_lock(
         now=now,
     )
 
+def release_ingestion_execution_lock_in_new_session(
+    *,
+    org_id: int,
+    source_id: int,
+    dataset_key: str,
+    owner: str | None = None,
+    force: bool = True,
+    now: datetime | None = None,
+) -> LockResult:
+    db = SessionLocal()
+    try:
+        result = release_ingestion_execution_lock(
+            db,
+            org_id=int(org_id),
+            source_id=int(source_id),
+            dataset_key=str(dataset_key),
+            owner=owner,
+            force=bool(force),
+            now=now,
+        )
+        db.commit()
+        return result
+    except Exception:
+        rollback_quietly(db)
+        raise
+    finally:
+        db.close()
+
+
+
 
 def has_completed_ingestion_dataset(
     db: Session,
@@ -406,26 +449,30 @@ def clear_stale_locks_for_prefix(
     lock_key_prefix: str,
     now: datetime | None = None,
 ) -> int:
-    now = now or _now()
-    rows = list(
-        db.scalars(
-            select(OrgLock).where(
-                OrgLock.org_id == int(org_id),
-                OrgLock.lock_key.like(f"{str(lock_key_prefix)}%"),
-            )
-        ).all()
-    )
-    cleared = 0
-    for row in rows:
-        if not _is_stale(row, now=now):
-            continue
-        _set_expiry(row, now - timedelta(seconds=1))
-        _touch_timestamps(row, now=now)
-        db.add(row)
-        cleared += 1
-    if cleared:
-        db.flush()
-    return cleared
+    try:
+        now = now or _now()
+        rows = list(
+            db.scalars(
+                select(OrgLock).where(
+                    OrgLock.org_id == int(org_id),
+                    OrgLock.lock_key.like(f"{str(lock_key_prefix)}%"),
+                )
+            ).all()
+        )
+        cleared = 0
+        for row in rows:
+            if not _is_stale(row, now=now):
+                continue
+            _set_expiry(row, now - timedelta(seconds=1))
+            _touch_timestamps(row, now=now)
+            db.add(row)
+            cleared += 1
+        if cleared:
+            db.flush()
+        return cleared
+    except Exception:
+        rollback_quietly(db)
+        raise
 
 
 def renew_ingestion_execution_lock(

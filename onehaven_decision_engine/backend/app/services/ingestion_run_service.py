@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..db import SessionLocal, rollback_quietly
 from ..models import IngestionRun, IngestionSource
 
 
@@ -69,9 +70,69 @@ def start_run(
         summary_json=summary,
     )
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        rollback_quietly(db)
+        raise
+
     db.refresh(row)
     return row
+
+
+def _apply_run_finish_state(
+    row: IngestionRun,
+    *,
+    status: str,
+    final_summary: dict[str, Any],
+    error_summary: str | None,
+    error_json: dict[str, Any] | None,
+) -> None:
+    row.status = str(status)
+    row.finished_at = datetime.utcnow()
+    row.records_seen = int(final_summary.get("records_seen") or 0)
+    row.records_imported = int(final_summary.get("records_imported") or 0)
+    row.properties_created = int(final_summary.get("properties_created") or 0)
+    row.properties_updated = int(final_summary.get("properties_updated") or 0)
+    row.deals_created = int(final_summary.get("deals_created") or 0)
+    row.deals_updated = int(final_summary.get("deals_updated") or 0)
+    row.rent_rows_upserted = int(final_summary.get("rent_rows_upserted") or 0)
+    row.photos_upserted = int(final_summary.get("photos_upserted") or 0)
+    row.duplicates_skipped = int(final_summary.get("duplicates_skipped") or 0)
+    row.invalid_rows = int(final_summary.get("invalid_rows") or 0)
+    row.summary_json = final_summary
+    row.error_summary = error_summary
+    row.error_json = _json_safe(error_json) if error_json is not None else None
+
+
+def finish_run_in_new_session(
+    *,
+    run_id: int,
+    status: str,
+    summary: dict[str, Any] | None = None,
+    summary_json: dict[str, Any] | None = None,
+    error_summary: str | None = None,
+    error_json: dict[str, Any] | None = None,
+) -> IngestionRun:
+    db = SessionLocal()
+    try:
+        row = db.get(IngestionRun, int(run_id))
+        if row is None:
+            raise ValueError(f"IngestionRun not found: run_id={int(run_id)}")
+        return finish_run(
+            db,
+            row,
+            status=status,
+            summary=summary,
+            summary_json=summary_json,
+            error_summary=error_summary,
+            error_json=error_json,
+        )
+    except Exception:
+        rollback_quietly(db)
+        raise
+    finally:
+        db.close()
 
 
 def finish_run(
@@ -101,21 +162,13 @@ def finish_run(
         final_summary.setdefault("max_pages_budget", existing_summary.get("max_pages_budget"))
         final_summary.setdefault("market_exhausted", existing_summary.get("market_exhausted"))
 
-    row.status = str(status)
-    row.finished_at = datetime.utcnow()
-    row.records_seen = int(final_summary.get("records_seen") or 0)
-    row.records_imported = int(final_summary.get("records_imported") or 0)
-    row.properties_created = int(final_summary.get("properties_created") or 0)
-    row.properties_updated = int(final_summary.get("properties_updated") or 0)
-    row.deals_created = int(final_summary.get("deals_created") or 0)
-    row.deals_updated = int(final_summary.get("deals_updated") or 0)
-    row.rent_rows_upserted = int(final_summary.get("rent_rows_upserted") or 0)
-    row.photos_upserted = int(final_summary.get("photos_upserted") or 0)
-    row.duplicates_skipped = int(final_summary.get("duplicates_skipped") or 0)
-    row.invalid_rows = int(final_summary.get("invalid_rows") or 0)
-    row.summary_json = final_summary
-    row.error_summary = error_summary
-    row.error_json = _json_safe(error_json) if error_json is not None else None
+    _apply_run_finish_state(
+        row,
+        status=status,
+        final_summary=final_summary,
+        error_summary=error_summary,
+        error_json=error_json,
+    )
     db.add(row)
 
     source = db.get(IngestionSource, int(row.source_id))
@@ -287,3 +340,5 @@ def get_ingestion_overview(db: Session, *, org_id: int) -> dict[str, Any]:
         "properties_created_7d": int(properties_created_7d),
         "properties_updated_7d": int(properties_updated_7d),
     }
+
+
