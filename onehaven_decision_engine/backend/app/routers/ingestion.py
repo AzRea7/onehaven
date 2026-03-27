@@ -237,20 +237,15 @@ class IngestionSyncLaunchRequest(BaseModel):
 
 
 class SupportedMarketSyncRequest(BaseModel):
-    market_slug: str | None = None
-    city: str | None = None
-    state: str = "MI"
+    market_slug: str
+    limit: int | None = Field(default=None, ge=1, le=500)
     execute_inline: bool = False
 
     @model_validator(mode="after")
     def validate_target(self):
         self.market_slug = _normalize_optional_text(self.market_slug)
-        self.city = _normalize_optional_text(self.city)
-        self.state = _normalize_optional_text(self.state) or "MI"
-
-        if not self.market_slug and not self.city:
-            raise ValueError("market_slug or city is required")
-
+        if not self.market_slug:
+            raise ValueError("market_slug is required")
         return self
 
 
@@ -346,8 +341,7 @@ def sync_supported_market(
         db,
         org_id=int(p.org_id),
         market_slug=payload.market_slug,
-        city=payload.city,
-        state=payload.state or "MI",
+        limit=payload.limit,
     )
 
     if not plan["covered"]:

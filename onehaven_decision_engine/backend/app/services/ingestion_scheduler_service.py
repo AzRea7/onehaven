@@ -67,6 +67,16 @@ def build_runtime_payload(
     property_types: list[str] | tuple[str, ...] | None = None,
     max_price: int | None = None,
     max_units: int | None = None,
+    market_cursor: dict[str, Any] | None = None,
+    market_sync_state_id: int | None = None,
+    market_sync_status: str | None = None,
+    market_exhausted: bool | None = None,
+    sync_mode: str | None = None,
+    max_pages_budget: int | None = None,
+    backfill_target_records: int | None = None,
+    reset_market_cursor_on_start: bool | None = None,
+    supported_market: bool | None = None,
+    mark_backfill_complete_on_exhaustion: bool | None = None,
 ) -> dict[str, Any]:
     normalized_property_types = [
         str(x).strip()
@@ -100,7 +110,29 @@ def build_runtime_payload(
     if city:
         payload["city"] = city.strip().lower()
     if market_slug:
+        payload["market_slug"] = str(market_slug).strip().lower()
         payload["idempotency_context"] = {"market_slug": str(market_slug).strip().lower()}
+
+    if isinstance(market_cursor, dict) and market_cursor:
+        payload["market_cursor"] = dict(market_cursor)
+    if market_sync_state_id is not None:
+        payload["market_sync_state_id"] = int(market_sync_state_id)
+    if market_sync_status:
+        payload["market_sync_status"] = str(market_sync_status)
+    if market_exhausted is not None:
+        payload["market_exhausted"] = bool(market_exhausted)
+    if sync_mode:
+        payload["sync_mode"] = str(sync_mode).strip().lower()
+    if max_pages_budget is not None:
+        payload["max_pages_budget"] = int(max_pages_budget)
+    if backfill_target_records is not None:
+        payload["backfill_target_records"] = int(backfill_target_records)
+    if reset_market_cursor_on_start is not None:
+        payload["reset_market_cursor_on_start"] = bool(reset_market_cursor_on_start)
+    if supported_market is not None:
+        payload["supported_market"] = bool(supported_market)
+    if mark_backfill_complete_on_exhaustion is not None:
+        payload["mark_backfill_complete_on_exhaustion"] = bool(mark_backfill_complete_on_exhaustion)
 
     return payload
 
@@ -219,14 +251,16 @@ def _dispatch_dedupe_key(
     day_key: str,
     source_key: str,
     market: dict[str, Any],
+    sync_mode: str | None = None,
 ) -> str:
     state = str(market.get("state") or "MI").strip().lower()
     county = str(market.get("county") or "").strip().lower()
     city = str(market.get("city") or "").strip().lower()
     market_slug = str(market.get("slug") or "").strip().lower()
+    normalized_mode = str(sync_mode or "refresh").strip().lower()
     return (
         f"daily_sync_dispatch:{int(org_id)}:{day_key}:{source_key}:"
-        f"{state}:{county}:{city}:{market_slug}"
+        f"{state}:{county}:{city}:{market_slug}:{normalized_mode}"
     )
 
 
@@ -235,9 +269,9 @@ def _source_key(source: Any) -> str:
     slug = str(getattr(source, "slug", "") or "").strip().lower()
     source_id = int(getattr(source, "id", 0) or 0)
     if provider and slug:
-      return f"{provider}:{slug}"
+        return f"{provider}:{slug}"
     if provider:
-      return f"{provider}:{source_id}"
+        return f"{provider}:{source_id}"
     return str(source_id)
 
 
@@ -248,12 +282,14 @@ def build_scheduler_idempotency_context(
     market: dict[str, Any],
     day_key: str,
     dispatch_key: str,
+    sync_mode: str | None = None,
 ) -> dict[str, Any]:
     source_id = int(getattr(source, "id"))
     source_key = _source_key(source)
     return {
         "mode": "scheduler",
         "scope": "daily_sync",
+        "sync_mode": str(sync_mode or "refresh").strip().lower(),
         "org_id": int(org_id),
         "source_id": source_id,
         "source_key": source_key,
@@ -329,6 +365,7 @@ def dispatch_daily_sync_for_org(
     *,
     org_id: int,
     enqueue_sync: Callable[[int, int, str, dict[str, Any]], Any],
+    sync_mode: str | None = "refresh",
 ) -> dict[str, Any]:
     ensure_default_manual_sources(db, org_id=int(org_id))
     sources = [
@@ -336,6 +373,7 @@ def dispatch_daily_sync_for_org(
         if bool(getattr(s, "is_enabled", False))
     ]
     markets = list_default_daily_markets()
+    normalized_mode = str(sync_mode or "refresh").strip().lower()
 
     owner = build_lock_owner(prefix="daily_sync")
     lock = acquire_lock(
@@ -358,6 +396,8 @@ def dispatch_daily_sync_for_org(
     queued = 0
     results: list[dict[str, Any]] = []
 
+    from .market_sync_service import build_market_runtime_payload, get_or_create_market_sync_state
+
     for market in markets:
         matching_sources = _matching_sources_for_market(sources, market)
 
@@ -368,6 +408,7 @@ def dispatch_daily_sync_for_org(
                 day_key=day_key,
                 source_key=source_key,
                 market=market,
+                sync_mode=normalized_mode,
             )
 
             acquire = acquire_lock(
@@ -386,16 +427,18 @@ def dispatch_daily_sync_for_org(
             if not acquire.acquired:
                 continue
 
-            payload = build_runtime_payload(
-                state=market.get("state"),
-                county=market.get("county"),
-                city=market.get("city"),
-                limit=market.get("sync_limit"),
-                market_slug=market.get("slug"),
-                trigger_type="daily_refresh",
-                property_types=market.get("property_types"),
-                max_price=market.get("max_price"),
-                max_units=market.get("max_units"),
+            sync_state = get_or_create_market_sync_state(
+                db,
+                org_id=int(org_id),
+                source=source,
+                market=market,
+            )
+
+            payload = build_market_runtime_payload(
+                market,
+                trigger_type="daily_refresh" if normalized_mode == "refresh" else "market_backfill",
+                sync_state=sync_state,
+                sync_mode=normalized_mode,
             )
             payload["idempotency_context"] = build_scheduler_idempotency_context(
                 org_id=int(org_id),
@@ -403,9 +446,15 @@ def dispatch_daily_sync_for_org(
                 market=market,
                 day_key=day_key,
                 dispatch_key=dispatch_key,
+                sync_mode=normalized_mode,
             )
 
-            task = enqueue_sync(int(org_id), int(source.id), "daily_refresh", payload)
+            task = enqueue_sync(
+                int(org_id),
+                int(source.id),
+                str(payload.get("trigger_type") or "daily_refresh"),
+                payload,
+            )
             queued += 1
             results.append(
                 {
@@ -416,6 +465,9 @@ def dispatch_daily_sync_for_org(
                     "city": market.get("city"),
                     "county": market.get("county"),
                     "state": market.get("state"),
+                    "sync_mode": normalized_mode,
+                    "market_sync_state_id": int(sync_state.id),
+                    "market_cursor": dict(payload.get("market_cursor") or {}),
                     "task_id": str(getattr(task, "id", None)),
                 }
             )
@@ -423,6 +475,7 @@ def dispatch_daily_sync_for_org(
     return {
         "ok": True,
         "org_id": int(org_id),
+        "sync_mode": normalized_mode,
         "queued": queued,
         "results": results,
         "markets": markets,
@@ -441,6 +494,16 @@ def build_runtime_payload_from_saved_filters(filters_json: dict[str, Any] | None
         property_types=filters_json.get("property_types"),
         max_price=filters_json.get("max_price"),
         max_units=filters_json.get("max_units"),
+        market_cursor=filters_json.get("market_cursor"),
+        market_sync_state_id=filters_json.get("market_sync_state_id"),
+        market_sync_status=filters_json.get("market_sync_status"),
+        market_exhausted=filters_json.get("market_exhausted"),
+        sync_mode=filters_json.get("sync_mode"),
+        max_pages_budget=filters_json.get("max_pages_budget"),
+        backfill_target_records=filters_json.get("backfill_target_records"),
+        reset_market_cursor_on_start=filters_json.get("reset_market_cursor_on_start"),
+        supported_market=filters_json.get("supported_market"),
+        mark_backfill_complete_on_exhaustion=filters_json.get("mark_backfill_complete_on_exhaustion"),
     )
     for key in [
         "min_price",

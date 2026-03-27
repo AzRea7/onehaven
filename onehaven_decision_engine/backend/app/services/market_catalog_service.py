@@ -1,4 +1,3 @@
-# backend/app/services/market_catalog_service.py
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -50,23 +49,20 @@ class MarketDefinition:
     county: str | None
     city: str | None
     zip_codes: tuple[str, ...] = ()
-    coverage_tier: str = "warm"   # hot | warm | cold
+    coverage_tier: str = "warm"
     priority: int = 50
     is_active: bool = True
     sync_limit: int = 125
     sync_every_hours: int = 24
 
-    # buy box defaults
     min_price: int | None = None
     max_price: int | None = 200_000
     property_types: tuple[str, ...] = ("single_family", "multi_family")
 
-    # future knobs
     max_units: int | None = 4
     notes: str | None = None
 
 
-# Phase 1: Southeast Michigan only
 _STATIC_MARKETS: tuple[MarketDefinition, ...] = (
     MarketDefinition(
         slug="detroit-wayne",
@@ -178,6 +174,19 @@ def get_market(slug: str) -> dict[str, Any] | None:
     return None
 
 
+def get_active_supported_market_by_slug(slug: str) -> dict[str, Any] | None:
+    wanted = _norm_text(slug)
+    if not wanted:
+        return None
+    for market in _STATIC_MARKETS:
+        if _norm_text(market.slug) != wanted:
+            continue
+        if not bool(market.is_active):
+            return None
+        return _serialize_market(market)
+    return None
+
+
 def list_supported_markets(
     *,
     tier_filter: str | None = None,
@@ -214,6 +223,8 @@ def find_market_by_city(*, city: str, state: str = "MI") -> Optional[dict[str, A
         return None
 
     for market in _STATIC_MARKETS:
+        if not bool(market.is_active):
+            continue
         if _norm_text(market.state) != wanted_state:
             continue
         if _norm_text(market.city) == wanted_city:

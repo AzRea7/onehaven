@@ -8,6 +8,7 @@ from typing import Any, Optional
 from sqlalchemy import desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..models import Deal, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
 from ..services.runtime_metrics import METRICS
@@ -15,12 +16,27 @@ from .acquisition_tag_service import list_tags_for_properties
 
 log = logging.getLogger("onehaven.inventory_snapshot")
 
+DEFAULT_NEW_THRESHOLD_DAYS = 1.0
+DEFAULT_FRESH_THRESHOLD_DAYS = 7.0
+DEFAULT_WARM_THRESHOLD_DAYS = 21.0
+DEFAULT_STALE_THRESHOLD_DAYS = 45.0
+DEFAULT_VERY_STALE_THRESHOLD_DAYS = 90.0
+
 
 def _safe_float(v: Any, default: float | None = None) -> float | None:
     try:
         if v is None:
             return default
         return float(v)
+    except Exception:
+        return default
+
+
+def _safe_int(v: Any, default: int | None = None) -> int | None:
+    try:
+        if v is None:
+            return default
+        return int(float(v))
     except Exception:
         return default
 
@@ -166,29 +182,68 @@ def _parse_dt(value: Any) -> datetime | None:
         return None
 
 
-def _freshness_score(snapshot: dict[str, Any]) -> int:
-    latest = (
+def _latest_seen_dt(snapshot: dict[str, Any]) -> datetime | None:
+    return (
         _parse_dt(snapshot.get("source_updated_at"))
         or _parse_dt(snapshot.get("acquisition_last_seen_at"))
         or _parse_dt(snapshot.get("updated_at"))
         or _parse_dt(snapshot.get("created_at"))
     )
+
+
+def get_freshness_thresholds() -> dict[str, float]:
+    return {
+        "new_days": float(getattr(settings, "inventory_new_threshold_days", DEFAULT_NEW_THRESHOLD_DAYS) or DEFAULT_NEW_THRESHOLD_DAYS),
+        "fresh_days": float(getattr(settings, "inventory_fresh_threshold_days", DEFAULT_FRESH_THRESHOLD_DAYS) or DEFAULT_FRESH_THRESHOLD_DAYS),
+        "warm_days": float(getattr(settings, "inventory_warm_threshold_days", DEFAULT_WARM_THRESHOLD_DAYS) or DEFAULT_WARM_THRESHOLD_DAYS),
+        "stale_days": float(getattr(settings, "inventory_stale_threshold_days", DEFAULT_STALE_THRESHOLD_DAYS) or DEFAULT_STALE_THRESHOLD_DAYS),
+        "very_stale_days": float(getattr(settings, "inventory_very_stale_threshold_days", DEFAULT_VERY_STALE_THRESHOLD_DAYS) or DEFAULT_VERY_STALE_THRESHOLD_DAYS),
+    }
+
+
+def compute_days_since_seen(snapshot: dict[str, Any]) -> float | None:
+    latest = _latest_seen_dt(snapshot)
     if latest is None:
+        return None
+    return max(0.0, (_utcnow() - latest).total_seconds() / 86400.0)
+
+
+def compute_freshness_bucket(snapshot: dict[str, Any]) -> str:
+    age_days = compute_days_since_seen(snapshot)
+    thresholds = get_freshness_thresholds()
+
+    if age_days is None:
+        return "unknown"
+    if age_days <= thresholds["new_days"]:
+        return "new"
+    if age_days <= thresholds["fresh_days"]:
+        return "fresh"
+    if age_days <= thresholds["warm_days"]:
+        return "warm"
+    if age_days <= thresholds["stale_days"]:
+        return "aging"
+    if age_days <= thresholds["very_stale_days"]:
+        return "stale"
+    return "very_stale"
+
+
+def compute_freshness_score(snapshot: dict[str, Any]) -> int:
+    age_days = compute_days_since_seen(snapshot)
+    thresholds = get_freshness_thresholds()
+
+    if age_days is None:
         return 0
-
-    age_days = max(0.0, (_utcnow() - latest).total_seconds() / 86400.0)
-
-    if age_days <= 1:
-        return 20
-    if age_days <= 3:
-        return 16
-    if age_days <= 7:
-        return 12
-    if age_days <= 14:
-        return 8
-    if age_days <= 30:
-        return 4
-    return 0
+    if age_days <= thresholds["new_days"]:
+        return 28
+    if age_days <= thresholds["fresh_days"]:
+        return 18
+    if age_days <= thresholds["warm_days"]:
+        return 10
+    if age_days <= thresholds["stale_days"]:
+        return 2
+    if age_days <= thresholds["very_stale_days"]:
+        return -10
+    return -22
 
 
 def _text_match_score(snapshot: dict[str, Any], q: str | None) -> int:
@@ -220,7 +275,13 @@ def _text_match_score(snapshot: dict[str, Any], q: str | None) -> int:
     return min(16, hits * 4)
 
 
-def _market_match_score(snapshot: dict[str, Any], *, state: str | None, county: str | None, city: str | None) -> int:
+def _market_match_score(
+    snapshot: dict[str, Any],
+    *,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+) -> int:
     score = 0
 
     snap_state = str(snapshot.get("state") or "").strip().lower()
@@ -237,33 +298,49 @@ def _market_match_score(snapshot: dict[str, Any], *, state: str | None, county: 
     return score
 
 
-def _buy_box_score(snapshot: dict[str, Any]) -> int:
+def _buy_box_score(snapshot: dict[str, Any], search_context: dict[str, Any]) -> int:
     score = 0
+
     asking_price = _safe_float(snapshot.get("asking_price"))
-    max_price = 200_000
+    max_price = _safe_float(
+        search_context.get("buy_box_max_price"),
+        _safe_float(getattr(settings, "investor_buy_box_max_price", 200_000), 200_000.0),
+    ) or 200_000.0
+
     property_type = str(snapshot.get("property_type") or "").strip().lower()
-    max_units = 4
-    units = int(_safe_float(snapshot.get("units"), 1) or 1)
+
+    allowed_property_types = search_context.get("buy_box_property_types")
+    if not allowed_property_types:
+        allowed_property_types = ["single_family", "multi_family"]
+    allowed_property_types = {str(x).strip().lower() for x in allowed_property_types if str(x).strip()}
+
+    max_units = _safe_int(
+        search_context.get("buy_box_max_units"),
+        _safe_int(getattr(settings, "investor_buy_box_max_units", 4), 4),
+    ) or 4
+    units = _safe_int(snapshot.get("units"), 1) or 1
 
     if asking_price is not None:
         if asking_price <= max_price:
             score += 14
-        elif asking_price <= max_price * 1.25:
-            score += 4
+        elif asking_price <= max_price * 1.15:
+            score += 6
+        elif asking_price <= max_price * 1.30:
+            score += 1
         else:
-            score -= 8
+            score -= 12
     else:
         score -= 10
 
-    if property_type in {"single_family", "multi_family"}:
+    if property_type in allowed_property_types:
         score += 10
     elif property_type:
-        score -= 6
+        score -= 8
 
     if units <= max_units:
-        score += 4
+        score += 5
     else:
-        score -= 6
+        score -= 8
 
     return score
 
@@ -276,11 +353,18 @@ def _data_quality_score(snapshot: dict[str, Any]) -> int:
     else:
         score -= 10
 
+    if snapshot.get("asking_price") is not None:
+        score += 6
+    else:
+        score -= 8
+
     if snapshot.get("normalized_address"):
         score += 5
 
     if snapshot.get("lat") is not None and snapshot.get("lng") is not None:
-        score += 6
+        score += 8
+    else:
+        score -= 4
 
     if snapshot.get("market_rent_estimate") is not None:
         score += 8
@@ -294,22 +378,12 @@ def _data_quality_score(snapshot: dict[str, Any]) -> int:
         if dscr >= 1.2:
             score += 4
 
-    completeness = str(snapshot.get("completeness") or "").upper()
-    if completeness == "COMPLETE":
-        score += 12
-    elif completeness == "PARTIAL":
-        score += 5
-    else:
-        score -= 4
-
     return score
 
 
 def _decision_score(snapshot: dict[str, Any]) -> int:
     value = str(snapshot.get("normalized_decision") or "").strip().upper()
-    if value == "GOOD":
-        return 18
-    if value == "GOOD_DEAL":
+    if value in {"GOOD", "GOOD_DEAL"}:
         return 18
     if value == "REVIEW":
         return 8
@@ -318,32 +392,87 @@ def _decision_score(snapshot: dict[str, Any]) -> int:
     return 0
 
 
-def compute_relevance_score(
+def _completeness_score(snapshot: dict[str, Any]) -> int:
+    completeness = str(snapshot.get("completeness") or "").upper()
+    if completeness == "COMPLETE":
+        return 12
+    if completeness == "PARTIAL":
+        return 5
+    return -6
+
+
+def _cashflow_score(snapshot: dict[str, Any]) -> int:
+    cashflow = _safe_float(snapshot.get("projected_monthly_cashflow"))
+    if cashflow is None:
+        return 0
+    if cashflow > 500:
+        return 12
+    if cashflow > 250:
+        return 9
+    if cashflow > 0:
+        return 6
+    if cashflow < -250:
+        return -8
+    if cashflow < 0:
+        return -4
+    return 0
+
+
+def compute_inventory_relevance(
     snapshot: dict[str, Any],
-    *,
-    state: str | None = None,
-    county: str | None = None,
-    city: str | None = None,
-    q: str | None = None,
-) -> int:
-    score = 0
-    score += _market_match_score(snapshot, state=state, county=county, city=city)
-    score += _text_match_score(snapshot, q)
-    score += _buy_box_score(snapshot)
+    search_context: dict[str, Any] | None = None,
+) -> float:
+    ctx = dict(search_context or {})
+    score = 0.0
+
+    score += _market_match_score(
+        snapshot,
+        state=ctx.get("state"),
+        county=ctx.get("county"),
+        city=ctx.get("city"),
+    )
+    score += _text_match_score(snapshot, ctx.get("q"))
+    score += _buy_box_score(snapshot, ctx)
     score += _data_quality_score(snapshot)
     score += _decision_score(snapshot)
-    score += _freshness_score(snapshot)
+    score += _completeness_score(snapshot)
+    score += _cashflow_score(snapshot)
+    score += compute_freshness_score(snapshot)
 
-    cashflow = _safe_float(snapshot.get("projected_monthly_cashflow"))
-    if cashflow is not None:
-        if cashflow > 250:
-            score += 10
-        elif cashflow > 0:
-            score += 6
-        elif cashflow < 0:
-            score -= 4
+    age_days = compute_days_since_seen(snapshot)
+    thresholds = get_freshness_thresholds()
+    if age_days is not None:
+        if age_days > thresholds["very_stale_days"]:
+            score -= 18
+        elif age_days > thresholds["stale_days"]:
+            score -= 8
 
-    return int(round(score))
+    if snapshot.get("is_new_this_sync"):
+        score += 6
+    if snapshot.get("is_recently_refreshed"):
+        score += 4
+    if snapshot.get("is_very_stale"):
+        score -= 10
+
+    return float(round(score, 2))
+
+
+def apply_freshness_policy(snapshot: dict[str, Any]) -> dict[str, Any]:
+    age_days = compute_days_since_seen(snapshot)
+    thresholds = get_freshness_thresholds()
+    bucket = compute_freshness_bucket(snapshot)
+
+    snapshot["days_since_seen"] = age_days
+    snapshot["freshness_bucket"] = bucket
+    snapshot["freshness_score"] = compute_freshness_score(snapshot)
+    snapshot["freshness_thresholds"] = thresholds
+
+    snapshot["is_new_this_sync"] = bool(age_days is not None and age_days <= thresholds["new_days"])
+    snapshot["is_recently_refreshed"] = bool(age_days is not None and age_days <= thresholds["fresh_days"])
+    snapshot["is_stale"] = bool(age_days is not None and age_days > thresholds["stale_days"])
+    snapshot["is_very_stale"] = bool(age_days is not None and age_days > thresholds["very_stale_days"])
+
+    return snapshot
 
 
 def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
@@ -416,6 +545,7 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
 
     snapshot["completeness"] = infer_snapshot_completeness(snapshot)
     snapshot["is_fully_enriched"] = snapshot["completeness"] == "COMPLETE"
+    snapshot = apply_freshness_policy(snapshot)
 
     duration_ms = round((time.perf_counter() - t0) * 1000, 2)
     METRICS.observe_ms("inventory_snapshot_build_ms", duration_ms, labels={"org_id": org_id})
@@ -450,6 +580,20 @@ def build_inventory_snapshots_for_scope(
     props = list(db.scalars(stmt.limit(overfetch)).all())
     query_ms = round((time.perf_counter() - query_t0) * 1000, 2)
 
+    search_context = {
+        "state": state,
+        "county": county,
+        "city": city,
+        "q": q,
+        "buy_box_max_price": getattr(settings, "investor_buy_box_max_price", 200_000),
+        "buy_box_max_units": getattr(settings, "investor_buy_box_max_units", 4),
+        "buy_box_property_types": getattr(
+            settings,
+            "investor_buy_box_property_types",
+            ["single_family", "multi_family"],
+        ),
+    }
+
     rows: list[dict[str, Any]] = []
     skipped_errors = 0
 
@@ -461,13 +605,7 @@ def build_inventory_snapshots_for_scope(
                 org_id=org_id,
                 property_id=int(prop.id),
             )
-            snapshot["relevance_score"] = compute_relevance_score(
-                snapshot,
-                state=state,
-                county=county,
-                city=city,
-                q=q,
-            )
+            snapshot["relevance_score"] = compute_inventory_relevance(snapshot, search_context)
             rows.append(snapshot)
         except Exception:
             skipped_errors += 1
@@ -478,8 +616,8 @@ def build_inventory_snapshots_for_scope(
 
     rows.sort(
         key=lambda item: (
-            -int(item.get("relevance_score") or 0),
-            -int(bool(item.get("source_updated_at"))),
+            -float(item.get("relevance_score") or 0.0),
+            -float(item.get("freshness_score") or 0.0),
             -int(item.get("id") or 0),
         )
     )

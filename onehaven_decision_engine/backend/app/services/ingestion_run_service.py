@@ -9,12 +9,20 @@ from sqlalchemy.orm import Session
 from ..models import IngestionRun, IngestionSource
 
 
-def start_run(db: Session, *, org_id: int, source_id: int, trigger_type: str) -> IngestionRun:
+def start_run(
+    db: Session,
+    *,
+    org_id: int,
+    source_id: int,
+    trigger_type: str,
+    status: str = "running",
+    summary_json: dict[str, Any] | None = None,
+) -> IngestionRun:
     row = IngestionRun(
         org_id=int(org_id),
         source_id=int(source_id),
         trigger_type=str(trigger_type or "manual"),
-        status="running",
+        status=str(status or "running"),
         started_at=datetime.utcnow(),
         records_seen=0,
         records_imported=0,
@@ -27,6 +35,7 @@ def start_run(db: Session, *, org_id: int, source_id: int, trigger_type: str) ->
         duplicates_skipped=0,
         invalid_rows=0,
         retry_count=0,
+        summary_json=dict(summary_json or {}),
     )
     db.add(row)
     db.commit()
@@ -64,7 +73,7 @@ def finish_run(
     source = db.get(IngestionSource, int(row.source_id))
     if source is not None:
         source.last_synced_at = row.finished_at
-        if status in {"success", "partial"}:
+        if status in {"success", "partial", "completed"}:
             source.last_success_at = row.finished_at
             source.last_error_summary = None
             source.status = "healthy"
@@ -79,6 +88,30 @@ def finish_run(
     return row
 
 
+def _summary_for_list(run: IngestionRun) -> dict[str, Any]:
+    summary = dict(getattr(run, "summary_json", None) or {})
+    cursor_advanced_to = dict(summary.get("cursor_advanced_to") or {})
+
+    return {
+        "new_listings_imported": int(
+            summary.get("new_listings_imported", summary.get("new_records_imported", 0)) or 0
+        ),
+        "already_seen_skipped": int(summary.get("already_seen_skipped") or 0),
+        "provider_pages_scanned": int(summary.get("provider_pages_scanned") or 0),
+        "market_slug": summary.get("market_slug"),
+        "cursor_advanced_to": {
+            "market_slug": cursor_advanced_to.get("market_slug"),
+            "page": cursor_advanced_to.get("page"),
+            "shard": cursor_advanced_to.get("shard"),
+            "sort_mode": cursor_advanced_to.get("sort_mode"),
+            "page_changed": cursor_advanced_to.get("page_changed"),
+        },
+        "market_exhausted": bool(summary.get("market_exhausted", False)),
+        "sync_mode": summary.get("sync_mode") or "refresh",
+        "stop_reason": summary.get("stop_reason"),
+    }
+
+
 def list_runs(db: Session, *, org_id: int, limit: int = 25) -> list[dict[str, Any]]:
     rows = db.execute(
         select(IngestionRun, IngestionSource)
@@ -90,6 +123,9 @@ def list_runs(db: Session, *, org_id: int, limit: int = 25) -> list[dict[str, An
 
     out: list[dict[str, Any]] = []
     for run, source in rows:
+        summary = dict(getattr(run, "summary_json", None) or {})
+        summary_extras = _summary_for_list(run)
+
         out.append(
             {
                 "id": run.id,
@@ -107,6 +143,8 @@ def list_runs(db: Session, *, org_id: int, limit: int = 25) -> list[dict[str, An
                 "duplicates_skipped": run.duplicates_skipped,
                 "invalid_rows": run.invalid_rows,
                 "error_summary": run.error_summary,
+                "summary_json": summary,
+                **summary_extras,
             }
         )
     return out
@@ -130,7 +168,7 @@ def get_ingestion_overview(db: Session, *, org_id: int) -> dict[str, Any]:
         select(func.count()).select_from(IngestionRun).where(
             IngestionRun.org_id == int(org_id),
             IngestionRun.started_at >= cutoff_24h,
-            IngestionRun.status.in_(["success", "partial"]),
+            IngestionRun.status.in_(["success", "partial", "completed"]),
         )
     ) or 0
     failed_runs_24h = db.scalar(

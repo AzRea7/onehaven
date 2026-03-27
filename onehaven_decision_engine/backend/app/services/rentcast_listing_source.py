@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -17,6 +19,13 @@ class RentCastListingFetchResult:
     rows: list[dict[str, Any]]
     next_cursor: dict[str, Any]
     raw_count: int
+    page_scanned: int = 1
+    shard_scanned: int = 1
+    sort_mode: str = "newest"
+    exhausted: bool = False
+    page_fingerprint: str | None = None
+    page_changed: bool = True
+    provider_cursor: dict[str, Any] | None = None
 
 
 class RentCastListingSource:
@@ -225,6 +234,85 @@ class RentCastListingSource:
         ).strip()
         return val or None
 
+    def _pick_update_marker(self, item: dict[str, Any]) -> str | None:
+        for key in (
+            "lastSeen",
+            "updatedAt",
+            "updatedDate",
+            "modifiedDate",
+            "lastModified",
+            "priceChangeDate",
+            "listedDate",
+            "daysOnMarket",
+        ):
+            value = item.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return None
+
+    def _hash_payload(self, payload: Any) -> str:
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _build_page_fingerprint(self, raw_rows: list[dict[str, Any]]) -> str:
+        digest_rows: list[dict[str, Any]] = []
+        for item in raw_rows:
+            digest_rows.append(
+                {
+                    "id": self._pick_external_id(item),
+                    "address": self._pick_address(item),
+                    "city": self._pick_city(item),
+                    "state": self._pick_state(item),
+                    "zip": self._pick_zip(item),
+                    "price": self._safe_float(item.get("price") or item.get("listPrice"), None),
+                    "updated": self._pick_update_marker(item),
+                }
+            )
+        return self._hash_payload(digest_rows)
+
+    def _resolve_cursor(
+        self,
+        *,
+        runtime_config: dict[str, Any],
+        cursor: dict[str, Any] | None,
+        explicit_page: int | None,
+        explicit_shard: int | None,
+        explicit_sort_mode: str | None,
+    ) -> dict[str, Any]:
+        runtime_cursor = runtime_config.get("market_cursor")
+        base = {}
+        if isinstance(runtime_cursor, dict):
+            base.update(runtime_cursor)
+        if isinstance(cursor, dict):
+            base.update(cursor)
+
+        page = self._safe_int(
+            explicit_page if explicit_page is not None else base.get("page"),
+            1,
+        ) or 1
+        shard = self._safe_int(
+            explicit_shard if explicit_shard is not None else base.get("shard"),
+            1,
+        ) or 1
+        sort_mode = str(
+            explicit_sort_mode or base.get("sort_mode") or "newest"
+        ).strip().lower() or "newest"
+
+        return {
+            "page": max(1, page),
+            "shard": max(1, shard),
+            "sort_mode": sort_mode,
+            "market_slug": str(
+                base.get("market_slug") or runtime_config.get("market_slug") or ""
+            ).strip().lower() or None,
+            "page_fingerprint": str(base.get("page_fingerprint") or "").strip() or None,
+            "provider_cursor": (
+                dict(base.get("provider_cursor") or {})
+                if isinstance(base.get("provider_cursor"), dict)
+                else None
+            ),
+        }
+
     def _to_canonical_row(self, item: dict[str, Any]) -> dict[str, Any]:
         photos = self._coerce_photo_rows(
             item.get("photos")
@@ -262,7 +350,13 @@ class RentCastListingSource:
             "raw_json": item,
         }
 
-    def _build_query_params(self, config: dict[str, Any], page: int, limit: int) -> dict[str, Any]:
+    def _build_query_params(
+        self,
+        config: dict[str, Any],
+        page: int,
+        limit: int,
+        sort_mode: str | None = None,
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "page": max(1, int(page)),
             "limit": max(1, min(int(limit), 500)),
@@ -320,6 +414,7 @@ class RentCastListingSource:
                 if mapped:
                     params["propertyType"] = mapped
 
+        _ = sort_mode
         return params
 
     def load_rows_page(
@@ -328,16 +423,51 @@ class RentCastListingSource:
         credentials: dict[str, Any],
         runtime_config: dict[str, Any],
         cursor: dict[str, Any] | None,
+        market_slug: str | None = None,
+        city: str | None = None,
+        county: str | None = None,
+        state: str | None = None,
+        page: int | None = None,
+        shard: int | None = None,
+        sort_mode: str | None = None,
+        limit: int | None = None,
     ) -> RentCastListingFetchResult:
         api_key = self._get_api_key(credentials or {})
         config = dict(runtime_config or {})
 
-        page = self._safe_int((cursor or {}).get("page"), 1) or 1
-        limit = self._safe_int(config.get("limit"), getattr(settings, "ingestion_provider_page_limit", 50)) or 50
+        if market_slug is not None:
+            config["market_slug"] = market_slug
+        if city is not None:
+            config["city"] = city
+        if county is not None:
+            config["county"] = county
+        if state is not None:
+            config["state"] = state
 
-        params = self._build_query_params(config, page, limit)
+        resolved_cursor = self._resolve_cursor(
+            runtime_config=config,
+            cursor=cursor,
+            explicit_page=page,
+            explicit_shard=shard,
+            explicit_sort_mode=sort_mode,
+        )
 
-        logger.info("rentcast_fetch params=%s", params)
+        page_num = self._safe_int(resolved_cursor.get("page"), 1) or 1
+        shard_num = self._safe_int(resolved_cursor.get("shard"), 1) or 1
+        sort_mode_value = str(resolved_cursor.get("sort_mode") or "newest")
+        limit_value = self._safe_int(
+            limit if limit is not None else config.get("limit"),
+            getattr(settings, "ingestion_provider_page_limit", 50),
+        ) or 50
+
+        params = self._build_query_params(config, page_num, limit_value, sort_mode_value)
+
+        logger.info(
+            "rentcast_fetch params=%s cursor=%s market_slug=%s",
+            params,
+            resolved_cursor,
+            config.get("market_slug"),
+        )
 
         with httpx.Client(timeout=30.0) as client:
             response = client.get(
@@ -357,10 +487,30 @@ class RentCastListingSource:
             raw_rows = []
 
         rows = [self._to_canonical_row(item) for item in raw_rows]
-        next_cursor = {"page": page + 1} if len(raw_rows) >= int(limit) else {}
+        page_fingerprint = self._build_page_fingerprint(raw_rows)
+        prior_fingerprint = str(resolved_cursor.get("page_fingerprint") or "").strip() or None
+        page_changed = prior_fingerprint != page_fingerprint if prior_fingerprint else True
+        exhausted = len(raw_rows) < int(limit_value)
+
+        next_cursor = {
+            "market_slug": str(config.get("market_slug") or "").strip().lower() or None,
+            "page": page_num if exhausted else page_num + 1,
+            "shard": shard_num,
+            "sort_mode": sort_mode_value,
+            "page_fingerprint": page_fingerprint,
+            "page_changed": page_changed,
+            "provider_cursor": None,
+        }
 
         return RentCastListingFetchResult(
             rows=rows,
             next_cursor=next_cursor,
             raw_count=len(raw_rows),
+            page_scanned=page_num,
+            shard_scanned=shard_num,
+            sort_mode=sort_mode_value,
+            exhausted=exhausted,
+            page_fingerprint=page_fingerprint,
+            page_changed=page_changed,
+            provider_cursor=None,
         )

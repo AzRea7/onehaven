@@ -519,6 +519,68 @@ class IngestionSource(Base):
         cascade="all, delete-orphan",
     )
 
+    market_sync_states: Mapped[List["MarketSyncState"]] = relationship(
+        "MarketSyncState",
+        back_populates="source",
+        cascade="all, delete-orphan",
+    )
+
+class MarketSyncState(Base):
+    __tablename__ = "market_sync_states"
+    __table_args__ = (
+        UniqueConstraint("org_id", "source_id", "market_slug", name="uq_market_sync_states_org_source_market"),
+        Index("ix_market_sync_states_org_market", "org_id", "market_slug"),
+        Index("ix_market_sync_states_org_provider_market", "org_id", "provider", "market_slug"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    org_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id"),
+        nullable=False,
+        index=True,
+    )
+    source_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("ingestion_sources.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    market_slug: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    state: Mapped[str] = mapped_column(String(2), nullable=False, default="MI")
+    county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="idle")
+
+    cursor_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    last_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_shard: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_sort_mode: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    last_requested_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    last_sync_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_sync_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_seen_provider_record_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    last_page_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    market_exhausted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    backfill_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    source: Mapped["IngestionSource"] = relationship("IngestionSource", back_populates="market_sync_states")
 
 class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
@@ -1329,7 +1391,7 @@ class OrgLock(Base):
     __table_args__ = (
         UniqueConstraint("org_id", "lock_key", name="uq_org_locks_org_lock_key"),
         Index("ix_org_locks_org_lock_key", "org_id", "lock_key"),
-        Index("ix_org_locks_expires_at", "expires_at"),
+        Index("ix_org_locks_locked_until", "locked_until"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -1342,20 +1404,38 @@ class OrgLock(Base):
     )
 
     lock_key: Mapped[str] = mapped_column(String(120), nullable=False)
-    owner_token: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    owner_token: Mapped[str] = mapped_column(
+        String(120),
+        nullable=False,
+        default="system",
+    )
 
     acquired_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=datetime.utcnow,
     )
-    expires_at: Mapped[Optional[datetime]] = mapped_column(
+
+    locked_until: Mapped[datetime] = mapped_column(
         DateTime,
-        nullable=True,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
     )
 
-    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
 
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
 
 class AgentRunDeadletter(Base):
     __tablename__ = "agent_run_deadletters"

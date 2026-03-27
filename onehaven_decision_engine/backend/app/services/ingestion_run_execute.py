@@ -33,9 +33,19 @@ from ..services.locks_service import (
     acquire_ingestion_execution_lock,
     has_completed_ingestion_dataset,
     mark_ingestion_dataset_completed,
-    release_lock,
+    release_ingestion_execution_lock,
 )
-from ..services.rentcast_listing_source import RentCastListingSource
+from ..services.market_sync_service import (
+    advance_market_cursor,
+    build_market_dataset_identity,
+    get_market_sync_state_by_id,
+    mark_market_sync_completed,
+    mark_market_sync_started,
+)
+from ..services.rentcast_listing_source import (
+    RentCastListingFetchResult,
+    RentCastListingSource,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +97,10 @@ def _safe_int(value: Any) -> int | None:
         return None
 
 
+def _utcnow_naive() -> datetime:
+    return datetime.utcnow()
+
+
 def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str, Any]:
     payload = dict(runtime_config or {})
     limit = _safe_int(payload.get("limit")) or int(
@@ -112,6 +126,10 @@ def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str
         payload["max_price"] = float(getattr(settings, "investor_buy_box_max_price", 200_000))
     if payload.get("max_units") is None:
         payload["max_units"] = float(getattr(settings, "investor_buy_box_max_units", 4))
+
+    payload["sync_mode"] = str(payload.get("sync_mode") or "refresh").strip().lower() or "refresh"
+    payload["market_slug"] = _normalize_optional_filter_value(payload.get("market_slug"))
+    payload["max_pages_budget"] = _safe_int(payload.get("max_pages_budget"))
 
     payload.pop("zip_code", None)
     payload.pop("address", None)
@@ -169,6 +187,10 @@ def _runtime_for_idempotency(runtime_config: dict[str, Any]) -> dict[str, Any]:
         "max_units": runtime_config.get("max_units"),
         "limit": runtime_config.get("limit"),
         "idempotency_context": runtime_config.get("idempotency_context") or {},
+        "market_cursor": runtime_config.get("market_cursor") or {},
+        "market_slug": runtime_config.get("market_slug"),
+        "market_sync_state_id": runtime_config.get("market_sync_state_id"),
+        "sync_mode": runtime_config.get("sync_mode"),
     }
     return stable
 
@@ -213,14 +235,10 @@ def build_run_idempotency_key(
     return _json_hash(base)
 
 
-def _build_lock_owner(*, org_id: int, source_id: int, idempotency_key: str) -> str:
+def _build_lock_owner(*, org_id: int, source_id: int, dataset_key: str) -> str:
     host = socket.gethostname()
     pid = os.getpid()
-    return f"ingestion:{host}:{pid}:{int(org_id)}:{int(source_id)}:{idempotency_key}"
-
-
-def _execution_lock_key(*, source_id: int) -> str:
-    return f"ingestion:source:{int(source_id)}"
+    return f"ingestion:{host}:{pid}:{int(org_id)}:{int(source_id)}:{dataset_key}"
 
 
 def _set_run_status(row: Any, status: str) -> None:
@@ -437,10 +455,16 @@ def _upsert_photos(db: Session, *, org_id: int, property_id: int, provider: str,
     return count
 
 
-def _starting_cursor(source, trigger_type: str) -> dict[str, Any]:
-    if trigger_type in {"manual", "daily_refresh", "scheduled", "manual_market_sync"}:
-        return {"page": 1}
-    return dict(source.cursor_json or {})
+def _starting_cursor(source, trigger_type: str, runtime_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    runtime_config = dict(runtime_config or {})
+    market_cursor = runtime_config.get("market_cursor")
+    if isinstance(market_cursor, dict) and market_cursor:
+        return dict(market_cursor)
+
+    if trigger_type in {"manual", "daily_refresh", "scheduled", "manual_market_sync", "market_backfill"}:
+        return dict(getattr(source, "cursor_json", None) or {"page": 1})
+
+    return dict(getattr(source, "cursor_json", None) or {})
 
 
 def _filter_reason(payload: dict[str, Any], runtime_config: dict[str, Any]) -> str | None:
@@ -511,7 +535,7 @@ def _load_rows_page(
     runtime_config: dict[str, Any],
     cursor: dict[str, Any],
     provider_fetch_limit: int,
-) -> tuple[list[dict[str, Any]], dict[str, Any], int]:
+) -> RentCastListingFetchResult:
     base_config = dict(source.config_json or {})
     merged_config = {**base_config, **dict(runtime_config or {})}
     merged_config["limit"] = int(provider_fetch_limit)
@@ -519,18 +543,28 @@ def _load_rows_page(
     sample_rows = merged_config.get("sample_rows")
     if isinstance(sample_rows, list):
         rows = [x for x in sample_rows if isinstance(x, dict)]
-        return rows, {"page": 1}, len(rows)
+        return RentCastListingFetchResult(
+            rows=rows,
+            next_cursor={"page": (_safe_int(cursor.get("page"), 1) or 1) + 1},
+            raw_count=len(rows),
+            page_scanned=_safe_int(cursor.get("page"), 1) or 1,
+            shard_scanned=_safe_int(cursor.get("shard"), 1) or 1,
+            sort_mode=str(cursor.get("sort_mode") or "newest"),
+            exhausted=len(rows) < int(provider_fetch_limit),
+            page_fingerprint=None,
+            page_changed=True,
+            provider_cursor=None,
+        )
 
     adapter = PROVIDER_ADAPTERS.get(source.provider)
     if adapter is None:
         raise ValueError(f"No adapter registered for provider={source.provider}")
 
-    result = adapter.load_rows_page(
+    return adapter.load_rows_page(
         credentials=dict(getattr(source, "credentials_json", None) or {}),
         runtime_config=merged_config,
         cursor=cursor,
     )
-    return result.rows, dict(result.next_cursor or {}), int(result.raw_count or 0)
 
 
 def _append_property_error(summary: dict[str, Any], *, property_id: int | None, external_record_id: str | None, reason: str) -> None:
@@ -543,6 +577,27 @@ def _append_property_error(summary: dict[str, Any], *, property_id: int | None, 
         }
     )
     summary["property_errors"] = errors[:200]
+
+
+def _budget_exhausted(
+    *,
+    provider_pages_scanned: int,
+    max_pages_budget: int,
+) -> bool:
+    return provider_pages_scanned >= max_pages_budget
+
+
+def _cursor_summary(next_cursor: dict[str, Any] | None) -> dict[str, Any]:
+    cursor = dict(next_cursor or {})
+    return {
+        "market_slug": cursor.get("market_slug"),
+        "page": _safe_int(cursor.get("page")),
+        "shard": _safe_int(cursor.get("shard")),
+        "sort_mode": cursor.get("sort_mode"),
+        "page_changed": cursor.get("page_changed"),
+        "page_fingerprint": cursor.get("page_fingerprint"),
+        "provider_cursor": cursor.get("provider_cursor"),
+    }
 
 
 def execute_source_sync(
@@ -559,14 +614,34 @@ def execute_source_sync(
     runtime_config["trigger_type"] = str(trigger_type or "manual")
 
     source_id = int(getattr(source, "id"))
-    execution_lock_key = _execution_lock_key(source_id=source_id)
 
+    requested_new_records = int(runtime_config.get("limit") or 1)
     provider_fetch_limit = min(
-        int(runtime_config.get("limit") or 100),
+        max(1, requested_new_records),
         int(getattr(settings, "market_sync_default_limit_per_market", 125) or 125),
     )
+    max_pages_budget = _safe_int(runtime_config.get("max_pages_budget")) or max(
+        1,
+        int(getattr(settings, "ingestion_provider_max_pages_per_shard", 3) or 3),
+    )
 
-    idempotency_key = build_run_idempotency_key(
+    market_sync_state = get_market_sync_state_by_id(
+        db,
+        sync_state_id=_safe_int(runtime_config.get("market_sync_state_id")),
+        org_id=int(org_id),
+    )
+
+    starting_cursor = _starting_cursor(source, trigger_type, runtime_config)
+    dataset_identity = build_market_dataset_identity(
+        org_id=int(org_id),
+        source=source,
+        runtime_config=runtime_config,
+        sync_state=market_sync_state,
+        cursor=starting_cursor,
+    )
+    dataset_key = str(dataset_identity["dataset_key"])
+
+    fallback_idempotency_key = build_run_idempotency_key(
         org_id=int(org_id),
         source=source,
         trigger_type=str(trigger_type),
@@ -576,7 +651,7 @@ def execute_source_sync(
     lock_owner = _build_lock_owner(
         org_id=int(org_id),
         source_id=source_id,
-        idempotency_key=idempotency_key,
+        dataset_key=dataset_key,
     )
 
     _emit(
@@ -587,8 +662,12 @@ def execute_source_sync(
             "provider": str(getattr(source, "provider", "") or ""),
             "trigger_type": str(trigger_type),
             "provider_fetch_limit": provider_fetch_limit,
+            "requested_new_records": requested_new_records,
+            "max_pages_budget": max_pages_budget,
             "runtime_config": runtime_config,
-            "idempotency_key": idempotency_key,
+            "dataset_identity": dataset_identity,
+            "dataset_key": dataset_key,
+            "fallback_idempotency_key": fallback_idempotency_key,
         }
     )
 
@@ -596,7 +675,7 @@ def execute_source_sync(
         db,
         org_id=int(org_id),
         source_id=source_id,
-        idempotency_key=idempotency_key,
+        dataset_key=dataset_key,
         owner=lock_owner,
         ttl_seconds=int(
             getattr(
@@ -612,7 +691,8 @@ def execute_source_sync(
                 "event": "ingestion_sync_skipped_locked",
                 "org_id": int(org_id),
                 "source_id": source_id,
-                "idempotency_key": idempotency_key,
+                "dataset_key": dataset_key,
+                "dataset_identity": dataset_identity,
             },
             level=logging.WARNING,
         )
@@ -623,19 +703,26 @@ def execute_source_sync(
             trigger_type=str(trigger_type),
             runtime_config=runtime_config,
             status="skipped_locked",
-            summary_json={"reason": "execution_lock_not_acquired"},
+            summary_json={
+                "reason": "execution_lock_not_acquired",
+                "dataset_key": dataset_key,
+                "dataset_identity": dataset_identity,
+                "market_slug": runtime_config.get("market_slug") or dataset_identity.get("market_slug"),
+                "sync_mode": runtime_config.get("sync_mode") or "refresh",
+            },
         )
 
     if has_completed_ingestion_dataset(
         db,
         org_id=int(org_id),
         source_id=source_id,
-        idempotency_key=idempotency_key,
+        dataset_key=dataset_key,
     ):
-        release_lock(
+        release_ingestion_execution_lock(
             db,
             org_id=int(org_id),
-            lock_key=execution_lock_key,
+            source_id=source_id,
+            dataset_key=dataset_key,
             owner=lock_owner,
         )
         _emit(
@@ -643,7 +730,8 @@ def execute_source_sync(
                 "event": "ingestion_sync_skipped_duplicate_dataset",
                 "org_id": int(org_id),
                 "source_id": source_id,
-                "idempotency_key": idempotency_key,
+                "dataset_key": dataset_key,
+                "dataset_identity": dataset_identity,
             }
         )
         return start_run(
@@ -653,7 +741,13 @@ def execute_source_sync(
             trigger_type=str(trigger_type),
             runtime_config=runtime_config,
             status="skipped_duplicate_dataset",
-            summary_json={"reason": "already_completed"},
+            summary_json={
+                "reason": "already_completed",
+                "dataset_key": dataset_key,
+                "dataset_identity": dataset_identity,
+                "market_slug": runtime_config.get("market_slug") or dataset_identity.get("market_slug"),
+                "sync_mode": runtime_config.get("sync_mode") or "refresh",
+            },
         )
 
     run = start_run(
@@ -666,7 +760,12 @@ def execute_source_sync(
 
     summary = {
         "records_seen": 0,
+        "records_seen_from_provider": 0,
+        "records_candidate_after_filtering": 0,
         "records_imported": 0,
+        "new_records_imported": 0,
+        "new_listings_imported": 0,
+        "already_seen_skipped": 0,
         "properties_created": 0,
         "properties_updated": 0,
         "deals_created": 0,
@@ -676,10 +775,24 @@ def execute_source_sync(
         "duplicates_skipped": 0,
         "invalid_rows": 0,
         "filtered_out": 0,
+        "unchanged_pages_skipped": 0,
         "filter_reason_counts": {},
         "normal_path": True,
         "pages_scanned": 0,
+        "provider_pages_scanned": 0,
         "page_stats": [],
+        "requested_new_records": requested_new_records,
+        "provider_fetch_limit": provider_fetch_limit,
+        "max_pages_budget": max_pages_budget,
+        "budget_boundary_hit": False,
+        "market_exhausted": False,
+        "stop_reason": None,
+        "dataset_key": dataset_key,
+        "dataset_identity": dataset_identity,
+        "market_slug": runtime_config.get("market_slug") or dataset_identity.get("market_slug"),
+        "sync_mode": runtime_config.get("sync_mode") or "refresh",
+        "cursor_started_at": _cursor_summary(starting_cursor),
+        "cursor_advanced_to": _cursor_summary(starting_cursor),
         "timings_ms": {
             "provider_load_total": 0.0,
             "db_upsert_total": 0.0,
@@ -689,18 +802,40 @@ def execute_source_sync(
     }
 
     try:
-        cursor = _starting_cursor(source, trigger_type)
-        max_pages = max(
-            1,
-            int(getattr(settings, "ingestion_provider_max_pages_per_shard", 3) or 3),
-        )
-        pages_scanned = 0
+        if market_sync_state is not None:
+            mark_market_sync_started(
+                db,
+                sync_state=market_sync_state,
+                requested_limit=requested_new_records,
+                status="running",
+            )
 
-        while cursor and pages_scanned < max_pages:
+        cursor = dict(starting_cursor or {})
+        provider_pages_scanned = 0
+        market_exhausted = False
+        last_seen_provider_record_at: datetime | None = None
+
+        while True:
+            if summary["new_records_imported"] >= requested_new_records:
+                summary["stop_reason"] = "requested_new_records_satisfied"
+                break
+
+            if market_exhausted:
+                summary["stop_reason"] = "market_exhausted"
+                break
+
+            if _budget_exhausted(
+                provider_pages_scanned=provider_pages_scanned,
+                max_pages_budget=max_pages_budget,
+            ):
+                summary["budget_boundary_hit"] = True
+                summary["stop_reason"] = "provider_page_budget_exhausted"
+                break
+
             page_t0 = time.perf_counter()
 
             provider_t0 = time.perf_counter()
-            rows, next_cursor, raw_count = _load_rows_page(
+            fetch_result = _load_rows_page(
                 source,
                 trigger_type=str(trigger_type),
                 runtime_config=runtime_config,
@@ -713,21 +848,51 @@ def execute_source_sync(
                 2,
             )
 
-            pages_scanned += 1
-            summary["pages_scanned"] = pages_scanned
+            provider_pages_scanned += 1
+            summary["provider_pages_scanned"] = provider_pages_scanned
+            summary["pages_scanned"] = provider_pages_scanned
+
+            rows = list(fetch_result.rows or [])
+            raw_count = int(fetch_result.raw_count or 0)
+            exhausted = bool(fetch_result.exhausted or not rows)
+            page_changed = bool(fetch_result.page_changed)
+            next_cursor = dict(fetch_result.next_cursor or {})
+
+            if raw_count > 0:
+                last_seen_provider_record_at = _utcnow_naive()
+
+            summary["records_seen_from_provider"] += raw_count
+            summary["records_seen"] = summary["records_seen_from_provider"]
+            summary["cursor_advanced_to"] = _cursor_summary(next_cursor)
+            summary["market_slug"] = (
+                next_cursor.get("market_slug")
+                or runtime_config.get("market_slug")
+                or summary.get("market_slug")
+            )
 
             page_stat = {
-                "page_number": pages_scanned,
+                "page_number": provider_pages_scanned,
                 "cursor_in": dict(cursor or {}),
                 "cursor_out": dict(next_cursor or {}),
-                "raw_count": int(raw_count or 0),
+                "raw_count": raw_count,
                 "rows_returned": len(rows),
                 "provider_ms": provider_ms,
+                "page_scanned": int(fetch_result.page_scanned or provider_pages_scanned),
+                "shard_scanned": int(fetch_result.shard_scanned or 1),
+                "sort_mode": str(fetch_result.sort_mode or "newest"),
+                "page_fingerprint": fetch_result.page_fingerprint,
+                "page_changed": page_changed,
+                "market_exhausted": exhausted,
+                "records_candidate_after_filtering": 0,
                 "imported": 0,
+                "new_records_imported": 0,
+                "new_listings_imported": 0,
+                "already_seen_skipped": 0,
                 "duplicates_skipped": 0,
                 "invalid_rows": 0,
                 "filtered_out": 0,
                 "pipeline_failures": 0,
+                "skipped_unchanged_page": False,
             }
 
             _emit(
@@ -735,16 +900,48 @@ def execute_source_sync(
                     "event": "ingestion_page_loaded",
                     "org_id": int(org_id),
                     "source_id": source_id,
-                    "page_number": pages_scanned,
-                    "raw_count": int(raw_count or 0),
+                    "page_number": provider_pages_scanned,
+                    "page_scanned": int(fetch_result.page_scanned or provider_pages_scanned),
+                    "raw_count": raw_count,
                     "rows_returned": len(rows),
                     "provider_ms": provider_ms,
+                    "page_changed": page_changed,
+                    "market_exhausted": exhausted,
+                    "dataset_key": dataset_key,
                 }
             )
 
-            for raw in rows:
-                summary["records_seen"] += 1
+            if not page_changed:
+                summary["unchanged_pages_skipped"] += 1
+                page_stat["skipped_unchanged_page"] = True
 
+                if market_sync_state is not None:
+                    advance_market_cursor(
+                        db,
+                        sync_state=market_sync_state,
+                        next_cursor=next_cursor,
+                        page_scanned=int(fetch_result.page_scanned or provider_pages_scanned),
+                        shard_scanned=int(fetch_result.shard_scanned or 1),
+                        sort_mode=str(fetch_result.sort_mode or "newest"),
+                        page_fingerprint=fetch_result.page_fingerprint,
+                        page_changed=page_changed,
+                        exhausted=exhausted,
+                        seen_provider_record_at=last_seen_provider_record_at,
+                    )
+
+                source.cursor_json = dict(next_cursor or {})
+                db.add(source)
+                db.flush()
+
+                page_stat["page_total_ms"] = round((time.perf_counter() - page_t0) * 1000, 2)
+                summary["page_stats"].append(page_stat)
+
+                cursor = dict(next_cursor or {})
+                market_exhausted = exhausted
+                summary["market_exhausted"] = market_exhausted
+                continue
+
+            for raw in rows:
                 payload = canonical_listing_payload(raw)
                 external_record_id = str(payload.get("external_record_id") or "").strip() or None
 
@@ -768,6 +965,9 @@ def execute_source_sync(
                     ) + 1
                     continue
 
+                summary["records_candidate_after_filtering"] += 1
+                page_stat["records_candidate_after_filtering"] += 1
+
                 external_link = find_existing_by_external_id(
                     db,
                     org_id=int(org_id),
@@ -775,7 +975,9 @@ def execute_source_sync(
                     external_record_id=str(payload["external_record_id"]),
                 )
                 if external_link is not None:
+                    summary["already_seen_skipped"] += 1
                     summary["duplicates_skipped"] += 1
+                    page_stat["already_seen_skipped"] += 1
                     page_stat["duplicates_skipped"] += 1
                     continue
 
@@ -803,7 +1005,7 @@ def execute_source_sync(
                     property_id=int(prop.id),
                     payload=payload,
                 )
-                rent, rent_created = _upsert_rent_assumption(
+                rent, _rent_created = _upsert_rent_assumption(
                     db,
                     org_id=int(org_id),
                     property_id=int(prop.id),
@@ -849,7 +1051,11 @@ def execute_source_sync(
                 )
 
                 summary["records_imported"] += 1
+                summary["new_records_imported"] += 1
+                summary["new_listings_imported"] += 1
                 page_stat["imported"] += 1
+                page_stat["new_records_imported"] += 1
+                page_stat["new_listings_imported"] += 1
                 summary["properties_created"] += 1 if prop_created else 0
                 summary["properties_updated"] += 1 if (not prop_created and prop_before is not None) else 0
                 summary["deals_created"] += 1 if deal_created else 0
@@ -886,7 +1092,6 @@ def execute_source_sync(
                             "external_record_id": external_record_id,
                             "prop_created": bool(prop_created),
                             "deal_created": bool(deal_created),
-                            "rent_created": bool(rent_created),
                             "photos_added": int(photos_added),
                             "db_upsert_ms": db_upsert_ms,
                             "pipeline_ms": pipeline_ms,
@@ -896,11 +1101,15 @@ def execute_source_sync(
                             "pipeline_errors": list((pipeline_summary or {}).get("errors") or [])
                             if isinstance(pipeline_summary, dict)
                             else [],
+                            "dataset_key": dataset_key,
                         }
                     )
                 except Exception as exc:
                     page_stat["pipeline_failures"] += 1
-                    logger.exception("post_ingestion_pipeline_failed property_id=%s", getattr(prop, "id", None))
+                    logger.exception(
+                        "post_ingestion_pipeline_failed property_id=%s",
+                        getattr(prop, "id", None),
+                    )
                     summary.setdefault("post_import_failures", 0)
                     summary["post_import_failures"] = int(summary.get("post_import_failures", 0)) + 1
                     summary.setdefault("post_import_errors", [])
@@ -912,18 +1121,45 @@ def execute_source_sync(
                         }
                     )
 
+            if market_sync_state is not None:
+                advance_market_cursor(
+                    db,
+                    sync_state=market_sync_state,
+                    next_cursor=next_cursor,
+                    page_scanned=int(fetch_result.page_scanned or provider_pages_scanned),
+                    shard_scanned=int(fetch_result.shard_scanned or 1),
+                    sort_mode=str(fetch_result.sort_mode or "newest"),
+                    page_fingerprint=fetch_result.page_fingerprint,
+                    page_changed=page_changed,
+                    exhausted=exhausted,
+                    seen_provider_record_at=last_seen_provider_record_at,
+                )
+
+            source.cursor_json = dict(next_cursor or {})
+            db.add(source)
+            db.flush()
+
             page_stat["page_total_ms"] = round((time.perf_counter() - page_t0) * 1000, 2)
             summary["page_stats"].append(page_stat)
-            cursor = dict(next_cursor or {})
 
-        source.cursor_json = cursor or {}
-        db.add(source)
+            cursor = dict(next_cursor or {})
+            market_exhausted = exhausted
+            summary["market_exhausted"] = market_exhausted
+
+        if market_sync_state is not None:
+            mark_market_sync_completed(
+                db,
+                sync_state=market_sync_state,
+                market_exhausted=market_exhausted,
+                seen_provider_record_at=last_seen_provider_record_at,
+                status="idle",
+            )
 
         mark_ingestion_dataset_completed(
             db,
             org_id=int(org_id),
             source_id=source_id,
-            idempotency_key=idempotency_key,
+            dataset_key=dataset_key,
             owner=lock_owner,
             ttl_seconds=int(
                 getattr(
@@ -946,6 +1182,8 @@ def execute_source_sync(
                 "org_id": int(org_id),
                 "source_id": source_id,
                 "run_id": int(getattr(run, "id")),
+                "dataset_key": dataset_key,
+                "dataset_identity": dataset_identity,
                 "summary": summary,
             }
         )
@@ -954,6 +1192,18 @@ def execute_source_sync(
     except Exception as exc:
         logger.exception("execute_source_sync_failed")
         summary["timings_ms"]["run_total"] = round((time.perf_counter() - run_t0) * 1000, 2)
+
+        if market_sync_state is not None:
+            try:
+                mark_market_sync_completed(
+                    db,
+                    sync_state=market_sync_state,
+                    market_exhausted=summary.get("market_exhausted"),
+                    status="failed",
+                )
+            except Exception:
+                logger.exception("mark_market_sync_completed_failed")
+
         _set_run_summary(run, {**summary, "error": str(exc)})
         _set_run_status(run, "failed")
         finish_run(db, run, status="failed", summary_json={**summary, "error": str(exc)})
@@ -964,6 +1214,8 @@ def execute_source_sync(
                 "org_id": int(org_id),
                 "source_id": source_id,
                 "run_id": int(getattr(run, "id")),
+                "dataset_key": dataset_key,
+                "dataset_identity": dataset_identity,
                 "error": str(exc),
                 "summary": summary,
             },
@@ -971,10 +1223,11 @@ def execute_source_sync(
         )
         raise
     finally:
-        release_lock(
+        release_ingestion_execution_lock(
             db,
             org_id=int(org_id),
-            lock_key=execution_lock_key,
+            source_id=source_id,
+            dataset_key=dataset_key,
             owner=lock_owner,
         )
         

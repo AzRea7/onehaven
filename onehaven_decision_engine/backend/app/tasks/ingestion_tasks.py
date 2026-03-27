@@ -6,7 +6,6 @@ from ..services.ingestion_run_execute import execute_source_sync
 from ..services.ingestion_scheduler_service import (
     build_jurisdiction_refresh_payload,
     build_location_refresh_payload,
-    build_runtime_payload,
     dispatch_daily_sync_for_org,
     list_jurisdictions_needing_refresh,
     list_org_ids_with_enabled_sources,
@@ -26,6 +25,10 @@ from ..workers.celery_app import celery_app
 
 from ..config import settings
 from ..services.ingestion_enrichment_service import refresh_property_rent_assumptions
+from ..services.market_sync_service import (
+    get_market_sync_state_by_id,
+    mark_backfill_completed,
+)
 from ..services.rent_refresh_queue_service import (
     list_properties_for_budgeted_rent_refresh,
     should_queue_rent_refresh_after_sync,
@@ -59,6 +62,8 @@ def _pipeline_outcome(summary_json: dict | None) -> dict:
         "filter_reason_counts": dict(summary.get("filter_reason_counts") or {}),
         "location_automation_enabled": bool(summary.get("location_automation_enabled", False)),
         "normal_path": bool(summary.get("normal_path", True)),
+        "market_exhausted": bool(summary.get("market_exhausted", False)),
+        "stop_reason": summary.get("stop_reason"),
     }
 
 
@@ -75,14 +80,26 @@ def sync_source_task(
         if source is None:
             return {"ok": False, "error": "source_not_found", "source_id": source_id}
 
+        effective_runtime_config = dict(runtime_config or {})
+        sync_mode = str(effective_runtime_config.get("sync_mode") or "refresh").strip().lower()
+
         run = execute_source_sync(
             db,
             org_id=int(org_id),
             source=source,
             trigger_type=str(trigger_type or "manual"),
-            runtime_config=runtime_config or {},
+            runtime_config=effective_runtime_config,
         )
         summary = dict(getattr(run, "summary_json", None) or {})
+
+        if sync_mode == "backfill" and bool(effective_runtime_config.get("mark_backfill_complete_on_exhaustion")):
+            sync_state = get_market_sync_state_by_id(
+                db,
+                sync_state_id=effective_runtime_config.get("market_sync_state_id"),
+                org_id=int(org_id),
+            )
+            if sync_state is not None and bool(summary.get("market_exhausted")):
+                mark_backfill_completed(db, sync_state=sync_state)
 
         post_sync_rent_queued = 0
         post_sync_rent_property_ids: list[int] = []
@@ -103,6 +120,7 @@ def sync_source_task(
             "ok": True,
             "run_id": getattr(run, "id", None),
             "status": getattr(run, "status", None),
+            "sync_mode": sync_mode,
             "post_sync_rent_queued": post_sync_rent_queued,
             "post_sync_rent_property_ids": post_sync_rent_property_ids,
             "summary_json": summary,
@@ -142,6 +160,7 @@ def daily_market_refresh_task():
             result = dispatch_daily_sync_for_org(
                 db,
                 org_id=int(org_id),
+                sync_mode="refresh",
                 enqueue_sync=lambda _org_id, _source_id, _trigger_type, _payload: sync_source_task.delay(
                     int(_org_id),
                     int(_source_id),
@@ -152,7 +171,7 @@ def daily_market_refresh_task():
             queued += int(result.get("queued", 0) or 0)
             runs.append(result)
 
-        return {"ok": True, "queued": queued, "runs": runs}
+        return {"ok": True, "queued": queued, "sync_mode": "refresh", "runs": runs}
     finally:
         db.close()
 
@@ -301,4 +320,3 @@ def notify_stale_jurisdictions_task(
         return {"ok": True, "result": result}
     finally:
         db.close()
-        

@@ -7,7 +7,7 @@ export type SupportedMarket = {
   county?: string | null;
   city?: string | null;
   zip_codes?: string[];
-  coverage_tier?: string;
+  coverage_tier?: string | null;
   priority?: number;
   is_active?: boolean;
   sync_limit?: number;
@@ -103,6 +103,21 @@ export type IngestionRun = {
   error_summary?: string | null;
   summary_json?: Record<string, any> | null;
   pipeline_outcome?: PipelineOutcome;
+
+  new_listings_imported?: number;
+  already_seen_skipped?: number;
+  provider_pages_scanned?: number;
+  market_slug?: string | null;
+  cursor_advanced_to?: {
+    market_slug?: string | null;
+    page?: number | null;
+    shard?: number | null;
+    sort_mode?: string | null;
+    page_changed?: boolean | null;
+  } | null;
+  market_exhausted?: boolean;
+  sync_mode?: string | null;
+  stop_reason?: string | null;
 };
 
 export type IngestionRunDetail = {
@@ -177,9 +192,8 @@ export type SyncDefaultSourcesResponse = {
 };
 
 export type SyncMarketPayload = {
-  market_slug?: string;
-  city?: string;
-  state?: string;
+  market_slug: string;
+  limit?: number;
   execute_inline?: boolean;
 };
 
@@ -187,8 +201,6 @@ export type SyncMarketResponse = {
   ok: boolean;
   covered: boolean;
   queued: boolean;
-  city?: string;
-  state?: string;
   market?: SupportedMarket | null;
   queued_count?: number;
   task_ids?: string[];
@@ -198,6 +210,15 @@ export type SyncMarketResponse = {
     provider: string;
     trigger_type: string;
     runtime_config: Record<string, any>;
+  }>;
+  runs?: Array<{
+    ok?: boolean;
+    run_id?: number;
+    status?: string;
+    source_id?: number;
+    trigger_type?: string;
+    summary_json?: Record<string, any>;
+    pipeline_outcome?: PipelineOutcome;
   }>;
 };
 
@@ -284,11 +305,14 @@ export const ingestionClient = {
       method: "POST",
       body: JSON.stringify({
         market_slug: payload.market_slug,
-        city: payload.city,
-        state: payload.state ?? "MI",
+        limit: payload.limit ?? undefined,
         execute_inline: Boolean(payload.execute_inline),
       }),
     });
+  },
+
+  syncSupportedMarket(payload: SyncMarketPayload) {
+    return this.syncMarket(payload);
   },
 
   syncSource(sourceId: number, payload: IngestionLaunchPayload = {}) {

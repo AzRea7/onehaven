@@ -1,4 +1,3 @@
-# backend/app/services/locks_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,11 +25,19 @@ def _now() -> datetime:
 
 
 def _get_expiry_attr_name(row: Any) -> str:
-    if hasattr(row, "expires_at"):
-        return "expires_at"
     if hasattr(row, "locked_until"):
         return "locked_until"
-    raise AttributeError("OrgLock must expose either 'expires_at' or 'locked_until'")
+    if hasattr(row, "expires_at"):
+        return "expires_at"
+    raise AttributeError("OrgLock must expose either 'locked_until' or 'expires_at'")
+
+
+def _get_holder_attr_name(row: Any) -> str:
+    if hasattr(row, "owner_token"):
+        return "owner_token"
+    if hasattr(row, "owner"):
+        return "owner"
+    raise AttributeError("OrgLock must expose either 'owner_token' or 'owner'")
 
 
 def _get_expiry(row: Any) -> datetime | None:
@@ -45,15 +52,16 @@ def _set_expiry(row: Any, value: datetime) -> None:
 
 
 def _get_holder(row: Any) -> str | None:
-    if hasattr(row, "owner"):
-        raw = getattr(row, "owner", None)
+    try:
+        raw = getattr(row, _get_holder_attr_name(row), None)
         return str(raw) if raw else None
-    return None
+    except Exception:
+        return None
 
 
 def _set_holder(row: Any, owner: str | None) -> None:
-    if hasattr(row, "owner"):
-        setattr(row, "owner", owner)
+    value = str(owner or "").strip() or "system"
+    setattr(row, _get_holder_attr_name(row), value)
 
 
 def _touch_timestamps(row: Any, *, now: datetime) -> None:
@@ -61,6 +69,8 @@ def _touch_timestamps(row: Any, *, now: datetime) -> None:
         setattr(row, "updated_at", now)
     if hasattr(row, "created_at") and getattr(row, "created_at", None) is None:
         setattr(row, "created_at", now)
+    if hasattr(row, "acquired_at") and getattr(row, "acquired_at", None) is None:
+        setattr(row, "acquired_at", now)
 
 
 def _is_stale(row: Any, *, now: datetime | None = None) -> bool:
@@ -147,8 +157,9 @@ def acquire_lock(
         return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
 
     current_holder = _get_holder(row)
-    if (current_holder or "") == (owner or ""):
-        _set_holder(row, owner)
+    desired_holder = str(owner or "").strip() or "system"
+    if (current_holder or "") == desired_holder:
+        _set_holder(row, desired_holder)
         _set_expiry(row, expires_at)
         _touch_timestamps(row, now=now)
         db.add(row)
@@ -206,12 +217,14 @@ def release_lock(
         )
 
     current_holder = _get_holder(row)
-    if not force and owner and current_holder and current_holder != owner:
+    desired_holder = str(owner or "").strip() or "system"
+
+    if not force and owner and current_holder and current_holder != desired_holder:
         return _row_to_result(row, acquired=False, org_id=int(org_id), lock_key=str(lock_key))
 
     _set_expiry(row, now - timedelta(seconds=1))
-    if force or not owner or current_holder == owner:
-        _set_holder(row, owner if hasattr(row, "owner") else None)
+    if force or not owner or current_holder == desired_holder:
+        _set_holder(row, desired_holder)
     _touch_timestamps(row, now=now)
     db.add(row)
     db.flush()
@@ -276,18 +289,18 @@ def build_ingestion_execution_lock_key(
     *,
     org_id: int,
     source_id: int,
-    idempotency_key: str,
+    dataset_key: str,
 ) -> str:
-    return f"ingestion_exec:{int(org_id)}:{int(source_id)}:{idempotency_key}"
+    return f"ingestion_exec:{int(org_id)}:{int(source_id)}:{dataset_key}"
 
 
 def build_ingestion_completed_lock_key(
     *,
     org_id: int,
     source_id: int,
-    idempotency_key: str,
+    dataset_key: str,
 ) -> str:
-    return f"ingestion_done:{int(org_id)}:{int(source_id)}:{idempotency_key}"
+    return f"ingestion_done:{int(org_id)}:{int(source_id)}:{dataset_key}"
 
 
 def acquire_ingestion_execution_lock(
@@ -295,7 +308,7 @@ def acquire_ingestion_execution_lock(
     *,
     org_id: int,
     source_id: int,
-    idempotency_key: str,
+    dataset_key: str,
     owner: str | None,
     ttl_seconds: int,
     now: datetime | None = None,
@@ -306,10 +319,34 @@ def acquire_ingestion_execution_lock(
         lock_key=build_ingestion_execution_lock_key(
             org_id=int(org_id),
             source_id=int(source_id),
-            idempotency_key=str(idempotency_key),
+            dataset_key=str(dataset_key),
         ),
         owner=owner,
         ttl_seconds=int(ttl_seconds),
+        now=now,
+    )
+
+
+def release_ingestion_execution_lock(
+    db: Session,
+    *,
+    org_id: int,
+    source_id: int,
+    dataset_key: str,
+    owner: str | None = None,
+    force: bool = False,
+    now: datetime | None = None,
+) -> LockResult:
+    return release_lock(
+        db,
+        org_id=int(org_id),
+        lock_key=build_ingestion_execution_lock_key(
+            org_id=int(org_id),
+            source_id=int(source_id),
+            dataset_key=str(dataset_key),
+        ),
+        owner=owner,
+        force=force,
         now=now,
     )
 
@@ -319,7 +356,7 @@ def has_completed_ingestion_dataset(
     *,
     org_id: int,
     source_id: int,
-    idempotency_key: str,
+    dataset_key: str,
     now: datetime | None = None,
 ) -> bool:
     return is_lock_active(
@@ -328,7 +365,7 @@ def has_completed_ingestion_dataset(
         lock_key=build_ingestion_completed_lock_key(
             org_id=int(org_id),
             source_id=int(source_id),
-            idempotency_key=str(idempotency_key),
+            dataset_key=str(dataset_key),
         ),
         now=now,
     )
@@ -339,7 +376,7 @@ def mark_ingestion_dataset_completed(
     *,
     org_id: int,
     source_id: int,
-    idempotency_key: str,
+    dataset_key: str,
     owner: str | None,
     ttl_seconds: int,
     now: datetime | None = None,
@@ -350,7 +387,7 @@ def mark_ingestion_dataset_completed(
         lock_key=build_ingestion_completed_lock_key(
             org_id=int(org_id),
             source_id=int(source_id),
-            idempotency_key=str(idempotency_key),
+            dataset_key=str(dataset_key),
         ),
         owner=owner,
         ttl_seconds=int(ttl_seconds),

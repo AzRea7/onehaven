@@ -56,8 +56,6 @@ from ..services.property_state_machine import (
 )
 from ..services.workflow_gate_service import build_workflow_summary
 from ..services.acquisition_tag_service import list_property_tags, replace_property_tags
-
-# NEW: use inventory snapshots as the investor-pane source instead of raw Property row ordering.
 from ..services.property_inventory_snapshot_service import (
     build_property_inventory_snapshot,
     build_inventory_snapshots_for_scope,
@@ -445,6 +443,79 @@ def _build_property_list_item(
     return prop_payload
 
 
+def _sort_inventory_rows(rows: list[dict[str, Any]], wanted_sort: str) -> list[dict[str, Any]]:
+    if wanted_sort == "best_cashflow":
+        rows.sort(
+            key=lambda item: (
+                float(item.get("projected_monthly_cashflow") or float("-inf")),
+                float(item.get("freshness_score") or 0.0),
+                float(item.get("relevance_score") or 0.0),
+                int(item.get("id") or 0),
+            ),
+            reverse=True,
+        )
+    elif wanted_sort == "lowest_price":
+        rows.sort(
+            key=lambda item: (
+                float(item.get("asking_price") or float("inf")),
+                -float(item.get("freshness_score") or 0.0),
+                -float(item.get("relevance_score") or 0.0),
+                -int(item.get("id") or 0),
+            )
+        )
+    elif wanted_sort == "highest_price":
+        rows.sort(
+            key=lambda item: (
+                float(item.get("asking_price") or float("-inf")),
+                float(item.get("freshness_score") or 0.0),
+                float(item.get("relevance_score") or 0.0),
+                int(item.get("id") or 0),
+            ),
+            reverse=True,
+        )
+    elif wanted_sort == "best_dscr":
+        rows.sort(
+            key=lambda item: (
+                float(item.get("dscr") or float("-inf")),
+                float(item.get("freshness_score") or 0.0),
+                float(item.get("relevance_score") or 0.0),
+                int(item.get("id") or 0),
+            ),
+            reverse=True,
+        )
+    elif wanted_sort == "newest":
+        rows.sort(
+            key=lambda item: (
+                bool(item.get("is_new_this_sync")),
+                bool(item.get("is_recently_refreshed")),
+                float(item.get("freshness_score") or 0.0),
+                str(
+                    item.get("source_updated_at")
+                    or item.get("acquisition_last_seen_at")
+                    or item.get("updated_at")
+                    or item.get("created_at")
+                    or ""
+                ),
+                int(item.get("id") or 0),
+            ),
+            reverse=True,
+        )
+    else:
+        rows.sort(
+            key=lambda item: (
+                float(item.get("relevance_score") or 0.0),
+                bool(item.get("is_new_this_sync")),
+                bool(item.get("is_recently_refreshed")),
+                float(item.get("freshness_score") or 0.0),
+                -int(bool(item.get("is_stale"))),
+                -int(bool(item.get("is_very_stale"))),
+                int(item.get("id") or 0),
+            ),
+            reverse=True,
+        )
+    return rows
+
+
 @router.post("", response_model=PropertyOut)
 def create_property(payload: PropertyCreate, db: Session = Depends(get_db), p=Depends(get_principal)):
     row = Property(**payload.model_dump())
@@ -474,119 +545,15 @@ def list_properties(
     max_crime_score: Optional[float] = Query(default=None),
     min_offender_count: Optional[int] = Query(default=None),
     max_offender_count: Optional[int] = Query(default=None),
+    hide_stale: bool = Query(default=False),
+    hide_very_stale: bool = Query(default=False),
+    freshness: Optional[str] = Query(default=None),
     sort: Optional[str] = Query(default="relevance"),
     limit: int = Query(default=100, ge=1, le=1000),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
     req_t0 = time.perf_counter()
-
-    # OLD PATH KEPT FOR REFERENCE ONLY:
-    #
-    # stmt = (
-    #     select(Property)
-    #     .where(Property.org_id == p.org_id)
-    #     .options(selectinload(Property.rent_assumption), selectinload(Property.rent_comps))
-    # )
-    #
-    # if state:
-    #     stmt = stmt.where(Property.state == state)
-    # if city:
-    #     stmt = stmt.where(func.lower(Property.city) == city.lower())
-    # if county:
-    #     stmt = stmt.where(func.lower(Property.county) == county.lower())
-    #
-    # if q:
-    #     like = f"%{q.strip().lower()}%"
-    #     stmt = stmt.where(
-    #         func.lower(
-    #             func.concat(
-    #                 Property.address,
-    #                 " ",
-    #                 Property.city,
-    #                 " ",
-    #                 Property.state,
-    #                 " ",
-    #                 Property.zip,
-    #             )
-    #         ).like(like)
-    #     )
-    #
-    # if only_red_zone:
-    #     stmt = stmt.where(Property.is_red_zone.is_(True))
-    # elif exclude_red_zone:
-    #     stmt = stmt.where((Property.is_red_zone.is_(False)) | (Property.is_red_zone.is_(None)))
-    #
-    # if min_crime_score is not None:
-    #     stmt = stmt.where(Property.crime_score.is_not(None))
-    #     stmt = stmt.where(Property.crime_score >= float(min_crime_score))
-    #
-    # if max_crime_score is not None:
-    #     stmt = stmt.where(Property.crime_score.is_not(None))
-    #     stmt = stmt.where(Property.crime_score <= float(max_crime_score))
-    #
-    # if min_offender_count is not None:
-    #     stmt = stmt.where(Property.offender_count.is_not(None))
-    #     stmt = stmt.where(Property.offender_count >= int(min_offender_count))
-    #
-    # if max_offender_count is not None:
-    #     stmt = stmt.where(Property.offender_count.is_not(None))
-    #     stmt = stmt.where(Property.offender_count <= int(max_offender_count))
-    #
-    # if sort == "oldest":
-    #     stmt = stmt.order_by(asc(Property.id))
-    # elif sort == "address_asc":
-    #     stmt = stmt.order_by(asc(Property.address), desc(Property.id))
-    # elif sort == "address_desc":
-    #     stmt = stmt.order_by(desc(Property.address), desc(Property.id))
-    # elif sort == "crime_desc":
-    #     stmt = stmt.order_by(desc(Property.crime_score).nullslast(), desc(Property.id))
-    # elif sort == "crime_asc":
-    #     stmt = stmt.order_by(asc(Property.crime_score).nullslast(), desc(Property.id))
-    # elif sort == "offenders_desc":
-    #     stmt = stmt.order_by(desc(Property.offender_count).nullslast(), desc(Property.id))
-    # elif sort == "offenders_asc":
-    #     stmt = stmt.order_by(asc(Property.offender_count).nullslast(), desc(Property.id))
-    # else:
-    #     stmt = stmt.order_by(desc(Property.id))
-    #
-    # query_t0 = time.perf_counter()
-    # rows = db.scalars(stmt.limit(limit)).unique().all()
-    # query_ms = round((time.perf_counter() - query_t0) * 1000, 2)
-    #
-    # wanted_stage = (stage or "").strip().lower() or None
-    # wanted_decision = normalize_decision_bucket(decision) if decision else None
-    #
-    # out: list[dict] = []
-    # skipped_errors = 0
-    # skipped_stage = 0
-    # skipped_decision = 0
-    #
-    # build_t0 = time.perf_counter()
-    # for prop in rows:
-    #     try:
-    #         item = _build_property_list_item(
-    #             db,
-    #             org_id=p.org_id,
-    #             prop=prop,
-    #             recompute_state=False,
-    #         )
-    #
-    #         if wanted_stage and str(item.get("current_workflow_stage") or "").lower() != wanted_stage:
-    #             skipped_stage += 1
-    #             continue
-    #         if wanted_decision and str(item.get("normalized_decision") or "").upper() != wanted_decision:
-    #             skipped_decision += 1
-    #             continue
-    #
-    #         out.append(item)
-    #     except Exception:
-    #         skipped_errors += 1
-    #         log.exception(
-    #             "properties_list_item_build_failed",
-    #             extra={"org_id": p.org_id, "property_id": int(getattr(prop, "id", 0) or 0)},
-    #         )
-    #         continue
 
     scope = build_inventory_snapshots_for_scope(
         db,
@@ -600,6 +567,7 @@ def list_properties(
     )
 
     rows = list(scope.get("items") or [])
+    wanted_freshness = str(freshness or "").strip().lower() or None
 
     def keep(row: dict[str, Any]) -> bool:
         row_stage = str(row.get("current_workflow_stage") or "").strip().lower()
@@ -607,6 +575,7 @@ def list_properties(
         crime_score = row.get("crime_score")
         offender_count = row.get("offender_count")
         is_red_zone = row.get("is_red_zone")
+        row_bucket = str(row.get("freshness_bucket") or "").strip().lower()
 
         if stage and row_stage != str(stage).strip().lower():
             return False
@@ -639,39 +608,32 @@ def list_properties(
             if offender_count is None or int(offender_count) > int(max_offender_count):
                 return False
 
+        if hide_very_stale and bool(row.get("is_very_stale")):
+            return False
+
+        if hide_stale and bool(row.get("is_stale")):
+            return False
+
+        if wanted_freshness:
+            if wanted_freshness == "new" and row_bucket != "new":
+                return False
+            if wanted_freshness == "fresh" and row_bucket not in {"new", "fresh"}:
+                return False
+            if wanted_freshness == "warm" and row_bucket not in {"new", "fresh", "warm"}:
+                return False
+            if wanted_freshness == "aging" and row_bucket != "aging":
+                return False
+            if wanted_freshness == "stale" and row_bucket != "stale":
+                return False
+            if wanted_freshness == "very_stale" and row_bucket != "very_stale":
+                return False
+
         return True
 
     rows = [row for row in rows if keep(row)]
 
     wanted_sort = str(sort or "relevance").strip().lower()
-
-    if wanted_sort == "best_cashflow":
-        rows.sort(
-            key=lambda item: float(item.get("projected_monthly_cashflow") or float("-inf")),
-            reverse=True,
-        )
-    elif wanted_sort == "lowest_price":
-        rows.sort(key=lambda item: float(item.get("asking_price") or float("inf")))
-    elif wanted_sort == "highest_price":
-        rows.sort(
-            key=lambda item: float(item.get("asking_price") or float("-inf")),
-            reverse=True,
-        )
-    elif wanted_sort == "best_dscr":
-        rows.sort(key=lambda item: float(item.get("dscr") or float("-inf")), reverse=True)
-    elif wanted_sort == "newest":
-        rows.sort(
-            key=lambda item: str(
-                item.get("source_updated_at")
-                or item.get("acquisition_last_seen_at")
-                or item.get("updated_at")
-                or item.get("created_at")
-                or ""
-            ),
-            reverse=True,
-        )
-    else:
-        rows.sort(key=lambda item: int(item.get("relevance_score") or 0), reverse=True)
+    rows = _sort_inventory_rows(rows, wanted_sort)
 
     total_ms = round((time.perf_counter() - req_t0) * 1000, 2)
 
@@ -685,6 +647,9 @@ def list_properties(
             "q": q,
             "stage": stage,
             "decision": decision,
+            "freshness": wanted_freshness,
+            "hide_stale": hide_stale,
+            "hide_very_stale": hide_very_stale,
             "sort": wanted_sort,
             "limit": limit,
             "returned_rows": len(rows),

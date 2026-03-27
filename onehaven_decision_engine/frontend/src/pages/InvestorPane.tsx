@@ -20,6 +20,7 @@ import {
   Clock3,
   CheckCircle2,
   Settings2,
+  PanelRightOpen,
 } from "lucide-react";
 
 import PageHero from "../components/PageHero";
@@ -28,9 +29,11 @@ import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
 import PaneSwitcher from "../components/PaneSwitcher";
 import IngestionErrorsDrawer from "../components/IngestionErrorsDrawer";
+import IngestionRunsPanel from "../components/IngestionRunsPanel";
 import MarketSourcePackModal from "../components/MarketSourcePackModal";
 import IngestionLaunchCard from "../components/IngestionLaunchCard";
-import { api, type SupportedMarket } from "../lib/api";
+import { api } from "../lib/api";
+import type { SupportedMarket } from "../lib/ingestionClient";
 
 type Row = any;
 type MarketRow = SupportedMarket;
@@ -182,14 +185,6 @@ function inferCrime(r: any) {
 
 function inferCounty(r: any) {
   return r?.county || r?.property?.county || null;
-}
-
-function inferLocationConfidence(r: any) {
-  return (
-    numberOrNull(r?.geocode_confidence) ??
-    numberOrNull(r?.property?.geocode_confidence) ??
-    null
-  );
 }
 
 function inferNormalizedAddress(r: any) {
@@ -465,6 +460,7 @@ export default function InvestorPane() {
   // const [selectedCity, setSelectedCity] = React.useState<string>("ALL");
 
   const [activeRunId, setActiveRunId] = React.useState<number | null>(null);
+  const [runsOpen, setRunsOpen] = React.useState(false);
   const [sourcePackMarket, setSourcePackMarket] =
     React.useState<SupportedMarket | null>(null);
   const [selectedMarket, setSelectedMarket] =
@@ -496,7 +492,6 @@ export default function InvestorPane() {
       if (selectedMarket?.city) params.city = selectedMarket.city;
       if (deferredQ.trim()) params.q = deferredQ.trim();
 
-      // keep backend sort names aligned to router contract
       if (sort === "RELEVANCE") params.sort = "relevance";
       if (sort === "BEST_CASHFLOW") params.sort = "best_cashflow";
       if (sort === "LOWEST_PRICE") params.sort = "lowest_price";
@@ -523,18 +518,51 @@ export default function InvestorPane() {
 
     try {
       const marketsRes = await api.supportedMarkets();
-      const normalized = Array.isArray(marketsRes) ? marketsRes : [];
+
+      const normalized: SupportedMarket[] = Array.isArray(marketsRes)
+        ? marketsRes.map(
+            (m: any): SupportedMarket => ({
+              slug: String(m?.slug || ""),
+              label: String(m?.label || m?.city || m?.slug || ""),
+              state: String(m?.state || "MI"),
+              county: m?.county ?? null,
+              city: m?.city ?? null,
+              zip_codes: Array.isArray(m?.zip_codes)
+                ? m.zip_codes.filter((z: any) => typeof z === "string")
+                : [],
+              coverage_tier: m?.coverage_tier ?? null,
+              priority:
+                typeof m?.priority === "number" ? m.priority : undefined,
+              is_active:
+                typeof m?.is_active === "boolean" ? m.is_active : undefined,
+              sync_limit:
+                typeof m?.sync_limit === "number" ? m.sync_limit : undefined,
+              sync_every_hours:
+                typeof m?.sync_every_hours === "number"
+                  ? m.sync_every_hours
+                  : undefined,
+              min_price: typeof m?.min_price === "number" ? m.min_price : null,
+              max_price: typeof m?.max_price === "number" ? m.max_price : null,
+              property_types: Array.isArray(m?.property_types)
+                ? m.property_types.filter((p: any) => typeof p === "string")
+                : [],
+              max_units: typeof m?.max_units === "number" ? m.max_units : null,
+              notes: typeof m?.notes === "string" ? m.notes : null,
+            }),
+          )
+        : [];
+
       setMarkets(normalized);
 
-      setSelectedMarket((prev) => {
+      setSelectedMarket((prev): SupportedMarket | null => {
         if (prev?.slug) {
           return (
-            normalized.find((m) => m.slug === prev.slug) ||
-            normalized[0] ||
+            normalized.find((m) => m.slug === prev.slug) ??
+            normalized[0] ??
             null
           );
         }
-        return normalized[0] || null;
+        return normalized[0] ?? null;
       });
     } catch (e: any) {
       setMarketsErr(formatApiError(e, "Failed to load markets."));
@@ -574,13 +602,7 @@ export default function InvestorPane() {
   // }, []);
 
   const load = React.useCallback(async () => {
-    setRefreshing(true);
-    await Promise.allSettled([
-      loadInventory(),
-      loadMarkets(),
-      // loadQueue(),
-    ]);
-    setRefreshing(false);
+    await Promise.all([loadMarkets(), loadInventory()]);
   }, [loadInventory, loadMarkets]);
 
   React.useEffect(() => {
@@ -591,6 +613,31 @@ export default function InvestorPane() {
     loadInventory();
   }, [loadInventory, marketRefreshNonce]);
 
+  const filteredRows = React.useMemo(() => {
+    return rows.filter((row) => {
+      const normalizedDecision = normalizeDecision(
+        row?.normalized_decision || row?.classification,
+      );
+      if (decision !== "ALL" && normalizedDecision !== decision) return false;
+
+      const financingType = getFinancingType(inferAskingPrice(row));
+      if (financing !== "ALL" && financingType !== financing) return false;
+
+      const completenessValue = inferCompleteness(row);
+      if (completeness !== "ALL" && completenessValue !== completeness)
+        return false;
+
+      return true;
+    });
+  }, [rows, decision, financing, completeness]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageRows = React.useMemo(() => {
+    const start = (safeCurrentPage - 1) * PAGE_SIZE;
+    return filteredRows.slice(start, start + PAGE_SIZE);
+  }, [filteredRows, safeCurrentPage]);
+
   React.useEffect(() => {
     setCurrentPage(1);
   }, [
@@ -599,649 +646,508 @@ export default function InvestorPane() {
     financing,
     completeness,
     sort,
+    deferredQ,
     selectedMarket?.slug,
   ]);
 
-  const baseRows = React.useMemo(() => {
-    return rows.filter((r) => {
-      const normalizedDecision = normalizeDecision(
-        r?.normalized_decision || r?.classification || r?.decision,
-      );
-      const financingType = getFinancingType(inferAskingPrice(r));
-      const completion = inferCompleteness(r);
-
-      if (decision !== "ALL" && normalizedDecision !== decision) return false;
-      if (financing !== "ALL" && financingType !== financing) return false;
-      if (completeness !== "ALL" && completion !== completeness) return false;
-
-      return true;
-    });
-  }, [rows, decision, financing, completeness]);
-
-  const sortedRows = React.useMemo(() => {
-    const copy = [...baseRows];
-
-    copy.sort((a, b) => {
-      if (sort === "RELEVANCE") {
-        return (
-          (numberOrNull(b?.relevance_score) ?? -Infinity) -
-          (numberOrNull(a?.relevance_score) ?? -Infinity)
-        );
-      }
-      if (sort === "BEST_CASHFLOW") {
-        return (
-          (inferCashflow(b) ?? -Infinity) - (inferCashflow(a) ?? -Infinity)
-        );
-      }
-      if (sort === "LOWEST_PRICE") {
-        return (
-          (inferAskingPrice(a) ?? Infinity) - (inferAskingPrice(b) ?? Infinity)
-        );
-      }
-      if (sort === "HIGHEST_PRICE") {
-        return (
-          (inferAskingPrice(b) ?? -Infinity) -
-          (inferAskingPrice(a) ?? -Infinity)
-        );
-      }
-      if (sort === "BEST_DSCR") {
-        return (inferDscr(b) ?? -Infinity) - (inferDscr(a) ?? -Infinity);
-      }
-
-      return (
-        (safeDate(inferUpdatedAt(b))?.getTime() ?? 0) -
-        (safeDate(inferUpdatedAt(a))?.getTime() ?? 0)
-      );
-    });
-
-    return copy;
-  }, [baseRows, sort]);
-
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const pageStart = (safeCurrentPage - 1) * PAGE_SIZE;
-  const pageRows = sortedRows.slice(pageStart, pageStart + PAGE_SIZE);
   const pagination = buildPagination(safeCurrentPage, totalPages);
 
-  const counts = React.useMemo(() => {
-    const next = {
-      GOOD_DEAL: 0,
-      REVIEW: 0,
-      REJECT: 0,
-    };
-
-    for (const row of baseRows) {
-      const d = normalizeDecision(
-        row?.normalized_decision || row?.classification || row?.decision,
-      );
-      next[d] += 1;
-    }
-
-    return next;
-  }, [baseRows]);
-
-  const enrichedCount = React.useMemo(
-    () => baseRows.filter((r) => inferCompleteness(r) === "COMPLETE").length,
-    [baseRows],
-  );
-
-  const positiveCashflowCount = React.useMemo(
-    () => baseRows.filter((r) => (inferCashflow(r) ?? 0) > 0).length,
-    [baseRows],
-  );
-
-  const avgCashflow = React.useMemo(() => {
-    const values = baseRows
-      .map((r) => inferCashflow(r))
-      .filter((v): v is number => typeof v === "number");
-    if (!values.length) return null;
-    return values.reduce((sum, v) => sum + v, 0) / values.length;
-  }, [baseRows]);
-
-
-  const handleMarketChange = React.useCallback(
-    (market: SupportedMarket | null) => {
-      setSelectedMarket((prev) => {
-        const prevSlug = prev?.slug || null;
-        const nextSlug = market?.slug || null;
-        if (prevSlug === nextSlug) return prev;
-        return market;
+  async function refreshSelectedMarket() {
+    if (!selectedMarket?.slug) return;
+    setRefreshing(true);
+    setInventoryErr(null);
+    try {
+      await api.post("/ingestion/sync-market", {
+        market_slug: selectedMarket.slug,
       });
-    },
-    [],
-  );
-
-  const handleQueued = React.useCallback(() => {
-    setMarketRefreshNonce((n) => n + 1);
-    loadInventory();
-  }, [loadInventory]);
+      setMarketRefreshNonce((v) => v + 1);
+      setRunsOpen(true);
+    } catch (e: any) {
+      setInventoryErr(formatApiError(e, "Failed to sync selected market."));
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   return (
     <PageShell>
-      <div className="space-y-6">
-        <PageHero
-          eyebrow="Pane 1"
-          title="Investor pane"
-          subtitle="Browse covered inventory, sync only supported markets, and rank results by relevance instead of raw provider order."
-          actions={
-            <>
-              <button onClick={load} className="oh-btn oh-btn-secondary">
-                {refreshing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="h-4 w-4" />
-                )}
-                Refresh inventory
-              </button>
-              <Link to="/dashboard" className="oh-btn oh-btn-secondary">
-                Portfolio dashboard
-              </Link>
-            </>
-          }
-        />
+      <PageHero
+        eyebrow="Investor pane"
+        title="Curated inventory across supported markets"
+        subtitle="Search your covered inventory, refresh the selected market, and inspect sync behavior without dropping into raw ingestion details."
+      />
 
-        <PaneSwitcher activePane="investor" />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-6">
+          <Surface
+            title="Inventory controls"
+            subtitle="Scope the investor catalog to a supported market and sort the results that matter."
+          >
+            <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr_auto]">
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <Search className="h-4 w-4" />
+                  Search inventory
+                </div>
+                <div className="mt-2 flex items-center gap-3">
+                  <Search className="h-4 w-4 text-app-4" />
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Address, city, ZIP, county"
+                    className="w-full bg-transparent text-sm text-app-0 outline-none placeholder:text-app-4"
+                  />
+                </div>
+              </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <MapPin className="h-4 w-4" />
+                  Supported market
+                </div>
+                <div className="mt-2">
+                  <select
+                    value={selectedMarket?.slug || ""}
+                    onChange={(e) =>
+                      setSelectedMarket(
+                        markets.find((m) => m.slug === e.target.value) || null,
+                      )
+                    }
+                    className="w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
+                  >
+                    {markets.map((market) => (
+                      <option key={market.slug} value={market.slug}>
+                        {marketDisplayName(market)}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-2 text-xs text-app-4">
+                    {selectedMarket
+                      ? marketSubLabel(selectedMarket)
+                      : "No market selected"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-stretch gap-3">
+                <button
+                  type="button"
+                  className="oh-btn"
+                  disabled={!selectedMarket || refreshing}
+                  onClick={refreshSelectedMarket}
+                >
+                  {refreshing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Syncing…
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCcw className="h-4 w-4" />
+                      Sync now
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className="oh-btn oh-btn-secondary"
+                  onClick={() => setRunsOpen((v) => !v)}
+                >
+                  <PanelRightOpen className="h-4 w-4" />
+                  {runsOpen ? "Hide runs" : "View runs"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Decision
+                </div>
+                <select
+                  value={decision}
+                  onChange={(e) =>
+                    setDecision(e.target.value as DecisionFilter)
+                  }
+                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
+                >
+                  <option value="ALL">All</option>
+                  <option value="GOOD_DEAL">Good deal</option>
+                  <option value="REVIEW">Review</option>
+                  <option value="REJECT">Reject</option>
+                </select>
+              </div>
+
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <Landmark className="h-4 w-4" />
+                  Financing
+                </div>
+                <select
+                  value={financing}
+                  onChange={(e) =>
+                    setFinancing(e.target.value as FinancingFilter)
+                  }
+                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
+                >
+                  <option value="ALL">All</option>
+                  <option value="CASH">Cash</option>
+                  <option value="DSCR">DSCR</option>
+                  <option value="UNKNOWN">Unknown</option>
+                </select>
+              </div>
+
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Completeness
+                </div>
+                <select
+                  value={completeness}
+                  onChange={(e) =>
+                    setCompleteness(e.target.value as CompletenessFilter)
+                  }
+                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
+                >
+                  <option value="ALL">All</option>
+                  <option value="COMPLETE">Complete</option>
+                  <option value="PARTIAL">Partial</option>
+                  <option value="MISSING">Missing</option>
+                </select>
+              </div>
+
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <Settings2 className="h-4 w-4" />
+                  Sort
+                </div>
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortKey)}
+                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
+                >
+                  <option value="RELEVANCE">Relevance</option>
+                  <option value="BEST_CASHFLOW">Best cashflow</option>
+                  <option value="LOWEST_PRICE">Lowest price</option>
+                  <option value="HIGHEST_PRICE">Highest price</option>
+                  <option value="BEST_DSCR">Best DSCR</option>
+                  <option value="NEWEST">Newest</option>
+                </select>
+              </div>
+            </div>
+
+            {inventoryErr ? (
+              <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                {inventoryErr}
+              </div>
+            ) : null}
+
+            {marketsErr ? (
+              <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                {marketsErr}
+              </div>
+            ) : null}
+          </Surface>
+
           <Surface
             title="Investor inventory"
-            subtitle="Visible supported listings"
+            subtitle="Your local supported-market catalog, sorted for action instead of raw provider order."
           >
-            <div className="text-3xl font-semibold text-app-0">
-              {baseRows.length.toLocaleString()}
-            </div>
-          </Surface>
+            {inventoryLoading || marketsLoading ? (
+              <div className="flex items-center justify-center py-16 text-app-4">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
+            ) : !pageRows.length ? (
+              <EmptyState
+                title="No properties match the current filters"
+                description="Try a different market, search term, or decision filter."
+              />
+            ) : (
+              <>
+                <div className="grid gap-4">
+                  {pageRows.map((row) => {
+                    const property = inferProperty(row);
+                    const propertyId = resolvePropertyId(row);
+                    const askingPrice = inferAskingPrice(row);
+                    const marketRent = inferMarketRent(row);
+                    const cashflow = inferCashflow(row);
+                    const dscr = inferDscr(row);
+                    const completenessValue = inferCompleteness(row);
+                    const photoUrl = inferPhotoUrl(row);
+                    const tags = inferTags(row);
+                    const updatedAt = inferUpdatedAt(row);
 
-          <Surface
-            title="Good deals"
-            subtitle="Underwriting-positive candidates"
-          >
-            <div className="text-3xl font-semibold text-app-0">
-              {counts.GOOD_DEAL.toLocaleString()}
-            </div>
-          </Surface>
+                    return (
+                      <div
+                        key={propertyId || property?.id || Math.random()}
+                        className="overflow-hidden rounded-3xl border border-app bg-app-panel"
+                      >
+                        <div className="grid gap-0 md:grid-cols-[280px_minmax(0,1fr)]">
+                          <div className="h-[220px] bg-app-muted">
+                            <Photo
+                              url={photoUrl}
+                              alt={property?.address || "Property"}
+                            />
+                          </div>
 
-          <Surface title="Fully enriched" subtitle="Ready for deeper review">
-            <div className="text-3xl font-semibold text-app-0">
-              {enrichedCount.toLocaleString()}
-            </div>
-          </Surface>
+                          <div className="p-5">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span
+                                    className={decisionPillClass(
+                                      row?.normalized_decision,
+                                    )}
+                                  >
+                                    {normalizeDecision(
+                                      row?.normalized_decision,
+                                    )}
+                                  </span>
+                                  <span
+                                    className={completenessPillClass(
+                                      completenessValue,
+                                    )}
+                                  >
+                                    {completenessLabel(completenessValue)}
+                                  </span>
+                                </div>
 
-          <Surface
-            title="Cashflow positive"
-            subtitle="Monthly upside candidates"
-          >
-            <div className="text-3xl font-semibold text-app-0">
-              {positiveCashflowCount.toLocaleString()}
-            </div>
+                                <div className="mt-3 text-xl font-semibold text-app-0">
+                                  {property?.address || "Unknown address"}
+                                </div>
+
+                                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-app-4">
+                                  <span className="inline-flex items-center gap-1">
+                                    <MapPin className="h-4 w-4" />
+                                    {[
+                                      property?.city,
+                                      property?.state,
+                                      property?.zip,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(", ")}
+                                  </span>
+                                  <span>•</span>
+                                  <span>{relativeTime(updatedAt)}</span>
+                                </div>
+                              </div>
+
+                              <div className="text-right">
+                                <div className="text-xs uppercase tracking-[0.18em] text-app-4">
+                                  Asking
+                                </div>
+                                <div className="mt-1 text-2xl font-semibold text-app-0">
+                                  {money(askingPrice)}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                              <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                                  <Wallet className="h-4 w-4" />
+                                  Cashflow
+                                </div>
+                                <div
+                                  className={`mt-2 text-lg font-semibold ${metricTone(cashflow)}`}
+                                >
+                                  {money(cashflow)}
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                                  <Landmark className="h-4 w-4" />
+                                  DSCR
+                                </div>
+                                <div className="mt-2 text-lg font-semibold text-app-0">
+                                  {dscr != null ? dscr.toFixed(2) : "—"}
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                                  <BriefcaseBusiness className="h-4 w-4" />
+                                  Rent est.
+                                </div>
+                                <div className="mt-2 text-lg font-semibold text-app-0">
+                                  {money(marketRent)}
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                                  <ShieldAlert className="h-4 w-4" />
+                                  Crime
+                                </div>
+                                <div className="mt-2 text-lg font-semibold text-app-0">
+                                  {numberOrNull(inferCrime(row)) ?? "—"}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              {tags.map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="oh-pill oh-pill-secondary"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+
+                            <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex flex-wrap items-center gap-4 text-sm text-app-4">
+                                <span className="inline-flex items-center gap-1">
+                                  <BedDouble className="h-4 w-4" />
+                                  {property?.bedrooms ?? "—"} beds
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                  <Bath className="h-4 w-4" />
+                                  {property?.bathrooms ?? "—"} baths
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                  <GitBranch className="h-4 w-4" />
+                                  {inferCounty(row) || "Unknown county"}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {propertyId ? (
+                                  <Link
+                                    to={`/properties/${propertyId}`}
+                                    className="oh-btn"
+                                  >
+                                    View property
+                                    <ArrowUpRight className="h-4 w-4" />
+                                  </Link>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="oh-btn oh-btn-secondary"
+                                    disabled
+                                  >
+                                    Missing property id
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-5 flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    className="oh-btn oh-btn-secondary"
+                    disabled={safeCurrentPage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Previous
+                  </button>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {pagination.map((token, index) =>
+                      typeof token === "string" ? (
+                        <span
+                          key={`ellipsis-${index}`}
+                          className="px-2 text-sm text-app-4"
+                        >
+                          {token}
+                        </span>
+                      ) : (
+                        <button
+                          key={token}
+                          type="button"
+                          className={
+                            token === safeCurrentPage
+                              ? "oh-btn"
+                              : "oh-btn oh-btn-secondary"
+                          }
+                          onClick={() => setCurrentPage(token)}
+                        >
+                          {token}
+                        </button>
+                      ),
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="oh-btn oh-btn-secondary"
+                    disabled={safeCurrentPage >= totalPages}
+                    onClick={() =>
+                      setCurrentPage((p) => Math.min(totalPages, p + 1))
+                    }
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </>
+            )}
           </Surface>
         </div>
 
-        <IngestionLaunchCard
-          refreshKey={marketRefreshNonce}
-          selectedMarketSlug={selectedMarket?.slug || null}
-          onMarketChange={handleMarketChange}
-          onQueued={handleQueued}
-        />
-
-        <Surface
-          title="Lifecycle handoff"
-          subtitle="This pane now acts as a supported-market inventory page first, while acquisition operations stay downstream."
-        >
-          <div className="flex flex-wrap gap-2">
-            <span className="oh-pill">
-              current stage discovery / underwriting
-            </span>
-            <span className="oh-pill oh-pill-accent">
-              next stage acquisition
-            </span>
-            <span className="oh-pill">
-              active market{" "}
-              {selectedMarket ? marketDisplayName(selectedMarket) : "none"}
-            </span>
-            <span className="oh-pill oh-pill-warn">
-              blocker incomplete enrichment or weak underwriting
-            </span>
-          </div>
-
-          {marketsErr ? (
-            <div className="mt-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-              Market list unavailable: {marketsErr}
-            </div>
-          ) : null}
-        </Surface>
-
-        {/* OLD ACQUISITION PRESSURE + QUEUE PREVIEW BLOCKS KEPT FOR REFERENCE.
-            The prior InvestorPane mixed inventory with acquisition operations.
-            Keeping that code commented makes it easy to restore later if you want
-            a split-screen investor/acquisition operational variant.
-
-        <Surface
-          title="Acquisition pressure"
-          subtitle="This is the operational handoff view: what is in motion, what is blocked, and what needs action now."
-        >
-          ...
-        </Surface>
-
-        <Surface
-          title="Acquisition queue preview"
-          subtitle="What are we waiting on right now?"
-        >
-          ...
-        </Surface>
-        */}
-
-        <Surface
-          title="Inventory filters"
-          subtitle="Filter your covered local inventory"
-        >
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3 xl:col-span-2">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <Search className="h-3.5 w-3.5" />
-                Search inventory
+        <div className="space-y-6">
+          <Surface
+            title="Supported market operations"
+            subtitle="Source packs and refresh controls for the currently selected supported region."
+          >
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-app-4">
+                  Current market
+                </div>
+                <div className="mt-2 text-base font-semibold text-app-0">
+                  {selectedMarket
+                    ? marketDisplayName(selectedMarket)
+                    : "No market"}
+                </div>
+                <div className="mt-1 text-sm text-app-4">
+                  {selectedMarket
+                    ? marketSubLabel(selectedMarket)
+                    : "Select a supported market."}
+                </div>
               </div>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="address, city, zip"
-                className="w-full bg-transparent text-sm text-app-0 outline-none"
+
+              <IngestionLaunchCard
+                market={selectedMarket}
+                onRunQueued={() => {
+                  setMarketRefreshNonce((v) => v + 1);
+                  setRunsOpen(true);
+                }}
+                onManageSources={() => setSourcePackMarket(selectedMarket)}
               />
-            </label>
 
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                Decision
-              </div>
-              <select
-                value={decision}
-                onChange={(e) => setDecision(e.target.value as DecisionFilter)}
-                className="w-full bg-transparent text-sm text-app-0 outline-none"
+              <button
+                type="button"
+                className="oh-btn oh-btn-secondary w-full"
+                disabled={!selectedMarket}
+                onClick={() => setSourcePackMarket(selectedMarket)}
               >
-                <option value="ALL">All</option>
-                <option value="GOOD_DEAL">Good deal</option>
-                <option value="REVIEW">Review</option>
-                <option value="REJECT">Reject</option>
-              </select>
-            </label>
-
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <BriefcaseBusiness className="h-3.5 w-3.5" />
-                Financing
-              </div>
-              <select
-                value={financing}
-                onChange={(e) =>
-                  setFinancing(e.target.value as FinancingFilter)
-                }
-                className="w-full bg-transparent text-sm text-app-0 outline-none"
-              >
-                <option value="ALL">All</option>
-                <option value="CASH">Cash</option>
-                <option value="DSCR">DSCR</option>
-                <option value="UNKNOWN">Unknown</option>
-              </select>
-            </label>
-
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <ShieldAlert className="h-3.5 w-3.5" />
-                Completeness
-              </div>
-              <select
-                value={completeness}
-                onChange={(e) =>
-                  setCompleteness(e.target.value as CompletenessFilter)
-                }
-                className="w-full bg-transparent text-sm text-app-0 outline-none"
-              >
-                <option value="ALL">All</option>
-                <option value="COMPLETE">Enriched</option>
-                <option value="PARTIAL">Partial</option>
-                <option value="MISSING">Missing</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <MapPin className="h-3.5 w-3.5" />
-                Market
-              </div>
-              <div className="text-sm font-semibold text-app-0">
-                {selectedMarket
-                  ? marketDisplayName(selectedMarket)
-                  : "No market selected"}
-              </div>
-              <div className="mt-1 text-xs text-app-4">
-                {selectedMarket
-                  ? marketSubLabel(selectedMarket)
-                  : "Choose a supported market above"}
-              </div>
+                <Settings2 className="h-4 w-4" />
+                Manage market sources
+              </button>
             </div>
+          </Surface>
 
-            <label className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
-                <GitBranch className="h-3.5 w-3.5" />
-                Sort
-              </div>
-              <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value as SortKey)}
-                className="w-full bg-transparent text-sm text-app-0 outline-none"
-              >
-                <option value="RELEVANCE">Relevance</option>
-                <option value="BEST_CASHFLOW">Best cashflow</option>
-                <option value="LOWEST_PRICE">Lowest price</option>
-                <option value="HIGHEST_PRICE">Highest price</option>
-                <option value="BEST_DSCR">Best DSCR</option>
-                <option value="NEWEST">Newest</option>
-              </select>
-            </label>
-
-            <Surface
-              title="Average cashflow"
-              subtitle="Across visible investor inventory"
-            >
-              <div
-                className={`text-3xl font-semibold ${metricTone(avgCashflow)}`}
-              >
-                {money(avgCashflow)}
-              </div>
-            </Surface>
-
-            <Surface
-              title="Next lifecycle move"
-              subtitle="What this pane should do"
-            >
-              <div className="space-y-3 text-sm text-app-2">
-                <div className="flex items-center gap-2">
-                  <BriefcaseBusiness className="h-4 w-4" />
-                  Move shortlisted and reviewable assets into acquisition.
-                </div>
-                <div className="flex items-center gap-2">
-                  <GitBranch className="h-4 w-4" />
-                  The main blocker here is missing enrichment or weak
-                  underwriting.
-                </div>
-              </div>
-            </Surface>
-          </div>
-        </Surface>
-
-        <Surface
-          title="Available investment inventory"
-          subtitle="Showing 25 properties per page from supported-market inventory."
-        >
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="text-xs text-app-4">
-              {sortedRows.length} matching properties
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setSourcePackMarket(selectedMarket)}
-              className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app-muted px-3 py-2 text-xs font-medium text-app-0 transition hover:bg-app-panel"
-              disabled={!selectedMarket}
-            >
-              <Settings2 className="h-4 w-4" />
-              Source pack
-            </button>
-          </div>
-
-          {inventoryLoading || marketsLoading ? (
-            <div className="py-10 text-center text-app-4">
-              Loading inventory…
-            </div>
-          ) : inventoryErr ? (
-            <EmptyState
-              compact
-              title="Inventory unavailable"
-              description={inventoryErr}
+          {runsOpen ? (
+            <IngestionRunsPanel
+              open={runsOpen}
+              refreshKey={marketRefreshNonce}
+              onClose={() => setRunsOpen(false)}
+              onSelectRun={(runId) => setActiveRunId(runId)}
             />
-          ) : pageRows.length === 0 ? (
-            <EmptyState
-              compact
-              title="No inventory matches the current filters"
-              description="Try clearing filters or switching to another supported market."
-            />
-          ) : (
-            <>
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-                {pageRows.map((row) => {
-                  const p = inferProperty(row);
-                  const propertyId = resolvePropertyId(row);
-                  const price = inferAskingPrice(row);
-                  const rent = inferMarketRent(row);
-                  const cashflow = inferCashflow(row);
-                  const dscr = inferDscr(row);
-                  const confidence = inferLocationConfidence(row);
-                  const completeness = inferCompleteness(row);
-                  const photoUrl = inferPhotoUrl(row);
-                  const tags = inferTags(row);
-
-                  return (
-                    <div
-                      key={
-                        propertyId ||
-                        `${p?.address || "property"}-${inferUpdatedAt(row) || ""}`
-                      }
-                      className="overflow-hidden rounded-3xl border border-app bg-app-panel"
-                    >
-                      <div className="h-56 overflow-hidden border-b border-app bg-app-muted">
-                        <Photo url={photoUrl} alt={p?.address || "Property"} />
-                      </div>
-
-                      <div className="space-y-4 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-base font-semibold text-app-0">
-                              {p?.address || row?.address || "Unknown address"}
-                            </div>
-                            <div className="mt-1 flex items-center gap-2 text-sm text-app-4">
-                              <MapPin className="h-4 w-4" />
-                              {[
-                                p?.city || row?.city,
-                                p?.state || row?.state,
-                                p?.zip || row?.zip,
-                              ]
-                                .filter(Boolean)
-                                .join(", ")}
-                            </div>
-                          </div>
-
-                          <div className="text-right">
-                            <div className="text-lg font-semibold text-app-0">
-                              {money(price)}
-                            </div>
-                            <div className="text-xs text-app-4">
-                              refreshed {relativeTime(inferUpdatedAt(row))}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <span
-                            className={decisionPillClass(
-                              row?.normalized_decision || row?.classification,
-                            )}
-                          >
-                            {normalizeDecision(
-                              row?.normalized_decision || row?.classification,
-                            )}
-                          </span>
-                          <span className={completenessPillClass(completeness)}>
-                            {completenessLabel(completeness)}
-                          </span>
-                          <span className="oh-pill">
-                            {getFinancingType(price)}
-                          </span>
-                          {row?.relevance_score != null ? (
-                            <span className="oh-pill">
-                              Score {row.relevance_score}
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {tags.length ? (
-                          <div className="flex flex-wrap gap-2">
-                            {tags.map((tag) => (
-                              <span key={tag} className="oh-pill">
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-
-                        <div className="grid grid-cols-2 gap-3 text-sm text-app-0">
-                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
-                            <div className="flex items-center gap-2 text-app-4">
-                              <BedDouble className="h-4 w-4" />
-                              Beds
-                            </div>
-                            <div className="mt-1 font-medium">
-                              {p?.bedrooms ?? "—"}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
-                            <div className="flex items-center gap-2 text-app-4">
-                              <Bath className="h-4 w-4" />
-                              Baths
-                            </div>
-                            <div className="mt-1 font-medium">
-                              {p?.bathrooms ?? "—"}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
-                            <div className="flex items-center gap-2 text-app-4">
-                              <Wallet className="h-4 w-4" />
-                              Cashflow
-                            </div>
-                            <div
-                              className={`mt-1 font-medium ${metricTone(cashflow)}`}
-                            >
-                              {money(cashflow)}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
-                            <div className="flex items-center gap-2 text-app-4">
-                              <Landmark className="h-4 w-4" />
-                              DSCR
-                            </div>
-                            <div className="mt-1 font-medium">
-                              {dscr != null ? dscr.toFixed(2) : "—"}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3 text-sm text-app-0">
-                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
-                            <div className="text-app-4">Estimated rent</div>
-                            <div className="mt-1 font-medium">
-                              {money(rent)}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl border border-app bg-app px-3 py-3">
-                            <div className="text-app-4">Location quality</div>
-                            <div className="mt-1 font-medium">
-                              {confidence != null ? confidence.toFixed(2) : "—"}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setSourcePackMarket(selectedMarket)}
-                            className="oh-btn oh-btn-secondary"
-                            disabled={!selectedMarket}
-                          >
-                            Source pack
-                          </button>
-
-                          {propertyId ? (
-                            <Link
-                              to={`/properties/${propertyId}`}
-                              className="oh-btn"
-                            >
-                              Open property
-                              <ArrowUpRight className="h-4 w-4" />
-                            </Link>
-                          ) : (
-                            <button
-                              type="button"
-                              className="oh-btn oh-btn-secondary"
-                              disabled
-                            >
-                              Missing property id
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-5 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  className="oh-btn oh-btn-secondary"
-                  disabled={safeCurrentPage <= 1}
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Previous
-                </button>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {pagination.map((token, index) =>
-                    typeof token === "string" ? (
-                      <span
-                        key={`ellipsis-${index}`}
-                        className="px-2 text-sm text-app-4"
-                      >
-                        {token}
-                      </span>
-                    ) : (
-                      <button
-                        key={token}
-                        type="button"
-                        className={
-                          token === safeCurrentPage
-                            ? "oh-btn"
-                            : "oh-btn oh-btn-secondary"
-                        }
-                        onClick={() => setCurrentPage(token)}
-                      >
-                        {token}
-                      </button>
-                    ),
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  className="oh-btn oh-btn-secondary"
-                  disabled={safeCurrentPage >= totalPages}
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            </>
-          )}
-        </Surface>
+          ) : null}
+        </div>
       </div>
 
       <IngestionErrorsDrawer

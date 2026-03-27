@@ -1,33 +1,68 @@
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+import hashlib
+import json
+from typing import Any, Literal
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import SessionLocal
+from ..models import MarketSyncState
 from .ingestion_scheduler_service import build_runtime_payload
 from .ingestion_source_service import ensure_default_manual_sources, list_sources
 from .market_catalog_service import (
-    find_market_by_city,
-    get_market,
+    get_active_supported_market_by_slug,
     list_active_supported_markets,
     list_markets_by_tier,
 )
 
-"""
-This service prepares supported-market sync plans.
+MarketSyncMode = Literal["refresh", "backfill"]
 
-Principles:
-- frontend only chooses a supported market
-- backend resolves that market from a single source of truth
-- runtime payload is bounded to the market definition
-- matching sources are reused from the same logic used by daily sync
-"""
+DEFAULT_CURSOR_SORT_MODE = "newest"
+DEFAULT_CURSOR_PAGE = 1
+DEFAULT_CURSOR_SHARD = 1
+DEFAULT_REFRESH_WINDOW_PAGES = 2
+
+DEFAULT_REFRESH_MAX_PAGES_BUDGET = 3
+DEFAULT_BACKFILL_MAX_PAGES_BUDGET = 12
+
+DEFAULT_REFRESH_LIMIT_FALLBACK = 125
+DEFAULT_BACKFILL_LIMIT_FALLBACK = 250
+DEFAULT_BACKFILL_TARGET_RECORDS_FALLBACK = 500
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
 
 
 def _norm_text(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else default
+    except Exception:
+        return default
+
+
+def _safe_optional_int(value: Any) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    except Exception:
+        return None
+
+
+def _stable_json_hash(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
 def _normalize_tier_limit(raw: str | None) -> str:
@@ -35,12 +70,270 @@ def _normalize_tier_limit(raw: str | None) -> str:
     return value if value in {"hot", "warm", "cold"} else "all"
 
 
+def normalize_sync_mode(sync_mode: str | None) -> MarketSyncMode:
+    value = _norm_text(sync_mode)
+    return "backfill" if value == "backfill" else "refresh"
+
+
 def get_daily_market_limit() -> int:
     return int(getattr(settings, "market_sync_daily_market_limit", 6) or 6)
 
 
 def get_default_market_limit_per_sync() -> int:
-    return int(getattr(settings, "market_sync_default_limit_per_market", 125) or 125)
+    return int(getattr(settings, "market_sync_default_limit_per_market", DEFAULT_REFRESH_LIMIT_FALLBACK) or DEFAULT_REFRESH_LIMIT_FALLBACK)
+
+
+def get_default_backfill_limit_per_sync() -> int:
+    return int(getattr(settings, "market_sync_backfill_limit_per_market", DEFAULT_BACKFILL_LIMIT_FALLBACK) or DEFAULT_BACKFILL_LIMIT_FALLBACK)
+
+
+def get_default_backfill_target_records() -> int:
+    return int(getattr(settings, "market_sync_backfill_target_records", DEFAULT_BACKFILL_TARGET_RECORDS_FALLBACK) or DEFAULT_BACKFILL_TARGET_RECORDS_FALLBACK)
+
+
+def get_default_refresh_window_pages() -> int:
+    return int(
+        getattr(settings, "market_sync_refresh_window_pages", DEFAULT_REFRESH_WINDOW_PAGES)
+        or DEFAULT_REFRESH_WINDOW_PAGES
+    )
+
+
+def get_default_refresh_max_pages_budget() -> int:
+    return int(
+        getattr(settings, "market_sync_refresh_max_pages_budget", DEFAULT_REFRESH_MAX_PAGES_BUDGET)
+        or DEFAULT_REFRESH_MAX_PAGES_BUDGET
+    )
+
+
+def get_default_backfill_max_pages_budget() -> int:
+    return int(
+        getattr(settings, "market_sync_backfill_max_pages_budget", DEFAULT_BACKFILL_MAX_PAGES_BUDGET)
+        or DEFAULT_BACKFILL_MAX_PAGES_BUDGET
+    )
+
+
+def _default_cursor(*, market_slug: str | None = None) -> dict[str, Any]:
+    return {
+        "market_slug": str(market_slug or "").strip().lower() or None,
+        "page": DEFAULT_CURSOR_PAGE,
+        "shard": DEFAULT_CURSOR_SHARD,
+        "sort_mode": DEFAULT_CURSOR_SORT_MODE,
+        "refresh_window_pages": get_default_refresh_window_pages(),
+        "page_fingerprint": None,
+        "page_changed": True,
+        "provider_cursor": None,
+    }
+
+
+def normalize_market_cursor(
+    cursor: dict[str, Any] | None,
+    *,
+    market_slug: str | None = None,
+) -> dict[str, Any]:
+    payload = dict(_default_cursor(market_slug=market_slug))
+    raw = dict(cursor or {})
+
+    payload["market_slug"] = str(
+        raw.get("market_slug") or payload.get("market_slug") or market_slug or ""
+    ).strip().lower() or None
+    payload["page"] = _safe_int(raw.get("page"), DEFAULT_CURSOR_PAGE)
+    payload["shard"] = _safe_int(raw.get("shard"), DEFAULT_CURSOR_SHARD)
+    payload["sort_mode"] = (
+        str(raw.get("sort_mode") or DEFAULT_CURSOR_SORT_MODE).strip().lower()
+        or DEFAULT_CURSOR_SORT_MODE
+    )
+    payload["refresh_window_pages"] = _safe_int(
+        raw.get("refresh_window_pages"),
+        get_default_refresh_window_pages(),
+    )
+    payload["page_fingerprint"] = str(raw.get("page_fingerprint") or "").strip() or None
+    payload["page_changed"] = bool(raw.get("page_changed", True))
+
+    provider_cursor = raw.get("provider_cursor")
+    if isinstance(provider_cursor, dict) and provider_cursor:
+        payload["provider_cursor"] = dict(provider_cursor)
+    else:
+        payload["provider_cursor"] = None
+
+    return payload
+
+
+def build_market_dataset_key(
+    *,
+    org_id: int,
+    provider: str,
+    source_id: int,
+    market_slug: str | None,
+    page: int | None,
+    shard: int | None,
+    sort_mode: str | None,
+    cursor_json: dict[str, Any] | None,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+) -> str:
+    normalized_cursor = normalize_market_cursor(
+        dict(cursor_json or {}),
+        market_slug=market_slug,
+    )
+    payload = {
+        "org_id": int(org_id),
+        "provider": str(provider or "").strip().lower(),
+        "source_id": int(source_id),
+        "market_slug": str(market_slug or normalized_cursor.get("market_slug") or "").strip().lower() or None,
+        "state": str(state or "").strip().upper() or None,
+        "county": str(county or "").strip().lower() or None,
+        "city": str(city or "").strip().lower() or None,
+        "page": _safe_int(page if page is not None else normalized_cursor.get("page"), DEFAULT_CURSOR_PAGE),
+        "shard": _safe_int(shard if shard is not None else normalized_cursor.get("shard"), DEFAULT_CURSOR_SHARD),
+        "sort_mode": (
+            str(sort_mode or normalized_cursor.get("sort_mode") or DEFAULT_CURSOR_SORT_MODE)
+            .strip()
+            .lower()
+            or DEFAULT_CURSOR_SORT_MODE
+        ),
+        "provider_cursor": dict(normalized_cursor.get("provider_cursor") or {}) if isinstance(normalized_cursor.get("provider_cursor"), dict) else None,
+        "page_fingerprint": str(normalized_cursor.get("page_fingerprint") or "").strip() or None,
+    }
+    return _stable_json_hash(payload)
+
+
+def build_market_dataset_identity(
+    *,
+    org_id: int,
+    source: Any,
+    runtime_config: dict[str, Any] | None,
+    sync_state: MarketSyncState | None = None,
+    cursor: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    runtime_config = dict(runtime_config or {})
+    base_cursor = normalize_market_cursor(
+        dict(cursor or runtime_config.get("market_cursor") or {}),
+        market_slug=runtime_config.get("market_slug") or (sync_state.market_slug if sync_state is not None else None),
+    )
+
+    market_slug = (
+        str(runtime_config.get("market_slug") or base_cursor.get("market_slug") or (sync_state.market_slug if sync_state is not None else "")).strip().lower()
+        or None
+    )
+    state = str(
+        runtime_config.get("state")
+        or (sync_state.state if sync_state is not None else "")
+        or "MI"
+    ).strip().upper()
+    county = str(
+        runtime_config.get("county")
+        or (sync_state.county if sync_state is not None else "")
+        or ""
+    ).strip().lower() or None
+    city = str(
+        runtime_config.get("city")
+        or (sync_state.city if sync_state is not None else "")
+        or ""
+    ).strip().lower() or None
+    provider = str(getattr(source, "provider", "") or "").strip().lower()
+    source_id = int(getattr(source, "id"))
+
+    page = _safe_int(base_cursor.get("page"), DEFAULT_CURSOR_PAGE)
+    shard = _safe_int(base_cursor.get("shard"), DEFAULT_CURSOR_SHARD)
+    sort_mode = str(base_cursor.get("sort_mode") or DEFAULT_CURSOR_SORT_MODE).strip().lower() or DEFAULT_CURSOR_SORT_MODE
+
+    dataset_key = build_market_dataset_key(
+        org_id=int(org_id),
+        provider=provider,
+        source_id=source_id,
+        market_slug=market_slug,
+        page=page,
+        shard=shard,
+        sort_mode=sort_mode,
+        cursor_json=base_cursor,
+        state=state,
+        county=county,
+        city=city,
+    )
+
+    return {
+        "dataset_key": dataset_key,
+        "provider": provider,
+        "source_id": source_id,
+        "market_slug": market_slug,
+        "state": state,
+        "county": county,
+        "city": city,
+        "page": page,
+        "shard": shard,
+        "sort_mode": sort_mode,
+        "cursor": base_cursor,
+    }
+
+
+def build_fresh_backfill_cursor(*, market_slug: str | None) -> dict[str, Any]:
+    return normalize_market_cursor(
+        {
+            "market_slug": market_slug,
+            "page": 1,
+            "shard": 1,
+            "sort_mode": DEFAULT_CURSOR_SORT_MODE,
+            "refresh_window_pages": get_default_refresh_window_pages(),
+            "page_fingerprint": None,
+            "page_changed": True,
+            "provider_cursor": None,
+        },
+        market_slug=market_slug,
+    )
+
+
+def get_resume_cursor(sync_state: MarketSyncState | None) -> dict[str, Any]:
+    if sync_state is None:
+        return normalize_market_cursor(None)
+
+    saved = normalize_market_cursor(
+        dict(sync_state.cursor_json or {}),
+        market_slug=sync_state.market_slug,
+    )
+
+    last_page = _safe_int(
+        sync_state.last_page if sync_state.last_page is not None else saved.get("page"),
+        DEFAULT_CURSOR_PAGE,
+    )
+    refresh_window_pages = _safe_int(
+        saved.get("refresh_window_pages"),
+        get_default_refresh_window_pages(),
+    )
+
+    resume_page = max(1, last_page - refresh_window_pages + 1)
+
+    saved["page"] = resume_page
+    saved["last_page"] = last_page
+    saved["market_exhausted"] = bool(sync_state.market_exhausted)
+    saved["status"] = str(sync_state.status or "idle")
+
+    return saved
+
+
+def mark_backfill_completed(
+    db: Session,
+    *,
+    sync_state: MarketSyncState,
+    completed_at: datetime | None = None,
+) -> MarketSyncState:
+    sync_state.backfill_completed_at = completed_at or _utcnow()
+    sync_state.updated_at = _utcnow()
+    db.add(sync_state)
+    db.flush()
+    return sync_state
+
+
+def clear_backfill_completed(
+    db: Session,
+    *,
+    sync_state: MarketSyncState,
+) -> MarketSyncState:
+    sync_state.backfill_completed_at = None
+    sync_state.updated_at = _utcnow()
+    db.add(sync_state)
+    db.flush()
+    return sync_state
 
 
 def list_selected_daily_markets() -> list[dict[str, Any]]:
@@ -56,16 +349,313 @@ def list_selected_daily_markets() -> list[dict[str, Any]]:
     return markets[: get_daily_market_limit()]
 
 
+def get_market_sync_state(
+    db: Session,
+    *,
+    org_id: int,
+    source_id: int,
+    market_slug: str,
+) -> MarketSyncState | None:
+    stmt = select(MarketSyncState).where(
+        MarketSyncState.org_id == int(org_id),
+        MarketSyncState.source_id == int(source_id),
+        MarketSyncState.market_slug == str(market_slug).strip().lower(),
+    )
+    return db.scalar(stmt)
+
+
+def get_market_sync_state_by_id(
+    db: Session,
+    *,
+    sync_state_id: int | None,
+    org_id: int | None = None,
+) -> MarketSyncState | None:
+    if not sync_state_id:
+        return None
+
+    stmt = select(MarketSyncState).where(MarketSyncState.id == int(sync_state_id))
+    if org_id is not None:
+        stmt = stmt.where(MarketSyncState.org_id == int(org_id))
+    return db.scalar(stmt)
+
+
+def get_or_create_market_sync_state(
+    db: Session,
+    *,
+    org_id: int,
+    source: Any,
+    market: dict[str, Any],
+) -> MarketSyncState:
+    market_slug = str(market.get("slug") or "").strip().lower()
+    existing = get_market_sync_state(
+        db,
+        org_id=int(org_id),
+        source_id=int(getattr(source, "id")),
+        market_slug=market_slug,
+    )
+    if existing is not None:
+        if not existing.cursor_json:
+            existing.cursor_json = normalize_market_cursor(None, market_slug=market_slug)
+            db.add(existing)
+            db.flush()
+        return existing
+
+    row = MarketSyncState(
+        org_id=int(org_id),
+        source_id=int(getattr(source, "id")),
+        provider=str(getattr(source, "provider", "") or "").strip().lower(),
+        market_slug=market_slug,
+        state=str(market.get("state") or "MI").strip().upper(),
+        county=str(market.get("county") or "").strip().lower() or None,
+        city=str(market.get("city") or "").strip().lower() or None,
+        status="idle",
+        cursor_json=normalize_market_cursor(None, market_slug=market_slug),
+        last_page=1,
+        last_shard=1,
+        last_sort_mode=DEFAULT_CURSOR_SORT_MODE,
+        market_exhausted=False,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def mark_market_sync_started(
+    db: Session,
+    *,
+    sync_state: MarketSyncState,
+    requested_limit: int | None = None,
+    status: str = "running",
+) -> MarketSyncState:
+    sync_state.status = str(status or "running")
+    sync_state.last_requested_limit = (
+        int(requested_limit) if requested_limit is not None else sync_state.last_requested_limit
+    )
+    sync_state.last_sync_started_at = _utcnow()
+    sync_state.updated_at = _utcnow()
+    db.add(sync_state)
+    db.flush()
+    return sync_state
+
+
+def mark_market_sync_completed(
+    db: Session,
+    *,
+    sync_state: MarketSyncState,
+    market_exhausted: bool | None = None,
+    seen_provider_record_at: datetime | None = None,
+    status: str = "idle",
+) -> MarketSyncState:
+    sync_state.status = str(status or "idle")
+    sync_state.last_sync_completed_at = _utcnow()
+    sync_state.updated_at = _utcnow()
+
+    if market_exhausted is not None:
+        sync_state.market_exhausted = bool(market_exhausted)
+
+    if seen_provider_record_at is not None:
+        sync_state.last_seen_provider_record_at = seen_provider_record_at
+
+    db.add(sync_state)
+    db.flush()
+    return sync_state
+
+
+def advance_market_cursor(
+    db: Session,
+    *,
+    sync_state: MarketSyncState,
+    next_cursor: dict[str, Any] | None,
+    page_scanned: int | None = None,
+    shard_scanned: int | None = None,
+    sort_mode: str | None = None,
+    page_fingerprint: str | None = None,
+    page_changed: bool | None = None,
+    exhausted: bool | None = None,
+    seen_provider_record_at: datetime | None = None,
+) -> MarketSyncState:
+    merged = normalize_market_cursor(
+        {
+            **dict(sync_state.cursor_json or {}),
+            **dict(next_cursor or {}),
+            "page_fingerprint": page_fingerprint
+            or (dict(next_cursor or {}).get("page_fingerprint")),
+            "page_changed": (
+                bool(page_changed)
+                if page_changed is not None
+                else dict(next_cursor or {}).get("page_changed", True)
+            ),
+            "sort_mode": sort_mode
+            or dict(next_cursor or {}).get("sort_mode")
+            or sync_state.last_sort_mode
+            or DEFAULT_CURSOR_SORT_MODE,
+        },
+        market_slug=sync_state.market_slug,
+    )
+
+    sync_state.cursor_json = merged
+    sync_state.last_page = _safe_int(
+        page_scanned if page_scanned is not None else merged.get("page"),
+        DEFAULT_CURSOR_PAGE,
+    )
+    sync_state.last_shard = _safe_int(
+        shard_scanned if shard_scanned is not None else merged.get("shard"),
+        DEFAULT_CURSOR_SHARD,
+    )
+    sync_state.last_sort_mode = str(merged.get("sort_mode") or DEFAULT_CURSOR_SORT_MODE)
+    sync_state.last_page_fingerprint = (
+        str(page_fingerprint or merged.get("page_fingerprint") or "").strip() or None
+    )
+    sync_state.market_exhausted = (
+        bool(exhausted) if exhausted is not None else bool(sync_state.market_exhausted)
+    )
+    sync_state.updated_at = _utcnow()
+
+    if seen_provider_record_at is not None:
+        sync_state.last_seenProvider_record_at = seen_provider_record_at  # noqa: B950
+       
+
+    db.add(sync_state)
+    db.flush()
+    return sync_state
+
+
+def reset_market_cursor(
+    db: Session,
+    *,
+    sync_state: MarketSyncState,
+    page: int = 1,
+    shard: int = 1,
+    sort_mode: str = DEFAULT_CURSOR_SORT_MODE,
+    clear_exhausted: bool = True,
+) -> MarketSyncState:
+    sync_state.cursor_json = normalize_market_cursor(
+        {
+            "market_slug": sync_state.market_slug,
+            "page": max(1, int(page)),
+            "shard": max(1, int(shard)),
+            "sort_mode": (
+                str(sort_mode or DEFAULT_CURSOR_SORT_MODE).strip().lower()
+                or DEFAULT_CURSOR_SORT_MODE
+            ),
+            "refresh_window_pages": get_default_refresh_window_pages(),
+            "page_fingerprint": None,
+            "page_changed": True,
+            "provider_cursor": None,
+        },
+        market_slug=sync_state.market_slug,
+    )
+    sync_state.last_page = max(1, int(page))
+    sync_state.last_shard = max(1, int(shard))
+    sync_state.last_sort_mode = (
+        str(sort_mode or DEFAULT_CURSOR_SORT_MODE).strip().lower()
+        or DEFAULT_CURSOR_SORT_MODE
+    )
+    sync_state.last_page_fingerprint = None
+    sync_state.updated_at = _utcnow()
+
+    if clear_exhausted:
+        sync_state.market_exhausted = False
+
+    db.add(sync_state)
+    db.flush()
+    return sync_state
+
+
+def mark_market_exhausted(
+    db: Session,
+    *,
+    sync_state: MarketSyncState,
+    exhausted: bool = True,
+) -> MarketSyncState:
+    sync_state.market_exhausted = bool(exhausted)
+    sync_state.updated_at = _utcnow()
+    db.add(sync_state)
+    db.flush()
+    return sync_state
+
+
+def get_sync_mode_runtime_overrides(
+    *,
+    sync_mode: str | None,
+    market: dict[str, Any],
+    sync_state: MarketSyncState | None,
+    limit_override: int | None = None,
+) -> dict[str, Any]:
+    normalized_mode = normalize_sync_mode(sync_mode)
+
+    if normalized_mode == "backfill":
+        market_slug = str(market.get("slug") or "").strip().lower() or None
+        limit = _safe_int(
+            limit_override
+            or market.get("backfill_limit")
+            or get_default_backfill_limit_per_sync(),
+            get_default_backfill_limit_per_sync(),
+        )
+        max_pages_budget = _safe_int(
+            market.get("backfill_max_pages_budget")
+            or get_default_backfill_max_pages_budget(),
+            get_default_backfill_max_pages_budget(),
+        )
+        backfill_target_records = _safe_int(
+            market.get("backfill_target_records")
+            or get_default_backfill_target_records(),
+            get_default_backfill_target_records(),
+        )
+
+        return {
+            "sync_mode": "backfill",
+            "limit": limit,
+            "market_cursor": build_fresh_backfill_cursor(market_slug=market_slug),
+            "reset_market_cursor_on_start": True,
+            "max_pages_budget": max_pages_budget,
+            "backfill_target_records": backfill_target_records,
+            "mark_backfill_complete_on_exhaustion": True,
+        }
+
+    limit = _safe_int(
+        limit_override
+        or market.get("sync_limit")
+        or get_default_market_limit_per_sync(),
+        get_default_market_limit_per_sync(),
+    )
+    max_pages_budget = _safe_int(
+        market.get("refresh_max_pages_budget")
+        or get_default_refresh_max_pages_budget(),
+        get_default_refresh_max_pages_budget(),
+    )
+
+    return {
+        "sync_mode": "refresh",
+        "limit": limit,
+        "market_cursor": get_resume_cursor(sync_state),
+        "reset_market_cursor_on_start": False,
+        "max_pages_budget": max_pages_budget,
+        "backfill_target_records": None,
+        "mark_backfill_complete_on_exhaustion": False,
+    }
+
+
 def build_market_runtime_payload(
     market: dict[str, Any],
     *,
     trigger_type: str = "daily_refresh",
+    sync_state: MarketSyncState | None = None,
+    limit_override: int | None = None,
+    sync_mode: str | None = "refresh",
 ) -> dict[str, Any]:
-    return build_runtime_payload(
+    mode_overrides = get_sync_mode_runtime_overrides(
+        sync_mode=sync_mode,
+        market=market,
+        sync_state=sync_state,
+        limit_override=limit_override,
+    )
+
+    payload = build_runtime_payload(
         state=str(market.get("state") or "MI"),
         county=str(market.get("county") or "") or None,
         city=str(market.get("city") or "") or None,
-        limit=int(market.get("sync_limit") or get_default_market_limit_per_sync()),
+        limit=int(mode_overrides["limit"]),
         market_slug=str(market.get("slug") or "") or None,
         trigger_type=trigger_type,
         property_types=list(
@@ -79,7 +669,20 @@ def build_market_runtime_payload(
             market.get("max_units")
             or getattr(settings, "investor_buy_box_max_units", 4)
         ),
+        market_cursor=dict(mode_overrides["market_cursor"] or {}),
+        market_sync_state_id=int(sync_state.id) if sync_state is not None else None,
+        market_sync_status=(
+            str(sync_state.status or "idle") if sync_state is not None else "idle"
+        ),
+        market_exhausted=bool(sync_state.market_exhausted) if sync_state is not None else False,
+        sync_mode=str(mode_overrides["sync_mode"]),
+        max_pages_budget=int(mode_overrides["max_pages_budget"]),
+        backfill_target_records=mode_overrides["backfill_target_records"],
+        reset_market_cursor_on_start=bool(mode_overrides["reset_market_cursor_on_start"]),
+        supported_market=True,
+        mark_backfill_complete_on_exhaustion=bool(mode_overrides["mark_backfill_complete_on_exhaustion"]),
     )
+    return payload
 
 
 def get_enabled_sources_for_org(db: Session, *, org_id: int):
@@ -134,32 +737,39 @@ def _matching_sources_for_market(
     ]
 
 
-def resolve_supported_market(
+def resolve_supported_market(*, market_slug: str) -> dict[str, Any] | None:
+    if not market_slug:
+        return None
+    return get_active_supported_market_by_slug(str(market_slug).strip().lower())
+
+
+def build_daily_dispatch_plan(
+    db: Session,
     *,
-    market_slug: str | None = None,
-    city: str | None = None,
-    state: str = "MI",
-) -> dict[str, Any] | None:
-    if market_slug:
-        return get_market(str(market_slug).strip().lower())
-    if city:
-        return find_market_by_city(city=city, state=state)
-    return None
-
-
-def build_daily_dispatch_plan(db: Session, *, org_id: int) -> list[dict[str, Any]]:
+    org_id: int,
+    sync_mode: str | None = "refresh",
+) -> list[dict[str, Any]]:
     markets = list_selected_daily_markets()
     sources = get_enabled_sources_for_org(db, org_id=int(org_id))
+    normalized_mode = normalize_sync_mode(sync_mode)
 
     dispatches: list[dict[str, Any]] = []
     for market in markets:
-        runtime_config = build_market_runtime_payload(
-            market,
-            trigger_type="daily_refresh",
-        )
         matched_sources = _matching_sources_for_market(sources, market)
 
         for source in matched_sources:
+            sync_state = get_or_create_market_sync_state(
+                db,
+                org_id=int(org_id),
+                source=source,
+                market=market,
+            )
+            runtime_config = build_market_runtime_payload(
+                market,
+                trigger_type="daily_refresh",
+                sync_state=sync_state,
+                sync_mode=normalized_mode,
+            )
             dispatches.append(
                 {
                     "market": market,
@@ -168,127 +778,93 @@ def build_daily_dispatch_plan(db: Session, *, org_id: int) -> list[dict[str, Any
                     "provider": str(getattr(source, "provider", "")),
                     "trigger_type": "daily_refresh",
                     "runtime_config": runtime_config,
+                    "market_sync_state_id": int(sync_state.id),
+                    "market_cursor": dict(runtime_config.get("market_cursor") or {}),
+                    "sync_mode": normalized_mode,
+                    "dataset_identity": build_market_dataset_identity(
+                        org_id=int(org_id),
+                        source=source,
+                        runtime_config=runtime_config,
+                        sync_state=sync_state,
+                    ),
                 }
             )
     return dispatches
-
-
-# def build_city_dispatch_plan(
-#     db: Session,
-#     *,
-#     org_id: int,
-#     city: str,
-#     state: str = "MI",
-# ) -> dict[str, Any]:
-#     """
-#     Compatibility function for market_sync_tasks.py.
-
-#     The task module expects a city-scoped dispatch planner. We already have the
-#     broader supported-market planner, so this function resolves the city to a
-#     supported market and returns the same dispatch shape the task expects.
-#     """
-#     market = resolve_supported_market(city=city, state=state)
-
-#     if market is None:
-#         return {
-#             "ok": False,
-#             "covered": False,
-#             "city": city,
-#             "state": state,
-#             "market": None,
-#             "dispatches": [],
-#         }
-
-#     sources = get_enabled_sources_for_org(db, org_id=int(org_id))
-#     matched_sources = _matching_sources_for_market(sources, market)
-
-#     runtime_config = build_market_runtime_payload(
-#         market,
-#         trigger_type="manual_market_sync",
-#     )
-
-#     dispatches = [
-#         {
-#             "market": market,
-#             "source_id": int(source.id),
-#             "source_slug": str(getattr(source, "slug", "")),
-#             "provider": str(getattr(source, "provider", "")),
-#             "trigger_type": "manual_market_sync",
-#             "runtime_config": dict(runtime_config),
-#         }
-#         for source in matched_sources
-#     ]
-
-#     return {
-#         "ok": True,
-#         "covered": True,
-#         "city": market.get("city"),
-#         "state": market.get("state"),
-#         "market": market,
-#         "dispatches": dispatches,
-#     }
 
 
 def build_supported_market_sync_plan_for_db(
     db: Session,
     *,
     org_id: int,
-    market_slug: str | None = None,
-    city: str | None = None,
-    state: str = "MI",
+    market_slug: str,
+    limit: int | None = None,
+    sync_mode: str | None = "refresh",
 ) -> dict[str, Any]:
-    market = resolve_supported_market(
-        market_slug=market_slug,
-        city=city,
-        state=state,
-    )
+    market = resolve_supported_market(market_slug=market_slug)
+    normalized_mode = normalize_sync_mode(sync_mode)
 
     if market is None:
         return {
             "ok": False,
             "covered": False,
-            "city": city,
-            "state": state,
             "market": None,
             "dispatches": [],
+            "sync_mode": normalized_mode,
         }
 
     sources = get_enabled_sources_for_org(db, org_id=int(org_id))
-    runtime_config = build_market_runtime_payload(
-        market,
-        trigger_type="manual_market_sync",
-    )
-
     matched_sources = _matching_sources_for_market(sources, market)
 
-    dispatches = [
-        {
-            "market": market,
-            "source_id": int(source.id),
-            "source_slug": str(getattr(source, "slug", "")),
-            "provider": str(getattr(source, "provider", "")),
-            "trigger_type": "manual_market_sync",
-            "runtime_config": dict(runtime_config),
-        }
-        for source in matched_sources
-    ]
+    dispatches = []
+    for source in matched_sources:
+        sync_state = get_or_create_market_sync_state(
+            db,
+            org_id=int(org_id),
+            source=source,
+            market=market,
+        )
+        runtime_config = build_market_runtime_payload(
+            market,
+            trigger_type="manual_market_sync" if normalized_mode == "refresh" else "market_backfill",
+            sync_state=sync_state,
+            limit_override=limit,
+            sync_mode=normalized_mode,
+        )
+        dispatches.append(
+            {
+                "market": market,
+                "source_id": int(source.id),
+                "source_slug": str(getattr(source, "slug", "")),
+                "provider": str(getattr(source, "provider", "")),
+                "trigger_type": "manual_market_sync" if normalized_mode == "refresh" else "market_backfill",
+                "runtime_config": dict(runtime_config),
+                "market_sync_state_id": int(sync_state.id),
+                "market_cursor": dict(runtime_config.get("market_cursor") or {}),
+                "sync_mode": normalized_mode,
+                "dataset_identity": build_market_dataset_identity(
+                    org_id=int(org_id),
+                    source=source,
+                    runtime_config=runtime_config,
+                    sync_state=sync_state,
+                ),
+            }
+        )
 
     return {
         "ok": True,
         "covered": True,
-        "city": market.get("city"),
-        "state": market.get("state"),
         "market": market,
         "dispatches": dispatches,
+        "sync_mode": normalized_mode,
     }
 
 
 def build_supported_market_sync_plan(
     *,
     org_id: int,
-    market_slug: str | None = None,
-    city: str | None = None,
-    state: str = "MI",
+    market_slug: str,
+    limit: int | None = None,
+    sync_mode: str | None = "refresh",
 ) -> dict[str, Any]:
     db = SessionLocal()
     try:
@@ -296,8 +872,8 @@ def build_supported_market_sync_plan(
             db,
             org_id=org_id,
             market_slug=market_slug,
-            city=city,
-            state=state,
+            limit=limit,
+            sync_mode=sync_mode,
         )
     finally:
         db.close()
