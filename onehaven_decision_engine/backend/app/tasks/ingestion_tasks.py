@@ -20,6 +20,7 @@ from ..services.ingestion_source_service import (
     ensure_default_manual_sources,
     get_source,
     list_sources,
+    resolve_sources_for_market,
 )
 from ..services.jurisdiction_notification_service import notify_stale_jurisdictions
 from ..services.jurisdiction_refresh_service import (
@@ -39,11 +40,7 @@ from ..services.rent_refresh_queue_service import (
     should_queue_rent_refresh_after_sync,
 )
 
-
 logger = logging.getLogger(__name__)
-
-
-
 
 
 def _retry_enabled() -> bool:
@@ -66,6 +63,7 @@ def _org_scope(org_id: int | None, discovered: list[int]) -> list[int]:
     if org_id is not None:
         return [int(org_id)]
     return discovered or [1]
+
 
 def _pipeline_outcome(summary_json: dict | None) -> dict:
     summary = dict(summary_json or {})
@@ -99,7 +97,51 @@ def _pipeline_outcome(summary_json: dict | None) -> dict:
     }
 
 
-@celery_app.task(name="ingestion.sync_source", bind=True, max_retries=1, default_retry_delay=30)
+def _recover_source_for_task(
+    db,
+    *,
+    org_id: int,
+    source_id: int,
+    runtime_config: dict | None,
+):
+    source = get_source(db, org_id=int(org_id), source_id=int(source_id))
+    if source is not None:
+        return source
+
+    cfg = dict(runtime_config or {})
+    market_slug = str(cfg.get("market_slug") or "").strip().lower()
+    if not market_slug:
+        return None
+
+    matches = resolve_sources_for_market(
+        db,
+        org_id=int(org_id),
+        market_slug=market_slug,
+    )
+    if not matches:
+        return None
+
+    enabled = [m for m in matches if bool(getattr(m, "is_enabled", False))]
+    if not enabled:
+        return None
+
+    enabled.sort(
+        key=lambda s: (
+            str(getattr(s, "slug", "") or ""),
+            int(getattr(s, "id", 0) or 0),
+        )
+    )
+    return enabled[0]
+
+
+@celery_app.task(
+    name="ingestion.sync_source",
+    bind=True,
+    max_retries=int(getattr(settings, "ingestion_sync_task_max_retries", 1) or 1),
+    default_retry_delay=int(getattr(settings, "ingestion_retry_delay_seconds", 30) or 30),
+    soft_time_limit=int(getattr(settings, "ingestion_task_soft_time_limit_seconds", 240) or 240),
+    time_limit=int(getattr(settings, "ingestion_task_hard_time_limit_seconds", 300) or 300),
+)
 def sync_source_task(
     self,
     org_id: int,
@@ -109,9 +151,19 @@ def sync_source_task(
 ):
     db = SessionLocal()
     try:
-        source = get_source(db, org_id=int(org_id), source_id=int(source_id))
+        source = _recover_source_for_task(
+            db,
+            org_id=int(org_id),
+            source_id=int(source_id),
+            runtime_config=runtime_config,
+        )
         if source is None:
-            return {"ok": False, "error": "source_not_found", "source_id": source_id}
+            return {
+                "ok": False,
+                "error": "source_not_found",
+                "source_id": int(source_id),
+                "market_slug": str((runtime_config or {}).get("market_slug") or "").strip().lower() or None,
+            }
 
         effective_runtime_config = dict(runtime_config or {})
         sync_mode = str(effective_runtime_config.get("sync_mode") or "refresh").strip().lower()
@@ -153,6 +205,7 @@ def sync_source_task(
             "ok": True,
             "run_id": getattr(run, "id", None),
             "status": getattr(run, "status", None),
+            "source_id": int(getattr(source, "id")),
             "sync_mode": sync_mode,
             "post_sync_rent_queued": post_sync_rent_queued,
             "post_sync_rent_property_ids": post_sync_rent_property_ids,
@@ -174,12 +227,13 @@ def sync_due_sources_task(org_id: int | None = None):
     try:
         org_ids = _org_scope(org_id, list_org_ids_with_enabled_sources(db))
         queued = 0
-        for org_id in org_ids:
-            ensure_default_manual_sources(db, org_id=int(org_id))
-            for source in list_sources(db, org_id=int(org_id)):
+        for scoped_org_id in org_ids:
+            ensure_default_manual_sources(db, org_id=int(scoped_org_id))
+            db.commit()
+            for source in list_sources(db, org_id=int(scoped_org_id)):
                 if not bool(getattr(source, "is_enabled", False)):
                     continue
-                sync_source_task.delay(int(org_id), int(source.id), "scheduled", {})
+                sync_source_task.delay(int(scoped_org_id), int(source.id), "scheduled", {})
                 queued += 1
         return {"ok": True, "queued": queued}
     finally:
@@ -194,10 +248,10 @@ def daily_market_refresh_task(org_id: int | None = None):
         queued = 0
         runs: list[dict] = []
 
-        for org_id in org_ids:
+        for scoped_org_id in org_ids:
             result = dispatch_daily_sync_for_org(
                 db,
-                org_id=int(org_id),
+                org_id=int(scoped_org_id),
                 sync_mode="refresh",
                 enqueue_sync=lambda _org_id, _source_id, _trigger_type, _payload: sync_source_task.delay(
                     int(_org_id),
@@ -291,14 +345,13 @@ def refresh_stale_locations_task(org_id: int = 1, force: bool = False, batch_siz
                 property_id=int(row.id),
                 force=bool(payload["force"]),
             )
-            if bool(result.get("ok")):
+            if bool(result.get("updated")):
                 refreshed += 1
-                property_ids.append(int(row.id))
+            property_ids.append(int(row.id))
 
         return {
             "ok": True,
             "org_id": int(org_id),
-            "requested_batch_size": int(payload["batch_size"]),
             "refreshed": refreshed,
             "property_ids": property_ids,
         }
@@ -307,54 +360,41 @@ def refresh_stale_locations_task(org_id: int = 1, force: bool = False, batch_siz
 
 
 @celery_app.task(name="jurisdiction.refresh_stale_profiles")
-def refresh_stale_jurisdictions_task(
-    org_id: int | None = None,
-    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
-):
+def refresh_stale_jurisdictions_task(org_id: int = 1, stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS):
     db = SessionLocal()
     try:
+        payload = build_jurisdiction_refresh_payload(stale_days=stale_days)
         rows = list_jurisdictions_needing_refresh(
             db,
-            org_id=org_id,
-            stale_days=stale_days,
+            org_id=int(org_id),
+            stale_days=int(payload["stale_days"]),
         )
         refreshed = 0
-        ids: list[int] = []
+        results: list[dict[str, Any]] = []
 
         for row in rows:
-            payload = build_jurisdiction_refresh_payload(
-                org_id=getattr(row, "org_id", None),
-                jurisdiction_profile_id=int(row.id),
-                state=getattr(row, "state", None),
-                county=getattr(row, "county", None),
-                city=getattr(row, "city", None),
-                pha_name=getattr(row, "pha_name", None),
-                reason="stale_scheduler_refresh",
-                force=False,
-                stale_days=stale_days,
+            result = refresh_jurisdiction_profile(
+                db,
+                org_id=int(org_id),
+                jurisdiction_code=str(row.jurisdiction_code),
             )
-            result = refresh_jurisdiction_profile(db, payload=payload)
+            results.append(result)
             if bool(result.get("ok")):
                 refreshed += 1
-                ids.append(int(row.id))
 
-        return {"ok": True, "refreshed": refreshed, "jurisdiction_profile_ids": ids}
+        return {"ok": True, "org_id": int(org_id), "refreshed": refreshed, "results": results}
     finally:
         db.close()
 
 
 @celery_app.task(name="jurisdiction.notify_stale_profiles")
-def notify_stale_jurisdictions_task(
-    org_id: int | None = None,
-    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
-):
+def notify_stale_jurisdictions_task(org_id: int = 1, stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS):
     db = SessionLocal()
     try:
-        result = notify_stale_jurisdictions(
+        return notify_stale_jurisdictions(
             db,
-            org_id=org_id,
-            stale_days=stale_days,
+            org_id=int(org_id),
+            stale_days=int(stale_days),
         )
-        return {"ok": True, "result": result}
     finally:
         db.close()

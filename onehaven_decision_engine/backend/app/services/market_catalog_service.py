@@ -73,7 +73,7 @@ _STATIC_MARKETS: tuple[MarketDefinition, ...] = (
         zip_codes=("48204", "48205", "48206", "48209", "48210", "48213", "48219", "48221", "48224", "48227", "48228", "48235", "48238"),
         coverage_tier="hot",
         priority=100,
-        sync_limit=175,
+        sync_limit=50,
         sync_every_hours=24,
         max_price=200_000,
         property_types=("single_family", "multi_family"),
@@ -151,6 +151,13 @@ _STATIC_MARKETS: tuple[MarketDefinition, ...] = (
 )
 
 
+def canonical_source_slug_for_market_slug(slug: str | None) -> str | None:
+    normalized = _norm_text(slug)
+    if not normalized:
+        return None
+    return f"rentcast-{normalized}-sale-listings"
+
+
 def _serialize_market(market: MarketDefinition) -> dict[str, Any]:
     payload = asdict(market)
     payload["state"] = str(payload.get("state") or "MI").strip().upper()
@@ -159,6 +166,7 @@ def _serialize_market(market: MarketDefinition) -> dict[str, Any]:
     payload["coverage_tier"] = _norm_text(payload.get("coverage_tier")) or "warm"
     payload["property_types"] = list(_norm_property_types(payload.get("property_types")))
     payload["zip_codes"] = [str(z).strip() for z in (payload.get("zip_codes") or []) if str(z).strip()]
+    payload["canonical_source_slug"] = canonical_source_slug_for_market_slug(payload.get("slug"))
     return payload
 
 

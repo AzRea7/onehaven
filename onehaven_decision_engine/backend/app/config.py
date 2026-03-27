@@ -80,6 +80,13 @@ class Settings(BaseSettings):
     ingestion_daily_rent_refresh_limit: int = 25
     ingestion_rent_refresh_stale_after_hours: int = 24 * 7
 
+    # ---- Ingestion execution tuning ----
+    ingestion_defer_optional_post_pipeline: bool = True
+    ingestion_inline_required_post_pipeline: bool = True
+    ingestion_inline_optional_next_actions: bool = False
+    ingestion_task_soft_time_limit_seconds: int = 240
+    ingestion_task_hard_time_limit_seconds: int = 300
+
     # ---- Investor inventory filters ----
     investor_require_address: bool = True
     investor_require_price: bool = True
@@ -87,7 +94,6 @@ class Settings(BaseSettings):
     investor_inventory_enabled: bool = True
     investor_inventory_default_limit: int = 200
 
-    # strict buy box to reduce wasted RentCast calls
     investor_buy_box_max_price: int = 200_000
     investor_buy_box_max_units: int = 4
     investor_buy_box_property_types: str = "single_family,multi_family"
@@ -162,6 +168,8 @@ class Settings(BaseSettings):
     celery_task_eager_propagates: bool = True
     celery_worker_max_tasks_per_child: int = 200
     celery_beat_schedule_filename: str = "celerybeat-schedule"
+    celery_default_task_soft_time_limit_seconds: int = 600
+    celery_default_task_hard_time_limit_seconds: int = 900
 
     # ---- Agent runtime limits ----
     agents_max_runs_per_property_per_hour: int = 6
@@ -179,7 +187,7 @@ class Settings(BaseSettings):
     agents_enable_photo_rehab: bool = True
 
     # ---- LM Studio / local LLM ----
-    llm_provider: str = "lm_studio"  # lm_studio|disabled
+    llm_provider: str = "lm_studio"
     lm_studio_enabled: bool = True
     lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
     lm_studio_api_key: str = "lm-studio"
@@ -192,7 +200,6 @@ class Settings(BaseSettings):
 
     # ---- Market ingestion hard guarantees ----
     market_sync_enforce_single_source: bool = True
-    ingestion_disable_county_fallback_variants: bool = True
     market_auto_create_sources: bool = True
 
     # ---- Trace / observability ----
@@ -233,46 +240,10 @@ class Settings(BaseSettings):
 
             if self.geocoding_enabled:
                 has_google = bool((self.google_geocode_api_key or "").strip())
-                has_nominatim = "nominatim" in self.geocode_provider_order_list
+                has_nominatim = bool((self.nominatim_base_url or "").strip())
                 has_opencage = bool((self.opencage_api_key or "").strip())
                 if not (has_google or has_nominatim or has_opencage):
-                    raise ValueError(
-                        "SECURITY: geocoding_enabled=True but no usable geocode provider is configured"
-                    )
-
-        # local/dev safety defaults
-        if not getattr(self, "agents_max_running_per_org", None):
-            object.__setattr__(self, "agents_max_running_per_org", 3)
-
-        if self.agents_run_timeout_seconds < 30:
-            object.__setattr__(self, "agents_run_timeout_seconds", 30)
-
-        if self.agents_max_runs_per_property_per_hour < 1:
-            object.__setattr__(self, "agents_max_runs_per_property_per_hour", 1)
-
-        if self.geocode_timeout_seconds < 3:
-            object.__setattr__(self, "geocode_timeout_seconds", 3)
-
-        if self.geocode_cache_ttl_hours < 1:
-            object.__setattr__(self, "geocode_cache_ttl_hours", 1)
-
-        if self.geocode_stale_after_hours < 1:
-            object.__setattr__(self, "geocode_stale_after_hours", 1)
-
-        if self.location_refresh_batch_size < 1:
-            object.__setattr__(self, "location_refresh_batch_size", 1)
-
-        if self.location_refresh_max_attempts < 1:
-            object.__setattr__(self, "location_refresh_max_attempts", 1)
-
-        if self.ingestion_sync_task_max_retries < 0:
-            object.__setattr__(self, "ingestion_sync_task_max_retries", 0)
-
-        if self.ingestion_retry_delay_seconds < 1:
-            object.__setattr__(self, "ingestion_retry_delay_seconds", 1)
-
-        clamped_confidence = min(max(float(self.geocode_min_confidence), 0.0), 1.0)
-        object.__setattr__(self, "geocode_min_confidence", clamped_confidence)
+                    raise ValueError("SECURITY: at least one geocoding provider must be configured in prod")
 
 
 settings = Settings()

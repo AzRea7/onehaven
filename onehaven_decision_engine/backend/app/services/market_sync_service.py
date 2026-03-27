@@ -20,6 +20,7 @@ from .ingestion_source_service import (
     resolve_sources_for_market,
 )
 from .market_catalog_service import (
+    canonical_source_slug_for_market_slug,
     get_active_supported_market_by_slug,
     list_active_supported_markets,
     list_markets_by_tier,
@@ -793,6 +794,12 @@ def _select_primary_source_for_market(
     if not rentcast_sources:
         return None
 
+    canonical_slug = canonical_source_slug_for_market_slug(market.get("slug"))
+    if canonical_slug:
+        for source in rentcast_sources:
+            if _norm_text(getattr(source, "slug", "")) == _norm_text(canonical_slug):
+                return source
+
     rentcast_sources.sort(key=lambda s: _source_sort_key(s, market))
     return rentcast_sources[0]
 
@@ -804,13 +811,13 @@ def resolve_supported_market(*, market_slug: str) -> dict[str, Any] | None:
 
 
 def get_enabled_sources_for_org(db: Session, *, org_id: int) -> list[Any]:
-    """
-    Keep org sources market-ready before anyone tries to dispatch.
-    This is the core behavior that prevents no_dispatchable_sources.
-    """
-    ensure_default_manual_sources(db, org_id=int(org_id))
+    # Normalize and persist supported sources first so downstream selection is working
+    # against rows that are already visible to other sessions.
     ensure_market_slug_on_sources(db, org_id=int(org_id))
     ensure_sources_for_supported_markets(db, org_id=int(org_id))
+    ensure_default_manual_sources(db, org_id=int(org_id))
+    db.flush()
+    db.commit()
 
     return [
         source
@@ -910,7 +917,6 @@ def build_supported_market_sync_plan_for_db(
             "sync_mode": normalized_mode,
         }
 
-    # Ensure/repair sources before resolving.
     get_enabled_sources_for_org(db, org_id=int(org_id))
 
     matched_sources = resolve_sources_for_market(

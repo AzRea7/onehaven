@@ -220,6 +220,61 @@ def _must_get_run(db: Session, *, org_id: int, run_id: int) -> IngestionRun:
     return row
 
 
+def _source_debug_snapshot(row: Any) -> dict[str, Any]:
+    config_json = dict(getattr(row, "config_json", None) or {})
+    return {
+        "id": int(getattr(row, "id", 0) or 0),
+        "provider": str(getattr(row, "provider", "") or ""),
+        "slug": str(getattr(row, "slug", "") or ""),
+        "display_name": str(getattr(row, "display_name", "") or ""),
+        "is_enabled": bool(getattr(row, "is_enabled", False)),
+        "status": str(getattr(row, "status", "") or ""),
+        "market_slug": str(config_json.get("market_slug") or "").strip().lower() or None,
+        "config_city": str(config_json.get("city") or "").strip() or None,
+        "config_county": str(config_json.get("county") or "").strip() or None,
+        "sync_interval_minutes": int(getattr(row, "sync_interval_minutes", 0) or 0),
+    }
+
+
+def _market_dispatch_debug(
+    db: Session,
+    *,
+    org_id: int,
+    market_slug: str,
+) -> dict[str, Any]:
+    normalized_market_slug = str(market_slug or "").strip().lower()
+
+    all_sources = list_sources(db, org_id=org_id)
+    enabled_sources = [s for s in all_sources if bool(getattr(s, "is_enabled", False))]
+
+    matched_enabled = []
+    matched_any = []
+
+    for row in all_sources:
+        snap = _source_debug_snapshot(row)
+        slug = snap["slug"]
+        row_market_slug = snap["market_slug"]
+
+        matched = (
+            row_market_slug == normalized_market_slug
+            or (normalized_market_slug and normalized_market_slug in slug)
+        )
+        if not matched:
+            continue
+
+        matched_any.append(snap)
+        if snap["is_enabled"]:
+            matched_enabled.append(snap)
+
+    return {
+        "market_slug": normalized_market_slug,
+        "total_sources": len(all_sources),
+        "enabled_sources": len(enabled_sources),
+        "matched_sources_any_state": matched_any,
+        "matched_sources_enabled": matched_enabled,
+    }
+
+
 class IngestionSyncLaunchRequest(BaseModel):
     trigger_type: str = "manual"
     state: str | None = "MI"
@@ -321,7 +376,10 @@ def create_ingestion_source(
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ):
-    return create_source(db, org_id=p.org_id, payload=payload)
+    row = create_source(db, org_id=p.org_id, payload=payload)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.patch("/sources/{source_id}", response_model=IngestionSourceOut)
@@ -336,12 +394,15 @@ def patch_ingestion_source(
     if not row:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    return update_source(
+    row = update_source(
         db,
         org_id=int(p.org_id),
         source_id=int(source_id),
         payload=payload,
     )
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.post("/sources/{source_id}/sync", response_model=dict)
@@ -368,11 +429,13 @@ def sync_now(
             trigger_type=trigger_type,
             runtime_config=runtime_config,
         )
+        db.commit()
         out = _run_response(run)
         out["queued"] = False
         out["normal_path"] = True
         return out
 
+    db.commit()
     job = sync_source_task.delay(int(p.org_id), int(row.id), trigger_type, runtime_config)
     return {
         "ok": True,
@@ -395,7 +458,11 @@ def sync_supported_market(
 
     ensure_default_manual_sources(db, org_id=p.org_id)
     ensure_market_slug_on_sources(db, org_id=p.org_id)
-    ensure_sources_for_supported_markets(db, org_id=p.org_id)
+    supported_result = ensure_sources_for_supported_markets(db, org_id=p.org_id)
+
+    # Persist source creation/repair/adoption before plan generation and queueing.
+    db.flush()
+    db.commit()
 
     plan = build_supported_market_sync_plan_for_db(
         db,
@@ -421,12 +488,25 @@ def sync_supported_market(
     dispatches = final_dispatches
 
     if not dispatches:
+        debug = _market_dispatch_debug(
+            db,
+            org_id=int(p.org_id),
+            market_slug=market_slug,
+        )
         raise HTTPException(
             status_code=409,
             detail={
                 "error": "no_dispatchable_sources",
                 "message": f"No enabled sources found for market '{market_slug}'",
                 "hint": "Ensure a rentcast source exists with matching market_slug",
+                "market": plan.get("market"),
+                "repair_summary": {
+                    "created": [str(getattr(s, "slug", "") or "") for s in supported_result.get("created", [])],
+                    "repaired": [str(getattr(s, "slug", "") or "") for s in supported_result.get("repaired", [])],
+                    "adopted": [str(getattr(s, "slug", "") or "") for s in supported_result.get("adopted", [])],
+                    "touched": [str(getattr(s, "slug", "") or "") for s in supported_result.get("touched", [])],
+                },
+                "dispatch_debug": debug,
             },
         )
 
@@ -451,6 +531,7 @@ def sync_supported_market(
             )
             runs.append(_run_response(run))
 
+        db.commit()
         return {
             "ok": True,
             "mode": "inline",
@@ -459,7 +540,13 @@ def sync_supported_market(
             "dispatches": dispatches,
             "dispatches_seen": len(raw_dispatches),
             "dispatches_executed": len(dispatches),
+            "supported_sources_created": [str(getattr(s, "slug", "") or "") for s in supported_result.get("created", [])],
+            "supported_sources_repaired": [str(getattr(s, "slug", "") or "") for s in supported_result.get("repaired", [])],
+            "supported_sources_adopted": [str(getattr(s, "slug", "") or "") for s in supported_result.get("adopted", [])],
         }
+
+    # Commit again so sync state rows created by plan building are visible to the worker.
+    db.commit()
 
     task_ids: list[str] = []
 
@@ -481,6 +568,9 @@ def sync_supported_market(
         "dispatches": dispatches,
         "dispatches_seen": len(raw_dispatches),
         "dispatches_executed": len(dispatches),
+        "supported_sources_created": [str(getattr(s, "slug", "") or "") for s in supported_result.get("created", [])],
+        "supported_sources_repaired": [str(getattr(s, "slug", "") or "") for s in supported_result.get("repaired", [])],
+        "supported_sources_adopted": [str(getattr(s, "slug", "") or "") for s in supported_result.get("adopted", [])],
     }
 
 
@@ -511,6 +601,7 @@ def sync_default_sources_now(
                 runtime_config=runtime,
             )
             runs.append(_run_response(run))
+        db.commit()
         return {
             "ok": True,
             "queued": False,
@@ -518,6 +609,8 @@ def sync_default_sources_now(
             "source_ids": [int(x.id) for x in rows],
             "normal_path": True,
         }
+
+    db.commit()
 
     source_ids: list[int] = []
     task_ids: list[str] = []
@@ -538,9 +631,11 @@ def sync_default_sources_now(
 
 @router.post("/refresh-daily", response_model=dict)
 def refresh_daily_markets(
+    db: Session = Depends(get_db),
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ):
+    db.commit()
     job = daily_market_refresh_task.delay(int(p.org_id))
     return {
         "ok": True,
@@ -551,9 +646,11 @@ def refresh_daily_markets(
 
 @router.post("/sync-due", response_model=dict)
 def sync_due_sources(
+    db: Session = Depends(get_db),
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ):
+    db.commit()
     job = sync_due_sources_task.delay(int(p.org_id))
     return {
         "ok": True,
@@ -588,7 +685,7 @@ def get_watchlists(db: Session = Depends(get_db), p=Depends(get_principal)):
 
 @router.post("/watchlists", response_model=dict)
 def save_watchlist(payload: WatchlistIn, db: Session = Depends(get_db), p=Depends(get_principal)):
-    return upsert_watchlist(
+    result = upsert_watchlist(
         db,
         org_id=int(p.org_id),
         user_id=_principal_user_id(p),
@@ -598,11 +695,15 @@ def save_watchlist(payload: WatchlistIn, db: Session = Depends(get_db), p=Depend
         sort_json=payload.sort_json,
         is_default=payload.is_default,
     )
+    db.commit()
+    return result
 
 
 @router.delete("/watchlists/{name}", response_model=dict)
 def remove_watchlist(name: str, db: Session = Depends(get_db), p=Depends(get_principal)):
-    return delete_watchlist(db, org_id=int(p.org_id), user_id=_principal_user_id(p), name=name)
+    result = delete_watchlist(db, org_id=int(p.org_id), user_id=_principal_user_id(p), name=name)
+    db.commit()
+    return result
 
 
 @router.get("/search-presets", response_model=list[dict])
@@ -612,7 +713,7 @@ def get_search_presets(db: Session = Depends(get_db), p=Depends(get_principal)):
 
 @router.post("/search-presets", response_model=dict)
 def save_search_preset(payload: SearchPresetIn, db: Session = Depends(get_db), p=Depends(get_principal)):
-    return upsert_search_preset(
+    result = upsert_search_preset(
         db,
         org_id=int(p.org_id),
         user_id=_principal_user_id(p),
@@ -620,11 +721,15 @@ def save_search_preset(payload: SearchPresetIn, db: Session = Depends(get_db), p
         filters_json=payload.filters_json,
         sort_json=payload.sort_json,
     )
+    db.commit()
+    return result
 
 
 @router.delete("/search-presets/{name}", response_model=dict)
 def remove_search_preset(name: str, db: Session = Depends(get_db), p=Depends(get_principal)):
-    return delete_search_preset(db, org_id=int(p.org_id), user_id=_principal_user_id(p), name=name)
+    result = delete_search_preset(db, org_id=int(p.org_id), user_id=_principal_user_id(p), name=name)
+    db.commit()
+    return result
 
 
 @router.post("/sources/ensure-supported", response_model=dict)
@@ -633,10 +738,14 @@ def ensure_supported_sources(
     principal: Any = Depends(get_principal),
     _op=Depends(require_operator),
 ):
-    created = ensure_sources_for_supported_markets(db, org_id=int(principal.org_id))
+    result = ensure_sources_for_supported_markets(db, org_id=int(principal.org_id))
+    db.commit()
 
     return {
         "ok": True,
-        "created": len(created),
-        "sources": [str(s.slug) for s in created],
+        "created": len(result.get("created", [])),
+        "repaired": len(result.get("repaired", [])),
+        "adopted": len(result.get("adopted", [])),
+        "touched": len(result.get("touched", [])),
+        "sources": [str(s.slug) for s in result.get("touched", [])],
     }
