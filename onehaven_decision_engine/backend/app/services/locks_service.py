@@ -59,17 +59,20 @@ def _get_holder(row: Any) -> str | None:
         return None
 
 
+def _normalize_owner(owner: str | None) -> str:
+    return str(owner or "").strip() or "system"
+
+
 def _set_holder(row: Any, owner: str | None) -> None:
-    value = str(owner or "").strip() or "system"
-    setattr(row, _get_holder_attr_name(row), value)
+    setattr(row, _get_holder_attr_name(row), _normalize_owner(owner))
 
 
-def _touch_timestamps(row: Any, *, now: datetime) -> None:
+def _touch_timestamps(row: Any, *, now: datetime, acquired: bool = False) -> None:
     if hasattr(row, "updated_at"):
         setattr(row, "updated_at", now)
     if hasattr(row, "created_at") and getattr(row, "created_at", None) is None:
         setattr(row, "created_at", now)
-    if hasattr(row, "acquired_at") and getattr(row, "acquired_at", None) is None:
+    if hasattr(row, "acquired_at") and (acquired or getattr(row, "acquired_at", None) is None):
         setattr(row, "acquired_at", now)
 
 
@@ -143,7 +146,7 @@ def acquire_lock(
         )
         _set_holder(row, owner)
         _set_expiry(row, expires_at)
-        _touch_timestamps(row, now=now)
+        _touch_timestamps(row, now=now, acquired=True)
         db.add(row)
         db.flush()
         return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
@@ -151,7 +154,7 @@ def acquire_lock(
     if _is_stale(row, now=now):
         _set_holder(row, owner)
         _set_expiry(row, expires_at)
-        _touch_timestamps(row, now=now)
+        _touch_timestamps(row, now=now, acquired=True)
         db.add(row)
         db.flush()
         return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
@@ -161,7 +164,7 @@ def acquire_lock(
     if (current_holder or "") == desired_holder:
         _set_holder(row, desired_holder)
         _set_expiry(row, expires_at)
-        _touch_timestamps(row, now=now)
+        _touch_timestamps(row, now=now, acquired=True)
         db.add(row)
         db.flush()
         return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
@@ -225,7 +228,7 @@ def release_lock(
     _set_expiry(row, now - timedelta(seconds=1))
     if force or not owner or current_holder == desired_holder:
         _set_holder(row, desired_holder)
-    _touch_timestamps(row, now=now)
+    _touch_timestamps(row, now=now, acquired=True)
     db.add(row)
     db.flush()
 
@@ -260,7 +263,7 @@ def clear_stale_lock(
         return _row_to_result(row, acquired=False, org_id=int(org_id), lock_key=str(lock_key))
 
     _set_expiry(row, now - timedelta(seconds=1))
-    _touch_timestamps(row, now=now)
+    _touch_timestamps(row, now=now, acquired=True)
     db.add(row)
     db.flush()
     return _row_to_result(row, acquired=True, org_id=int(org_id), lock_key=str(lock_key))
@@ -390,6 +393,60 @@ def mark_ingestion_dataset_completed(
             dataset_key=str(dataset_key),
         ),
         owner=owner,
+        ttl_seconds=int(ttl_seconds),
+        now=now,
+    )
+
+
+
+def clear_stale_locks_for_prefix(
+    db: Session,
+    *,
+    org_id: int,
+    lock_key_prefix: str,
+    now: datetime | None = None,
+) -> int:
+    now = now or _now()
+    rows = list(
+        db.scalars(
+            select(OrgLock).where(
+                OrgLock.org_id == int(org_id),
+                OrgLock.lock_key.like(f"{str(lock_key_prefix)}%"),
+            )
+        ).all()
+    )
+    cleared = 0
+    for row in rows:
+        if not _is_stale(row, now=now):
+            continue
+        _set_expiry(row, now - timedelta(seconds=1))
+        _touch_timestamps(row, now=now)
+        db.add(row)
+        cleared += 1
+    if cleared:
+        db.flush()
+    return cleared
+
+
+def renew_ingestion_execution_lock(
+    db: Session,
+    *,
+    org_id: int,
+    source_id: int,
+    dataset_key: str,
+    owner: str | None,
+    ttl_seconds: int,
+    now: datetime | None = None,
+) -> LockResult:
+    return renew_lock(
+        db,
+        org_id=int(org_id),
+        lock_key=build_ingestion_execution_lock_key(
+            org_id=int(org_id),
+            source_id=int(source_id),
+            dataset_key=str(dataset_key),
+        ),
+        owner=_normalize_owner(owner),
         ttl_seconds=int(ttl_seconds),
         now=now,
     )

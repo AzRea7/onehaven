@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import logging
+from typing import Any
+
+from sqlalchemy.exc import DBAPIError, OperationalError
+
 from ..db import SessionLocal
 from ..services.geo_enrichment import enrich_property_geo
 from ..services.ingestion_run_execute import execute_source_sync
@@ -35,6 +40,33 @@ from ..services.rent_refresh_queue_service import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
+
+
+
+def _retry_enabled() -> bool:
+    return bool(getattr(settings, "ingestion_retry_transient_failures", False))
+
+
+def _max_retries() -> int:
+    return max(0, int(getattr(settings, "ingestion_sync_task_max_retries", 1) or 0))
+
+
+def _retry_delay_seconds() -> int:
+    return max(1, int(getattr(settings, "ingestion_retry_delay_seconds", 30) or 30))
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    return isinstance(exc, (OperationalError, DBAPIError, TimeoutError, ConnectionError))
+
+
+def _org_scope(org_id: int | None, discovered: list[int]) -> list[int]:
+    if org_id is not None:
+        return [int(org_id)]
+    return discovered or [1]
+
 def _pipeline_outcome(summary_json: dict | None) -> dict:
     summary = dict(summary_json or {})
     return {
@@ -67,8 +99,9 @@ def _pipeline_outcome(summary_json: dict | None) -> dict:
     }
 
 
-@celery_app.task(name="ingestion.sync_source")
+@celery_app.task(name="ingestion.sync_source", bind=True, max_retries=1, default_retry_delay=30)
 def sync_source_task(
+    self,
     org_id: int,
     source_id: int,
     trigger_type: str = "manual",
@@ -126,15 +159,20 @@ def sync_source_task(
             "summary_json": summary,
             "pipeline_outcome": _pipeline_outcome(summary),
         }
+    except Exception as exc:
+        logger.exception("sync_source_task_failed", extra={"org_id": int(org_id), "source_id": int(source_id)})
+        if _retry_enabled() and _is_transient_error(exc) and int(getattr(self.request, "retries", 0) or 0) < _max_retries():
+            raise self.retry(exc=exc, countdown=_retry_delay_seconds())
+        raise
     finally:
         db.close()
 
 
 @celery_app.task(name="ingestion.sync_due_sources")
-def sync_due_sources_task():
+def sync_due_sources_task(org_id: int | None = None):
     db = SessionLocal()
     try:
-        org_ids = list_org_ids_with_enabled_sources(db) or [1]
+        org_ids = _org_scope(org_id, list_org_ids_with_enabled_sources(db))
         queued = 0
         for org_id in org_ids:
             ensure_default_manual_sources(db, org_id=int(org_id))
@@ -149,10 +187,10 @@ def sync_due_sources_task():
 
 
 @celery_app.task(name="ingestion.daily_market_refresh")
-def daily_market_refresh_task():
+def daily_market_refresh_task(org_id: int | None = None):
     db = SessionLocal()
     try:
-        org_ids = list_org_ids_with_enabled_sources(db) or [1]
+        org_ids = _org_scope(org_id, list_org_ids_with_enabled_sources(db))
         queued = 0
         runs: list[dict] = []
 

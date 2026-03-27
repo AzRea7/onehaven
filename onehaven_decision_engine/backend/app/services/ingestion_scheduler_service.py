@@ -55,6 +55,20 @@ def compute_next_daily_sync(now: datetime | None = None) -> datetime:
         next_run = next_run + timedelta(days=1)
     return next_run
 
+def collapse_dispatches_to_primary_source(dispatches: list[dict]):
+    seen = set()
+    out = []
+
+    for d in dispatches:
+        slug = d["market"]["slug"]
+
+        if slug in seen:
+            continue
+
+        seen.add(slug)
+        out.append(d)
+
+    return out
 
 def build_runtime_payload(
     *,
@@ -360,6 +374,86 @@ def _matching_sources_for_market(
     ]
 
 
+
+
+
+def _market_identity(market: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(market.get("slug") or "").strip().lower(),
+        str(market.get("state") or "MI").strip().lower(),
+        str(market.get("county") or "").strip().lower(),
+        str(market.get("city") or "").strip().lower(),
+    )
+
+
+def _source_match_score(source: Any, market: dict[str, Any]) -> tuple[int, int, str]:
+    config = dict(getattr(source, "config_json", None) or {})
+    market_slug = str(market.get("slug") or "").strip().lower()
+    market_city = str(market.get("city") or "").strip().lower()
+    market_state = str(market.get("state") or "MI").strip().lower()
+    source_slug = str(getattr(source, "slug", "") or "").strip().lower()
+    source_market_slug = str(config.get("market_slug") or "").strip().lower()
+    source_city = str(config.get("city") or "").strip().lower()
+    source_state = str(config.get("state") or "MI").strip().lower()
+
+    exact_market_slug = int(bool(source_market_slug and market_slug and source_market_slug == market_slug))
+    exact_city = int(bool(source_city and market_city and source_city == market_city and source_state == market_state))
+    slug_contains_market = int(bool(market_slug and market_slug in source_slug))
+    provider_is_rentcast = int(str(getattr(source, "provider", "") or "").strip().lower() == "rentcast")
+    source_id = int(getattr(source, "id", 0) or 0)
+
+    # Higher is better for first 4 components; lower source_id wins tie.
+    return (
+        exact_market_slug * 100 + exact_city * 10 + slug_contains_market,
+        provider_is_rentcast,
+        -source_id,
+    )
+
+
+def pick_primary_source_for_market(
+    sources: list[Any],
+    market: dict[str, Any],
+) -> Any | None:
+    matched = _matching_sources_for_market(sources, market)
+    if not matched:
+        return None
+    ranked = sorted(
+        matched,
+        key=lambda source: _source_match_score(source, market),
+        reverse=True,
+    )
+    return ranked[0]
+
+
+def collapse_dispatches_to_primary_source(
+    dispatches: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+) -> list[dict[str, Any]]:
+    items = [dict(item) for item in (dispatches or []) if isinstance(item, dict)]
+    if not items:
+        return []
+
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    for item in items:
+        market = dict(item.get("market") or {})
+        grouped.setdefault(_market_identity(market), []).append(item)
+
+    collapsed: list[dict[str, Any]] = []
+    for _, group in grouped.items():
+        group = sorted(
+            group,
+            key=lambda item: (
+                int(bool(str((item.get("runtime_config") or {}).get("market_slug") or "").strip())),
+                int(bool(str(item.get("source_slug") or "").strip())),
+                -int(item.get("source_id") or 0),
+            ),
+            reverse=True,
+        )
+        selected = dict(group[0])
+        selected["dispatch_candidates"] = len(group)
+        selected["dispatch_source_ids"] = [int(x.get("source_id") or 0) for x in group]
+        collapsed.append(selected)
+    return collapsed
+
 def dispatch_daily_sync_for_org(
     db: Session,
     *,
@@ -399,78 +493,104 @@ def dispatch_daily_sync_for_org(
     from .market_sync_service import build_market_runtime_payload, get_or_create_market_sync_state
 
     for market in markets:
-        matching_sources = _matching_sources_for_market(sources, market)
-
-        for source in matching_sources:
-            source_key = _source_key(source)
-            dispatch_key = _dispatch_dedupe_key(
-                org_id=int(org_id),
-                day_key=day_key,
-                source_key=source_key,
-                market=market,
-                sync_mode=normalized_mode,
-            )
-
-            acquire = acquire_lock(
-                db,
-                org_id=int(org_id),
-                lock_key=dispatch_key,
-                owner=owner,
-                ttl_seconds=int(
-                    getattr(
-                        settings,
-                        "dispatch_dedupe_ttl_seconds",
-                        DEFAULT_DISPATCH_DEDUPE_TTL_SECONDS,
-                    )
-                ),
-            )
-            if not acquire.acquired:
-                continue
-
-            sync_state = get_or_create_market_sync_state(
-                db,
-                org_id=int(org_id),
-                source=source,
-                market=market,
-            )
-
-            payload = build_market_runtime_payload(
-                market,
-                trigger_type="daily_refresh" if normalized_mode == "refresh" else "market_backfill",
-                sync_state=sync_state,
-                sync_mode=normalized_mode,
-            )
-            payload["idempotency_context"] = build_scheduler_idempotency_context(
-                org_id=int(org_id),
-                source=source,
-                market=market,
-                day_key=day_key,
-                dispatch_key=dispatch_key,
-                sync_mode=normalized_mode,
-            )
-
-            task = enqueue_sync(
-                int(org_id),
-                int(source.id),
-                str(payload.get("trigger_type") or "daily_refresh"),
-                payload,
-            )
-            queued += 1
+        source = pick_primary_source_for_market(sources, market)
+        if source is None:
             results.append(
                 {
-                    "source_id": int(source.id),
-                    "source_slug": getattr(source, "slug", None),
-                    "provider": getattr(source, "provider", None),
                     "market_slug": market.get("slug"),
                     "city": market.get("city"),
                     "county": market.get("county"),
                     "state": market.get("state"),
                     "sync_mode": normalized_mode,
-                    "market_sync_state_id": int(sync_state.id),
-                    "market_cursor": dict(payload.get("market_cursor") or {}),
-                    "task_id": str(getattr(task, "id", None)),
+                    "queued": False,
+                    "reason": "no_matching_enabled_source",
                 }
             )
+            continue
+
+        source_key = _source_key(source)
+        dispatch_key = _dispatch_dedupe_key(
+            org_id=int(org_id),
+            day_key=day_key,
+            source_key=source_key,
+            market=market,
+            sync_mode=normalized_mode,
+        )
+
+        acquire = acquire_lock(
+            db,
+            org_id=int(org_id),
+            lock_key=dispatch_key,
+            owner=owner,
+            ttl_seconds=int(
+                getattr(
+                    settings,
+                    "dispatch_dedupe_ttl_seconds",
+                    DEFAULT_DISPATCH_DEDUPE_TTL_SECONDS,
+                )
+            ),
+        )
+        if not acquire.acquired:
+            results.append(
+                {
+                    "market_slug": market.get("slug"),
+                    "city": market.get("city"),
+                    "county": market.get("county"),
+                    "state": market.get("state"),
+                    "sync_mode": normalized_mode,
+                    "queued": False,
+                    "reason": "dispatch_dedupe_lock_not_acquired",
+                    "source_id": int(source.id),
+                    "source_slug": getattr(source, "slug", None),
+                }
+            )
+            continue
+
+        sync_state = get_or_create_market_sync_state(
+            db,
+            org_id=int(org_id),
+            source=source,
+            market=market,
+        )
+
+        payload = build_market_runtime_payload(
+            market,
+            trigger_type="daily_refresh" if normalized_mode == "refresh" else "market_backfill",
+            sync_state=sync_state,
+            sync_mode=normalized_mode,
+        )
+        payload["idempotency_context"] = build_scheduler_idempotency_context(
+            org_id=int(org_id),
+            source=source,
+            market=market,
+            day_key=day_key,
+            dispatch_key=dispatch_key,
+            sync_mode=normalized_mode,
+        )
+
+        task = enqueue_sync(
+            int(org_id),
+            int(source.id),
+            str(payload.get("trigger_type") or "daily_refresh"),
+            payload,
+        )
+        queued += 1
+        results.append(
+            {
+                "source_id": int(source.id),
+                "source_slug": getattr(source, "slug", None),
+                "provider": getattr(source, "provider", None),
+                "market_slug": market.get("slug"),
+                "city": market.get("city"),
+                "county": market.get("county"),
+                "state": market.get("state"),
+                "sync_mode": normalized_mode,
+                "market_sync_state_id": int(sync_state.id),
+                "market_cursor": dict(payload.get("market_cursor") or {}),
+                "task_id": str(getattr(task, "id", None)),
+                "queued": True,
+            }
+        )
 
     return {
         "ok": True,

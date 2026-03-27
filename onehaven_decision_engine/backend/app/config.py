@@ -98,6 +98,16 @@ class Settings(BaseSettings):
     market_sync_daily_tier_filter: str = "all"
     market_catalog_backend: str = "static"
     market_sync_enable_statewide_expansion: bool = False
+    market_sync_one_source_per_market: bool = True
+    market_sync_source_selection_strategy: str = "market_match_first"
+
+    # ---- Ingestion execution hardening ----
+    ingestion_disable_county_fallback_variants: bool = True
+    ingestion_commit_execution_lock_on_acquire: bool = True
+    ingestion_force_release_lock_on_finish: bool = True
+    ingestion_sync_task_max_retries: int = 1
+    ingestion_retry_delay_seconds: int = 30
+    ingestion_retry_transient_failures: bool = False
 
     # ---- Provider fetch hardening ----
     ingestion_provider_page_limit: int = 50
@@ -180,6 +190,11 @@ class Settings(BaseSettings):
     lm_studio_max_tokens: int = 2048
     lm_studio_json_mode: bool = True
 
+    # ---- Market ingestion hard guarantees ----
+    market_sync_enforce_single_source: bool = True
+    ingestion_disable_county_fallback_variants: bool = True
+    market_auto_create_sources: bool = True
+
     # ---- Trace / observability ----
     trace_mirror_to_messages: int = 0
 
@@ -249,6 +264,12 @@ class Settings(BaseSettings):
 
         if self.location_refresh_max_attempts < 1:
             object.__setattr__(self, "location_refresh_max_attempts", 1)
+
+        if self.ingestion_sync_task_max_retries < 0:
+            object.__setattr__(self, "ingestion_sync_task_max_retries", 0)
+
+        if self.ingestion_retry_delay_seconds < 1:
+            object.__setattr__(self, "ingestion_retry_delay_seconds", 1)
 
         clamped_confidence = min(max(float(self.geocode_min_confidence), 0.0), 1.0)
         object.__setattr__(self, "geocode_min_confidence", clamped_confidence)

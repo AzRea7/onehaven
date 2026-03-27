@@ -41,6 +41,12 @@ from ..tasks.ingestion_tasks import (
     sync_due_sources_task,
     sync_source_task,
 )
+from ..services.ingestion_scheduler_service import collapse_dispatches_to_primary_source
+from ..services.market_catalog_service import (
+    list_active_supported_markets,
+    get_active_supported_market_by_slug,
+)
+
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
@@ -69,6 +75,28 @@ def _principal_user_id(p: Any) -> int | None:
                 return None
     return None
 
+def _resolve_market_slug_or_404(slug: str) -> str:
+    slug = (slug or "").strip().lower()
+
+    markets = list_active_supported_markets()
+    valid_slugs = {m["slug"] for m in markets}
+
+    if slug in valid_slugs:
+        return slug
+
+    # 🔥 OPTIONAL AUTO-CORRECTION (SMART UX)
+    for m in markets:
+        if slug in m["slug"]:
+            return m["slug"]
+
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "error": "invalid_market_slug",
+            "message": f"Invalid market_slug '{slug}'",
+            "valid_options": sorted(valid_slugs),
+        },
+    )
 
 def _normalize_optional_text(value: Any) -> str | None:
     s = str(value or "").strip()
@@ -337,26 +365,64 @@ def sync_supported_market(
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ):
+    # ✅ STEP 1: VALIDATE MARKET SLUG
+    market_slug = _resolve_market_slug_or_404(payload.market_slug)
+
+    # ✅ STEP 2: BUILD PLAN
     plan = build_supported_market_sync_plan_for_db(
         db,
         org_id=int(p.org_id),
-        market_slug=payload.market_slug,
+        market_slug=market_slug,
         limit=payload.limit,
     )
 
-    if not plan["covered"]:
-        raise HTTPException(status_code=404, detail="Supported market not found")
+    if not plan.get("covered"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Supported market '{market_slug}' not found",
+        )
 
-    dispatches = list(plan["dispatches"] or [])
+    raw_dispatches = list(plan.get("dispatches") or [])
+
+    # 🔥 STEP 3: HARD COLLAPSE TO SINGLE SOURCE
+    dispatches = collapse_dispatches_to_primary_source(raw_dispatches)
+
+    # 🔥 STEP 4: DOUBLE GUARANTEE (NO DUPLICATE MARKETS)
+    seen = set()
+    final_dispatches = []
+    for d in dispatches:
+        slug = d["market"]["slug"]
+        if slug in seen:
+            continue
+        seen.add(slug)
+        final_dispatches.append(d)
+
+    dispatches = final_dispatches
+
+    # 🔥 STEP 5: HARD FAILURE WITH CLEAR REASON
     if not dispatches:
-        raise HTTPException(status_code=409, detail="No enabled sources available for supported market")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "no_dispatchable_sources",
+                "message": f"No enabled sources found for market '{market_slug}'",
+                "hint": "Ensure a rentcast source exists with matching market_slug",
+            },
+        )
 
+    # 🔥 STEP 6: EXECUTE INLINE (SAFE MODE)
     if payload.execute_inline:
         runs: list[dict[str, Any]] = []
+
         for dispatch in dispatches:
-            row = get_source(db, org_id=p.org_id, source_id=int(dispatch["source_id"]))
+            row = get_source(
+                db,
+                org_id=p.org_id,
+                source_id=int(dispatch["source_id"]),
+            )
             if not row:
                 continue
+
             run = execute_source_sync(
                 db,
                 org_id=int(p.org_id),
@@ -368,15 +434,17 @@ def sync_supported_market(
 
         return {
             "ok": True,
-            "covered": True,
-            "queued": False,
+            "mode": "inline",
             "market": plan["market"],
             "runs": runs,
             "dispatches": dispatches,
-            "queued_count": len(runs),
+            "dispatches_seen": len(raw_dispatches),
+            "dispatches_executed": len(dispatches),
         }
 
+    # 🔥 STEP 7: QUEUE MODE (PRODUCTION)
     task_ids: list[str] = []
+
     for dispatch in dispatches:
         job = sync_source_task.delay(
             int(p.org_id),
@@ -388,12 +456,13 @@ def sync_supported_market(
 
     return {
         "ok": True,
-        "covered": True,
-        "queued": True,
+        "mode": "queued",
         "market": plan["market"],
         "queued_count": len(task_ids),
         "task_ids": task_ids,
         "dispatches": dispatches,
+        "dispatches_seen": len(raw_dispatches),
+        "dispatches_executed": len(dispatches),
     }
 
 
@@ -518,6 +587,22 @@ def save_search_preset(payload: SearchPresetIn, db: Session = Depends(get_db), p
         sort_json=payload.sort_json,
     )
 
+@router.post("/sources/ensure-supported")
+def ensure_supported_sources(
+    db: Session = Depends(get_db),
+    principal: Any = Depends(get_principal),
+):
+    require_operator(principal)
+
+    from ..services.ingestion_source_service import ensure_sources_for_supported_markets
+
+    created = ensure_sources_for_supported_markets(db, org_id=principal.org_id)
+
+    return {
+        "ok": True,
+        "created": len(created),
+        "sources": [s.slug for s in created],
+    }
 
 @router.delete("/search-presets/{name}", response_model=dict)
 def remove_search_preset(name: str, db: Session = Depends(get_db), p=Depends(get_principal)):

@@ -113,10 +113,19 @@ def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str
     payload["state"] = _normalize_optional_filter_value(payload.get("state")) or "MI"
     payload["county"] = _normalize_optional_filter_value(payload.get("county"))
     payload["city"] = _normalize_optional_filter_value(payload.get("city"))
+    
+    # HARD STOP COUNTY FALLBACK
+    if payload.get("market_slug") or payload.get("city"):
+        payload["county"] = None
+
+    if bool(getattr(settings, "ingestion_disable_county_fallback_variants", True)) and (payload.get("market_slug") or payload.get("city")):
+        payload["county"] = None
 
     property_types = payload.get("property_types")
     if isinstance(property_types, str):
         property_types = [x.strip() for x in property_types.split(",") if x.strip()]
+    if not payload.get("city") and not payload.get("market_slug"):
+        raise ValueError("Ingestion requires city or market_slug (county-only disabled)")
     if not property_types:
         property_types = ["single_family", "multi_family"]
     payload["property_types"] = [str(x).strip() for x in property_types if str(x).strip()]
@@ -631,6 +640,8 @@ def _load_rows_page(
     base_config = dict(source.config_json or {})
     merged_config = {**base_config, **dict(runtime_config or {})}
     merged_config["limit"] = int(provider_fetch_limit)
+    if bool(getattr(settings, "ingestion_disable_county_fallback_variants", True)):
+        merged_config["county"] = None
 
     sample_rows = merged_config.get("sample_rows")
     if isinstance(sample_rows, list):
@@ -854,6 +865,17 @@ def execute_source_sync(
                 owner=lock_owner,
                 ttl_seconds=execution_lock_ttl_seconds,
             )
+
+    if execution_lock.acquired and bool(getattr(settings, "ingestion_commit_execution_lock_on_acquire", True)):
+        try:
+            db.commit()
+        except Exception:
+            logger.exception("commit_after_execution_lock_acquire_failed")
+            try:
+                db.rollback()
+            except Exception:
+                logger.exception("rollback_after_execution_lock_acquire_commit_failed")
+            raise
 
     if not execution_lock.acquired:
         _emit(
@@ -1481,7 +1503,9 @@ def execute_source_sync(
                 source_id=source_id,
                 dataset_key=dataset_key,
                 owner=lock_owner,
+                force=bool(getattr(settings, "ingestion_force_release_lock_on_finish", True)),
             )
+            db.commit()
         except Exception:
             logger.exception(
                 "release_ingestion_execution_lock_failed",
@@ -1491,3 +1515,7 @@ def execute_source_sync(
                     "dataset_key": dataset_key,
                 },
             )
+            try:
+                db.rollback()
+            except Exception:
+                logger.exception("rollback_after_release_ingestion_execution_lock_failed")

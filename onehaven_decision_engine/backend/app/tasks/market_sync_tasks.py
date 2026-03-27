@@ -1,27 +1,13 @@
 from __future__ import annotations
 
-from app.db import SessionLocal
-from app.workers.celery_app import celery_app
-
+from ..db import SessionLocal
+from ..workers.celery_app import celery_app
+from ..services.ingestion_scheduler_service import collapse_dispatches_to_primary_source
 from ..services.market_sync_service import (
     build_daily_dispatch_plan,
     build_supported_market_sync_plan_for_db,
 )
 from .ingestion_tasks import sync_source_task
-
-"""
-Separate task module for market scheduling.
-
-Why separate from ingestion_tasks.py:
-- avoids making the existing file even bigger
-- keeps market coverage orchestration distinct from raw source sync
-- easier to expand to nationwide region batching later
-
-Chunk 5 additions:
-- explicit refresh vs backfill orchestration
-- backfill can seed a supported market deeply
-- refresh can remain light and incremental
-"""
 
 
 @celery_app.task(name="market_sync.daily_supported_markets")
@@ -32,11 +18,12 @@ def daily_supported_markets_task(
 ):
     db = SessionLocal()
     try:
-        dispatches = build_daily_dispatch_plan(
+        raw_dispatches = build_daily_dispatch_plan(
             db,
             org_id=int(org_id),
             sync_mode=sync_mode,
         )
+        dispatches = collapse_dispatches_to_primary_source(raw_dispatches)
 
         queued = []
         for item in dispatches:
@@ -55,6 +42,8 @@ def daily_supported_markets_task(
                     "market_slug": str(item["market"]["slug"]),
                     "sync_mode": str(item.get("sync_mode") or sync_mode),
                     "runtime_config": dict(item["runtime_config"]),
+                    "dispatch_candidates": int(item.get("dispatch_candidates") or 1),
+                    "dispatch_source_ids": [int(x) for x in item.get("dispatch_source_ids") or [item["source_id"]]],
                 }
             )
 
@@ -62,6 +51,8 @@ def daily_supported_markets_task(
             "ok": True,
             "org_id": int(org_id),
             "sync_mode": str(sync_mode),
+            "dispatches_seen": len(raw_dispatches),
+            "dispatches_selected": len(dispatches),
             "queued": len(queued),
             "jobs": queued,
         }
@@ -89,8 +80,11 @@ def sync_supported_market_task(
         if not bool(plan.get("covered")):
             return plan
 
+        raw_dispatches = list(plan.get("dispatches") or [])
+        dispatches = collapse_dispatches_to_primary_source(raw_dispatches)
+
         queued = []
-        for item in plan["dispatches"]:
+        for item in dispatches:
             job = sync_source_task.delay(
                 int(org_id),
                 int(item["source_id"]),
@@ -106,9 +100,13 @@ def sync_supported_market_task(
                     "market_slug": str(item["market"]["slug"]),
                     "sync_mode": str(item.get("sync_mode") or sync_mode),
                     "runtime_config": dict(item["runtime_config"]),
+                    "dispatch_candidates": int(item.get("dispatch_candidates") or 1),
+                    "dispatch_source_ids": [int(x) for x in item.get("dispatch_source_ids") or [item["source_id"]]],
                 }
             )
 
+        plan["dispatches_seen"] = len(raw_dispatches)
+        plan["dispatches"] = dispatches
         plan["queued_jobs"] = queued
         plan["queued"] = len(queued)
         return plan
@@ -123,7 +121,9 @@ def backfill_supported_market_task(
     *,
     limit: int | None = None,
 ):
-    return sync_supported_market_task.apply(
-        args=(int(org_id), str(market_slug)),
-        kwargs={"limit": limit, "sync_mode": "backfill"},
-    ).get()
+    return sync_supported_market_task(
+        int(org_id),
+        str(market_slug),
+        limit=limit,
+        sync_mode="backfill",
+    )

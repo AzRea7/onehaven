@@ -80,15 +80,24 @@ def get_daily_market_limit() -> int:
 
 
 def get_default_market_limit_per_sync() -> int:
-    return int(getattr(settings, "market_sync_default_limit_per_market", DEFAULT_REFRESH_LIMIT_FALLBACK) or DEFAULT_REFRESH_LIMIT_FALLBACK)
+    return int(
+        getattr(settings, "market_sync_default_limit_per_market", DEFAULT_REFRESH_LIMIT_FALLBACK)
+        or DEFAULT_REFRESH_LIMIT_FALLBACK
+    )
 
 
 def get_default_backfill_limit_per_sync() -> int:
-    return int(getattr(settings, "market_sync_backfill_limit_per_market", DEFAULT_BACKFILL_LIMIT_FALLBACK) or DEFAULT_BACKFILL_LIMIT_FALLBACK)
+    return int(
+        getattr(settings, "market_sync_backfill_limit_per_market", DEFAULT_BACKFILL_LIMIT_FALLBACK)
+        or DEFAULT_BACKFILL_LIMIT_FALLBACK
+    )
 
 
 def get_default_backfill_target_records() -> int:
-    return int(getattr(settings, "market_sync_backfill_target_records", DEFAULT_BACKFILL_TARGET_RECORDS_FALLBACK) or DEFAULT_BACKFILL_TARGET_RECORDS_FALLBACK)
+    return int(
+        getattr(settings, "market_sync_backfill_target_records", DEFAULT_BACKFILL_TARGET_RECORDS_FALLBACK)
+        or DEFAULT_BACKFILL_TARGET_RECORDS_FALLBACK
+    )
 
 
 def get_default_refresh_window_pages() -> int:
@@ -180,19 +189,31 @@ def build_market_dataset_key(
         "org_id": int(org_id),
         "provider": str(provider or "").strip().lower(),
         "source_id": int(source_id),
-        "market_slug": str(market_slug or normalized_cursor.get("market_slug") or "").strip().lower() or None,
+        "market_slug": str(
+            market_slug or normalized_cursor.get("market_slug") or ""
+        ).strip().lower() or None,
         "state": str(state or "").strip().upper() or None,
         "county": str(county or "").strip().lower() or None,
         "city": str(city or "").strip().lower() or None,
-        "page": _safe_int(page if page is not None else normalized_cursor.get("page"), DEFAULT_CURSOR_PAGE),
-        "shard": _safe_int(shard if shard is not None else normalized_cursor.get("shard"), DEFAULT_CURSOR_SHARD),
+        "page": _safe_int(
+            page if page is not None else normalized_cursor.get("page"),
+            DEFAULT_CURSOR_PAGE,
+        ),
+        "shard": _safe_int(
+            shard if shard is not None else normalized_cursor.get("shard"),
+            DEFAULT_CURSOR_SHARD,
+        ),
         "sort_mode": (
             str(sort_mode or normalized_cursor.get("sort_mode") or DEFAULT_CURSOR_SORT_MODE)
             .strip()
             .lower()
             or DEFAULT_CURSOR_SORT_MODE
         ),
-        "provider_cursor": dict(normalized_cursor.get("provider_cursor") or {}) if isinstance(normalized_cursor.get("provider_cursor"), dict) else None,
+        "provider_cursor": (
+            dict(normalized_cursor.get("provider_cursor") or {})
+            if isinstance(normalized_cursor.get("provider_cursor"), dict)
+            else None
+        ),
         "page_fingerprint": str(normalized_cursor.get("page_fingerprint") or "").strip() or None,
     }
     return _stable_json_hash(payload)
@@ -213,7 +234,11 @@ def build_market_dataset_identity(
     )
 
     market_slug = (
-        str(runtime_config.get("market_slug") or base_cursor.get("market_slug") or (sync_state.market_slug if sync_state is not None else "")).strip().lower()
+        str(
+            runtime_config.get("market_slug")
+            or base_cursor.get("market_slug")
+            or (sync_state.market_slug if sync_state is not None else "")
+        ).strip().lower()
         or None
     )
     state = str(
@@ -479,7 +504,7 @@ def advance_market_cursor(
             **dict(sync_state.cursor_json or {}),
             **dict(next_cursor or {}),
             "page_fingerprint": page_fingerprint
-            or (dict(next_cursor or {}).get("page_fingerprint")),
+            or dict(next_cursor or {}).get("page_fingerprint"),
             "page_changed": (
                 bool(page_changed)
                 if page_changed is not None
@@ -512,8 +537,7 @@ def advance_market_cursor(
     sync_state.updated_at = _utcnow()
 
     if seen_provider_record_at is not None:
-        sync_state.last_seenProvider_record_at = seen_provider_record_at  # noqa: B950
-       
+        sync_state.last_seen_provider_record_at = seen_provider_record_at
 
     db.add(sync_state)
     db.flush()
@@ -685,56 +709,127 @@ def build_market_runtime_payload(
     return payload
 
 
-def get_enabled_sources_for_org(db: Session, *, org_id: int):
+def get_enabled_sources_for_org(db: Session, *, org_id: int) -> list[Any]:
     ensure_default_manual_sources(db, org_id=int(org_id))
     return [
         source
         for source in list_sources(db, org_id=int(org_id))
         if bool(getattr(source, "is_enabled", False))
+        and _norm_text(getattr(source, "provider", "")) == "rentcast"
     ]
 
 
-def _source_matches_market(source: Any, market: dict[str, Any]) -> bool:
-    config = dict(getattr(source, "config_json", None) or {})
+def _source_config(source: Any) -> dict[str, Any]:
+    raw = getattr(source, "config_json", None) or {}
+    return dict(raw) if isinstance(raw, dict) else {}
 
+
+def _source_matches_market_slug(source: Any, market: dict[str, Any]) -> bool:
+    config = _source_config(source)
     source_market_slug = _norm_text(config.get("market_slug"))
     market_slug = _norm_text(market.get("slug"))
-    if source_market_slug and market_slug and source_market_slug == market_slug:
-        return True
+    if not source_market_slug or not market_slug:
+        return False
+    return source_market_slug == market_slug
 
+
+def _source_matches_city_state(source: Any, market: dict[str, Any]) -> bool:
+    config = _source_config(source)
     source_city = _norm_text(config.get("city"))
     market_city = _norm_text(market.get("city"))
     source_state = _norm_text(config.get("state") or "MI")
     market_state = _norm_text(market.get("state") or "MI")
-
-    if (
+    return bool(
         source_city
         and market_city
         and source_city == market_city
         and source_state == market_state
-    ):
-        return True
+    )
 
+
+def _source_matches_county_state(source: Any, market: dict[str, Any]) -> bool:
+    config = _source_config(source)
+    source_county = _norm_text(config.get("county"))
+    market_county = _norm_text(market.get("county"))
+    source_state = _norm_text(config.get("state") or "MI")
+    market_state = _norm_text(market.get("state") or "MI")
+    return bool(
+        source_county
+        and market_county
+        and source_county == market_county
+        and source_state == market_state
+    )
+
+
+def _source_slug_contains_market(source: Any, market: dict[str, Any]) -> bool:
     source_slug = _norm_text(getattr(source, "slug", ""))
-    if market_slug and market_slug in source_slug:
-        return True
-
-    return False
+    market_slug = _norm_text(market.get("slug"))
+    return bool(source_slug and market_slug and market_slug in source_slug)
 
 
-def _matching_sources_for_market(
+def _source_match_rank(source: Any, market: dict[str, Any]) -> int:
+    if _source_matches_market_slug(source, market):
+        return 100
+    if _source_matches_city_state(source, market):
+        return 80
+    if _source_matches_county_state(source, market):
+        return 50
+    if _source_slug_contains_market(source, market):
+        return 30
+    return 0
+
+
+def _source_sort_key(source: Any, market: dict[str, Any]) -> tuple[Any, ...]:
+    config = _source_config(source)
+    return (
+        -_source_match_rank(source, market),
+        0 if bool(config.get("market_slug")) else 1,
+        0 if bool(config.get("city")) else 1,
+        0 if bool(config.get("county")) else 1,
+        str(getattr(source, "slug", "") or "").strip().lower(),
+        int(getattr(source, "id", 0) or 0),
+    )
+
+def _select_primary_source_for_market(sources: list[Any], market_slug: str):
+    market_slug = (market_slug or "").strip().lower()
+
+    # 1. exact market match (BEST)
+    for s in sources:
+        cfg = getattr(s, "config_json", {}) or {}
+        if cfg.get("market_slug") == market_slug:
+            return s
+
+    # 2. fallback: city match
+    for s in sources:
+        cfg = getattr(s, "config_json", {}) or {}
+        if cfg.get("city"):
+            return s
+
+    # 3. fallback: first enabled (never county)
+    return sources[0] if sources else None
+
+def _select_primary_source_for_market(
     sources: list[Any],
     market: dict[str, Any],
-) -> list[Any]:
-    exact = [source for source in sources if _source_matches_market(source, market)]
-    if exact:
-        return exact
+) -> Any | None:
+    if not sources:
+        return None
 
-    return [
+    ranked = [source for source in sources if _source_match_rank(source, market) > 0]
+    if ranked:
+        ranked.sort(key=lambda s: _source_sort_key(s, market))
+        return ranked[0]
+
+    rentcast_sources = [
         source
         for source in sources
         if _norm_text(getattr(source, "provider", "")) == "rentcast"
     ]
+    if not rentcast_sources:
+        return None
+
+    rentcast_sources.sort(key=lambda s: _source_sort_key(s, market))
+    return rentcast_sources[0]
 
 
 def resolve_supported_market(*, market_slug: str) -> dict[str, Any] | None:
@@ -754,41 +849,50 @@ def build_daily_dispatch_plan(
     normalized_mode = normalize_sync_mode(sync_mode)
 
     dispatches: list[dict[str, Any]] = []
-    for market in markets:
-        matched_sources = _matching_sources_for_market(sources, market)
+    seen_market_slugs: set[str] = set()
 
-        for source in matched_sources:
-            sync_state = get_or_create_market_sync_state(
-                db,
-                org_id=int(org_id),
-                source=source,
-                market=market,
-            )
-            runtime_config = build_market_runtime_payload(
-                market,
-                trigger_type="daily_refresh",
-                sync_state=sync_state,
-                sync_mode=normalized_mode,
-            )
-            dispatches.append(
-                {
-                    "market": market,
-                    "source_id": int(source.id),
-                    "source_slug": str(getattr(source, "slug", "")),
-                    "provider": str(getattr(source, "provider", "")),
-                    "trigger_type": "daily_refresh",
-                    "runtime_config": runtime_config,
-                    "market_sync_state_id": int(sync_state.id),
-                    "market_cursor": dict(runtime_config.get("market_cursor") or {}),
-                    "sync_mode": normalized_mode,
-                    "dataset_identity": build_market_dataset_identity(
-                        org_id=int(org_id),
-                        source=source,
-                        runtime_config=runtime_config,
-                        sync_state=sync_state,
-                    ),
-                }
-            )
+    for market in markets:
+        market_slug = str(market.get("slug") or "").strip().lower()
+        if not market_slug or market_slug in seen_market_slugs:
+            continue
+
+        source = _select_primary_source_for_market(sources, market)
+        if source is None:
+            continue
+
+        sync_state = get_or_create_market_sync_state(
+            db,
+            org_id=int(org_id),
+            source=source,
+            market=market,
+        )
+        runtime_config = build_market_runtime_payload(
+            market,
+            trigger_type="daily_refresh",
+            sync_state=sync_state,
+            sync_mode=normalized_mode,
+        )
+        dispatches.append(
+            {
+                "market": market,
+                "source_id": int(source.id),
+                "source_slug": str(getattr(source, "slug", "")),
+                "provider": str(getattr(source, "provider", "")),
+                "trigger_type": "daily_refresh",
+                "runtime_config": runtime_config,
+                "market_sync_state_id": int(sync_state.id),
+                "market_cursor": dict(runtime_config.get("market_cursor") or {}),
+                "sync_mode": normalized_mode,
+                "dataset_identity": build_market_dataset_identity(
+                    org_id=int(org_id),
+                    source=source,
+                    runtime_config=runtime_config,
+                    sync_state=sync_state,
+                ),
+            }
+        )
+        seen_market_slugs.add(market_slug)
+
     return dispatches
 
 
@@ -813,42 +917,51 @@ def build_supported_market_sync_plan_for_db(
         }
 
     sources = get_enabled_sources_for_org(db, org_id=int(org_id))
-    matched_sources = _matching_sources_for_market(sources, market)
+    source = _select_primary_source_for_market(sources, market)
 
-    dispatches = []
-    for source in matched_sources:
-        sync_state = get_or_create_market_sync_state(
-            db,
-            org_id=int(org_id),
-            source=source,
-            market=market,
-        )
-        runtime_config = build_market_runtime_payload(
-            market,
-            trigger_type="manual_market_sync" if normalized_mode == "refresh" else "market_backfill",
-            sync_state=sync_state,
-            limit_override=limit,
-            sync_mode=normalized_mode,
-        )
-        dispatches.append(
-            {
-                "market": market,
-                "source_id": int(source.id),
-                "source_slug": str(getattr(source, "slug", "")),
-                "provider": str(getattr(source, "provider", "")),
-                "trigger_type": "manual_market_sync" if normalized_mode == "refresh" else "market_backfill",
-                "runtime_config": dict(runtime_config),
-                "market_sync_state_id": int(sync_state.id),
-                "market_cursor": dict(runtime_config.get("market_cursor") or {}),
-                "sync_mode": normalized_mode,
-                "dataset_identity": build_market_dataset_identity(
-                    org_id=int(org_id),
-                    source=source,
-                    runtime_config=runtime_config,
-                    sync_state=sync_state,
-                ),
-            }
-        )
+    if source is None:
+        return {
+            "ok": True,
+            "covered": True,
+            "market": market,
+            "dispatches": [],
+            "sync_mode": normalized_mode,
+        }
+
+    sync_state = get_or_create_market_sync_state(
+        db,
+        org_id=int(org_id),
+        source=source,
+        market=market,
+    )
+    trigger_type = "manual_market_sync" if normalized_mode == "refresh" else "market_backfill"
+    runtime_config = build_market_runtime_payload(
+        market,
+        trigger_type=trigger_type,
+        sync_state=sync_state,
+        limit_override=limit,
+        sync_mode=normalized_mode,
+    )
+
+    dispatches = [
+        {
+            "market": market,
+            "source_id": int(source.id),
+            "source_slug": str(getattr(source, "slug", "")),
+            "provider": str(getattr(source, "provider", "")),
+            "trigger_type": trigger_type,
+            "runtime_config": dict(runtime_config),
+            "market_sync_state_id": int(sync_state.id),
+            "market_cursor": dict(runtime_config.get("market_cursor") or {}),
+            "sync_mode": normalized_mode,
+            "dataset_identity": build_market_dataset_identity(
+                org_id=int(org_id),
+                source=source,
+                runtime_config=runtime_config,
+                sync_state=sync_state,
+            ),
+        }
+    ]
 
     return {
         "ok": True,
