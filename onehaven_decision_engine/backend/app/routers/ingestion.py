@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
@@ -15,18 +16,23 @@ from ..schemas import (
     IngestionSourceCreate,
     IngestionSourceOut,
     IngestionSourceUpdate,
-    IngestionWebhookIn,
 )
 from ..services.ingestion_run_execute import execute_source_sync
 from ..services.ingestion_run_service import get_ingestion_overview, list_runs
-from ..services.ingestion_scheduler_service import list_default_daily_markets
+from ..services.ingestion_scheduler_service import (
+    collapse_dispatches_to_primary_source,
+    list_default_daily_markets,
+)
 from ..services.ingestion_source_service import (
     create_source,
     ensure_default_manual_sources,
+    ensure_market_slug_on_sources,
+    ensure_sources_for_supported_markets,
     get_source,
     list_sources,
     update_source,
 )
+from ..services.market_catalog_service import list_active_supported_markets
 from ..services.market_sync_service import build_supported_market_sync_plan_for_db
 from ..services.portfolio_watchlist_service import (
     delete_search_preset,
@@ -41,12 +47,6 @@ from ..tasks.ingestion_tasks import (
     sync_due_sources_task,
     sync_source_task,
 )
-from ..services.ingestion_scheduler_service import collapse_dispatches_to_primary_source
-from ..services.market_catalog_service import (
-    list_active_supported_markets,
-    get_active_supported_market_by_slug,
-)
-
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
@@ -75,19 +75,20 @@ def _principal_user_id(p: Any) -> int | None:
                 return None
     return None
 
-def _resolve_market_slug_or_404(slug: str) -> str:
+
+def _resolve_market_slug_or_400(slug: str) -> str:
     slug = (slug or "").strip().lower()
 
     markets = list_active_supported_markets()
-    valid_slugs = {m["slug"] for m in markets}
+    valid_slugs = {str(m["slug"]).strip().lower() for m in markets}
 
     if slug in valid_slugs:
         return slug
 
-    # 🔥 OPTIONAL AUTO-CORRECTION (SMART UX)
     for m in markets:
-        if slug in m["slug"]:
-            return m["slug"]
+        candidate = str(m.get("slug") or "").strip().lower()
+        if slug and slug in candidate:
+            return candidate
 
     raise HTTPException(
         status_code=400,
@@ -97,6 +98,7 @@ def _resolve_market_slug_or_404(slug: str) -> str:
             "valid_options": sorted(valid_slugs),
         },
     )
+
 
 def _normalize_optional_text(value: Any) -> str | None:
     s = str(value or "").strip()
@@ -199,7 +201,23 @@ def _run_response(row: IngestionRun) -> dict[str, Any]:
         "trigger_type": getattr(row, "trigger_type", None),
         "summary_json": summary,
         "pipeline_outcome": _pipeline_outcome(summary),
+        "started_at": getattr(row, "started_at", None),
+        "finished_at": getattr(row, "finished_at", None),
+        "created_at": getattr(row, "created_at", None),
+        "updated_at": getattr(row, "updated_at", None),
     }
+
+
+def _must_get_run(db: Session, *, org_id: int, run_id: int) -> IngestionRun:
+    row = db.scalar(
+        select(IngestionRun).where(
+            IngestionRun.id == int(run_id),
+            IngestionRun.org_id == int(org_id),
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return row
 
 
 class IngestionSyncLaunchRequest(BaseModel):
@@ -280,6 +298,7 @@ class SupportedMarketSyncRequest(BaseModel):
 @router.get("/overview", response_model=IngestionOverviewOut)
 def overview(db: Session = Depends(get_db), p=Depends(get_principal)):
     ensure_default_manual_sources(db, org_id=p.org_id)
+    ensure_market_slug_on_sources(db, org_id=p.org_id)
     payload = get_ingestion_overview(db, org_id=p.org_id)
     payload["daily_markets"] = list_default_daily_markets()
     payload["ui_mode"] = "consolidated"
@@ -291,6 +310,7 @@ def overview(db: Session = Depends(get_db), p=Depends(get_principal)):
 @router.get("/sources", response_model=list[IngestionSourceOut])
 def sources(db: Session = Depends(get_db), p=Depends(get_principal)):
     ensure_default_manual_sources(db, org_id=p.org_id)
+    ensure_market_slug_on_sources(db, org_id=p.org_id)
     return list_sources(db, org_id=p.org_id)
 
 
@@ -315,7 +335,13 @@ def patch_ingestion_source(
     row = get_source(db, org_id=p.org_id, source_id=source_id)
     if not row:
         raise HTTPException(status_code=404, detail="Source not found")
-    return update_source(db, row=row, payload=payload)
+
+    return update_source(
+        db,
+        org_id=int(p.org_id),
+        source_id=int(source_id),
+        payload=payload,
+    )
 
 
 @router.post("/sources/{source_id}/sync", response_model=dict)
@@ -347,12 +373,12 @@ def sync_now(
         out["normal_path"] = True
         return out
 
-    job = sync_source_task.delay(p.org_id, row.id, trigger_type, runtime_config)
+    job = sync_source_task.delay(int(p.org_id), int(row.id), trigger_type, runtime_config)
     return {
         "ok": True,
         "queued": True,
-        "task_id": job.id,
-        "source_id": row.id,
+        "task_id": str(job.id),
+        "source_id": int(row.id),
         "runtime_config": runtime_config,
         "normal_path": True,
     }
@@ -365,41 +391,35 @@ def sync_supported_market(
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ):
-    # ✅ STEP 1: VALIDATE MARKET SLUG
-    market_slug = _resolve_market_slug_or_404(payload.market_slug)
+    market_slug = _resolve_market_slug_or_400(payload.market_slug)
 
-    # ✅ STEP 2: BUILD PLAN
+    ensure_default_manual_sources(db, org_id=p.org_id)
+    ensure_market_slug_on_sources(db, org_id=p.org_id)
+    ensure_sources_for_supported_markets(db, org_id=p.org_id)
+
     plan = build_supported_market_sync_plan_for_db(
         db,
         org_id=int(p.org_id),
         market_slug=market_slug,
         limit=payload.limit,
+        sync_mode="refresh",
     )
 
-    if not plan.get("covered"):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Supported market '{market_slug}' not found",
-        )
-
     raw_dispatches = list(plan.get("dispatches") or [])
-
-    # 🔥 STEP 3: HARD COLLAPSE TO SINGLE SOURCE
     dispatches = collapse_dispatches_to_primary_source(raw_dispatches)
 
-    # 🔥 STEP 4: DOUBLE GUARANTEE (NO DUPLICATE MARKETS)
-    seen = set()
-    final_dispatches = []
-    for d in dispatches:
-        slug = d["market"]["slug"]
-        if slug in seen:
+    seen_market_slugs: set[str] = set()
+    final_dispatches: list[dict[str, Any]] = []
+    for dispatch in dispatches:
+        market = dict(dispatch.get("market") or {})
+        slug = str(market.get("slug") or "").strip().lower()
+        if not slug or slug in seen_market_slugs:
             continue
-        seen.add(slug)
-        final_dispatches.append(d)
+        seen_market_slugs.add(slug)
+        final_dispatches.append(dispatch)
 
     dispatches = final_dispatches
 
-    # 🔥 STEP 5: HARD FAILURE WITH CLEAR REASON
     if not dispatches:
         raise HTTPException(
             status_code=409,
@@ -410,7 +430,6 @@ def sync_supported_market(
             },
         )
 
-    # 🔥 STEP 6: EXECUTE INLINE (SAFE MODE)
     if payload.execute_inline:
         runs: list[dict[str, Any]] = []
 
@@ -435,14 +454,13 @@ def sync_supported_market(
         return {
             "ok": True,
             "mode": "inline",
-            "market": plan["market"],
+            "market": plan.get("market"),
             "runs": runs,
             "dispatches": dispatches,
             "dispatches_seen": len(raw_dispatches),
             "dispatches_executed": len(dispatches),
         }
 
-    # 🔥 STEP 7: QUEUE MODE (PRODUCTION)
     task_ids: list[str] = []
 
     for dispatch in dispatches:
@@ -457,7 +475,7 @@ def sync_supported_market(
     return {
         "ok": True,
         "mode": "queued",
-        "market": plan["market"],
+        "market": plan.get("market"),
         "queued_count": len(task_ids),
         "task_ids": task_ids,
         "dispatches": dispatches,
@@ -474,6 +492,8 @@ def sync_default_sources_now(
     _op=Depends(require_operator),
 ):
     ensure_default_manual_sources(db, org_id=p.org_id)
+    ensure_market_slug_on_sources(db, org_id=p.org_id)
+
     rows = [x for x in list_sources(db, org_id=p.org_id) if bool(x.is_enabled)]
     runtime = (payload or IngestionSyncLaunchRequest()).runtime_config()
 
@@ -500,13 +520,17 @@ def sync_default_sources_now(
         }
 
     source_ids: list[int] = []
+    task_ids: list[str] = []
+
     for row in rows:
-        sync_source_task.delay(int(p.org_id), int(row.id), trigger_type, runtime)
+        job = sync_source_task.delay(int(p.org_id), int(row.id), trigger_type, runtime)
+        task_ids.append(str(job.id))
         source_ids.append(int(row.id))
 
     return {
         "ok": True,
-        "queued": len(source_ids),
+        "queued": True,
+        "task_ids": task_ids,
         "source_ids": source_ids,
         "normal_path": True,
     }
@@ -545,6 +569,16 @@ def runs(
     p=Depends(get_principal),
 ):
     return list_runs(db, org_id=p.org_id, limit=max(1, min(limit, 200)))
+
+
+@router.get("/runs/{run_id}", response_model=dict)
+def run_detail(
+    run_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    row = _must_get_run(db, org_id=int(p.org_id), run_id=int(run_id))
+    return _run_response(row)
 
 
 @router.get("/watchlists", response_model=list[dict])
@@ -587,23 +621,22 @@ def save_search_preset(payload: SearchPresetIn, db: Session = Depends(get_db), p
         sort_json=payload.sort_json,
     )
 
-@router.post("/sources/ensure-supported")
-def ensure_supported_sources(
-    db: Session = Depends(get_db),
-    principal: Any = Depends(get_principal),
-):
-    require_operator(principal)
-
-    from ..services.ingestion_source_service import ensure_sources_for_supported_markets
-
-    created = ensure_sources_for_supported_markets(db, org_id=principal.org_id)
-
-    return {
-        "ok": True,
-        "created": len(created),
-        "sources": [s.slug for s in created],
-    }
 
 @router.delete("/search-presets/{name}", response_model=dict)
 def remove_search_preset(name: str, db: Session = Depends(get_db), p=Depends(get_principal)):
     return delete_search_preset(db, org_id=int(p.org_id), user_id=_principal_user_id(p), name=name)
+
+
+@router.post("/sources/ensure-supported", response_model=dict)
+def ensure_supported_sources(
+    db: Session = Depends(get_db),
+    principal: Any = Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    created = ensure_sources_for_supported_markets(db, org_id=int(principal.org_id))
+
+    return {
+        "ok": True,
+        "created": len(created),
+        "sources": [str(s.slug) for s in created],
+    }

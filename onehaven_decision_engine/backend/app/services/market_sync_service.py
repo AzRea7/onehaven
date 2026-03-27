@@ -12,7 +12,13 @@ from ..config import settings
 from ..db import SessionLocal
 from ..models import MarketSyncState
 from .ingestion_scheduler_service import build_runtime_payload
-from .ingestion_source_service import ensure_default_manual_sources, list_sources
+from .ingestion_source_service import (
+    ensure_default_manual_sources,
+    ensure_market_slug_on_sources,
+    ensure_sources_for_supported_markets,
+    list_sources,
+    resolve_sources_for_market,
+)
 from .market_catalog_service import (
     get_active_supported_market_by_slug,
     list_active_supported_markets,
@@ -709,16 +715,6 @@ def build_market_runtime_payload(
     return payload
 
 
-def get_enabled_sources_for_org(db: Session, *, org_id: int) -> list[Any]:
-    ensure_default_manual_sources(db, org_id=int(org_id))
-    return [
-        source
-        for source in list_sources(db, org_id=int(org_id))
-        if bool(getattr(source, "is_enabled", False))
-        and _norm_text(getattr(source, "provider", "")) == "rentcast"
-    ]
-
-
 def _source_config(source: Any) -> dict[str, Any]:
     raw = getattr(source, "config_json", None) or {}
     return dict(raw) if isinstance(raw, dict) else {}
@@ -726,38 +722,24 @@ def _source_config(source: Any) -> dict[str, Any]:
 
 def _source_matches_market_slug(source: Any, market: dict[str, Any]) -> bool:
     config = _source_config(source)
-    source_market_slug = _norm_text(config.get("market_slug"))
-    market_slug = _norm_text(market.get("slug"))
-    if not source_market_slug or not market_slug:
-        return False
-    return source_market_slug == market_slug
+    return _norm_text(config.get("market_slug")) == _norm_text(market.get("slug"))
 
 
 def _source_matches_city_state(source: Any, market: dict[str, Any]) -> bool:
     config = _source_config(source)
-    source_city = _norm_text(config.get("city"))
-    market_city = _norm_text(market.get("city"))
-    source_state = _norm_text(config.get("state") or "MI")
-    market_state = _norm_text(market.get("state") or "MI")
-    return bool(
-        source_city
-        and market_city
-        and source_city == market_city
-        and source_state == market_state
+    return (
+        _norm_text(config.get("city")) == _norm_text(market.get("city"))
+        and str(config.get("state") or "").strip().upper()
+        == str(market.get("state") or "").strip().upper()
     )
 
 
 def _source_matches_county_state(source: Any, market: dict[str, Any]) -> bool:
     config = _source_config(source)
-    source_county = _norm_text(config.get("county"))
-    market_county = _norm_text(market.get("county"))
-    source_state = _norm_text(config.get("state") or "MI")
-    market_state = _norm_text(market.get("state") or "MI")
-    return bool(
-        source_county
-        and market_county
-        and source_county == market_county
-        and source_state == market_state
+    return (
+        _norm_text(config.get("county")) == _norm_text(market.get("county"))
+        and str(config.get("state") or "").strip().upper()
+        == str(market.get("state") or "").strip().upper()
     )
 
 
@@ -790,23 +772,6 @@ def _source_sort_key(source: Any, market: dict[str, Any]) -> tuple[Any, ...]:
         int(getattr(source, "id", 0) or 0),
     )
 
-def _select_primary_source_for_market(sources: list[Any], market_slug: str):
-    market_slug = (market_slug or "").strip().lower()
-
-    # 1. exact market match (BEST)
-    for s in sources:
-        cfg = getattr(s, "config_json", {}) or {}
-        if cfg.get("market_slug") == market_slug:
-            return s
-
-    # 2. fallback: city match
-    for s in sources:
-        cfg = getattr(s, "config_json", {}) or {}
-        if cfg.get("city"):
-            return s
-
-    # 3. fallback: first enabled (never county)
-    return sources[0] if sources else None
 
 def _select_primary_source_for_market(
     sources: list[Any],
@@ -838,6 +803,23 @@ def resolve_supported_market(*, market_slug: str) -> dict[str, Any] | None:
     return get_active_supported_market_by_slug(str(market_slug).strip().lower())
 
 
+def get_enabled_sources_for_org(db: Session, *, org_id: int) -> list[Any]:
+    """
+    Keep org sources market-ready before anyone tries to dispatch.
+    This is the core behavior that prevents no_dispatchable_sources.
+    """
+    ensure_default_manual_sources(db, org_id=int(org_id))
+    ensure_market_slug_on_sources(db, org_id=int(org_id))
+    ensure_sources_for_supported_markets(db, org_id=int(org_id))
+
+    return [
+        source
+        for source in list_sources(db, org_id=int(org_id))
+        if bool(getattr(source, "is_enabled", False))
+        and _norm_text(getattr(source, "provider", "")) == "rentcast"
+    ]
+
+
 def build_daily_dispatch_plan(
     db: Session,
     *,
@@ -856,7 +838,19 @@ def build_daily_dispatch_plan(
         if not market_slug or market_slug in seen_market_slugs:
             continue
 
-        source = _select_primary_source_for_market(sources, market)
+        matched_sources = resolve_sources_for_market(
+            db,
+            org_id=int(org_id),
+            market_slug=market_slug,
+        )
+
+        source = None
+        if matched_sources:
+            matched_sources.sort(key=lambda s: _source_sort_key(s, market))
+            source = matched_sources[0]
+        else:
+            source = _select_primary_source_for_market(sources, market)
+
         if source is None:
             continue
 
@@ -916,10 +910,16 @@ def build_supported_market_sync_plan_for_db(
             "sync_mode": normalized_mode,
         }
 
-    sources = get_enabled_sources_for_org(db, org_id=int(org_id))
-    source = _select_primary_source_for_market(sources, market)
+    # Ensure/repair sources before resolving.
+    get_enabled_sources_for_org(db, org_id=int(org_id))
 
-    if source is None:
+    matched_sources = resolve_sources_for_market(
+        db,
+        org_id=int(org_id),
+        market_slug=str(market.get("slug") or ""),
+    )
+
+    if not matched_sources:
         return {
             "ok": True,
             "covered": True,
@@ -928,13 +928,18 @@ def build_supported_market_sync_plan_for_db(
             "sync_mode": normalized_mode,
         }
 
+    matched_sources.sort(key=lambda s: _source_sort_key(s, market))
+    source = matched_sources[0]
+
     sync_state = get_or_create_market_sync_state(
         db,
         org_id=int(org_id),
         source=source,
         market=market,
     )
-    trigger_type = "manual_market_sync" if normalized_mode == "refresh" else "market_backfill"
+
+    trigger_type = "manual_market_sync"
+
     runtime_config = build_market_runtime_payload(
         market,
         trigger_type=trigger_type,
@@ -981,12 +986,18 @@ def build_supported_market_sync_plan(
 ) -> dict[str, Any]:
     db = SessionLocal()
     try:
-        return build_supported_market_sync_plan_for_db(
+        plan = build_supported_market_sync_plan_for_db(
             db,
-            org_id=org_id,
+            org_id=int(org_id),
             market_slug=market_slug,
             limit=limit,
             sync_mode=sync_mode,
         )
+        db.commit()
+        return plan
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
+        
