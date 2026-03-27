@@ -26,6 +26,7 @@ class RentCastListingFetchResult:
     page_fingerprint: str | None = None
     page_changed: bool = True
     provider_cursor: dict[str, Any] | None = None
+    query_variant: dict[str, Any] | None = None
 
 
 class RentCastListingSource:
@@ -116,7 +117,47 @@ class RentCastListingSource:
             return "Single Family"
         if norm == "multi_family":
             return "Multi Family"
+        if norm == "condo":
+            return "Condo"
+        if norm == "townhouse":
+            return "Townhouse"
+        if norm == "manufactured":
+            return "Manufactured"
+        if norm == "land":
+            return "Land"
         return None
+
+    def _provider_property_type_param(
+        self,
+        config: dict[str, Any],
+    ) -> str | None:
+        property_types = config.get("property_types")
+        if isinstance(property_types, str):
+            property_types = [x.strip() for x in property_types.split(",") if x.strip()]
+
+        provider_types: list[str] = []
+        seen: set[str] = set()
+
+        for item in property_types or []:
+            mapped = self._to_provider_property_type(str(item))
+            if mapped and mapped not in seen:
+                seen.add(mapped)
+                provider_types.append(mapped)
+
+        if not provider_types:
+            single_property_type = self._normalize_optional_text(config.get("property_type"))
+            if single_property_type:
+                mapped = self._to_provider_property_type(single_property_type)
+                if mapped:
+                    provider_types.append(mapped)
+
+        return "|".join(provider_types) if provider_types else None
+
+    def _provider_price_param(self, config: dict[str, Any]) -> str | None:
+        max_price = self._safe_int(config.get("max_price"), None)
+        if max_price is None or max_price <= 0:
+            return None
+        return f"0:{max_price}"
 
     def _coerce_zip_codes(self, config: dict[str, Any]) -> list[str]:
         out: list[str] = []
@@ -366,7 +407,6 @@ class RentCastListingSource:
         state = self._normalize_optional_text(config.get("state")) or "MI"
         city = self._normalize_optional_text(config.get("city"))
         county = self._normalize_optional_text(config.get("county"))
-        zip_codes = self._coerce_zip_codes(config)
 
         params["state"] = state
         if city:
@@ -374,45 +414,13 @@ class RentCastListingSource:
         elif county:
             params["county"] = county
 
-        if zip_codes:
-            params["zipCode"] = ",".join(zip_codes)
+        provider_property_type = self._provider_property_type_param(config)
+        if provider_property_type:
+            params["propertyType"] = provider_property_type
 
-        min_price = self._safe_int(config.get("min_price"), None)
-        max_price = self._safe_int(config.get("max_price"), None)
-        if min_price is not None:
-            params["minPrice"] = min_price
-        if max_price is not None:
-            params["maxPrice"] = max_price
-
-        min_beds = self._safe_int(config.get("min_bedrooms") or config.get("min_beds"), None)
-        min_baths = self._safe_float(config.get("min_bathrooms") or config.get("min_baths"), None)
-        if min_beds is not None:
-            params["minBeds"] = min_beds
-        if min_baths is not None:
-            params["minBaths"] = min_baths
-
-        max_units = self._safe_int(config.get("max_units"), None)
-        if max_units is not None:
-            params["maxUnits"] = max_units
-
-        property_types = config.get("property_types")
-        if isinstance(property_types, str):
-            property_types = [x.strip() for x in property_types.split(",") if x.strip()]
-
-        provider_types: list[str] = []
-        for item in property_types or []:
-            mapped = self._to_provider_property_type(str(item))
-            if mapped:
-                provider_types.append(mapped)
-
-        if provider_types:
-            params["propertyType"] = ",".join(sorted(set(provider_types)))
-        else:
-            single_property_type = self._normalize_optional_text(config.get("property_type"))
-            if single_property_type:
-                mapped = self._to_provider_property_type(single_property_type)
-                if mapped:
-                    params["propertyType"] = mapped
+        provider_price = self._provider_price_param(config)
+        if provider_price:
+            params["price"] = provider_price
 
         _ = sort_mode
         return params
@@ -513,4 +521,5 @@ class RentCastListingSource:
             page_fingerprint=page_fingerprint,
             page_changed=page_changed,
             provider_cursor=None,
+            query_variant=dict(config.get("_query_variant") or {}) or None,
         )

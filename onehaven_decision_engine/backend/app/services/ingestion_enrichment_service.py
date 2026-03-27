@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
 import logging
 import os
@@ -201,7 +202,6 @@ def _timed_step(
         raise exc
 
 
-
 def _status_from_bool(ok: bool) -> str:
     return "complete" if ok else "missing"
 
@@ -242,6 +242,7 @@ def _update_property_acquisition_completeness(
         db.rollback()
         raise
     return statuses
+
 
 def refresh_property_rent_assumptions(
     db: Session,
@@ -378,27 +379,86 @@ def _run_maybe_async(value: Any) -> Any:
 
 
 def _seed_next_actions_if_available(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    candidates: list[tuple[str, str]] = [
-        ("app.services.next_actions_service", "seed_property_next_actions"),
-        ("app.services.next_actions_service", "generate_property_next_actions"),
-        ("app.services.next_actions_service", "recompute_property_next_actions"),
+    """
+    Best-effort optional hook. Missing module or missing function should not be noisy
+    because next actions are not required for ingestion success.
+    """
+    module_name = "app.services.next_actions_service"
+    candidates: list[str] = [
+        "seed_property_next_actions",
+        "generate_property_next_actions",
+        "recompute_property_next_actions",
     ]
 
-    for module_name, fn_name in candidates:
+    try:
+        module = importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name == module_name:
+            log.info(
+                "next_actions_seed_skipped_missing_module org_id=%s property_id=%s module=%s",
+                int(org_id),
+                int(property_id),
+                module_name,
+            )
+            return {
+                "ok": False,
+                "skipped": True,
+                "reason": "next_actions_service_unavailable",
+                "module": module_name,
+            }
+        log.exception(
+            "next_actions_seed_handler_failed",
+            extra={"org_id": int(org_id), "property_id": int(property_id), "module": module_name},
+        )
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "next_actions_dependency_import_failed",
+            "module": module_name,
+            "error": str(exc),
+        }
+    except Exception as exc:
+        log.exception(
+            "next_actions_seed_handler_failed",
+            extra={"org_id": int(org_id), "property_id": int(property_id), "module": module_name},
+        )
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "next_actions_module_import_failed",
+            "module": module_name,
+            "error": str(exc),
+        }
+
+    for fn_name in candidates:
+        fn = getattr(module, fn_name, None)
+        if not callable(fn):
+            continue
+
         try:
-            module = __import__(module_name, fromlist=[fn_name])
-            fn = getattr(module, fn_name, None)
-            if callable(fn):
-                out = fn(db, org_id=int(org_id), property_id=int(property_id))
-                return {"ok": True, "handler": fn_name, "result": out}
-        except Exception:
+            out = fn(db, org_id=int(org_id), property_id=int(property_id))
+            out = _run_maybe_async(out)
+            return {"ok": True, "handler": fn_name, "result": out}
+        except Exception as exc:
             log.exception(
                 "next_actions_seed_handler_failed",
                 extra={"org_id": int(org_id), "property_id": int(property_id), "handler": fn_name},
             )
-            continue
+            return {
+                "ok": False,
+                "skipped": True,
+                "reason": "next_actions_handler_failed",
+                "handler": fn_name,
+                "error": str(exc),
+            }
 
-    return {"ok": False, "skipped": True, "reason": "next_actions_service_unavailable"}
+    return {
+        "ok": False,
+        "skipped": True,
+        "reason": "next_actions_handler_missing",
+        "module": module_name,
+        "candidates": candidates,
+    }
 
 
 def _try_risk_refresh(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:

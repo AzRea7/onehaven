@@ -31,6 +31,8 @@ from ..services.ingestion_enrichment_service import (
 from ..services.ingestion_run_service import finish_run, start_run
 from ..services.locks_service import (
     acquire_ingestion_execution_lock,
+    build_ingestion_execution_lock_key,
+    clear_stale_lock,
     has_completed_ingestion_dataset,
     mark_ingestion_dataset_completed,
     release_ingestion_execution_lock,
@@ -119,13 +121,9 @@ def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str
         property_types = ["single_family", "multi_family"]
     payload["property_types"] = [str(x).strip() for x in property_types if str(x).strip()]
 
-    for key in ["min_price", "max_price", "min_bedrooms", "min_bathrooms", "max_units"]:
-        payload[key] = _safe_float(payload.get(key))
-
+    payload["max_price"] = _safe_float(payload.get("max_price"))
     if payload.get("max_price") is None:
         payload["max_price"] = float(getattr(settings, "investor_buy_box_max_price", 200_000))
-    if payload.get("max_units") is None:
-        payload["max_units"] = float(getattr(settings, "investor_buy_box_max_units", 4))
 
     payload["sync_mode"] = str(payload.get("sync_mode") or "refresh").strip().lower() or "refresh"
     payload["market_slug"] = _normalize_optional_filter_value(payload.get("market_slug"))
@@ -133,6 +131,10 @@ def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str
 
     payload.pop("zip_code", None)
     payload.pop("address", None)
+    payload.pop("max_units", None)
+    payload.pop("min_price", None)
+    payload.pop("min_bedrooms", None)
+    payload.pop("min_bathrooms", None)
     return payload
 
 
@@ -180,11 +182,7 @@ def _runtime_for_idempotency(runtime_config: dict[str, Any]) -> dict[str, Any]:
         "county": runtime_config.get("county"),
         "city": runtime_config.get("city"),
         "property_types": runtime_config.get("property_types"),
-        "min_price": runtime_config.get("min_price"),
         "max_price": runtime_config.get("max_price"),
-        "min_bedrooms": runtime_config.get("min_bedrooms"),
-        "min_bathrooms": runtime_config.get("min_bathrooms"),
-        "max_units": runtime_config.get("max_units"),
         "limit": runtime_config.get("limit"),
         "idempotency_context": runtime_config.get("idempotency_context") or {},
         "market_cursor": runtime_config.get("market_cursor") or {},
@@ -467,47 +465,51 @@ def _starting_cursor(source, trigger_type: str, runtime_config: dict[str, Any] |
     return dict(getattr(source, "cursor_json", None) or {})
 
 
-def _filter_reason(payload: dict[str, Any], runtime_config: dict[str, Any]) -> str | None:
+def _filter_reason(
+    payload: dict[str, Any],
+    runtime_config: dict[str, Any],
+    *,
+    query_variant: dict[str, Any] | None = None,
+) -> str | None:
     if not runtime_config:
         return None
 
     state = _normalize_optional_filter_value(runtime_config.get("state"))
-    county = _normalize_optional_filter_value(runtime_config.get("county"))
-    city = _normalize_optional_filter_value(runtime_config.get("city"))
+    runtime_city = _normalize_optional_filter_value(runtime_config.get("city"))
+    active_variant = dict(query_variant or {})
 
-    if state and _norm_text(payload.get("state")) != _norm_text(state):
+    query_city = _normalize_optional_filter_value(active_variant.get("city"))
+    query_county = _normalize_optional_filter_value(active_variant.get("county"))
+
+    payload_state = _normalize_optional_filter_value(payload.get("state"))
+    payload_city = _normalize_optional_filter_value(payload.get("city"))
+    payload_county = _normalize_optional_filter_value(payload.get("county"))
+
+    # State is always hard.
+    if state and _norm_text(payload_state) != _norm_text(state):
         return "state"
 
-    payload_county = payload.get("county")
-    if county and payload_county:
-        if _normalize_county_text(payload_county) != _normalize_county_text(county):
+    # If the active provider query is city-based, enforce that city strictly.
+    if query_city:
+        if _norm_text(payload_city) != _norm_text(query_city):
+            return "city"
+
+    # County is secondary/optional and should only matter if we ever explicitly
+    # re-enable county-only provider fallback in the future.
+    elif query_county and payload_county:
+        if _normalize_county_text(payload_county) != _normalize_county_text(query_county):
             return "county"
 
-    if city and _norm_text(payload.get("city")) != _norm_text(city):
-        return "city"
+    # If the active query is state-only, but the original request had a city,
+    # still require the payload city to match the original requested city.
+    elif runtime_city:
+        if _norm_text(payload_city) != _norm_text(runtime_city):
+            return "city"
 
     asking_price = _safe_float(payload.get("asking_price")) or 0.0
-    min_price = runtime_config.get("min_price")
     max_price = runtime_config.get("max_price")
-    if min_price is not None and asking_price < float(min_price):
-        return "min_price"
     if max_price is not None and asking_price > float(max_price):
         return "max_price"
-
-    bedrooms = _safe_float(payload.get("bedrooms")) or 0.0
-    bathrooms = _safe_float(payload.get("bathrooms")) or 0.0
-    min_bedrooms = runtime_config.get("min_bedrooms")
-    min_bathrooms = runtime_config.get("min_bathrooms")
-    if min_bedrooms is not None and bedrooms < float(min_bedrooms):
-        return "min_bedrooms"
-    if min_bathrooms is not None and bathrooms < float(min_bathrooms):
-        return "min_bathrooms"
-
-    max_units = runtime_config.get("max_units")
-    if max_units is not None:
-        units = _safe_float(payload.get("units"))
-        if units is not None and units > float(max_units):
-            return "max_units"
 
     requested_types = runtime_config.get("property_types") or []
     requested_types = {_normalize_property_type(x) for x in requested_types if str(x).strip()}
@@ -528,6 +530,96 @@ def _is_valid_payload(payload: dict[str, Any]) -> bool:
     )
 
 
+def _title_city_variants(value: Any) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+
+    variants: list[str] = []
+    seen: set[str] = set()
+
+    candidates = [raw, raw.lower(), raw.title()]
+
+    for item in candidates:
+        normalized = str(item or "").strip()
+        if normalized and normalized.lower() not in seen:
+            seen.add(normalized.lower())
+            variants.append(normalized)
+
+    return variants
+
+
+def _build_query_variants(
+    *,
+    source: Any,
+    runtime_config: dict[str, Any],
+    provider_fetch_limit: int,
+) -> list[dict[str, Any]]:
+    base_config = dict(source.config_json or {})
+    merged = {**base_config, **dict(runtime_config or {})}
+    merged["limit"] = int(provider_fetch_limit)
+
+    city = _normalize_optional_filter_value(merged.get("city"))
+    state = _normalize_optional_filter_value(merged.get("state")) or "MI"
+    max_price = _safe_float(merged.get("max_price"))
+    property_types = list(merged.get("property_types") or [])
+
+    city_variants = _title_city_variants(city)
+
+    variants: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add_variant(
+        *,
+        city_value: str | None,
+        include_property_type: bool,
+    ) -> None:
+        cfg = dict(merged)
+
+        cfg["state"] = state
+        cfg["city"] = city_value
+        cfg["county"] = None
+        cfg["max_price"] = max_price
+
+        if include_property_type:
+            cfg["property_types"] = list(property_types)
+        else:
+            cfg["property_types"] = []
+            cfg.pop("property_type", None)
+
+        variant_label = {
+            "state": cfg.get("state"),
+            "city": cfg.get("city"),
+            "county": None,
+            "max_price": cfg.get("max_price"),
+            "property_types": list(cfg.get("property_types") or []),
+        }
+
+        key = json.dumps(variant_label, sort_keys=True, default=str)
+        if key in seen:
+            return
+
+        cfg["_query_variant"] = dict(variant_label)
+        seen.add(key)
+        variants.append(cfg)
+
+    # 1) state + city + propertyType + price
+    for city_value in city_variants:
+        add_variant(city_value=city_value, include_property_type=True)
+
+    # 2) state + city + price
+    for city_value in city_variants:
+        add_variant(city_value=city_value, include_property_type=False)
+
+    # 3) state + propertyType + price
+    add_variant(city_value=None, include_property_type=True)
+
+    # 4) state + price
+    add_variant(city_value=None, include_property_type=False)
+
+    return variants
+
+
 def _load_rows_page(
     source,
     *,
@@ -545,26 +637,76 @@ def _load_rows_page(
         rows = [x for x in sample_rows if isinstance(x, dict)]
         return RentCastListingFetchResult(
             rows=rows,
-            next_cursor={"page": (_safe_int(cursor.get("page"), 1) or 1) + 1},
+            next_cursor={"page": (_safe_int(cursor.get("page")) or 1) + 1},
             raw_count=len(rows),
-            page_scanned=_safe_int(cursor.get("page"), 1) or 1,
-            shard_scanned=_safe_int(cursor.get("shard"), 1) or 1,
+            page_scanned=_safe_int(cursor.get("page")) or 1,
+            shard_scanned=_safe_int(cursor.get("shard")) or 1,
             sort_mode=str(cursor.get("sort_mode") or "newest"),
             exhausted=len(rows) < int(provider_fetch_limit),
             page_fingerprint=None,
             page_changed=True,
             provider_cursor=None,
+            query_variant=None,
         )
 
     adapter = PROVIDER_ADAPTERS.get(source.provider)
     if adapter is None:
         raise ValueError(f"No adapter registered for provider={source.provider}")
 
-    return adapter.load_rows_page(
-        credentials=dict(getattr(source, "credentials_json", None) or {}),
-        runtime_config=merged_config,
-        cursor=cursor,
+    if str(getattr(source, "provider", "") or "").strip().lower() != "rentcast":
+        return adapter.load_rows_page(
+            credentials=dict(getattr(source, "credentials_json", None) or {}),
+            runtime_config=merged_config,
+            cursor=cursor,
+        )
+
+    query_variants = _build_query_variants(
+        source=source,
+        runtime_config=runtime_config,
+        provider_fetch_limit=provider_fetch_limit,
     )
+
+    last_result: RentCastListingFetchResult | None = None
+
+    for idx, variant_config in enumerate(query_variants, start=1):
+        variant_label = dict(variant_config.get("_query_variant") or {})
+        variant_label["attempt"] = idx
+
+        _emit(
+            {
+                "event": "ingestion_query_variant_attempt",
+                "provider": str(getattr(source, "provider", "") or ""),
+                "source_id": int(getattr(source, "id")),
+                "variant": variant_label,
+                "cursor": dict(cursor or {}),
+            }
+        )
+
+        result = adapter.load_rows_page(
+            credentials=dict(getattr(source, "credentials_json", None) or {}),
+            runtime_config=variant_config,
+            cursor=cursor,
+        )
+        last_result = result
+
+        rows = list(result.rows or [])
+        raw_count = int(result.raw_count or 0)
+
+        if raw_count > 0 or rows:
+            _emit(
+                {
+                    "event": "ingestion_query_variant_selected",
+                    "provider": str(getattr(source, "provider", "") or ""),
+                    "source_id": int(getattr(source, "id")),
+                    "variant": variant_label,
+                    "raw_count": raw_count,
+                    "rows_returned": len(rows),
+                }
+            )
+            return result
+
+    assert last_result is not None
+    return last_result
 
 
 def _append_property_error(summary: dict[str, Any], *, property_id: int | None, external_record_id: str | None, reason: str) -> None:
@@ -671,20 +813,48 @@ def execute_source_sync(
         }
     )
 
+    execution_lock_ttl_seconds = int(
+        getattr(
+            settings,
+            "ingestion_execution_lock_ttl_seconds",
+            DEFAULT_EXECUTION_LOCK_TTL_SECONDS,
+        )
+    )
+
     execution_lock = acquire_ingestion_execution_lock(
         db,
         org_id=int(org_id),
         source_id=source_id,
         dataset_key=dataset_key,
         owner=lock_owner,
-        ttl_seconds=int(
-            getattr(
-                settings,
-                "ingestion_execution_lock_ttl_seconds",
-                DEFAULT_EXECUTION_LOCK_TTL_SECONDS,
-            )
-        ),
+        ttl_seconds=execution_lock_ttl_seconds,
     )
+
+    if not execution_lock.acquired:
+        execution_lock_key = build_ingestion_execution_lock_key(
+            org_id=int(org_id),
+            source_id=source_id,
+            dataset_key=dataset_key,
+        )
+
+        stale_clear_result = clear_stale_lock(
+            db,
+            org_id=int(org_id),
+            lock_key=execution_lock_key,
+        )
+
+        if stale_clear_result.acquired:
+            db.commit()
+
+            execution_lock = acquire_ingestion_execution_lock(
+                db,
+                org_id=int(org_id),
+                source_id=source_id,
+                dataset_key=dataset_key,
+                owner=lock_owner,
+                ttl_seconds=execution_lock_ttl_seconds,
+            )
+
     if not execution_lock.acquired:
         _emit(
             {
@@ -693,6 +863,9 @@ def execute_source_sync(
                 "source_id": source_id,
                 "dataset_key": dataset_key,
                 "dataset_identity": dataset_identity,
+                "lock_holder": getattr(execution_lock, "holder", None),
+                "lock_expires_at": getattr(execution_lock, "expires_at", None),
+                "lock_stale": getattr(execution_lock, "stale", None),
             },
             level=logging.WARNING,
         )
@@ -709,6 +882,10 @@ def execute_source_sync(
                 "dataset_identity": dataset_identity,
                 "market_slug": runtime_config.get("market_slug") or dataset_identity.get("market_slug"),
                 "sync_mode": runtime_config.get("sync_mode") or "refresh",
+                "runtime_config": dict(runtime_config or {}),
+                "lock_holder": getattr(execution_lock, "holder", None),
+                "lock_expires_at": getattr(execution_lock, "expires_at", None),
+                "lock_stale": getattr(execution_lock, "stale", None),
             },
         )
 
@@ -777,6 +954,7 @@ def execute_source_sync(
         "filtered_out": 0,
         "unchanged_pages_skipped": 0,
         "filter_reason_counts": {},
+        "filter_reason_examples": {},
         "normal_path": True,
         "pages_scanned": 0,
         "provider_pages_scanned": 0,
@@ -857,6 +1035,7 @@ def execute_source_sync(
             exhausted = bool(fetch_result.exhausted or not rows)
             page_changed = bool(fetch_result.page_changed)
             next_cursor = dict(fetch_result.next_cursor or {})
+            selected_query_variant = dict(getattr(fetch_result, "query_variant", None) or {})
 
             if raw_count > 0:
                 last_seen_provider_record_at = _utcnow_naive()
@@ -893,6 +1072,9 @@ def execute_source_sync(
                 "filtered_out": 0,
                 "pipeline_failures": 0,
                 "skipped_unchanged_page": False,
+                "query_variant": selected_query_variant,
+                "runtime_city": runtime_config.get("city"),
+                "runtime_county": runtime_config.get("county"),
             }
 
             _emit(
@@ -908,6 +1090,7 @@ def execute_source_sync(
                     "page_changed": page_changed,
                     "market_exhausted": exhausted,
                     "dataset_key": dataset_key,
+                    "query_variant": selected_query_variant,
                 }
             )
 
@@ -939,6 +1122,11 @@ def execute_source_sync(
                 cursor = dict(next_cursor or {})
                 market_exhausted = exhausted
                 summary["market_exhausted"] = market_exhausted
+
+                if provider_pages_scanned >= 2:
+                    summary["stop_reason"] = "unchanged_page_repeat"
+                    break
+
                 continue
 
             for raw in rows:
@@ -956,13 +1144,29 @@ def execute_source_sync(
                     )
                     continue
 
-                reason = _filter_reason(payload, runtime_config)
+                reason = _filter_reason(
+                    payload,
+                    runtime_config,
+                    query_variant=selected_query_variant,
+                )
                 if reason:
                     summary["filtered_out"] += 1
                     page_stat["filtered_out"] += 1
                     summary["filter_reason_counts"][reason] = int(
                         summary["filter_reason_counts"].get(reason, 0)
                     ) + 1
+
+                    if len(summary["filter_reason_examples"].setdefault(reason, [])) < 10:
+                        summary["filter_reason_examples"][reason].append(
+                            {
+                                "external_record_id": external_record_id,
+                                "payload_city": payload.get("city"),
+                                "payload_county": payload.get("county"),
+                                "runtime_city": runtime_config.get("city"),
+                                "runtime_county": runtime_config.get("county"),
+                                "query_variant": selected_query_variant,
+                            }
+                        )
                     continue
 
                 summary["records_candidate_after_filtering"] += 1
@@ -1155,20 +1359,40 @@ def execute_source_sync(
                 status="idle",
             )
 
-        mark_ingestion_dataset_completed(
-            db,
-            org_id=int(org_id),
-            source_id=source_id,
-            dataset_key=dataset_key,
-            owner=lock_owner,
-            ttl_seconds=int(
-                getattr(
-                    settings,
-                    "ingestion_completion_lock_ttl_seconds",
-                    DEFAULT_COMPLETION_LOCK_TTL_SECONDS,
-                )
-            ),
+        should_mark_completed = bool(
+            summary.get("new_records_imported", 0) > 0
+            or summary.get("records_imported", 0) > 0
         )
+
+        if should_mark_completed:
+            mark_ingestion_dataset_completed(
+                db,
+                org_id=int(org_id),
+                source_id=source_id,
+                dataset_key=dataset_key,
+                owner=lock_owner,
+                ttl_seconds=int(
+                    getattr(
+                        settings,
+                        "ingestion_completion_lock_ttl_seconds",
+                        DEFAULT_COMPLETION_LOCK_TTL_SECONDS,
+                    )
+                ),
+            )
+        else:
+            _emit(
+                {
+                    "event": "ingestion_dataset_not_marked_completed",
+                    "org_id": int(org_id),
+                    "source_id": source_id,
+                    "dataset_key": dataset_key,
+                    "reason": "zero_import_run",
+                    "records_imported": int(summary.get("records_imported", 0) or 0),
+                    "new_records_imported": int(summary.get("new_records_imported", 0) or 0),
+                    "stop_reason": summary.get("stop_reason"),
+                    "market_exhausted": bool(summary.get("market_exhausted")),
+                }
+            )
 
         summary["timings_ms"]["run_total"] = round((time.perf_counter() - run_t0) * 1000, 2)
 
@@ -1191,6 +1415,12 @@ def execute_source_sync(
 
     except Exception as exc:
         logger.exception("execute_source_sync_failed")
+
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("execute_source_sync_rollback_failed")
+
         summary["timings_ms"]["run_total"] = round((time.perf_counter() - run_t0) * 1000, 2)
 
         if market_sync_state is not None:
@@ -1203,31 +1433,61 @@ def execute_source_sync(
                 )
             except Exception:
                 logger.exception("mark_market_sync_completed_failed")
+                try:
+                    db.rollback()
+                except Exception:
+                    logger.exception("rollback_after_mark_market_sync_completed_failed")
 
-        _set_run_summary(run, {**summary, "error": str(exc)})
-        _set_run_status(run, "failed")
-        finish_run(db, run, status="failed", summary_json={**summary, "error": str(exc)})
+        try:
+            _set_run_summary(run, {**summary, "error": str(exc)})
+            _set_run_status(run, "failed")
+            finish_run(db, run, status="failed", summary_json={**summary, "error": str(exc)})
+        except Exception:
+            logger.exception("finish_run_failed_after_ingestion_error")
+            try:
+                db.rollback()
+            except Exception:
+                logger.exception("rollback_after_finish_run_failed")
 
-        _emit(
-            {
-                "event": "ingestion_sync_failed",
-                "org_id": int(org_id),
-                "source_id": source_id,
-                "run_id": int(getattr(run, "id")),
-                "dataset_key": dataset_key,
-                "dataset_identity": dataset_identity,
-                "error": str(exc),
-                "summary": summary,
-            },
-            level=logging.ERROR,
-        )
+        try:
+            _emit(
+                {
+                    "event": "ingestion_sync_failed",
+                    "org_id": int(org_id),
+                    "source_id": source_id,
+                    "run_id": int(getattr(run, "id")) if getattr(run, "id", None) else None,
+                    "dataset_key": dataset_key,
+                    "dataset_identity": dataset_identity,
+                    "error": str(exc),
+                    "summary": summary,
+                },
+                level=logging.ERROR,
+            )
+        except Exception:
+            logger.exception("emit_ingestion_sync_failed_event_failed")
+
         raise
+
     finally:
-        release_ingestion_execution_lock(
-            db,
-            org_id=int(org_id),
-            source_id=source_id,
-            dataset_key=dataset_key,
-            owner=lock_owner,
-        )
-        
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("execute_source_sync_finally_rollback_failed")
+
+        try:
+            release_ingestion_execution_lock(
+                db,
+                org_id=int(org_id),
+                source_id=source_id,
+                dataset_key=dataset_key,
+                owner=lock_owner,
+            )
+        except Exception:
+            logger.exception(
+                "release_ingestion_execution_lock_failed",
+                extra={
+                    "org_id": int(org_id),
+                    "source_id": source_id,
+                    "dataset_key": dataset_key,
+                },
+            )

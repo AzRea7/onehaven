@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     # ---- Provider fetch hardening ----
     ingestion_provider_page_limit: int = 50
     ingestion_provider_max_pages_per_shard: int = 3
-    ingestion_execution_lock_ttl_seconds: int = 60 * 60 * 3
+    ingestion_execution_lock_ttl_seconds: int = 900
     ingestion_completion_lock_ttl_seconds: int = 60 * 60 * 24 * 14
     daily_sync_lock_ttl_seconds: int = 60 * 60 * 2
     dispatch_dedupe_ttl_seconds: int = 60 * 60 * 36
