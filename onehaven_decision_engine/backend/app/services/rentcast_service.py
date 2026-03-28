@@ -1,4 +1,3 @@
-
 # backend/app/services/rentcast_service.py
 from __future__ import annotations
 
@@ -117,12 +116,143 @@ class RentCastClient:
         state: str | None = None,
         zip_code: str | None = None,
         limit: int = 10,
+        status: str | None = "Active",
+        allow_status_fallback: bool = True,
+        allow_location_fallback: bool = True,
     ) -> RentCastSaleListingResult | None:
+        attempts: list[dict[str, Any]] = []
+
+        search_variants: list[dict[str, Any]] = [
+            {
+                "address": address,
+                "city": city,
+                "state": state,
+                "zip_code": zip_code,
+                "status": status,
+                "label": "strict_active" if status else "strict_any_status",
+            }
+        ]
+
+        normalized_status = str(status or "").strip().lower() or None
+
+        if allow_status_fallback and normalized_status == "active":
+            search_variants.append(
+                {
+                    "address": address,
+                    "city": city,
+                    "state": state,
+                    "zip_code": zip_code,
+                    "status": "Inactive",
+                    "label": "strict_inactive",
+                }
+            )
+
+        if allow_location_fallback:
+            search_variants.append(
+                {
+                    "address": address,
+                    "city": None,
+                    "state": None,
+                    "zip_code": None,
+                    "status": status,
+                    "label": "address_only_active" if status else "address_only_any_status",
+                }
+            )
+            if allow_status_fallback and normalized_status == "active":
+                search_variants.append(
+                    {
+                        "address": address,
+                        "city": None,
+                        "state": None,
+                        "zip_code": None,
+                        "status": "Inactive",
+                        "label": "address_only_inactive",
+                    }
+                )
+
+        seen_fingerprints: set[tuple[str, str, str, str, str]] = set()
+        deduped_variants: list[dict[str, Any]] = []
+        for variant in search_variants:
+            fp = (
+                str(variant.get("address") or "").strip().lower(),
+                str(variant.get("city") or "").strip().lower(),
+                str(variant.get("state") or "").strip().lower(),
+                str(variant.get("zip_code") or "").strip().lower(),
+                str(variant.get("status") or "").strip().lower(),
+            )
+            if fp in seen_fingerprints:
+                continue
+            seen_fingerprints.add(fp)
+            deduped_variants.append(variant)
+
+        for variant in deduped_variants:
+            rows = self._fetch_sale_listing_rows(
+                address=variant["address"],
+                city=variant.get("city"),
+                state=variant.get("state"),
+                zip_code=variant.get("zip_code"),
+                limit=limit,
+                status=variant.get("status"),
+            )
+            attempts.append(
+                {
+                    "label": variant["label"],
+                    "status": variant.get("status"),
+                    "city": variant.get("city"),
+                    "state": variant.get("state"),
+                    "zip_code": variant.get("zip_code"),
+                    "row_count": len(rows),
+                }
+            )
+            if not rows:
+                continue
+
+            best = self._pick_best_listing_match(
+                rows,
+                address=address,
+                city=city,
+                state=state,
+                zip_code=zip_code,
+            )
+            if not best:
+                continue
+
+            raw_json = dict(best)
+            raw_json.setdefault("_lookup_attempts", attempts)
+
+            return RentCastSaleListingResult(
+                id=str(best.get("id") or best.get("listingId") or best.get("mlsNumber") or "").strip() or None,
+                formatted_address=str(best.get("formattedAddress") or "").strip() or None,
+                address_line1=str(best.get("addressLine1") or "").strip() or None,
+                city=str(best.get("city") or "").strip() or None,
+                state=str(best.get("state") or "").strip() or None,
+                zip_code=str(best.get("zipCode") or "").strip() or None,
+                county=str(best.get("county") or "").strip() or None,
+                latitude=self._safe_float(best.get("latitude")),
+                longitude=self._safe_float(best.get("longitude")),
+                status=str(best.get("status") or "").strip() or None,
+                price=self._safe_float(best.get("price")),
+                raw_json=raw_json,
+            )
+
+        return None
+
+    def _fetch_sale_listing_rows(
+        self,
+        *,
+        address: str,
+        city: str | None,
+        state: str | None,
+        zip_code: str | None,
+        limit: int,
+        status: str | None,
+    ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "address": address,
             "limit": max(1, min(int(limit or 10), 50)),
-            "status": "Active",
         }
+        if status:
+            params["status"] = status
         if city:
             params["city"] = city
         if state:
@@ -134,39 +264,11 @@ class RentCastClient:
         url = f"{self.SALE_LISTINGS_BASE}?{qs}"
         payload = self._request_json(url)
 
-        rows: list[dict[str, Any]] = []
         if isinstance(payload, list):
-            rows = [x for x in payload if isinstance(x, dict)]
-        elif isinstance(payload, dict):
-            rows = [x for x in payload.get("listings", []) if isinstance(x, dict)]
-
-        if not rows:
-            return None
-
-        best = self._pick_best_listing_match(
-            rows,
-            address=address,
-            city=city,
-            state=state,
-            zip_code=zip_code,
-        )
-        if not best:
-            return None
-
-        return RentCastSaleListingResult(
-            id=str(best.get("id") or best.get("listingId") or best.get("mlsNumber") or "").strip() or None,
-            formatted_address=str(best.get("formattedAddress") or "").strip() or None,
-            address_line1=str(best.get("addressLine1") or "").strip() or None,
-            city=str(best.get("city") or "").strip() or None,
-            state=str(best.get("state") or "").strip() or None,
-            zip_code=str(best.get("zipCode") or "").strip() or None,
-            county=str(best.get("county") or "").strip() or None,
-            latitude=self._safe_float(best.get("latitude")),
-            longitude=self._safe_float(best.get("longitude")),
-            status=str(best.get("status") or "").strip() or None,
-            price=self._safe_float(best.get("price")),
-            raw_json=best,
-        )
+            return [x for x in payload if isinstance(x, dict)]
+        if isinstance(payload, dict):
+            return [x for x in payload.get("listings", []) if isinstance(x, dict)]
+        return []
 
     @staticmethod
     def _safe_float(value: Any) -> float | None:

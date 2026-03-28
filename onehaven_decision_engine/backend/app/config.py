@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # ---- Geocoding / location automation ----
     geocoding_enabled: bool = True
     geocode_default_country_code: str = "US"
-    geocode_provider_order: str = "google,nominatim"
+    geocode_provider_order: str = "google,nominatim,rentcast"
     geocode_cache_enabled: bool = True
     geocode_cache_ttl_hours: int = 24 * 30
     geocode_stale_after_hours: int = 24 * 14
@@ -213,7 +213,15 @@ class Settings(BaseSettings):
         for p in parts:
             if p not in deduped:
                 deduped.append(p)
-        return deduped or ["nominatim"]
+
+        if "google" not in deduped:
+            deduped.insert(0, "google")
+        if "nominatim" not in deduped:
+            deduped.append("nominatim")
+        if "rentcast" not in deduped:
+            deduped.append("rentcast")
+
+        return deduped or ["google", "nominatim", "rentcast"]
 
     def model_post_init(self, __context) -> None:
         if self.rent_calibration_apha is not None:
@@ -242,7 +250,8 @@ class Settings(BaseSettings):
                 has_google = bool((self.google_geocode_api_key or "").strip())
                 has_nominatim = bool((self.nominatim_base_url or "").strip())
                 has_opencage = bool((self.opencage_api_key or "").strip())
-                if not (has_google or has_nominatim or has_opencage):
+                has_rentcast = bool((self.rentcast_api_key or "").strip())
+                if not (has_google or has_nominatim or has_opencage or has_rentcast):
                     raise ValueError("SECURITY: at least one geocoding provider must be configured in prod")
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Property
+from ..services.address_normalization import normalize_full_address
 from ..services.geocoding_service import GeocodingService
 from ..services.risk_scoring import compute_property_risk
 
@@ -334,6 +336,7 @@ def _address_candidates(prop: Property) -> list[dict[str, Any]]:
     postal_code = _nonblank(getattr(prop, "zip", None))
     county = _normalize_county(getattr(prop, "county", None))
     normalized = _clean_address_text(getattr(prop, "normalized_address", None))
+    canonical_full = normalize_full_address(raw_address, city, state, postal_code).full_address if raw_address else ""
 
     if _looks_like_test_address(raw_address):
         return []
@@ -389,7 +392,9 @@ def _address_candidates(prop: Property) -> list[dict[str, Any]]:
             }
         )
 
-    if normalized:
+    if canonical_full:
+        add_candidate(label="canonical_full_address", address_value=canonical_full, city_value=None, state_value=None, postal_code_value=None)
+    if normalized and normalized != canonical_full and normalized.count((city or '').strip()) <= 1:
         add_candidate(label="normalized_address", address_value=normalized, city_value=None, state_value=None, postal_code_value=None)
 
     if raw_address:
@@ -458,8 +463,209 @@ def _address_candidates(prop: Property) -> list[dict[str, Any]]:
     return candidates
 
 
+
+
+def _property_metadata_attr_name(prop: Property) -> str:
+    if hasattr(prop, "acquisition_metadata_json"):
+        return "acquisition_metadata_json"
+    if hasattr(prop, "raw_json"):
+        return "raw_json"
+    return "acquisition_metadata_json"
+
+
+def _property_metadata_dict(prop: Property) -> dict[str, Any]:
+    raw = getattr(prop, _property_metadata_attr_name(prop), None)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _set_property_metadata_dict(prop: Property, value: dict[str, Any]) -> None:
+    setattr(prop, _property_metadata_attr_name(prop), dict(value or {}))
+
+
+def _raw_json_dict(prop: Property) -> dict[str, Any]:
+    return _property_metadata_dict(prop)
+
+
+def _extract_payload_geo_candidate(prop: Property) -> dict[str, Any] | None:
+    raw = _raw_json_dict(prop)
+    if not raw:
+        return None
+
+    payloads: list[dict[str, Any]] = [raw]
+    nested = raw.get("raw")
+    if isinstance(nested, dict):
+        payloads.append(nested)
+
+    for payload in payloads:
+        lat = _to_float(
+            payload.get("latitude")
+            or payload.get("lat")
+            or payload.get("locationLat")
+            or payload.get("geoLat")
+        )
+        lng = _to_float(
+            payload.get("longitude")
+            or payload.get("lng")
+            or payload.get("lon")
+            or payload.get("locationLng")
+            or payload.get("geoLng")
+        )
+        if lat is None or lng is None:
+            continue
+
+        county = _normalize_county(
+            payload.get("county")
+            or payload.get("countyName")
+            or payload.get("county_name")
+        )
+        state = _normalize_state(payload.get("state")) or _normalize_state(getattr(prop, "state", None))
+        city = _nonblank(payload.get("city")) or _nonblank(getattr(prop, "city", None))
+        postal_code = _nonblank(
+            payload.get("zipCode")
+            or payload.get("postalCode")
+            or payload.get("zip")
+            or getattr(prop, "zip", None)
+        )
+        formatted_address = _clean_address_text(
+            payload.get("formattedAddress")
+            or payload.get("address")
+            or getattr(prop, "address", None)
+        )
+        normalized_address = normalize_full_address(
+            formatted_address or getattr(prop, "address", None),
+            city,
+            state,
+            postal_code,
+        ).full_address
+
+        return {
+            "normalized_address": normalized_address,
+            "source": "source_payload",
+            "confidence": 0.72,
+            "lat": lat,
+            "lng": lng,
+            "county": county,
+            "state": state,
+            "city": city,
+            "postal_code": postal_code,
+            "provider_status": "SOURCE_PAYLOAD_COORDINATES",
+            "cache_hit": False,
+            "is_success": True,
+            "raw_json": payload,
+        }
+
+    return None
+
+
+def _apply_payload_geo_candidate(prop: Property, candidate: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:
+    changed = False
+
+    normalized_address = normalize_full_address(candidate.get("normalized_address") or getattr(prop, 'address', None), candidate.get('city') or getattr(prop, 'city', None), candidate.get('state') or getattr(prop, 'state', None), candidate.get('postal_code') or getattr(prop, 'zip', None)).full_address or _clean_address_text(candidate.get("normalized_address"))
+    if normalized_address and normalized_address != before.get("normalized_address"):
+        prop.normalized_address = normalized_address
+        changed = True
+
+    lat = _to_float(candidate.get("lat"))
+    lng = _to_float(candidate.get("lng"))
+    if lat is not None and lng is not None:
+        if lat != before.get("lat"):
+            prop.lat = lat
+            changed = True
+        if lng != before.get("lng"):
+            prop.lng = lng
+            changed = True
+
+    county = _normalize_county(candidate.get("county"))
+    if county and county != before.get("county"):
+        prop.county = county
+        changed = True
+
+    state = _normalize_state(candidate.get("state"))
+    if state and _nonblank(getattr(prop, "state", None)) != state:
+        prop.state = state
+        changed = True
+
+    city = _nonblank(candidate.get("city"))
+    if city and _nonblank(getattr(prop, "city", None)) != city:
+        prop.city = city
+        changed = True
+
+    postal_code = _nonblank(candidate.get("postal_code"))
+    if postal_code and _nonblank(getattr(prop, "zip", None)) != postal_code:
+        prop.zip = postal_code
+        changed = True
+
+    confidence = _to_float(candidate.get("confidence"))
+    if confidence is not None and confidence != before.get("geocode_confidence"):
+        prop.geocode_confidence = confidence
+        changed = True
+
+    source = _nonblank(candidate.get("source"))
+    if source and source != before.get("geocode_source"):
+        prop.geocode_source = source
+        changed = True
+
+    if changed:
+        prop.geocode_last_refreshed = _utcnow()
+
+    after = _geo_snapshot(prop)
+    return {
+        "normalized_address": normalized_address,
+        "source": source,
+        "confidence": confidence,
+        "lat": lat,
+        "lng": lng,
+        "county": county,
+        "state": state,
+        "provider_status": _nonblank(candidate.get("provider_status")),
+        "cache_hit": False,
+        "is_success": True,
+        "changed": changed,
+        "geo_complete": _is_geo_complete(after),
+    }
+
+
+def _get_geo_retry_meta(prop: Property) -> dict[str, Any]:
+    raw = _property_metadata_dict(prop)
+    meta = raw.get("_geo_retry_meta")
+    return dict(meta) if isinstance(meta, dict) else {}
+
+
+def _get_retry_limit_for_type(retry_type: str) -> int:
+    env_key = f"GEO_{str(retry_type).upper()}_RETRY_LIMIT"
+    raw_value = os.getenv(env_key, "").strip()
+    if raw_value:
+        try:
+            return max(0, int(raw_value))
+        except Exception:
+            return 1
+    return 1
+
+
+def _remaining_retry_budget(prop: Property, retry_type: str) -> int:
+    meta = _get_geo_retry_meta(prop)
+    used = 0
+    try:
+        used = int((meta.get("used") or {}).get(retry_type) or 0)
+    except Exception:
+        used = 0
+    return max(0, _get_retry_limit_for_type(retry_type) - used)
+
+
+def _consume_retry_budget(prop: Property, retry_type: str) -> dict[str, Any]:
+    raw = _property_metadata_dict(prop)
+    meta = _get_geo_retry_meta(prop)
+    used = dict(meta.get("used") or {})
+    used[retry_type] = int(used.get(retry_type) or 0) + 1
+    meta["used"] = used
+    meta["last_retry_type"] = retry_type
+    meta["last_retry_at"] = _utcnow().isoformat()
+    raw["_geo_retry_meta"] = meta
+    _set_property_metadata_dict(prop, raw)
+    return meta
+
 def _apply_geocode_result(prop: Property, result: Any, before: dict[str, Any]) -> dict[str, Any]:
-    normalized_address = _nonblank(getattr(result, "normalized_address", None))
+    normalized_address = normalize_full_address(getattr(result, 'formatted_address', None) or getattr(prop, 'address', None), getattr(result, 'city', None) or getattr(prop, 'city', None), getattr(result, 'state', None) or getattr(prop, 'state', None), getattr(result, 'postal_code', None) or getattr(prop, 'zip', None)).full_address or _nonblank(getattr(result, 'normalized_address', None))
     source = _nonblank(getattr(result, "source", None))
     confidence = _to_float(getattr(result, "confidence", None))
     lat = _to_float(getattr(result, "lat", None))
@@ -573,6 +779,29 @@ async def enrich_property_geo_async(db: Session, *, org_id: int, property_id: in
     geocode_provider_status: str | None = None
 
     needs_geocode = bool(force) or not _is_geo_complete(before)
+
+    if needs_geocode:
+        payload_candidate = _extract_payload_geo_candidate(prop)
+        if payload_candidate is not None:
+            applied_payload = _apply_payload_geo_candidate(prop, payload_candidate, before)
+            geocode_provider_status = applied_payload.get("provider_status")
+            geocoded = bool(applied_payload.get("lat") is not None and applied_payload.get("lng") is not None)
+            reverse_geocoded = bool(applied_payload.get("county") and not before.get("county"))
+            attempt_log.append(
+                {
+                    "attempt": 0,
+                    "label": "source_payload_coordinates",
+                    "ok": bool(applied_payload.get("geo_complete")),
+                    "provider_status": applied_payload.get("provider_status"),
+                    "changed": bool(applied_payload.get("changed")),
+                    "lat": applied_payload.get("lat"),
+                    "lng": applied_payload.get("lng"),
+                    "normalized_address": applied_payload.get("normalized_address"),
+                }
+            )
+            before = _geo_snapshot(prop)
+            if _is_geo_complete(before):
+                needs_geocode = False
 
     if not settings.geocoding_enabled:
         warnings.append("geocoding_disabled")

@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import hashlib
@@ -89,13 +88,141 @@ class RentCastListingSource:
         state: str | None = None,
         zip_code: str | None = None,
         limit: int = 10,
+        status: str | None = "Active",
+        allow_status_fallback: bool = True,
+        allow_location_fallback: bool = True,
     ) -> dict[str, Any] | None:
         api_key = self._get_api_key(credentials or {})
+        attempts: list[dict[str, Any]] = []
+
+        search_variants: list[dict[str, Any]] = [
+            {
+                "address": str(address or "").strip(),
+                "city": str(city).strip() if city else None,
+                "state": str(state).strip() if state else None,
+                "zip_code": str(zip_code).strip() if zip_code else None,
+                "status": status,
+                "label": "strict_active" if status else "strict_any_status",
+            }
+        ]
+
+        if allow_status_fallback and status:
+            search_variants.append(
+                {
+                    "address": str(address or "").strip(),
+                    "city": str(city).strip() if city else None,
+                    "state": str(state).strip() if state else None,
+                    "zip_code": str(zip_code).strip() if zip_code else None,
+                    "status": None,
+                    "label": "strict_without_status",
+                }
+            )
+
+        if allow_location_fallback:
+            search_variants.append(
+                {
+                    "address": str(address or "").strip(),
+                    "city": None,
+                    "state": None,
+                    "zip_code": None,
+                    "status": status,
+                    "label": "address_only_active" if status else "address_only_any_status",
+                }
+            )
+            if allow_status_fallback and status:
+                search_variants.append(
+                    {
+                        "address": str(address or "").strip(),
+                        "city": None,
+                        "state": None,
+                        "zip_code": None,
+                        "status": None,
+                        "label": "address_only_without_status",
+                    }
+                )
+
+        seen_fingerprints: set[tuple[str, str, str, str, str]] = set()
+        deduped_variants: list[dict[str, Any]] = []
+        for variant in search_variants:
+            fp = (
+                str(variant.get("address") or "").strip().lower(),
+                str(variant.get("city") or "").strip().lower(),
+                str(variant.get("state") or "").strip().lower(),
+                str(variant.get("zip_code") or "").strip().lower(),
+                str(variant.get("status") or "").strip().lower(),
+            )
+            if fp in seen_fingerprints:
+                continue
+            seen_fingerprints.add(fp)
+            deduped_variants.append(variant)
+
+        for variant in deduped_variants:
+            rows = self._fetch_exact_address_rows(
+                api_key=api_key,
+                address=variant["address"],
+                city=variant.get("city"),
+                state=variant.get("state"),
+                zip_code=variant.get("zip_code"),
+                limit=limit,
+                status=variant.get("status"),
+            )
+            attempts.append(
+                {
+                    "label": variant["label"],
+                    "status": variant.get("status"),
+                    "city": variant.get("city"),
+                    "state": variant.get("state"),
+                    "zip_code": variant.get("zip_code"),
+                    "row_count": len(rows),
+                }
+            )
+            if not rows:
+                continue
+
+            ranked = sorted(
+                rows,
+                key=lambda row: self._score_exact_address_match(
+                    row=row,
+                    address=address,
+                    city=city,
+                    state=state,
+                    zip_code=zip_code,
+                ),
+                reverse=True,
+            )
+            best = ranked[0]
+            if self._score_exact_address_match(
+                row=best,
+                address=address,
+                city=city,
+                state=state,
+                zip_code=zip_code,
+            ) <= 0:
+                continue
+
+            enriched = dict(best)
+            enriched.setdefault("_lookup_attempts", attempts)
+            return enriched
+
+        return None
+
+    def _fetch_exact_address_rows(
+        self,
+        *,
+        api_key: str,
+        address: str,
+        city: str | None,
+        state: str | None,
+        zip_code: str | None,
+        limit: int,
+        status: str | None,
+    ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "address": str(address or "").strip(),
             "limit": max(1, min(int(limit or 10), 50)),
-            "status": "Active",
         }
+        if status:
+            params["status"] = status
         if city:
             params["city"] = str(city).strip()
         if state:
@@ -112,39 +239,11 @@ class RentCastListingSource:
             response.raise_for_status()
             payload = response.json()
 
-        rows: list[dict[str, Any]]
         if isinstance(payload, list):
-            rows = [x for x in payload if isinstance(x, dict)]
-        elif isinstance(payload, dict):
-            rows = [x for x in payload.get("listings", []) if isinstance(x, dict)]
-        else:
-            rows = []
-
-        if not rows:
-            return None
-
-        target = self._normalize_match_string(address)
-        ranked = sorted(
-            rows,
-            key=lambda row: self._score_exact_address_match(
-                row=row,
-                address=address,
-                city=city,
-                state=state,
-                zip_code=zip_code,
-            ),
-            reverse=True,
-        )
-        best = ranked[0]
-        if self._score_exact_address_match(
-            row=best,
-            address=address,
-            city=city,
-            state=state,
-            zip_code=zip_code,
-        ) <= 0:
-            return None
-        return best
+            return [x for x in payload if isinstance(x, dict)]
+        if isinstance(payload, dict):
+            return [x for x in payload.get("listings", []) if isinstance(x, dict)]
+        return []
 
     def _normalize_match_string(self, value: Any) -> str:
         return " ".join(str(value or "").strip().lower().replace(",", " ").split())

@@ -24,6 +24,7 @@ from ..services.ingestion_dedupe_service import (
     find_existing_property,
     upsert_record_link,
 )
+from ..services.address_normalization import normalize_full_address
 from ..services.ingestion_enrichment_service import (
     apply_pipeline_summary,
     canonical_listing_payload,
@@ -338,6 +339,7 @@ def _persist_property_acquisition_metadata(
                     "last_payload_address": payload.get("address"),
                     "last_payload_city": payload.get("city"),
                     "inventory_count": payload.get("inventory_count"),
+                    "raw": payload.get("raw") or payload,
                 },
                 default=str,
             ),
@@ -367,7 +369,28 @@ def _mark_property_enrichment_queued(db: Session, *, org_id: int, property_id: i
    return
 
 
+def _canonicalize_property_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = normalize_full_address(
+        payload.get("address"),
+        payload.get("city"),
+        payload.get("state"),
+        payload.get("zip"),
+    )
+    out = dict(payload)
+    if normalized.address_line1:
+        out["address"] = normalized.address_line1
+    if normalized.city:
+        out["city"] = normalized.city
+    if normalized.state:
+        out["state"] = normalized.state
+    if normalized.postal_code:
+        out["zip"] = normalized.postal_code
+    out["normalized_address"] = normalized.full_address
+    return out
+
+
 def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
+    payload = _canonicalize_property_payload(payload)
     existing = find_existing_property(
         db,
         org_id=org_id,
@@ -392,16 +415,34 @@ def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
             year_built=payload.get("year_built"),
             property_type=payload.get("property_type") or "single_family",
         )
+        if hasattr(existing, "normalized_address"):
+            existing.normalized_address = normalize_full_address(
+                payload.get("address"),
+                payload.get("city"),
+                payload.get("state"),
+                payload.get("zip"),
+            ).full_address
         db.add(existing)
         db.flush()
         created = True
     else:
+        existing.address = payload["address"]
+        existing.city = payload["city"]
+        existing.state = payload["state"]
+        existing.zip = payload["zip"]
         existing.county = payload.get("county") or getattr(existing, "county", None)
         existing.bedrooms = int(payload["bedrooms"] or existing.bedrooms or 0)
         existing.bathrooms = float(payload["bathrooms"] or existing.bathrooms or 1)
         existing.square_feet = payload.get("square_feet") or existing.square_feet
         existing.year_built = payload.get("year_built") or existing.year_built
         existing.property_type = payload.get("property_type") or existing.property_type
+        if hasattr(existing, "normalized_address"):
+            existing.normalized_address = payload.get("normalized_address") or normalize_full_address(
+                payload.get("address"),
+                payload.get("city"),
+                payload.get("state"),
+                payload.get("zip"),
+            ).full_address
         db.add(existing)
         db.flush()
 
@@ -409,6 +450,7 @@ def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
 
 
 def _upsert_deal(db: Session, *, org_id: int, property_id: int, payload: dict[str, Any]):
+    payload = _canonicalize_property_payload(payload)
     existing = db.scalar(
         select(Deal)
         .where(
@@ -430,6 +472,13 @@ def _upsert_deal(db: Session, *, org_id: int, property_id: int, payload: dict[st
             source=payload.get("source", "ingestion"),
             strategy="section8",
         )
+        if hasattr(existing, "normalized_address"):
+            existing.normalized_address = normalize_full_address(
+                payload.get("address"),
+                payload.get("city"),
+                payload.get("state"),
+                payload.get("zip"),
+            ).full_address
         db.add(existing)
         db.flush()
         created = True
@@ -440,6 +489,13 @@ def _upsert_deal(db: Session, *, org_id: int, property_id: int, payload: dict[st
         existing.rehab_estimate = float(payload.get("rehab_estimate") or existing.rehab_estimate or 0)
         existing.source = payload.get("source", existing.source)
         existing.snapshot_id = None
+        if hasattr(existing, "normalized_address"):
+            existing.normalized_address = normalize_full_address(
+                payload.get("address"),
+                payload.get("city"),
+                payload.get("state"),
+                payload.get("zip"),
+            ).full_address
         db.add(existing)
         db.flush()
 
@@ -447,6 +503,7 @@ def _upsert_deal(db: Session, *, org_id: int, property_id: int, payload: dict[st
 
 
 def _upsert_rent_assumption(db: Session, *, org_id: int, property_id: int, payload: dict[str, Any]):
+    payload = _canonicalize_property_payload(payload)
     existing = db.scalar(
         select(RentAssumption)
         .where(
@@ -466,6 +523,13 @@ def _upsert_rent_assumption(db: Session, *, org_id: int, property_id: int, paylo
             approved_rent_ceiling=payload.get("approved_rent_ceiling"),
             inventory_count=payload.get("inventory_count"),
         )
+        if hasattr(existing, "normalized_address"):
+            existing.normalized_address = normalize_full_address(
+                payload.get("address"),
+                payload.get("city"),
+                payload.get("state"),
+                payload.get("zip"),
+            ).full_address
         db.add(existing)
         db.flush()
         created = True

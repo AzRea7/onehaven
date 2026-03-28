@@ -1,13 +1,12 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from .address_normalization import normalize_full_address
+from .address_normalization import normalize_full_address, normalize_address_line1
 from .geocode_cache_service import (
     GeocodeCachePayload,
     GeocodeCacheService,
@@ -122,7 +121,7 @@ class GeocodingService:
         if not normalized.full_address:
             return None
 
-        raw_input_address = ", ".join([p for p in [address, city, state, postal_code] if p])
+        raw_input_address = normalized.full_address
 
         allow_fallback = getattr(settings, "geocode_allow_fallback_providers", True)
         confidence_threshold = float(getattr(settings, "geocode_min_confidence", 0.0))
@@ -165,10 +164,10 @@ class GeocodingService:
                 mapped = self._try_rentcast_lookup(
                     normalized_address=normalized.full_address,
                     raw_input_address=raw_input_address,
-                    address=address,
-                    city=city,
-                    state=state,
-                    postal_code=postal_code,
+                    address=normalized.address_line1,
+                    city=normalized.city or city,
+                    state=normalized.state or state,
+                    postal_code=normalized.postal_code or postal_code,
                 )
             else:
                 provider = self._get_provider(provider_name)
@@ -194,6 +193,9 @@ class GeocodingService:
             if mapped.is_success:
                 self.cache_service.upsert(mapped.to_cache_payload())
 
+                if mapped.source == "rentcast":
+                    return mapped
+
                 if (mapped.confidence or 0.0) >= confidence_threshold:
                     return mapped
 
@@ -210,7 +212,15 @@ class GeocodingService:
             n = (name or "").strip().lower()
             if n and n not in ordered:
                 ordered.append(n)
-        return ordered or ["nominatim", "rentcast"]
+
+        if "google" not in ordered:
+            ordered.insert(0, "google")
+        if "nominatim" not in ordered:
+            ordered.append("nominatim")
+        if self.rentcast_client is not None and "rentcast" not in ordered:
+            ordered.append("rentcast")
+
+        return ordered or ["google", "nominatim", "rentcast"]
 
     def _get_provider(self, provider_name: str) -> GeocodeProvider | None:
         if provider_name == "google":
@@ -235,12 +245,16 @@ class GeocodingService:
             return None
 
         try:
+            clean_address = normalize_address_line1(address or normalized_address)
             listing = self.rentcast_client.sale_listing_lookup(
-                address=str(address or "").strip(),
+                address=str(clean_address or normalized_address).strip(),
                 city=city,
                 state=state,
                 zip_code=postal_code,
                 limit=10,
+                status="Active",
+                allow_status_fallback=True,
+                allow_location_fallback=True,
             )
         except Exception:
             if getattr(settings, "geocode_fail_open", True):

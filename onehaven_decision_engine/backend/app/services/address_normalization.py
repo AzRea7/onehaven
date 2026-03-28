@@ -231,6 +231,49 @@ def _extract_unit(tokens: list[str]) -> tuple[list[str], str]:
     return out, unit
 
 
+
+def _strip_locality_suffix(
+    address: str,
+    city: str | None,
+    state: str | None,
+    postal_code: str | None,
+) -> str:
+    """
+    Remove duplicated locality fragments when callers pass a full address string
+    plus separate city/state/zip components, e.g.
+      "8833 Manor St, Detroit, MI 48204" + ("Detroit", "MI", "48204")
+    should normalize line1 to just "8833 Manor St".
+    """
+    value = _clean_whitespace(address)
+    if not value:
+        return ""
+
+    norm_city = normalize_city(city)
+    norm_state = normalize_state(state)
+    norm_zip = normalize_zip(postal_code)
+
+    patterns: list[str] = []
+    if norm_city and norm_state and norm_zip:
+        patterns.extend([
+            rf",?\s*{re.escape(norm_city)}\s*,?\s*{re.escape(norm_state)}\s+{re.escape(norm_zip)}\s*$",
+            rf"\s+{re.escape(norm_city)}\s+{re.escape(norm_state)}\s+{re.escape(norm_zip)}\s*$",
+        ])
+    if norm_city and norm_state:
+        patterns.extend([
+            rf",?\s*{re.escape(norm_city)}\s*,?\s*{re.escape(norm_state)}\s*$",
+            rf"\s+{re.escape(norm_city)}\s+{re.escape(norm_state)}\s*$",
+        ])
+    if norm_zip:
+        patterns.append(rf",?\s*{re.escape(norm_zip)}\s*$")
+
+    out = value
+    for pattern in patterns:
+        out2 = re.sub(pattern, "", out, flags=re.IGNORECASE).strip(" ,")
+        if out2 and out2 != out:
+            out = out2
+    return out
+
+
 def normalize_address_line1(address: str | None) -> str:
     address = _clean_whitespace(address)
     if not address:
@@ -283,7 +326,8 @@ def normalize_full_address(
     state: str | None,
     postal_code: str | None,
 ) -> NormalizedAddress:
-    line1 = normalize_address_line1(address)
+    cleaned_address = _strip_locality_suffix(address or '', city, state, postal_code)
+    line1 = normalize_address_line1(cleaned_address or address)
     norm_city = normalize_city(city)
     norm_state = normalize_state(state)
     norm_zip = normalize_zip(postal_code)

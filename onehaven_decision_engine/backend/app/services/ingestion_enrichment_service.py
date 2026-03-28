@@ -15,6 +15,7 @@ from ..config import settings
 from ..models import Property, RentAssumption
 from .rent_refresh_queue_service import publish_without_rent, should_run_inline_rent_refresh
 from .rentcast_service import RentCastClient, persist_rentcast_comps_and_get_median
+from .address_normalization import normalize_full_address
 
 log = logging.getLogger("onehaven.ingestion.enrichment")
 
@@ -73,6 +74,23 @@ def canonical_listing_payload(row: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         bathrooms = 1.0
 
+    raw_address = (
+        row.get("addressLine1")
+        or row.get("address")
+        or row.get("formattedAddress")
+        or ""
+    )
+    raw_city = str(row.get("city") or "").strip()
+    raw_state = str(row.get("state") or "MI").strip() or "MI"
+    raw_zip = str(row.get("zip") or row.get("zipCode") or row.get("postalCode") or "").strip()
+
+    normalized = normalize_full_address(
+        str(raw_address or "").strip(),
+        raw_city,
+        raw_state,
+        raw_zip,
+    )
+
     return {
         "external_record_id": str(
             row.get("external_record_id")
@@ -83,11 +101,11 @@ def canonical_listing_payload(row: dict[str, Any]) -> dict[str, Any]:
             or ""
         ).strip(),
         "external_url": row.get("external_url") or row.get("listingUrl") or row.get("url"),
-        "address": str(row.get("address") or row.get("formattedAddress") or "").strip(),
-        "city": str(row.get("city") or "").strip(),
+        "address": normalized.address_line1 or str(raw_address or "").strip(),
+        "city": normalized.city or raw_city,
         "county": str(row.get("county") or "").strip() or None,
-        "state": str(row.get("state") or "MI").strip() or "MI",
-        "zip": str(row.get("zip") or row.get("zipCode") or row.get("postalCode") or "").strip(),
+        "state": normalized.state or raw_state,
+        "zip": normalized.postal_code or raw_zip,
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,
         "square_feet": row.get("square_feet") or row.get("squareFootage") or row.get("livingArea"),
@@ -195,6 +213,52 @@ def _safe_rollback(db: Session) -> None:
     except Exception:
         pass
 
+
+
+
+def _get_retry_limit_from_env(retry_type: str) -> int:
+    env_key = f"GEO_{str(retry_type).upper()}_RETRY_LIMIT"
+    raw_value = os.getenv(env_key, "").strip()
+    if raw_value:
+        try:
+            return max(0, int(raw_value))
+        except Exception:
+            return 1
+    return 1
+
+
+
+def _property_metadata_dict(prop: Property) -> dict[str, Any]:
+    for attr in ("acquisition_metadata_json", "raw_json"):
+        raw = getattr(prop, attr, None)
+        if isinstance(raw, dict):
+            return dict(raw)
+    return {}
+
+
+def _get_property_retry_budget(db: Session, *, property_id: int, retry_type: str) -> int:
+    prop = db.scalar(select(Property).where(Property.id == int(property_id)))
+    if prop is None:
+        return _get_retry_limit_from_env(retry_type)
+
+    raw = _property_metadata_dict(prop)
+    if not isinstance(raw, dict):
+        return _get_retry_limit_from_env(retry_type)
+
+    meta = raw.get("_geo_retry_meta")
+    if not isinstance(meta, dict):
+        return _get_retry_limit_from_env(retry_type)
+
+    used = meta.get("used")
+    if not isinstance(used, dict):
+        return _get_retry_limit_from_env(retry_type)
+
+    try:
+        used_count = int(used.get(retry_type) or 0)
+    except Exception:
+        used_count = 0
+
+    return max(0, _get_retry_limit_from_env(retry_type) - used_count)
 
 def _status_from_bool(ok: bool) -> str:
     return "complete" if ok else "missing"
@@ -559,7 +623,12 @@ def execute_post_ingestion_pipeline(
         )
         geo_res = geo_res if isinstance(geo_res, dict) else {"ok": bool(geo_res)}
         result["geo_ok"] = _is_geo_payload_complete(geo_res)
-        if not result["geo_ok"] and geo_res.get("geocode_attempted"):
+        geo_force_retry_remaining = _get_property_retry_budget(
+            db,
+            property_id=int(property_id),
+            retry_type="force_retry",
+        )
+        if not result["geo_ok"] and geo_res.get("geocode_attempted") and geo_force_retry_remaining > 0:
             forced_geo_res = _timed_step(
                 result,
                 step_key="geo_force_retry",
@@ -581,6 +650,9 @@ def execute_post_ingestion_pipeline(
             else:
                 geo_res["forced_retry"] = True
                 geo_res["forced_retry_result"] = forced_geo_res
+        elif not result["geo_ok"] and geo_res.get("geocode_attempted"):
+            geo_res["forced_retry_skipped"] = True
+            geo_res["forced_retry_skip_reason"] = "retry_limit_reached"
         geo_res["ok"] = result["geo_ok"]
         _record_step("geo", result["geo_ok"], geo_res, skipped=bool(geo_res.get("skipped")))
     except Exception as e:
@@ -802,3 +874,4 @@ def apply_pipeline_summary(summary: dict[str, Any], pipeline_res: dict[str, Any]
         except Exception:
             continue
     summary["post_import_timing_ms_total"] = timing_agg
+    
