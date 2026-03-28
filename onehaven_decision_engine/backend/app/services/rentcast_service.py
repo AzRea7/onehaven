@@ -1,3 +1,4 @@
+
 # backend/app/services/rentcast_service.py
 from __future__ import annotations
 
@@ -18,6 +19,22 @@ from app.models import RentComp
 class HttpResp:
     status: int
     data: Any
+
+
+@dataclass(frozen=True)
+class RentCastSaleListingResult:
+    id: str | None
+    formatted_address: str | None
+    address_line1: str | None
+    city: str | None
+    state: str | None
+    zip_code: str | None
+    county: str | None
+    latitude: float | None
+    longitude: float | None
+    status: str | None
+    price: float | None
+    raw_json: dict[str, Any]
 
 
 def _http_get_json(url: str, headers: dict[str, str], timeout_s: int = 20) -> HttpResp:
@@ -42,12 +59,28 @@ class RentCastClient:
       - falls back to Authorization: Bearer
     """
 
-    BASE = "https://api.rentcast.io/v1/avm/rent/long-term"
+    RENT_BASE = "https://api.rentcast.io/v1/avm/rent/long-term"
+    SALE_LISTINGS_BASE = "https://api.rentcast.io/v1/listings/sale"
 
     def __init__(self, api_key: str):
         if not api_key:
             raise ValueError("RENTCAST_API_KEY is missing")
         self.api_key = api_key
+
+    def _request_json(self, url: str) -> dict[str, Any] | list[Any] | None:
+        resp1 = _http_get_json(url, {"X-Api-Key": self.api_key})
+        if resp1.status == 200:
+            return resp1.data
+
+        resp2 = _http_get_json(url, {"Authorization": f"Bearer {self.api_key}"})
+        if resp2.status == 200:
+            return resp2.data
+
+        raise RuntimeError(
+            "RentCast request failed. "
+            f"X-Api-Key status={resp1.status} body={resp1.data} | "
+            f"Bearer status={resp2.status} body={resp2.data}"
+        )
 
     def rent_estimate(
         self,
@@ -72,21 +105,123 @@ class RentCastClient:
             params["squareFootage"] = int(square_feet)
 
         qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
-        url = f"{self.BASE}?{qs}"
+        url = f"{self.RENT_BASE}?{qs}"
+        payload = self._request_json(url)
+        return payload if isinstance(payload, dict) else {"data": payload}
 
-        resp1 = _http_get_json(url, {"X-Api-Key": self.api_key})
-        if resp1.status == 200:
-            return resp1.data if isinstance(resp1.data, dict) else {"data": resp1.data}
+    def sale_listing_lookup(
+        self,
+        *,
+        address: str,
+        city: str | None = None,
+        state: str | None = None,
+        zip_code: str | None = None,
+        limit: int = 10,
+    ) -> RentCastSaleListingResult | None:
+        params: dict[str, Any] = {
+            "address": address,
+            "limit": max(1, min(int(limit or 10), 50)),
+            "status": "Active",
+        }
+        if city:
+            params["city"] = city
+        if state:
+            params["state"] = state
+        if zip_code:
+            params["zipCode"] = zip_code
 
-        resp2 = _http_get_json(url, {"Authorization": f"Bearer {self.api_key}"})
-        if resp2.status == 200:
-            return resp2.data if isinstance(resp2.data, dict) else {"data": resp2.data}
+        qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None and str(v).strip()})
+        url = f"{self.SALE_LISTINGS_BASE}?{qs}"
+        payload = self._request_json(url)
 
-        raise RuntimeError(
-            "RentCast rent estimate failed. "
-            f"X-Api-Key status={resp1.status} body={resp1.data} | "
-            f"Bearer status={resp2.status} body={resp2.data}"
+        rows: list[dict[str, Any]] = []
+        if isinstance(payload, list):
+            rows = [x for x in payload if isinstance(x, dict)]
+        elif isinstance(payload, dict):
+            rows = [x for x in payload.get("listings", []) if isinstance(x, dict)]
+
+        if not rows:
+            return None
+
+        best = self._pick_best_listing_match(
+            rows,
+            address=address,
+            city=city,
+            state=state,
+            zip_code=zip_code,
         )
+        if not best:
+            return None
+
+        return RentCastSaleListingResult(
+            id=str(best.get("id") or best.get("listingId") or best.get("mlsNumber") or "").strip() or None,
+            formatted_address=str(best.get("formattedAddress") or "").strip() or None,
+            address_line1=str(best.get("addressLine1") or "").strip() or None,
+            city=str(best.get("city") or "").strip() or None,
+            state=str(best.get("state") or "").strip() or None,
+            zip_code=str(best.get("zipCode") or "").strip() or None,
+            county=str(best.get("county") or "").strip() or None,
+            latitude=self._safe_float(best.get("latitude")),
+            longitude=self._safe_float(best.get("longitude")),
+            status=str(best.get("status") or "").strip() or None,
+            price=self._safe_float(best.get("price")),
+            raw_json=best,
+        )
+
+    @staticmethod
+    def _safe_float(value: Any) -> float | None:
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _norm(s: Any) -> str:
+        return " ".join(str(s or "").strip().lower().replace(",", " ").split())
+
+    @classmethod
+    def _pick_best_listing_match(
+        cls,
+        rows: list[dict[str, Any]],
+        *,
+        address: str,
+        city: str | None,
+        state: str | None,
+        zip_code: str | None,
+    ) -> dict[str, Any] | None:
+        target_address = cls._norm(address)
+        target_city = cls._norm(city)
+        target_state = cls._norm(state)
+        target_zip = str(zip_code or "").strip()
+
+        def score(row: dict[str, Any]) -> tuple[int, int]:
+            formatted = cls._norm(row.get("formattedAddress"))
+            line1 = cls._norm(row.get("addressLine1"))
+            row_city = cls._norm(row.get("city"))
+            row_state = cls._norm(row.get("state"))
+            row_zip = str(row.get("zipCode") or "").strip()
+
+            exact = 0
+            if formatted == target_address or line1 == target_address:
+                exact += 4
+            if target_address and target_address in formatted:
+                exact += 3
+            if target_city and row_city == target_city:
+                exact += 2
+            if target_state and row_state == target_state:
+                exact += 1
+            if target_zip and row_zip == target_zip:
+                exact += 2
+            return exact, len(formatted)
+
+        ranked = sorted(rows, key=score, reverse=True)
+        best = ranked[0] if ranked else None
+        if not best:
+            return None
+        best_score = score(best)[0]
+        return best if best_score > 0 else None
 
     @staticmethod
     def pick_estimated_rent(payload: dict[str, Any]) -> Optional[float]:
@@ -238,5 +373,6 @@ def persist_rentcast_comps_and_get_median(
 
 __all__ = [
     "RentCastClient",
+    "RentCastSaleListingResult",
     "persist_rentcast_comps_and_get_median",
 ]

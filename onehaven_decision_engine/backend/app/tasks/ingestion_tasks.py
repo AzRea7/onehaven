@@ -59,6 +59,384 @@ DEFAULT_TASK_DONE_TTL_SECONDS = 60 * 60 * 24
 DEFAULT_BACKFILL_ENQUEUE_LOCK_TTL_SECONDS = 60 * 15
 
 
+INCOMPLETE_COMPLETENESS_STATUSES = (
+    "missing",
+    "partial",
+    "stale",
+    "pending",
+    "error",
+    "failed",
+)
+
+
+def _property_columns(db) -> set[str]:
+    cached = getattr(db, "_onehaven_properties_columns", None)
+    if cached is not None:
+        return cached
+
+    rows = db.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'properties'
+            """
+        )
+    ).fetchall()
+    cols = {str(row[0]).strip() for row in rows if row and row[0]}
+    setattr(db, "_onehaven_properties_columns", cols)
+    return cols
+
+
+def _property_has_column(db, column_name: str) -> bool:
+    return str(column_name).strip() in _property_columns(db)
+
+
+def _optional_select_expr(db, column_name: str, *, alias: str | None = None, blank_string: bool = False) -> str:
+    label = alias or column_name
+    if _property_has_column(db, column_name):
+        return f"{column_name} AS {label}" if label != column_name else column_name
+    if blank_string:
+        return f"'' AS {label}"
+    return f"NULL AS {label}"
+
+
+def _incomplete_property_sql(db) -> str:
+    clauses = [
+        "COALESCE(completeness_geo_status, 'missing') = ANY(:incomplete_statuses)",
+        "COALESCE(completeness_rent_status, 'missing') = ANY(:incomplete_statuses)",
+        "COALESCE(completeness_risk_status, 'missing') = ANY(:incomplete_statuses)",
+        "COALESCE(completeness_jurisdiction_status, 'missing') = ANY(:incomplete_statuses)",
+        "COALESCE(completeness_cashflow_status, 'missing') = ANY(:incomplete_statuses)",
+    ]
+
+    if _property_has_column(db, "lat"):
+        clauses.append("lat IS NULL")
+    if _property_has_column(db, "lng"):
+        clauses.append("lng IS NULL")
+    if _property_has_column(db, "normalized_address"):
+        clauses.append("NULLIF(TRIM(COALESCE(normalized_address, '')), '') IS NULL")
+    if _property_has_column(db, "jurisdiction_code"):
+        clauses.append("NULLIF(TRIM(COALESCE(jurisdiction_code, '')), '') IS NULL")
+
+    rent_cols = [
+        c
+        for c in ("market_rent_estimate", "section8_fmr", "approved_rent_ceiling")
+        if _property_has_column(db, c)
+    ]
+    if rent_cols:
+        clauses.append("(" + " AND ".join(f"{c} IS NULL" for c in rent_cols) + ")")
+
+    if _property_has_column(db, "crime_score"):
+        clauses.append("crime_score IS NULL")
+    if _property_has_column(db, "offender_count"):
+        clauses.append("offender_count IS NULL")
+
+    return "(\n      " + "\n   OR ".join(clauses) + "\n)"
+
+
+def _incomplete_status_values() -> list[str]:
+    return [str(v) for v in INCOMPLETE_COMPLETENESS_STATUSES]
+
+
+def _property_needs_enrichment(db, *, org_id: int, property_id: int) -> bool:
+    row = db.execute(
+        text(
+            f"""
+            SELECT id
+            FROM properties
+            WHERE org_id = :org_id
+              AND id = :property_id
+              AND {_incomplete_property_sql(db)}
+            LIMIT 1
+            """
+        ),
+        {
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "incomplete_statuses": _incomplete_status_values(),
+        },
+    ).fetchone()
+    return row is not None
+
+
+def _property_completion_snapshot(db, *, org_id: int, property_id: int) -> dict[str, Any] | None:
+    row = db.execute(
+        text(
+            f"""
+            SELECT
+                id,
+                COALESCE(completeness_geo_status, 'missing') AS completeness_geo_status,
+                COALESCE(completeness_rent_status, 'missing') AS completeness_rent_status,
+                COALESCE(completeness_risk_status, 'missing') AS completeness_risk_status,
+                COALESCE(completeness_jurisdiction_status, 'missing') AS completeness_jurisdiction_status,
+                COALESCE(completeness_cashflow_status, 'missing') AS completeness_cashflow_status,
+                {_optional_select_expr(db, 'lat')},
+                {_optional_select_expr(db, 'lng')},
+                {_optional_select_expr(db, 'normalized_address', blank_string=True)},
+                {_optional_select_expr(db, 'jurisdiction_code', blank_string=True)},
+                {_optional_select_expr(db, 'market_rent_estimate')},
+                {_optional_select_expr(db, 'section8_fmr')},
+                {_optional_select_expr(db, 'approved_rent_ceiling')},
+                {_optional_select_expr(db, 'crime_score')},
+                {_optional_select_expr(db, 'offender_count')},
+                {'TRUE' if _property_has_column(db, 'lat') else 'FALSE'} AS __has_lat,
+                {'TRUE' if _property_has_column(db, 'lng') else 'FALSE'} AS __has_lng,
+                {'TRUE' if _property_has_column(db, 'normalized_address') else 'FALSE'} AS __has_normalized_address,
+                {'TRUE' if _property_has_column(db, 'jurisdiction_code') else 'FALSE'} AS __has_jurisdiction_code,
+                {'TRUE' if _property_has_column(db, 'market_rent_estimate') else 'FALSE'} AS __has_market_rent_estimate,
+                {'TRUE' if _property_has_column(db, 'section8_fmr') else 'FALSE'} AS __has_section8_fmr,
+                {'TRUE' if _property_has_column(db, 'approved_rent_ceiling') else 'FALSE'} AS __has_approved_rent_ceiling,
+                {'TRUE' if _property_has_column(db, 'crime_score') else 'FALSE'} AS __has_crime_score,
+                {'TRUE' if _property_has_column(db, 'offender_count') else 'FALSE'} AS __has_offender_count
+            FROM properties
+            WHERE org_id = :org_id AND id = :property_id
+            LIMIT 1
+            """
+        ),
+        {"org_id": int(org_id), "property_id": int(property_id)},
+    ).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def _property_is_complete(snapshot: dict[str, Any] | None) -> bool:
+    if not snapshot:
+        return False
+
+    required_statuses = (
+        "completeness_geo_status",
+        "completeness_rent_status",
+        "completeness_risk_status",
+        "completeness_jurisdiction_status",
+        "completeness_cashflow_status",
+    )
+    statuses_complete = all(
+        str(snapshot.get(key) or "").strip().lower() == "complete"
+        for key in required_statuses
+    )
+    if not statuses_complete:
+        return False
+
+    require_geo = bool(snapshot.get("__has_lat")) and bool(snapshot.get("__has_lng"))
+    has_geo = (not require_geo) or (snapshot.get("lat") is not None and snapshot.get("lng") is not None)
+
+    require_address = bool(snapshot.get("__has_normalized_address"))
+    has_address = (not require_address) or bool(str(snapshot.get("normalized_address") or "").strip())
+
+    require_jurisdiction = bool(snapshot.get("__has_jurisdiction_code"))
+    has_jurisdiction = (not require_jurisdiction) or bool(str(snapshot.get("jurisdiction_code") or "").strip())
+
+    rent_keys = [
+        key
+        for key, present in (
+            ("market_rent_estimate", snapshot.get("__has_market_rent_estimate")),
+            ("section8_fmr", snapshot.get("__has_section8_fmr")),
+            ("approved_rent_ceiling", snapshot.get("__has_approved_rent_ceiling")),
+        )
+        if present
+    ]
+    has_rent = (not rent_keys) or any(snapshot.get(key) is not None for key in rent_keys)
+
+    require_risk = bool(snapshot.get("__has_crime_score")) or bool(snapshot.get("__has_offender_count"))
+    has_risk = (not require_risk) or (
+        (not bool(snapshot.get("__has_crime_score")) or snapshot.get("crime_score") is not None)
+        and (not bool(snapshot.get("__has_offender_count")) or snapshot.get("offender_count") is not None)
+    )
+
+    return has_geo and has_address and has_jurisdiction and has_rent and has_risk
+
+
+
+INCOMPLETE_COMPLETENESS_STATUSES = (
+    "missing",
+    "partial",
+    "stale",
+    "pending",
+    "error",
+    "failed",
+)
+
+
+def _property_columns(db) -> set[str]:
+    cached = getattr(db, "_onehaven_properties_columns", None)
+    if cached is not None:
+        return cached
+
+    rows = db.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'properties'
+            """
+        )
+    ).fetchall()
+    cols = {str(row[0]).strip() for row in rows if row and row[0]}
+    setattr(db, "_onehaven_properties_columns", cols)
+    return cols
+
+
+def _property_has_column(db, column_name: str) -> bool:
+    return str(column_name).strip() in _property_columns(db)
+
+
+def _optional_select_expr(db, column_name: str, *, alias: str | None = None, blank_string: bool = False) -> str:
+    label = alias or column_name
+    if _property_has_column(db, column_name):
+        return f"{column_name} AS {label}" if label != column_name else column_name
+    if blank_string:
+        return f"'' AS {label}"
+    return f"NULL AS {label}"
+
+
+def _incomplete_property_sql(db) -> str:
+    clauses = [
+        "COALESCE(completeness_geo_status, 'missing') = ANY(:incomplete_statuses)",
+        "COALESCE(completeness_rent_status, 'missing') = ANY(:incomplete_statuses)",
+        "COALESCE(completeness_risk_status, 'missing') = ANY(:incomplete_statuses)",
+        "COALESCE(completeness_jurisdiction_status, 'missing') = ANY(:incomplete_statuses)",
+        "COALESCE(completeness_cashflow_status, 'missing') = ANY(:incomplete_statuses)",
+    ]
+
+    if _property_has_column(db, "lat"):
+        clauses.append("lat IS NULL")
+    if _property_has_column(db, "lng"):
+        clauses.append("lng IS NULL")
+    if _property_has_column(db, "normalized_address"):
+        clauses.append("NULLIF(TRIM(COALESCE(normalized_address, '')), '') IS NULL")
+    if _property_has_column(db, "jurisdiction_code"):
+        clauses.append("NULLIF(TRIM(COALESCE(jurisdiction_code, '')), '') IS NULL")
+
+    rent_cols = [
+        c
+        for c in ("market_rent_estimate", "section8_fmr", "approved_rent_ceiling")
+        if _property_has_column(db, c)
+    ]
+    if rent_cols:
+        clauses.append("(" + " AND ".join(f"{c} IS NULL" for c in rent_cols) + ")")
+
+    if _property_has_column(db, "crime_score"):
+        clauses.append("crime_score IS NULL")
+    if _property_has_column(db, "offender_count"):
+        clauses.append("offender_count IS NULL")
+
+    return "(\n      " + "\n   OR ".join(clauses) + "\n)"
+
+
+def _incomplete_status_values() -> list[str]:
+    return [str(v) for v in INCOMPLETE_COMPLETENESS_STATUSES]
+
+
+def _property_needs_enrichment(db, *, org_id: int, property_id: int) -> bool:
+    row = db.execute(
+        text(
+            f"""
+            SELECT id
+            FROM properties
+            WHERE org_id = :org_id
+              AND id = :property_id
+              AND {_incomplete_property_sql(db)}
+            LIMIT 1
+            """
+        ),
+        {
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "incomplete_statuses": _incomplete_status_values(),
+        },
+    ).fetchone()
+    return row is not None
+
+
+def _property_completion_snapshot(db, *, org_id: int, property_id: int) -> dict[str, Any] | None:
+    row = db.execute(
+        text(
+            f"""
+            SELECT
+                id,
+                COALESCE(completeness_geo_status, 'missing') AS completeness_geo_status,
+                COALESCE(completeness_rent_status, 'missing') AS completeness_rent_status,
+                COALESCE(completeness_risk_status, 'missing') AS completeness_risk_status,
+                COALESCE(completeness_jurisdiction_status, 'missing') AS completeness_jurisdiction_status,
+                COALESCE(completeness_cashflow_status, 'missing') AS completeness_cashflow_status,
+                {_optional_select_expr(db, 'lat')},
+                {_optional_select_expr(db, 'lng')},
+                {_optional_select_expr(db, 'normalized_address', blank_string=True)},
+                {_optional_select_expr(db, 'jurisdiction_code', blank_string=True)},
+                {_optional_select_expr(db, 'market_rent_estimate')},
+                {_optional_select_expr(db, 'section8_fmr')},
+                {_optional_select_expr(db, 'approved_rent_ceiling')},
+                {_optional_select_expr(db, 'crime_score')},
+                {_optional_select_expr(db, 'offender_count')},
+                {'TRUE' if _property_has_column(db, 'lat') else 'FALSE'} AS __has_lat,
+                {'TRUE' if _property_has_column(db, 'lng') else 'FALSE'} AS __has_lng,
+                {'TRUE' if _property_has_column(db, 'normalized_address') else 'FALSE'} AS __has_normalized_address,
+                {'TRUE' if _property_has_column(db, 'jurisdiction_code') else 'FALSE'} AS __has_jurisdiction_code,
+                {'TRUE' if _property_has_column(db, 'market_rent_estimate') else 'FALSE'} AS __has_market_rent_estimate,
+                {'TRUE' if _property_has_column(db, 'section8_fmr') else 'FALSE'} AS __has_section8_fmr,
+                {'TRUE' if _property_has_column(db, 'approved_rent_ceiling') else 'FALSE'} AS __has_approved_rent_ceiling,
+                {'TRUE' if _property_has_column(db, 'crime_score') else 'FALSE'} AS __has_crime_score,
+                {'TRUE' if _property_has_column(db, 'offender_count') else 'FALSE'} AS __has_offender_count
+            FROM properties
+            WHERE org_id = :org_id AND id = :property_id
+            LIMIT 1
+            """
+        ),
+        {"org_id": int(org_id), "property_id": int(property_id)},
+    ).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def _property_is_complete(snapshot: dict[str, Any] | None) -> bool:
+    if not snapshot:
+        return False
+
+    required_statuses = (
+        "completeness_geo_status",
+        "completeness_rent_status",
+        "completeness_risk_status",
+        "completeness_jurisdiction_status",
+        "completeness_cashflow_status",
+    )
+    statuses_complete = all(
+        str(snapshot.get(key) or "").strip().lower() == "complete"
+        for key in required_statuses
+    )
+    if not statuses_complete:
+        return False
+
+    require_geo = bool(snapshot.get("__has_lat")) and bool(snapshot.get("__has_lng"))
+    has_geo = (not require_geo) or (snapshot.get("lat") is not None and snapshot.get("lng") is not None)
+
+    require_address = bool(snapshot.get("__has_normalized_address"))
+    has_address = (not require_address) or bool(str(snapshot.get("normalized_address") or "").strip())
+
+    require_jurisdiction = bool(snapshot.get("__has_jurisdiction_code"))
+    has_jurisdiction = (not require_jurisdiction) or bool(str(snapshot.get("jurisdiction_code") or "").strip())
+
+    rent_keys = [
+        key
+        for key, present in (
+            ("market_rent_estimate", snapshot.get("__has_market_rent_estimate")),
+            ("section8_fmr", snapshot.get("__has_section8_fmr")),
+            ("approved_rent_ceiling", snapshot.get("__has_approved_rent_ceiling")),
+        )
+        if present
+    ]
+    has_rent = (not rent_keys) or any(snapshot.get(key) is not None for key in rent_keys)
+
+    require_risk = bool(snapshot.get("__has_crime_score")) or bool(snapshot.get("__has_offender_count"))
+    has_risk = (not require_risk) or (
+        (not bool(snapshot.get("__has_crime_score")) or snapshot.get("crime_score") is not None)
+        and (not bool(snapshot.get("__has_offender_count")) or snapshot.get("offender_count") is not None)
+    )
+
+    return has_geo and has_address and has_jurisdiction and has_rent and has_risk
+
+
+
 def _retry_enabled() -> bool:
     return bool(getattr(settings, "ingestion_retry_transient_failures", False))
 
@@ -267,43 +645,26 @@ def _jurisdiction_backfill_lock_key(org_id: int, jurisdiction_code: str, limit: 
     return f"backfill_jurisdiction:{int(org_id)}:{str(jurisdiction_code).strip().lower()}:{digest}"
 
 
-def _property_needs_enrichment(db, *, org_id: int, property_id: int) -> bool:
-    row = db.execute(
-        text(
-            """
-            SELECT id
-            FROM properties
-            WHERE org_id = :org_id
-              AND id = :property_id
-              AND (
-                    COALESCE(completeness_geo_status, 'missing') = 'missing'
-                 OR COALESCE(completeness_rent_status, 'missing') = 'missing'
-                 OR COALESCE(completeness_risk_status, 'missing') = 'missing'
-                 OR COALESCE(completeness_jurisdiction_status, 'missing') = 'missing'
-                 OR COALESCE(completeness_cashflow_status, 'missing') = 'missing'
-              )
-            LIMIT 1
-            """
-        ),
-        {
-            "org_id": int(org_id),
-            "property_id": int(property_id),
-        },
-    ).fetchone()
-    return row is not None
 
 
-def _property_completion_snapshot(db, *, org_id: int, property_id: int) -> dict[str, Any] | None:
+
+def _property_geo_retry_snapshot(db, *, org_id: int, property_id: int) -> dict[str, Any] | None:
     row = db.execute(
         text(
-            """
+            f"""
             SELECT
                 id,
-                COALESCE(completeness_geo_status, 'missing') AS completeness_geo_status,
-                COALESCE(completeness_rent_status, 'missing') AS completeness_rent_status,
-                COALESCE(completeness_risk_status, 'missing') AS completeness_risk_status,
-                COALESCE(completeness_jurisdiction_status, 'missing') AS completeness_jurisdiction_status,
-                COALESCE(completeness_cashflow_status, 'missing') AS completeness_cashflow_status
+                {_optional_select_expr(db, 'address', blank_string=True)},
+                {_optional_select_expr(db, 'city', blank_string=True)},
+                {_optional_select_expr(db, 'state', blank_string=True)},
+                {_optional_select_expr(db, 'zip', blank_string=True)},
+                {_optional_select_expr(db, 'county', blank_string=True)},
+                {_optional_select_expr(db, 'normalized_address', blank_string=True)},
+                {_optional_select_expr(db, 'geocode_source', blank_string=True)},
+                {_optional_select_expr(db, 'lat')},
+                {_optional_select_expr(db, 'lng')},
+                {_optional_select_expr(db, 'geocode_last_refreshed')},
+                COALESCE(completeness_geo_status, 'missing') AS completeness_geo_status
             FROM properties
             WHERE org_id = :org_id AND id = :property_id
             LIMIT 1
@@ -314,18 +675,94 @@ def _property_completion_snapshot(db, *, org_id: int, property_id: int) -> dict[
     return dict(row) if row is not None else None
 
 
-def _property_is_complete(snapshot: dict[str, Any] | None) -> bool:
+def _property_has_geo_retryable_input(snapshot: dict[str, Any] | None) -> bool:
     if not snapshot:
         return False
-    required = (
-        "completeness_geo_status",
-        "completeness_rent_status",
-        "completeness_risk_status",
-        "completeness_jurisdiction_status",
-        "completeness_cashflow_status",
-    )
-    return all(str(snapshot.get(key) or "").strip().lower() == "complete" for key in required)
+    address = str(snapshot.get("address") or "").strip()
+    city = str(snapshot.get("city") or "").strip()
+    state = str(snapshot.get("state") or "").strip()
+    return bool(address and city and state and "test st" not in address.lower())
 
+
+def _property_needs_geo_retry(snapshot: dict[str, Any] | None) -> bool:
+    if not snapshot:
+        return False
+    geo_status = str(snapshot.get("completeness_geo_status") or "missing").strip().lower()
+    normalized_address = str(snapshot.get("normalized_address") or "").strip()
+    geocode_source = str(snapshot.get("geocode_source") or "").strip()
+    lat = snapshot.get("lat")
+    lng = snapshot.get("lng")
+    return bool(
+        geo_status in INCOMPLETE_COMPLETENESS_STATUSES
+        or not normalized_address
+        or not geocode_source
+        or lat is None
+        or lng is None
+    )
+
+
+def _prime_geo_retry(db, *, org_id: int, property_id: int) -> dict[str, Any]:
+    snapshot = _property_geo_retry_snapshot(db, org_id=int(org_id), property_id=int(property_id))
+    if not _property_has_geo_retryable_input(snapshot):
+        return {"ok": False, "skipped": True, "reason": "geo_retry_input_unavailable", "snapshot": snapshot}
+    if not _property_needs_geo_retry(snapshot):
+        return {"ok": True, "skipped": True, "reason": "geo_already_present", "snapshot": snapshot}
+
+    result = enrich_property_geo(
+        db,
+        org_id=int(org_id),
+        property_id=int(property_id),
+        force=True,
+    )
+    result = result if isinstance(result, dict) else {"ok": bool(result)}
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return result
+
+
+def _run_geo_retry_in_isolated_session(*, org_id: int, property_id: int) -> dict[str, Any]:
+    isolated_db = SessionLocal()
+    try:
+        result = _prime_geo_retry(
+            isolated_db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+        isolated_db.commit()
+        return result if isinstance(result, dict) else {"ok": bool(result)}
+    except Exception as exc:
+        isolated_db.rollback()
+        logger.exception(
+            "task_geo_retry_isolated_failed",
+            extra={"org_id": int(org_id), "property_id": int(property_id)},
+        )
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "geo_retry_isolated_failed",
+            "error": f"{type(exc).__name__}:{exc}",
+        }
+    finally:
+        isolated_db.close()
+
+
+def _should_retry_again_after_pipeline(*, pipeline_result: dict[str, Any] | None, completion_snapshot: dict[str, Any] | None) -> bool:
+    result = dict(pipeline_result or {})
+    geo_payload = dict(result.get("geo") or {})
+    if bool(result.get("geo_ok")):
+        return False
+    if _property_is_complete(completion_snapshot):
+        return False
+    if geo_payload.get("lat") is not None and geo_payload.get("lng") is not None:
+        return False
+    if str(geo_payload.get("geocode_source") or "").strip():
+        return False
+    if str(geo_payload.get("normalized_address") or "").strip():
+        return False
+    return True
 
 def _clear_false_done_marker(db, *, org_id: int, property_id: int, owner: str) -> bool:
     done_key = _property_enrich_done_key(int(org_id), int(property_id))
@@ -585,13 +1022,42 @@ def enrich_property_after_sync_task(
                 },
             )
 
+        pre_geo_retry = _run_geo_retry_in_isolated_session(
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+
         result = execute_post_ingestion_pipeline(
             db,
             org_id=int(org_id),
             property_id=int(property_id),
             actor_user_id=None,
             emit_events=False,
-        )
+        ) or {}
+
+        if isinstance(result, dict):
+            result["task_geo_retry_pre"] = pre_geo_retry
+
+        snapshot = _property_completion_snapshot(db, org_id=int(org_id), property_id=int(property_id))
+        if _should_retry_again_after_pipeline(
+            pipeline_result=result if isinstance(result, dict) else None,
+            completion_snapshot=snapshot,
+        ):
+            post_geo_retry = _run_geo_retry_in_isolated_session(
+                org_id=int(org_id),
+                property_id=int(property_id),
+            )
+            rerun_result = execute_post_ingestion_pipeline(
+                db,
+                org_id=int(org_id),
+                property_id=int(property_id),
+                actor_user_id=None,
+                emit_events=False,
+            ) or {}
+            if isinstance(rerun_result, dict):
+                rerun_result["task_geo_retry_pre"] = pre_geo_retry
+                rerun_result["task_geo_retry_post"] = post_geo_retry
+            result = rerun_result
 
         snapshot = _property_completion_snapshot(db, org_id=int(org_id), property_id=int(property_id))
         completed = _property_is_complete(snapshot)

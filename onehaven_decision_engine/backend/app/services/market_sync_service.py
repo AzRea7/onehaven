@@ -342,9 +342,26 @@ def build_fresh_backfill_cursor(*, market_slug: str | None) -> dict[str, Any]:
     )
 
 
+def build_fresh_refresh_cursor(*, market_slug: str | None) -> dict[str, Any]:
+    return normalize_market_cursor(
+        {
+            "market_slug": market_slug,
+            "page": 1,
+            "shard": 1,
+            "sort_mode": DEFAULT_CURSOR_SORT_MODE,
+            "refresh_window_pages": get_default_refresh_window_pages(),
+            "page_fingerprint": None,
+            "page_changed": True,
+            "provider_cursor": None,
+            "refresh_resume": True,
+        },
+        market_slug=market_slug,
+    )
+
+
 def get_resume_cursor(sync_state: MarketSyncState | None) -> dict[str, Any]:
     if sync_state is None:
-        return normalize_market_cursor(None)
+        return build_fresh_refresh_cursor(market_slug=None)
 
     saved = normalize_market_cursor(
         dict(sync_state.cursor_json or {}),
@@ -360,12 +377,16 @@ def get_resume_cursor(sync_state: MarketSyncState | None) -> dict[str, Any]:
         get_default_refresh_window_pages(),
     )
 
-    resume_page = max(1, last_page - refresh_window_pages + 1)
+    if bool(sync_state.market_exhausted):
+        resume_page = 1
+    else:
+        resume_page = max(1, last_page - refresh_window_pages + 1)
 
     saved["page"] = resume_page
     saved["last_page"] = last_page
     saved["market_exhausted"] = bool(sync_state.market_exhausted)
     saved["status"] = str(sync_state.status or "idle")
+    saved["refresh_resume"] = True
 
     return saved
 
@@ -525,14 +546,19 @@ def mark_market_sync_completed(
     market_exhausted: bool | None = None,
     seen_provider_record_at: datetime | None = None,
     status: str = "idle",
+    sync_mode: str | None = None,
 ) -> MarketSyncState:
     def _op() -> MarketSyncState:
         sync_state.status = str(status or "idle")
         sync_state.last_sync_completed_at = _utcnow()
         sync_state.updated_at = _utcnow()
 
+        normalized_mode = normalize_sync_mode(sync_mode)
         if market_exhausted is not None:
-            sync_state.market_exhausted = bool(market_exhausted)
+            if normalized_mode == "refresh":
+                sync_state.market_exhausted = False
+            else:
+                sync_state.market_exhausted = bool(market_exhausted)
 
         if seen_provider_record_at is not None:
             sync_state.last_seen_provider_record_at = seen_provider_record_at
@@ -725,7 +751,7 @@ def get_sync_mode_runtime_overrides(
         return {
             "sync_mode": "refresh",
             "limit": limit,
-            "market_cursor": build_fresh_backfill_cursor(market_slug=market_slug),
+            "market_cursor": build_fresh_refresh_cursor(market_slug=market_slug),
             "reset_market_cursor_on_start": True,
             "max_pages_budget": max_pages_budget,
             "backfill_target_records": None,

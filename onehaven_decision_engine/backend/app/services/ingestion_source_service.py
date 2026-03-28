@@ -127,10 +127,22 @@ def _clean_config_json(config_json: dict | None) -> dict[str, Any]:
     elif not market_slug and city:
         market_slug = _slugify(city)
 
+    raw_zip_codes = payload.get("zip_codes") or payload.get("zips") or payload.get("zipCodes") or []
+    if isinstance(raw_zip_codes, str):
+        zip_codes = [part.strip() for part in raw_zip_codes.split(",") if part.strip()]
+    elif isinstance(raw_zip_codes, (list, tuple, set)):
+        zip_codes = [str(part).strip() for part in raw_zip_codes if str(part).strip()]
+    else:
+        zip_codes = []
+
+    query_strategy = _norm_lower(payload.get("query_strategy") or "") or None
+
     payload["state"] = state
     payload["county"] = county.lower() if county else None
     payload["city"] = city
     payload["market_slug"] = market_slug
+    payload["zip_codes"] = list(dict.fromkeys(zip_codes))
+    payload["query_strategy"] = query_strategy
 
     return payload
 
@@ -481,6 +493,8 @@ def _supported_market_source_defaults(market: dict[str, Any]) -> dict[str, Any]:
                 "property_types": market.get("property_types"),
                 "max_price": market.get("max_price"),
                 "max_units": market.get("max_units"),
+                "zip_codes": market.get("zip_codes") or market.get("zips") or market.get("zipCodes"),
+                "query_strategy": market.get("query_strategy") or "city_plus_zip_sweep",
             }
         ),
     }
@@ -742,7 +756,12 @@ def resolve_sources_for_market(db: Session, org_id: int, market_slug: str) -> li
         source_state = _norm_upper(cfg.get("state") or "MI")
         source_slug = _norm_lower(getattr(source, "slug", ""))
 
+        source_zip_codes = set(str(z).strip() for z in (cfg.get("zip_codes") or []) if str(z).strip())
+        market_zip_codes = set(str(z).strip() for z in (((market or {}).get("zip_codes") or [])) if str(z).strip())
+
         if source_market_slug == normalized_market_slug:
+            if market_zip_codes and source_zip_codes and source_zip_codes.isdisjoint(market_zip_codes):
+                continue
             exact_market.append(source)
             continue
 

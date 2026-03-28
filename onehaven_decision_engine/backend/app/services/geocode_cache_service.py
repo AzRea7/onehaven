@@ -1,3 +1,4 @@
+
 # backend/app/services/geocode_cache_service.py
 from __future__ import annotations
 
@@ -11,6 +12,48 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import GeocodeCache
 from .address_normalization import make_normalized_cache_key
+
+
+def _clean_text(value: Any) -> str | None:
+    s = str(value or "").strip()
+    return s or None
+
+
+def _normalize_state(value: Any) -> str | None:
+    s = _clean_text(value)
+    if not s:
+        return None
+    if len(s) == 2:
+        return s.upper()
+    state_map = {
+        "michigan": "MI",
+        "ohio": "OH",
+        "indiana": "IN",
+        "illinois": "IL",
+        "wisconsin": "WI",
+        "pennsylvania": "PA",
+        "new york": "NY",
+        "california": "CA",
+        "texas": "TX",
+        "florida": "FL",
+    }
+    return state_map.get(s.lower()) or s[:2].upper()
+
+
+def _normalize_county(value: Any) -> str | None:
+    s = _clean_text(value)
+    if not s:
+        return None
+    if s.lower().endswith(" county"):
+        s = s[:-7].strip()
+    return s or None
+
+
+def _normalize_zip(value: Any) -> str | None:
+    s = _clean_text(value)
+    if not s:
+        return None
+    return s[:10]
 
 
 @dataclass
@@ -114,13 +157,32 @@ class GeocodeCacheService:
         entry.updated_at = datetime.utcnow()
         self.db.add(entry)
         if commit:
-            self.db.commit()
-            self.db.refresh(entry)
+            try:
+                self.db.commit()
+                self.db.refresh(entry)
+            except Exception:
+                self.db.rollback()
+                raise
         return entry
 
     def upsert(self, payload: GeocodeCachePayload, *, commit: bool = True) -> GeocodeCache:
         now = datetime.utcnow()
         expires_at = now + timedelta(hours=self.ttl_hours)
+
+        payload = GeocodeCachePayload(
+            normalized_address=payload.normalized_address,
+            raw_address=_clean_text(payload.raw_address),
+            city=_clean_text(payload.city),
+            state=_normalize_state(payload.state),
+            zip=_normalize_zip(payload.zip),
+            county=_normalize_county(payload.county),
+            lat=payload.lat,
+            lng=payload.lng,
+            source=_clean_text(payload.source) or "unknown",
+            confidence=payload.confidence,
+            formatted_address=_clean_text(payload.formatted_address),
+            provider_response_json=payload.provider_response_json,
+        )
 
         existing = self.get_by_normalized_address(payload.normalized_address)
 
@@ -163,8 +225,12 @@ class GeocodeCacheService:
             self.db.add(existing)
 
         if commit:
-            self.db.commit()
-            self.db.refresh(existing)
+            try:
+                self.db.commit()
+                self.db.refresh(existing)
+            except Exception:
+                self.db.rollback()
+                raise
 
         return existing
 
@@ -193,8 +259,12 @@ class GeocodeCacheService:
         self.db.add(entry)
 
         if commit:
-            self.db.commit()
-            self.db.refresh(entry)
+            try:
+                self.db.commit()
+                self.db.refresh(entry)
+            except Exception:
+                self.db.rollback()
+                raise
 
         return True
 
@@ -220,7 +290,11 @@ class GeocodeCacheService:
 
         self.db.delete(entry)
         if commit:
-            self.db.commit()
+            try:
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                raise
         return True
 
 
@@ -245,14 +319,14 @@ def build_geocode_cache_payload(
     return GeocodeCachePayload(
         normalized_address=normalized_address,
         raw_address=raw_address,
-        city=city,
-        state=state,
-        zip=postal_code,
-        county=county,
+        city=_clean_text(city),
+        state=_normalize_state(state),
+        zip=_normalize_zip(postal_code),
+        county=_normalize_county(county),
         lat=lat,
         lng=lng,
-        source=source,
+        source=_clean_text(source) or "unknown",
         confidence=confidence,
-        formatted_address=formatted_address,
+        formatted_address=_clean_text(formatted_address),
         provider_response_json=provider_response_json,
     )

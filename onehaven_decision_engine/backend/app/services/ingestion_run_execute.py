@@ -631,6 +631,21 @@ def _budget_exhausted(
     return provider_pages_scanned >= max_pages_budget
 
 
+def _should_skip_completed_dataset(*, trigger_type: str, runtime_config: dict[str, Any]) -> bool:
+    normalized_trigger = str(trigger_type or "").strip().lower()
+    normalized_mode = str(runtime_config.get("sync_mode") or "refresh").strip().lower()
+
+    if bool(runtime_config.get("allow_completed_dataset_skip")):
+        return True
+    if bool(runtime_config.get("disable_completed_dataset_skip")):
+        return False
+    if normalized_mode == "refresh":
+        return False
+    if normalized_trigger in {"manual", "manual_market_sync", "sync_now", "refresh", "daily_refresh"}:
+        return False
+    return normalized_mode == "backfill"
+
+
 def _cursor_summary(next_cursor: dict[str, Any] | None) -> dict[str, Any]:
     cursor = dict(next_cursor or {})
     return {
@@ -894,26 +909,45 @@ def execute_source_sync(
             },
         )
 
-    if has_completed_ingestion_dataset(
-        db,
-        org_id=int(org_id),
-        source_id=source_id,
-        dataset_key=dataset_key,
-    ):
-        return start_run(
+    skip_completed_dataset = _should_skip_completed_dataset(
+        trigger_type=str(trigger_type),
+        runtime_config=runtime_config,
+    )
+    if skip_completed_dataset:
+        if has_completed_ingestion_dataset(
             db,
             org_id=int(org_id),
             source_id=source_id,
-            trigger_type=str(trigger_type),
-            runtime_config=runtime_config,
-            status="skipped_duplicate_dataset",
-            summary_json={
-                "reason": "dataset_already_completed",
+            dataset_key=dataset_key,
+        ):
+            return start_run(
+                db,
+                org_id=int(org_id),
+                source_id=source_id,
+                trigger_type=str(trigger_type),
+                runtime_config=runtime_config,
+                status="skipped_duplicate_dataset",
+                summary_json={
+                    "reason": "dataset_already_completed",
+                    "dataset_key": dataset_key,
+                    "dataset_identity": dataset_identity,
+                    "market_slug": runtime_config.get("market_slug") or dataset_identity.get("market_slug"),
+                    "sync_mode": runtime_config.get("sync_mode") or "refresh",
+                    "completed_dataset_skip_applied": True,
+                },
+            )
+    else:
+        _emit(
+            {
+                "event": "ingestion_completed_dataset_skip_disabled",
+                "org_id": int(org_id),
+                "source_id": source_id,
                 "dataset_key": dataset_key,
                 "dataset_identity": dataset_identity,
                 "market_slug": runtime_config.get("market_slug") or dataset_identity.get("market_slug"),
                 "sync_mode": runtime_config.get("sync_mode") or "refresh",
-            },
+                "trigger_type": str(trigger_type),
+            }
         )
 
     run = start_run(
@@ -991,6 +1025,8 @@ def execute_source_sync(
         provider_pages_scanned = 0
         market_exhausted = False
         last_seen_provider_record_at: datetime | None = None
+        empty_page_grace = max(1, _safe_int(runtime_config.get("empty_page_grace")) or 2)
+        consecutive_empty_pages = 0
 
         while True:
             if summary["new_records_imported"] >= requested_new_records:
@@ -1035,6 +1071,12 @@ def execute_source_sync(
             summary["records_seen_from_provider"] += raw_count
             summary["records_seen"] += raw_count
 
+            page_is_empty = raw_count <= 0 and len(rows) <= 0
+            if page_is_empty:
+                consecutive_empty_pages += 1
+            else:
+                consecutive_empty_pages = 0
+
             page_stat = {
                 "page_number": int(fetch_result.page_scanned or _safe_int(cursor.get("page")) or 1),
                 "cursor_in": _cursor_summary(cursor),
@@ -1048,6 +1090,9 @@ def execute_source_sync(
                 "page_fingerprint": fetch_result.page_fingerprint,
                 "page_changed": bool(fetch_result.page_changed),
                 "market_exhausted": bool(fetch_result.exhausted),
+                "empty_page": bool(page_is_empty),
+                "consecutive_empty_pages": int(consecutive_empty_pages),
+                "empty_page_grace": int(empty_page_grace),
                 "records_candidate_after_filtering": 0,
                 "imported": 0,
                 "new_records_imported": 0,
@@ -1227,12 +1272,21 @@ def execute_source_sync(
 
             advanced_to_new_variant = next_shard != current_shard
             advanced_within_variant = next_page != current_page
+            advanced_cursor = advanced_to_new_variant or advanced_within_variant
             market_exhausted = bool(fetch_result.exhausted)
+
+            if page_is_empty and advanced_cursor and consecutive_empty_pages < empty_page_grace:
+                market_exhausted = False
+                page_stat["market_exhausted"] = False
+                page_stat["empty_page_grace_used"] = True
+            else:
+                page_stat["empty_page_grace_used"] = False
 
             cursor = next_cursor
 
-            if market_exhausted and (advanced_to_new_variant or advanced_within_variant):
+            if market_exhausted and advanced_cursor:
                 market_exhausted = False
+                page_stat["market_exhausted"] = False
 
         summary["market_exhausted"] = bool(market_exhausted)
 
@@ -1251,9 +1305,9 @@ def execute_source_sync(
                 db,
                 sync_state=market_sync_state,
                 next_cursor=cursor,
-                page_scanned=_safe_int(cursor.get("page")) or 1,
-                shard_scanned=_safe_int(cursor.get("shard")) or 1,
-                sort_mode=str(cursor.get("sort_mode") or "newest"),
+                page_scanned=current_page,
+                shard_scanned=current_shard,
+                sort_mode=str(fetch_result.sort_mode or cursor.get("sort_mode") or "newest"),
                 page_fingerprint=cursor.get("page_fingerprint"),
                 page_changed=bool(cursor.get("page_changed", True)),
                 exhausted=bool(market_exhausted),
@@ -1267,7 +1321,10 @@ def execute_source_sync(
                 status="idle",
             )
 
-        if int(summary.get("records_imported", 0) or 0) > 0:
+        if int(summary.get("records_imported", 0) or 0) > 0 and _should_skip_completed_dataset(
+            trigger_type=str(trigger_type),
+            runtime_config=runtime_config,
+        ):
             completion_ttl = int(
                 getattr(settings, "ingestion_completion_lock_ttl_seconds", DEFAULT_COMPLETION_LOCK_TTL_SECONDS)
                 or DEFAULT_COMPLETION_LOCK_TTL_SECONDS
@@ -1338,14 +1395,34 @@ def execute_source_sync(
             )
         raise
     finally:
-        try:
-            if bool(getattr(settings, "ingestion_force_release_lock_on_finish", True)):
-                release_ingestion_execution_lock_in_new_session(
+        if bool(getattr(settings, "ingestion_force_release_lock_on_finish", True)):
+            released = False
+            try:
+                release_ingestion_execution_lock(
+                    db,
                     org_id=int(org_id),
                     source_id=source_id,
                     dataset_key=dataset_key,
                     owner=lock_owner,
                     force=True,
                 )
-        except Exception:
-            logger.exception("release_ingestion_execution_lock_failed")
+                try:
+                    db.commit()
+                except Exception:
+                    rollback_quietly(db)
+                released = True
+            except Exception:
+                rollback_quietly(db)
+                logger.exception("release_ingestion_execution_lock_inline_failed")
+
+            if not released:
+                try:
+                    release_ingestion_execution_lock_in_new_session(
+                        org_id=int(org_id),
+                        source_id=source_id,
+                        dataset_key=dataset_key,
+                        owner=lock_owner,
+                        force=True,
+                    )
+                except Exception:
+                    logger.exception("release_ingestion_execution_lock_failed")

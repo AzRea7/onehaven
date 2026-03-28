@@ -13,11 +13,8 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Property, RentAssumption
+from .rent_refresh_queue_service import publish_without_rent, should_run_inline_rent_refresh
 from .rentcast_service import RentCastClient, persist_rentcast_comps_and_get_median
-from .rent_refresh_queue_service import (
-    publish_without_rent,
-    should_run_inline_rent_refresh,
-)
 
 log = logging.getLogger("onehaven.ingestion.enrichment")
 
@@ -35,16 +32,13 @@ def normalize_photos(raw: Any) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     if not raw:
         return out
-
     if isinstance(raw, list):
         for item in raw:
             if isinstance(item, str):
                 url = item.strip()
-                if not url:
-                    continue
-                out.append({"url": url, "kind": derive_photo_kind(url)})
+                if url:
+                    out.append({"url": url, "kind": derive_photo_kind(url)})
                 continue
-
             if isinstance(item, dict):
                 url = str(
                     item.get("url")
@@ -55,7 +49,6 @@ def normalize_photos(raw: Any) -> list[dict[str, str]]:
                 ).strip()
                 if not url:
                     continue
-
                 kind = str(item.get("kind") or "").strip() or derive_photo_kind(url)
                 out.append({"url": url, "kind": kind})
     return out
@@ -71,16 +64,12 @@ def canonical_listing_payload(row: dict[str, Any]) -> dict[str, Any]:
         or row.get("predictedRent")
     )
 
-    bedrooms_raw = row.get("bedrooms")
-    bathrooms_raw = row.get("bathrooms")
-
     try:
-        bedrooms = int(bedrooms_raw or 0)
+        bedrooms = int(row.get("bedrooms") or 0)
     except Exception:
         bedrooms = 0
-
     try:
-        bathrooms = float(bathrooms_raw or 1)
+        bathrooms = float(row.get("bathrooms") or 1)
     except Exception:
         bathrooms = 1.0
 
@@ -122,7 +111,6 @@ def build_post_import_actions() -> list[dict[str, str]]:
         if should_run_inline_rent_refresh()
         else "Queue budgeted rent refresh"
     )
-
     return [
         {"key": "geo", "label": "Geocode and enrich location"},
         {"key": "risk", "label": "Update crime and zone risk"},
@@ -162,63 +150,116 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _compute_approved_ceiling(
-    *,
-    section8_fmr: Any,
-    rent_reasonableness_comp: Any,
-    approved_rent_ceiling: Any,
-) -> Optional[float]:
+def _safe_int(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _nonblank(value: Any) -> str | None:
+    s = str(value or "").strip()
+    return s or None
+
+
+def _compute_approved_ceiling(*, section8_fmr: Any, rent_reasonableness_comp: Any, approved_rent_ceiling: Any) -> Optional[float]:
     approved_existing = _safe_float(approved_rent_ceiling)
     if approved_existing is not None and approved_existing > 0:
         return approved_existing
-
     fmr_existing = _safe_float(section8_fmr)
     rr_existing = _safe_float(rent_reasonableness_comp)
-
     approved_candidates: list[float] = []
     if rr_existing is not None and rr_existing > 0:
         approved_candidates.append(rr_existing)
     if fmr_existing is not None and fmr_existing > 0:
         approved_candidates.append(fmr_existing)
-
     return min(approved_candidates) if approved_candidates else None
 
 
-def _timed_step(
-    result: dict[str, Any],
-    *,
-    step_key: str,
-    fn,
-) -> Any:
+def _timed_step(result: dict[str, Any], *, step_key: str, fn):
     t0 = time.perf_counter()
     try:
         out = fn()
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        result.setdefault("timings_ms", {})[step_key] = duration_ms
+        result.setdefault("timings_ms", {})[step_key] = round((time.perf_counter() - t0) * 1000, 2)
         return out
     except Exception as exc:
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
-        result.setdefault("timings_ms", {})[step_key] = duration_ms
+        result.setdefault("timings_ms", {})[step_key] = round((time.perf_counter() - t0) * 1000, 2)
         raise exc
+
+
+def _safe_rollback(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        pass
 
 
 def _status_from_bool(ok: bool) -> str:
     return "complete" if ok else "missing"
 
 
-def _update_property_acquisition_completeness(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-    pipeline_result: dict[str, Any],
-) -> dict[str, str]:
+def _derive_geo_status(pipeline_result: dict[str, Any]) -> str:
+    geo = dict(pipeline_result.get("geo") or {})
+    if pipeline_result.get("geo_ok"):
+        return "complete"
+    if geo.get("lat") is not None or geo.get("lng") is not None or geo.get("normalized_address") or geo.get("county"):
+        return "partial"
+    return "missing"
+
+
+def _derive_risk_status(pipeline_result: dict[str, Any]) -> str:
+    risk = dict(pipeline_result.get("risk") or {})
+    if pipeline_result.get("risk_ok"):
+        return "complete"
+    if risk.get("crime_score") is not None or risk.get("offender_count") is not None or risk.get("risk_score") is not None:
+        return "partial"
+    return "missing"
+
+
+def _derive_rent_status(pipeline_result: dict[str, Any]) -> str:
+    rent = dict(pipeline_result.get("rent") or {})
+    if pipeline_result.get("rent_ok"):
+        return "complete"
+    if pipeline_result.get("rent_deferred"):
+        return "deferred"
+    if (
+        rent.get("market_rent_estimate") is not None
+        or rent.get("approved_rent_ceiling") is not None
+        or rent.get("section8_fmr") is not None
+    ):
+        return "partial"
+    return "missing"
+
+
+def _derive_jurisdiction_status(pipeline_result: dict[str, Any]) -> str:
+    workflow = (((pipeline_result.get("workflow") or {}).get("summary") or {}).get("summary") or {})
+    jurisdiction = dict(workflow.get("jurisdiction") or {})
+    if jurisdiction.get("exists"):
+        return "complete"
+    if jurisdiction:
+        return "partial"
+    return "missing"
+
+
+def _derive_rehab_status(pipeline_result: dict[str, Any]) -> str:
+    workflow = (((pipeline_result.get("workflow") or {}).get("summary") or {}).get("summary") or {})
+    rehab = dict(workflow.get("rehab") or {})
+    if rehab.get("has_plan"):
+        return "complete"
+    if rehab:
+        return "partial"
+    return "missing"
+
+
+def _update_property_acquisition_completeness(db: Session, *, org_id: int, property_id: int, pipeline_result: dict[str, Any]) -> dict[str, str]:
     statuses = {
-        "geo": _status_from_bool(bool(pipeline_result.get("geo_ok"))),
-        "rent": "deferred" if bool(pipeline_result.get("rent_deferred")) else _status_from_bool(bool(pipeline_result.get("rent_ok"))),
-        "rehab": "complete" if bool((pipeline_result.get("workflow") or {}).get("summary", {}).get("summary", {}).get("rehab", {}).get("has_plan")) else "missing",
-        "risk": _status_from_bool(bool(pipeline_result.get("risk_ok"))),
-        "jurisdiction": "complete" if bool((pipeline_result.get("workflow") or {}).get("summary", {}).get("summary", {}).get("jurisdiction", {}).get("exists")) else "missing",
+        "geo": _derive_geo_status(pipeline_result),
+        "rent": _derive_rent_status(pipeline_result),
+        "rehab": _derive_rehab_status(pipeline_result),
+        "risk": _derive_risk_status(pipeline_result),
+        "jurisdiction": _derive_jurisdiction_status(pipeline_result),
         "cashflow": _status_from_bool(bool(pipeline_result.get("evaluate_ok"))),
     }
     db.execute(
@@ -252,12 +293,7 @@ def refresh_property_rent_assumptions(
     rentcast_api_key: Optional[str] = None,
     replace_existing_comps: bool = True,
 ) -> dict[str, Any]:
-    prop = db.scalar(
-        select(Property).where(
-            Property.org_id == int(org_id),
-            Property.id == int(property_id),
-        )
-    )
+    prop = db.scalar(select(Property).where(Property.org_id == int(org_id), Property.id == int(property_id)))
     if prop is None:
         return {"ok": False, "error": "property_not_found"}
 
@@ -307,26 +343,20 @@ def refresh_property_rent_assumptions(
     persist_ms = round((time.perf_counter() - t1) * 1000, 2)
 
     existing = db.scalar(
-        select(RentAssumption).where(
-            RentAssumption.org_id == int(org_id),
-            RentAssumption.property_id == int(property_id),
-        ).order_by(desc(RentAssumption.id))
+        select(RentAssumption)
+        .where(RentAssumption.org_id == int(org_id), RentAssumption.property_id == int(property_id))
+        .order_by(desc(RentAssumption.id))
     )
 
     created = False
     if existing is None:
-        existing = RentAssumption(
-            org_id=int(org_id),
-            property_id=int(property_id),
-        )
+        existing = RentAssumption(org_id=int(org_id), property_id=int(property_id))
         created = True
 
     updated_fields: list[str] = []
-
     if market_rent_estimate is not None:
         existing.market_rent_estimate = float(market_rent_estimate)
         updated_fields.append("market_rent_estimate")
-
     if hasattr(existing, "rent_reasonableness_comp") and rent_reasonableness_comp is not None:
         existing.rent_reasonableness_comp = float(rent_reasonableness_comp)
         updated_fields.append("rent_reasonableness_comp")
@@ -342,26 +372,30 @@ def refresh_property_rent_assumptions(
 
     t2 = time.perf_counter()
     db.add(existing)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(existing)
     commit_ms = round((time.perf_counter() - t2) * 1000, 2)
 
+    ok = bool(
+        _safe_float(getattr(existing, "market_rent_estimate", None)) is not None
+        or _safe_float(getattr(existing, "approved_rent_ceiling", None)) is not None
+        or _safe_float(getattr(existing, "section8_fmr", None)) is not None
+    )
+
     return {
-        "ok": True,
+        "ok": ok,
         "created": created,
         "property_id": int(property_id),
         "updated_fields": updated_fields,
         "market_rent_estimate": _safe_float(getattr(existing, "market_rent_estimate", None)),
-        "rent_reasonableness_comp": _safe_float(getattr(existing, "rent_reasonableness_comp", None))
-        if hasattr(existing, "rent_reasonableness_comp")
-        else rent_reasonableness_comp,
+        "rent_reasonableness_comp": _safe_float(getattr(existing, "rent_reasonableness_comp", None)) if hasattr(existing, "rent_reasonableness_comp") else rent_reasonableness_comp,
         "approved_rent_ceiling": _safe_float(getattr(existing, "approved_rent_ceiling", None)),
         "section8_fmr": _safe_float(getattr(existing, "section8_fmr", None)),
-        "timings_ms": {
-            "provider_call": provider_ms,
-            "persist_comps": persist_ms,
-            "commit": commit_ms,
-        },
+        "timings_ms": {"provider_call": provider_ms, "persist_comps": persist_ms, "commit": commit_ms},
     }
 
 
@@ -378,87 +412,57 @@ def _run_maybe_async(value: Any) -> Any:
     return value
 
 
+def _module_candidates(*names: str) -> list[str]:
+    out: list[str] = []
+    for name in names:
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
 def _seed_next_actions_if_available(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    """
-    Best-effort optional hook. Missing module or missing function should not be noisy
-    because next actions are not required for ingestion success.
-    """
-    module_name = "app.services.next_actions_service"
-    candidates: list[str] = [
+    module_candidates = _module_candidates(
+        "app.services.next_actions_service",
+    )
+    handler_candidates = [
         "seed_property_next_actions",
         "generate_property_next_actions",
         "recompute_property_next_actions",
     ]
 
-    try:
-        module = importlib.import_module(module_name)
-    except ModuleNotFoundError as exc:
-        if exc.name == module_name:
-            log.info(
-                "next_actions_seed_skipped_missing_module org_id=%s property_id=%s module=%s",
-                int(org_id),
-                int(property_id),
-                module_name,
-            )
-            return {
-                "ok": False,
-                "skipped": True,
-                "reason": "next_actions_service_unavailable",
-                "module": module_name,
-            }
-        log.exception(
-            "next_actions_seed_handler_failed",
-            extra={"org_id": int(org_id), "property_id": int(property_id), "module": module_name},
-        )
-        return {
-            "ok": False,
-            "skipped": True,
-            "reason": "next_actions_dependency_import_failed",
-            "module": module_name,
-            "error": str(exc),
-        }
-    except Exception as exc:
-        log.exception(
-            "next_actions_seed_handler_failed",
-            extra={"org_id": int(org_id), "property_id": int(property_id), "module": module_name},
-        )
-        return {
-            "ok": False,
-            "skipped": True,
-            "reason": "next_actions_module_import_failed",
-            "module": module_name,
-            "error": str(exc),
-        }
-
-    for fn_name in candidates:
-        fn = getattr(module, fn_name, None)
-        if not callable(fn):
-            continue
-
+    last_missing: str | None = None
+    for module_name in module_candidates:
         try:
-            out = fn(db, org_id=int(org_id), property_id=int(property_id))
-            out = _run_maybe_async(out)
-            return {"ok": True, "handler": fn_name, "result": out}
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            if exc.name == module_name:
+                last_missing = module_name
+                continue
+            log.exception("next_actions_seed_handler_failed", extra={"org_id": int(org_id), "property_id": int(property_id), "module_name": module_name})
+            return {"ok": False, "skipped": True, "reason": "next_actions_dependency_import_failed", "module_name": module_name, "error": str(exc)}
         except Exception as exc:
-            log.exception(
-                "next_actions_seed_handler_failed",
-                extra={"org_id": int(org_id), "property_id": int(property_id), "handler": fn_name},
-            )
-            return {
-                "ok": False,
-                "skipped": True,
-                "reason": "next_actions_handler_failed",
-                "handler": fn_name,
-                "error": str(exc),
-            }
+            log.exception("next_actions_seed_handler_failed", extra={"org_id": int(org_id), "property_id": int(property_id), "module_name": module_name})
+            return {"ok": False, "skipped": True, "reason": "next_actions_module_import_failed", "module_name": module_name, "error": str(exc)}
 
-    return {
-        "ok": False,
-        "skipped": True,
-        "reason": "next_actions_handler_missing",
-        "module": module_name,
-        "candidates": candidates,
-    }
+        for fn_name in handler_candidates:
+            fn = getattr(module, fn_name, None)
+            if not callable(fn):
+                continue
+            try:
+                out = _run_maybe_async(fn(db, org_id=int(org_id), property_id=int(property_id)))
+                return {"ok": True, "module_name": module_name, "handler": fn_name, "result": out}
+            except Exception as exc:
+                log.exception("next_actions_seed_handler_failed", extra={"org_id": int(org_id), "property_id": int(property_id), "handler": fn_name, "module_name": module_name})
+                return {"ok": False, "skipped": True, "reason": "next_actions_handler_failed", "module_name": module_name, "handler": fn_name, "error": str(exc)}
+
+    if last_missing:
+        log.info(
+            "next_actions_seed_skipped_missing_module org_id=%s property_id=%s module=%s",
+            int(org_id),
+            int(property_id),
+            last_missing,
+        )
+    return {"ok": False, "skipped": True, "reason": "next_actions_service_unavailable", "module_name": last_missing or module_candidates[0], "candidates": handler_candidates}
 
 
 def _try_risk_refresh(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
@@ -468,24 +472,45 @@ def _try_risk_refresh(db: Session, *, org_id: int, property_id: int) -> dict[str
         ("app.services.risk_scoring", "recompute_property_risk"),
         ("app.services.geo_enrichment", "enrich_property_risk"),
     ]
-
     for module_name, fn_name in candidates:
         try:
-            module = __import__(module_name, fromlist=[fn_name])
+            module = importlib.import_module(module_name)
             fn = getattr(module, fn_name, None)
             if callable(fn):
                 out = fn(db, org_id=int(org_id), property_id=int(property_id))
                 out = out if isinstance(out, dict) else {"ok": bool(out)}
                 out["handler"] = fn_name
+                out["module_name"] = module_name
                 return out
         except Exception:
-            log.exception(
-                "risk_refresh_handler_failed",
-                extra={"org_id": int(org_id), "property_id": int(property_id), "handler": fn_name},
-            )
+            _safe_rollback(db)
+            log.exception("risk_refresh_handler_failed", extra={"org_id": int(org_id), "property_id": int(property_id), "handler": fn_name, "module_name": module_name})
             continue
-
     return {"ok": False, "skipped": True, "reason": "risk_service_unavailable"}
+
+
+def _is_geo_payload_complete(payload: dict[str, Any] | None) -> bool:
+    data = dict(payload or {})
+    return bool(
+        data.get("lat") is not None
+        and data.get("lng") is not None
+        and _nonblank(data.get("normalized_address"))
+        and _nonblank(data.get("geocode_source"))
+    )
+
+
+def _is_risk_payload_complete(payload: dict[str, Any] | None) -> bool:
+    data = dict(payload or {})
+    return bool(data.get("crime_score") is not None and data.get("offender_count") is not None)
+
+
+def _is_rent_payload_complete(payload: dict[str, Any] | None) -> bool:
+    data = dict(payload or {})
+    return bool(
+        data.get("market_rent_estimate") is not None
+        or data.get("approved_rent_ceiling") is not None
+        or data.get("section8_fmr") is not None
+    )
 
 
 def execute_post_ingestion_pipeline(
@@ -512,10 +537,7 @@ def execute_post_ingestion_pipeline(
     }
 
     def _record_step(step: str, ok: bool, payload: Any = None, *, skipped: bool = False) -> None:
-        result["step_status"][step] = {
-            "ok": bool(ok),
-            "skipped": bool(skipped),
-        }
+        result["step_status"][step] = {"ok": bool(ok), "skipped": bool(skipped)}
         if payload is not None:
             result[step] = payload
 
@@ -536,21 +558,44 @@ def execute_post_ingestion_pipeline(
             ),
         )
         geo_res = geo_res if isinstance(geo_res, dict) else {"ok": bool(geo_res)}
-        result["geo_ok"] = bool(geo_res.get("ok"))
+        result["geo_ok"] = _is_geo_payload_complete(geo_res)
+        if not result["geo_ok"] and geo_res.get("geocode_attempted"):
+            forced_geo_res = _timed_step(
+                result,
+                step_key="geo_force_retry",
+                fn=lambda: _run_maybe_async(
+                    enrich_property_geo(
+                        db,
+                        org_id=int(org_id),
+                        property_id=int(property_id),
+                        google_api_key=get_google_maps_api_key(),
+                        force=True,
+                    )
+                ),
+            )
+            forced_geo_res = forced_geo_res if isinstance(forced_geo_res, dict) else {"ok": bool(forced_geo_res)}
+            if _is_geo_payload_complete(forced_geo_res):
+                geo_res = forced_geo_res
+                geo_res["forced_retry"] = True
+                result["geo_ok"] = True
+            else:
+                geo_res["forced_retry"] = True
+                geo_res["forced_retry_result"] = forced_geo_res
+        geo_res["ok"] = result["geo_ok"]
         _record_step("geo", result["geo_ok"], geo_res, skipped=bool(geo_res.get("skipped")))
     except Exception as e:
+        _safe_rollback(db)
         result["errors"].append(f"geo:{type(e).__name__}:{e}")
         _record_step("geo", False, {"ok": False, "error": str(e)})
 
     try:
-        risk_res = _timed_step(
-            result,
-            step_key="risk",
-            fn=lambda: _try_risk_refresh(db, org_id=int(org_id), property_id=int(property_id)),
-        )
-        result["risk_ok"] = bool(risk_res.get("ok"))
+        risk_res = _timed_step(result, step_key="risk", fn=lambda: _try_risk_refresh(db, org_id=int(org_id), property_id=int(property_id)))
+        risk_res = risk_res if isinstance(risk_res, dict) else {"ok": bool(risk_res)}
+        result["risk_ok"] = _is_risk_payload_complete(risk_res)
+        risk_res["ok"] = result["risk_ok"]
         _record_step("risk", result["risk_ok"], risk_res, skipped=bool(risk_res.get("skipped")))
     except Exception as e:
+        _safe_rollback(db)
         result["errors"].append(f"risk:{type(e).__name__}:{e}")
         _record_step("risk", False, {"ok": False, "error": str(e)})
 
@@ -559,26 +604,20 @@ def execute_post_ingestion_pipeline(
             rent_res = _timed_step(
                 result,
                 step_key="rent",
-                fn=lambda: refresh_property_rent_assumptions(
-                    db,
-                    org_id=int(org_id),
-                    property_id=int(property_id),
-                ),
+                fn=lambda: refresh_property_rent_assumptions(db, org_id=int(org_id), property_id=int(property_id)),
             )
-            result["rent_ok"] = bool(rent_res.get("ok"))
+            rent_res = rent_res if isinstance(rent_res, dict) else {"ok": bool(rent_res)}
+            result["rent_ok"] = _is_rent_payload_complete(rent_res)
+            rent_res["ok"] = result["rent_ok"]
             _record_step("rent", result["rent_ok"], rent_res, skipped=bool(rent_res.get("skipped")))
         else:
             result["rent_ok"] = False
             result["rent_deferred"] = True
             result["timings_ms"]["rent"] = 0.0
-            rent_payload = {
-                "ok": False,
-                "skipped": True,
-                "reason": "deferred_budgeted_refresh",
-                "publish_without_rent": publish_without_rent(),
-            }
+            rent_payload = {"ok": False, "skipped": True, "reason": "deferred_budgeted_refresh", "publish_without_rent": publish_without_rent()}
             _record_step("rent", False, rent_payload, skipped=True)
     except Exception as e:
+        _safe_rollback(db)
         result["errors"].append(f"rent:{type(e).__name__}:{e}")
         _record_step("rent", False, {"ok": False, "error": str(e)})
 
@@ -590,7 +629,6 @@ def execute_post_ingestion_pipeline(
 
         def _evaluate_step():
             step_result: dict[str, Any] = {}
-
             if result.get("rent_ok"):
                 explain_res = explain_rent(
                     property_id=int(property_id),
@@ -606,7 +644,6 @@ def execute_post_ingestion_pipeline(
                     "approved_rent_ceiling": getattr(explain_res, "approved_rent_ceiling", None),
                     "cap_reason": getattr(explain_res, "cap_reason", None),
                 }
-
             eval_res = evaluate_property_core(
                 db,
                 org_id=int(org_id),
@@ -621,25 +658,22 @@ def execute_post_ingestion_pipeline(
         evaluate_res = _timed_step(result, step_key="evaluate", fn=_evaluate_step)
         if isinstance(evaluate_res, dict) and "rent_explain" in evaluate_res:
             result["rent_explain"] = evaluate_res["rent_explain"]
-
         eval_payload = evaluate_res.get("evaluate", {}) if isinstance(evaluate_res, dict) else {}
         result["evaluate_ok"] = bool(eval_payload.get("ok"))
         _record_step("evaluate", result["evaluate_ok"], eval_payload)
     except Exception as e:
+        _safe_rollback(db)
         result["errors"].append(f"evaluate:{type(e).__name__}:{e}")
         _record_step("evaluate", False, {"ok": False, "error": str(e)})
 
     try:
         from ..services.property_state_machine import sync_property_state
 
-        _timed_step(
-            result,
-            step_key="state",
-            fn=lambda: sync_property_state(db, org_id=int(org_id), property_id=int(property_id)),
-        )
+        _timed_step(result, step_key="state", fn=lambda: sync_property_state(db, org_id=int(org_id), property_id=int(property_id)))
         result["state_ok"] = True
         _record_step("state", True, {"ok": True})
     except Exception as e:
+        _safe_rollback(db)
         result["errors"].append(f"state:{type(e).__name__}:{e}")
         _record_step("state", False, {"ok": False, "error": str(e)})
 
@@ -649,16 +683,12 @@ def execute_post_ingestion_pipeline(
         workflow_res = _timed_step(
             result,
             step_key="workflow",
-            fn=lambda: build_workflow_summary(
-                db,
-                org_id=int(org_id),
-                property_id=int(property_id),
-                recompute=False,
-            ),
+            fn=lambda: build_workflow_summary(db, org_id=int(org_id), property_id=int(property_id), recompute=False),
         )
         result["workflow_ok"] = True
         _record_step("workflow", True, {"ok": True, "summary": workflow_res})
     except Exception as e:
+        _safe_rollback(db)
         result["errors"].append(f"workflow:{type(e).__name__}:{e}")
         _record_step("workflow", False, {"ok": False, "error": str(e)})
 
@@ -666,20 +696,12 @@ def execute_post_ingestion_pipeline(
         next_actions_res = _timed_step(
             result,
             step_key="next_actions",
-            fn=lambda: _seed_next_actions_if_available(
-                db,
-                org_id=int(org_id),
-                property_id=int(property_id),
-            ),
+            fn=lambda: _seed_next_actions_if_available(db, org_id=int(org_id), property_id=int(property_id)),
         )
         result["next_actions_ok"] = bool(next_actions_res.get("ok"))
-        _record_step(
-            "next_actions",
-            result["next_actions_ok"],
-            next_actions_res,
-            skipped=bool(next_actions_res.get("skipped")),
-        )
+        _record_step("next_actions", result["next_actions_ok"], next_actions_res, skipped=bool(next_actions_res.get("skipped")))
     except Exception as e:
+        _safe_rollback(db)
         result["errors"].append(f"next_actions:{type(e).__name__}:{e}")
         _record_step("next_actions", False, {"ok": False, "error": str(e)})
 
@@ -692,6 +714,7 @@ def execute_post_ingestion_pipeline(
         bool(result.get("workflow_ok")),
     ]
     result["partial"] = any(oks) and not all(oks)
+    result["needs_followup"] = not all(oks)
 
     try:
         result["completeness_status"] = _update_property_acquisition_completeness(
@@ -721,13 +744,11 @@ def execute_post_ingestion_pipeline(
             "timings_ms": result.get("timings_ms"),
         },
     )
-
     return result
 
 
 def apply_pipeline_summary(summary: dict[str, Any], pipeline_res: dict[str, Any], property_id: int) -> None:
     summary["post_import_pipeline_attempted"] = int(summary.get("post_import_pipeline_attempted", 0) or 0) + 1
-
     if pipeline_res.get("geo_ok"):
         summary["geo_enriched"] = int(summary.get("geo_enriched", 0) or 0) + 1
     if pipeline_res.get("risk_ok"):
@@ -781,4 +802,3 @@ def apply_pipeline_summary(summary: dict[str, Any], pipeline_res: dict[str, Any]
         except Exception:
             continue
     summary["post_import_timing_ms_total"] = timing_agg
-    

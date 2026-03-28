@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import hashlib
@@ -78,6 +79,108 @@ class RentCastListingSource:
         if s.lower() in {"none", "null", "all", "any"}:
             return None
         return s
+
+    def lookup_exact_address(
+        self,
+        *,
+        credentials: dict[str, Any],
+        address: str,
+        city: str | None = None,
+        state: str | None = None,
+        zip_code: str | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any] | None:
+        api_key = self._get_api_key(credentials or {})
+        params: dict[str, Any] = {
+            "address": str(address or "").strip(),
+            "limit": max(1, min(int(limit or 10), 50)),
+            "status": "Active",
+        }
+        if city:
+            params["city"] = str(city).strip()
+        if state:
+            params["state"] = str(state).strip()
+        if zip_code:
+            params["zipCode"] = str(zip_code).strip()
+
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(
+                self.SALE_LISTINGS_URL,
+                params=params,
+                headers=self._headers(api_key),
+            )
+            response.raise_for_status()
+            payload = response.json()
+
+        rows: list[dict[str, Any]]
+        if isinstance(payload, list):
+            rows = [x for x in payload if isinstance(x, dict)]
+        elif isinstance(payload, dict):
+            rows = [x for x in payload.get("listings", []) if isinstance(x, dict)]
+        else:
+            rows = []
+
+        if not rows:
+            return None
+
+        target = self._normalize_match_string(address)
+        ranked = sorted(
+            rows,
+            key=lambda row: self._score_exact_address_match(
+                row=row,
+                address=address,
+                city=city,
+                state=state,
+                zip_code=zip_code,
+            ),
+            reverse=True,
+        )
+        best = ranked[0]
+        if self._score_exact_address_match(
+            row=best,
+            address=address,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+        ) <= 0:
+            return None
+        return best
+
+    def _normalize_match_string(self, value: Any) -> str:
+        return " ".join(str(value or "").strip().lower().replace(",", " ").split())
+
+    def _score_exact_address_match(
+        self,
+        *,
+        row: dict[str, Any],
+        address: str,
+        city: str | None,
+        state: str | None,
+        zip_code: str | None,
+    ) -> int:
+        target_address = self._normalize_match_string(address)
+        target_city = self._normalize_match_string(city)
+        target_state = self._normalize_match_string(state)
+        target_zip = str(zip_code or "").strip()
+
+        formatted = self._normalize_match_string(row.get("formattedAddress"))
+        line1 = self._normalize_match_string(row.get("addressLine1"))
+        row_city = self._normalize_match_string(row.get("city"))
+        row_state = self._normalize_match_string(row.get("state"))
+        row_zip = str(row.get("zipCode") or "").strip()
+
+        score = 0
+        if formatted == target_address or line1 == target_address:
+            score += 5
+        if target_address and target_address in formatted:
+            score += 3
+        if target_city and row_city == target_city:
+            score += 2
+        if target_state and row_state == target_state:
+            score += 1
+        if target_zip and row_zip == target_zip:
+            score += 2
+        return score
 
     def _normalize_property_type(self, value: Any) -> str:
         raw = str(value or "").strip().lower()
@@ -174,6 +277,20 @@ class RentCastListingSource:
 
         return deduped
 
+    def _normalize_query_strategy(self, value: Any) -> str:
+        raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        allowed = {
+            "city_then_zip",
+            "zip_then_city",
+            "zip_only",
+            "city_only",
+            "city_and_zip",
+            "broad_then_zip",
+        }
+        if raw in allowed:
+            return raw
+        return "city_then_zip"
+
     def _coerce_photo_rows(self, raw: Any) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         if not raw:
@@ -266,6 +383,8 @@ class RentCastListingSource:
 
     def _pick_update_marker(self, item: dict[str, Any]) -> str | None:
         for key in (
+            "status",
+            "statusText",
             "lastSeenDate",
             "lastSeen",
             "updatedAt",
@@ -296,7 +415,9 @@ class RentCastListingSource:
                     "state": self._pick_state(item),
                     "zip": self._pick_zip(item),
                     "price": self._safe_float(item.get("price") or item.get("listPrice"), None),
+                    "status": str(item.get("status") or item.get("statusText") or "").strip() or None,
                     "updated": self._pick_update_marker(item),
+                    "url": self._pick_external_url(item),
                 }
             )
         return self._hash_payload(digest_rows)
@@ -381,51 +502,95 @@ class RentCastListingSource:
             "raw_json": item,
         }
 
+    def _append_variant(
+        self,
+        variants: list[dict[str, Any]],
+        *,
+        key: str,
+        scope: str,
+        query: dict[str, Any],
+        post_filter: dict[str, Any],
+        strict_zip_match: bool = False,
+    ) -> None:
+        variants.append(
+            {
+                "key": key,
+                "scope": scope,
+                "query": query,
+                "post_filter": post_filter,
+                "strict_zip_match": bool(strict_zip_match),
+            }
+        )
+
     def _build_query_variants(self, config: dict[str, Any]) -> list[dict[str, Any]]:
         state = self._normalize_optional_text(config.get("state")) or "MI"
         city = self._normalize_optional_text(config.get("city"))
         county = self._normalize_optional_text(config.get("county"))
         zip_codes = self._coerce_zip_codes(config)
+        query_strategy = self._normalize_query_strategy(config.get("query_strategy"))
 
         variants: list[dict[str, Any]] = []
 
-        if city:
-            variants.append(
-                {
-                    "key": f"city:{state.lower()}:{city.lower()}",
-                    "scope": "city",
-                    "query": {"state": state, "city": city},
-                    "post_filter": {
-                        "state": state,
-                        "city": city,
-                        "county": county,
-                        "zip_codes": zip_codes,
-                    },
-                }
+        def add_city(strict_zip_match: bool = False, broad: bool = False) -> None:
+            if not city:
+                return
+            suffix = ":broad" if broad else ""
+            self._append_variant(
+                variants,
+                key=f"city:{state.lower()}:{city.lower()}{suffix}",
+                scope="city",
+                query={"state": state, "city": city},
+                post_filter={
+                    "state": state,
+                    "city": city,
+                    "county": county,
+                    "zip_codes": zip_codes,
+                    "broad_city_match": bool(broad),
+                },
+                strict_zip_match=strict_zip_match,
             )
 
-        for zip_code in zip_codes:
-            variants.append(
-                {
-                    "key": f"zip:{state.lower()}:{zip_code}",
-                    "scope": "zip",
-                    "query": {"state": state, "zipCode": zip_code},
-                    "post_filter": {
+        def add_zip() -> None:
+            for zip_code in zip_codes:
+                self._append_variant(
+                    variants,
+                    key=f"zip:{state.lower()}:{zip_code}",
+                    scope="zip",
+                    query={"state": state, "zipCode": zip_code},
+                    post_filter={
                         "state": state,
                         "zip_code": zip_code,
+                        "city": city,
                         "county": county,
                     },
-                }
-            )
+                    strict_zip_match=True,
+                )
+
+        if query_strategy == "zip_only":
+            add_zip()
+        elif query_strategy == "city_only":
+            add_city(strict_zip_match=False)
+        elif query_strategy == "zip_then_city":
+            add_zip()
+            add_city(strict_zip_match=False)
+        elif query_strategy == "city_and_zip":
+            add_city(strict_zip_match=True)
+            add_zip()
+        elif query_strategy == "broad_then_zip":
+            add_city(strict_zip_match=False, broad=True)
+            add_zip()
+        else:
+            add_city(strict_zip_match=False)
+            add_zip()
 
         if not variants:
-            variants.append(
-                {
-                    "key": f"state:{state.lower()}",
-                    "scope": "state",
-                    "query": {"state": state},
-                    "post_filter": {"state": state, "city": city, "county": county},
-                }
+            self._append_variant(
+                variants,
+                key=f"state:{state.lower()}",
+                scope="state",
+                query={"state": state},
+                post_filter={"state": state, "city": city, "county": county, "zip_codes": zip_codes},
+                strict_zip_match=False,
             )
 
         deduped: list[dict[str, Any]] = []
@@ -453,8 +618,11 @@ class RentCastListingSource:
         expected_city = self._normalize_optional_text(post_filter.get("city"))
         expected_county = self._normalize_optional_text(post_filter.get("county"))
         expected_zip = self._normalize_optional_text(post_filter.get("zip_code"))
-        expected_zip_codes = post_filter.get("zip_codes") or []
+        expected_zip_codes = {
+            str(z).strip() for z in (post_filter.get("zip_codes") or []) if str(z).strip()
+        }
         scope = str(variant.get("scope") or "").strip().lower()
+        strict_zip_match = bool(variant.get("strict_zip_match", False))
 
         row_state = self._normalize_optional_text(self._pick_state(item))
         row_city = self._normalize_optional_text(self._pick_city(item))
@@ -467,18 +635,24 @@ class RentCastListingSource:
         if scope == "city":
             if expected_city and (row_city or "").lower() != expected_city.lower():
                 return False
-            if expected_zip_codes and row_zip and row_zip not in set(str(z) for z in expected_zip_codes):
+            if strict_zip_match and expected_zip_codes and (row_zip or "") not in expected_zip_codes:
+                return False
+            if expected_county and row_county and row_county.lower() != expected_county.lower():
                 return False
             return True
 
         if scope == "zip":
             if expected_zip and (row_zip or "") != expected_zip:
                 return False
+            if expected_city and row_city and row_city.lower() != expected_city.lower():
+                return False
             return True
 
         if expected_city and row_city and row_city.lower() != expected_city.lower():
             return False
         if expected_county and row_county and row_county.lower() != expected_county.lower():
+            return False
+        if strict_zip_match and expected_zip_codes and (row_zip or "") not in expected_zip_codes:
             return False
 
         return True
@@ -497,9 +671,10 @@ class RentCastListingSource:
         limit: int,
         sort_mode: str | None = None,
     ) -> dict[str, Any]:
-        offset = max(0, (max(1, int(page)) - 1) * max(1, min(int(limit), 500)))
+        limit_value = max(1, min(int(limit), 500))
+        offset = max(0, (max(1, int(page)) - 1) * limit_value)
         params: dict[str, Any] = {
-            "limit": max(1, min(int(limit), 500)),
+            "limit": limit_value,
             "offset": offset,
             "status": "Active",
             "includeTotalCount": "true",
@@ -524,7 +699,16 @@ class RentCastListingSource:
         if provider_price:
             params["price"] = provider_price
 
-        _ = sort_mode
+        normalized_sort = str(sort_mode or "newest").strip().lower()
+        if normalized_sort in {"newest", "latest"}:
+            params["sort"] = "listedDate:desc"
+        elif normalized_sort in {"oldest"}:
+            params["sort"] = "listedDate:asc"
+        elif normalized_sort in {"price_desc", "highest_price"}:
+            params["sort"] = "price:desc"
+        elif normalized_sort in {"price_asc", "lowest_price"}:
+            params["sort"] = "price:asc"
+
         return params
 
     def load_rows_page(
@@ -582,11 +766,12 @@ class RentCastListingSource:
         )
 
         logger.info(
-            "rentcast_fetch params=%s cursor=%s market_slug=%s variant=%s",
+            "rentcast_fetch params=%s cursor=%s market_slug=%s variant=%s variant_count=%s",
             params,
             resolved_cursor,
             config.get("market_slug"),
             active_variant,
+            len(variants),
         )
 
         with httpx.Client(timeout=30.0) as client:
@@ -634,6 +819,15 @@ class RentCastListingSource:
 
         has_more_variants = shard_num < len(variants)
 
+        base_provider_cursor = {
+            "variant_key": current_variant_key,
+            "variant_count": len(variants),
+            "total_count": total_count,
+            "offset": offset,
+            "matched_count": len(matched_raw_rows),
+            "raw_count": len(raw_rows),
+        }
+
         if variant_exhausted and has_more_variants:
             next_cursor = {
                 "market_slug": str(config.get("market_slug") or "").strip().lower() or None,
@@ -643,8 +837,8 @@ class RentCastListingSource:
                 "page_fingerprint": None,
                 "page_changed": True,
                 "provider_cursor": {
+                    **base_provider_cursor,
                     "variant_key": str(variants[shard_num].get("key") or "").strip() or None,
-                    "total_count": total_count,
                     "offset": 0,
                 },
             }
@@ -657,11 +851,7 @@ class RentCastListingSource:
                 "sort_mode": sort_mode_value,
                 "page_fingerprint": page_fingerprint,
                 "page_changed": page_changed,
-                "provider_cursor": {
-                    "variant_key": current_variant_key,
-                    "total_count": total_count,
-                    "offset": offset,
-                },
+                "provider_cursor": base_provider_cursor,
             }
             exhausted = True
         else:
@@ -673,8 +863,7 @@ class RentCastListingSource:
                 "page_fingerprint": page_fingerprint,
                 "page_changed": page_changed,
                 "provider_cursor": {
-                    "variant_key": current_variant_key,
-                    "total_count": total_count,
+                    **base_provider_cursor,
                     "offset": offset + limit_value,
                 },
             }

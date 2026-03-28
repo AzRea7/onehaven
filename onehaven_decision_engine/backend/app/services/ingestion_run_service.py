@@ -105,6 +105,30 @@ def _apply_run_finish_state(
     row.error_json = _json_safe(error_json) if error_json is not None else None
 
 
+def _derive_final_run_status(
+    *,
+    requested_status: str,
+    final_summary: dict[str, Any],
+    error_summary: str | None,
+    error_json: dict[str, Any] | None,
+) -> str:
+    status = str(requested_status or "completed").strip().lower() or "completed"
+    if status in {"failed", "skipped_locked", "skipped_duplicate_dataset"}:
+        return status
+
+    partial_signals = [
+        int(final_summary.get("post_import_failures") or 0),
+        int(final_summary.get("post_import_partials") or 0),
+        int(final_summary.get("invalid_rows") or 0),
+        len(list(final_summary.get("property_errors") or [])),
+    ]
+    if error_summary or error_json:
+        return "failed"
+    if any(x > 0 for x in partial_signals):
+        return "partial"
+    return "completed" if status in {"success", "partial", "completed"} else status
+
+
 def finish_run_in_new_session(
     *,
     run_id: int,
@@ -162,9 +186,16 @@ def finish_run(
         final_summary.setdefault("max_pages_budget", existing_summary.get("max_pages_budget"))
         final_summary.setdefault("market_exhausted", existing_summary.get("market_exhausted"))
 
+    final_status = _derive_final_run_status(
+        requested_status=status,
+        final_summary=final_summary,
+        error_summary=error_summary,
+        error_json=error_json,
+    )
+
     _apply_run_finish_state(
         row,
-        status=status,
+        status=final_status,
         final_summary=final_summary,
         error_summary=error_summary,
         error_json=error_json,
@@ -174,7 +205,7 @@ def finish_run(
     source = db.get(IngestionSource, int(row.source_id))
     if source is not None:
         source.last_synced_at = row.finished_at
-        if status in {"success", "partial", "completed"}:
+        if final_status in {"success", "partial", "completed"}:
             source.last_success_at = row.finished_at
             source.last_error_summary = None
             source.status = "healthy"
@@ -208,6 +239,19 @@ def _summary_for_list(run: IngestionRun) -> dict[str, Any]:
             "shard": cursor_advanced_to.get("shard"),
             "sort_mode": cursor_advanced_to.get("sort_mode"),
             "page_changed": cursor_advanced_to.get("page_changed"),
+        },
+        "refresh_cursor": {
+            "market_slug": market_cursor.get("market_slug"),
+            "page": market_cursor.get("page"),
+            "shard": market_cursor.get("shard"),
+            "sort_mode": market_cursor.get("sort_mode"),
+            "refresh_window_pages": market_cursor.get("refresh_window_pages"),
+            "page_fingerprint": market_cursor.get("page_fingerprint"),
+            "page_changed": market_cursor.get("page_changed"),
+            "provider_cursor": market_cursor.get("provider_cursor"),
+            "last_page": market_cursor.get("last_page"),
+            "market_exhausted": market_cursor.get("market_exhausted"),
+            "status": market_cursor.get("status"),
         },
         "market_cursor": {
             "market_slug": market_cursor.get("market_slug"),
