@@ -22,7 +22,15 @@ const STAGES = [
 ];
 
 const SORTS = [
-  { value: "", label: "Newest" },
+  { value: "", label: "Default" },
+  { value: "relevance", label: "Relevance" },
+  { value: "best_cashflow", label: "Best cashflow" },
+  { value: "best_dscr", label: "Best DSCR" },
+  { value: "best_rent_gap", label: "Best rent gap" },
+  { value: "lowest_risk", label: "Lowest risk" },
+  { value: "newest", label: "Newest" },
+  { value: "lowest_price", label: "Lowest price" },
+  { value: "highest_price", label: "Highest price" },
   { value: "oldest", label: "Oldest" },
   { value: "address_asc", label: "Address A → Z" },
   { value: "address_desc", label: "Address Z → A" },
@@ -107,7 +115,7 @@ export default function GlobalFilters({ className }: { className?: string }) {
     <Surface
       className={className}
       title="Global filters"
-      subtitle="URL-backed filters shared across dashboard, properties, and drilldowns."
+      subtitle="URL-backed filters shared across dashboard, properties, and investor ranking views."
       padding="md"
       actions={
         <div className="flex items-center gap-2">
@@ -298,6 +306,55 @@ export default function GlobalFilters({ className }: { className?: string }) {
                   inputMode="numeric"
                   className="oh-input"
                 />
+              </Field>
+            </div>
+
+            <div className="lg:col-span-3">
+              <Field label="Deals only">
+                <select
+                  value={filters.deals_only || "true"}
+                  onChange={(e) =>
+                    set({ ...filters, deals_only: e.target.value })
+                  }
+                  className="oh-input"
+                >
+                  <option value="true">Only deal candidates</option>
+                  <option value="false">Include everything</option>
+                </select>
+              </Field>
+            </div>
+
+            <div className="lg:col-span-3">
+              <Field label="Suppressed rows">
+                <select
+                  value={filters.include_suppressed || "false"}
+                  onChange={(e) =>
+                    set({ ...filters, include_suppressed: e.target.value })
+                  }
+                  className="oh-input"
+                >
+                  <option value="false">Hide suppressed</option>
+                  <option value="true">Include suppressed</option>
+                </select>
+              </Field>
+            </div>
+
+            <div className="lg:col-span-6">
+              <Field label="Hidden reason">
+                <select
+                  value={filters.hidden_reason || ""}
+                  onChange={(e) =>
+                    set({ ...filters, hidden_reason: e.target.value })
+                  }
+                  className="oh-input"
+                >
+                  <option value="">All hidden reasons</option>
+                  <option value="inactive_listing">Inactive listing</option>
+                  <option value="low_score">Low score</option>
+                  <option value="bad_risk">Bad risk</option>
+                  <option value="weak_cashflow">Weak cashflow</option>
+                  <option value="weak_dscr">Weak DSCR</option>
+                </select>
               </Field>
             </div>
           </>

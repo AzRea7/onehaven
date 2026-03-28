@@ -16,8 +16,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .acquisition_deadline_service import list_deadlines
-from .acquisition_document_review_service import create_field_suggestions_from_document, list_document_field_values
-from .acquisition_participant_service import list_participants
+from .acquisition_document_review_service import (
+    create_field_suggestions_from_document,
+    list_document_field_values,
+)
+from .acquisition_participant_service import (
+    list_participants,
+    seed_listing_contacts_from_property,
+)
 from .document_parsing_service import parse_document
 from .virus_scanning_service import scan_file
 from .acquisition_tag_service import list_property_tags, replace_property_tags
@@ -32,7 +38,6 @@ DEFAULT_REQUIRED_DOCS = [
     {"kind": "insurance_binder", "label": "Insurance binder"},
     {"kind": "inspection_report", "label": "Inspection / due diligence"},
 ]
-
 
 PROMOTION_REQUIRED_FIELDS = (
     "purchase_price",
@@ -106,6 +111,13 @@ def _days_to_close(target_close_date: str | None) -> int | None:
         return None
 
 
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _acquisition_upload_root() -> Path:
     raw = os.getenv("ACQUISITION_UPLOAD_DIR", "/app/data/acquisition_uploads")
     root = Path(raw).resolve()
@@ -116,7 +128,7 @@ def _acquisition_upload_root() -> Path:
 def _sanitize_filename(filename: str | None) -> str:
     raw = (filename or "upload").strip()
     raw = raw.replace("\\", "/").split("/")[-1]
-    raw = re.sub(r"[^A-Za-z0-9._\- ]+", "_", raw).strip()
+    raw = re.sub(r"[^A-Za-z0-9._\\- ]+", "_", raw).strip()
     raw = re.sub(r"\s+", "_", raw)
     if not raw:
         raw = "upload"
@@ -269,6 +281,44 @@ def ensure_acquisition_record(db: Session, *, org_id: int, property_id: int) -> 
     ) or {}
 
 
+def _merge_contacts_json_with_participants(
+    *,
+    existing_contacts: list[dict[str, Any]],
+    participants: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+
+    seen_keys: set[tuple[str, str]] = set()
+    for row in existing_contacts:
+        role = str(row.get("role") or "").strip().lower()
+        name = str(row.get("name") or "").strip().lower()
+        seen_keys.add((role, name))
+        out.append(row)
+
+    for row in participants:
+        role = str(row.get("role") or "").strip().lower()
+        name = str(row.get("name") or "").strip().lower()
+        if not role or not name:
+            continue
+        if (role, name) in seen_keys:
+            continue
+        out.append(
+            {
+                "role": row.get("role"),
+                "name": row.get("name"),
+                "email": row.get("email"),
+                "phone": row.get("phone"),
+                "company": row.get("company"),
+                "is_primary": bool(row.get("is_primary") or False),
+                "waiting_on": bool(row.get("waiting_on") or False),
+                "source_type": row.get("source_type"),
+            }
+        )
+        seen_keys.add((role, name))
+
+    return out
+
+
 def update_acquisition_record(
     db: Session,
     *,
@@ -277,6 +327,18 @@ def update_acquisition_record(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+
+    if payload.get("contacts_json") is None:
+        existing = ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+        current_contacts = _safe_json_load(existing.get("contacts_json"), [])
+        participants = list_participants(db, org_id=org_id, property_id=property_id)
+        payload = {
+            **payload,
+            "contacts_json": _merge_contacts_json_with_participants(
+                existing_contacts=current_contacts if isinstance(current_contacts, list) else [],
+                participants=participants,
+            ),
+        }
 
     allowed_fields = {
         "status",
@@ -329,15 +391,6 @@ def update_acquisition_record(
     return ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
 
 
-
-
-def _clean_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
 def _as_float_or_none(value: Any) -> float | None:
     if value in (None, ""):
         return None
@@ -379,7 +432,14 @@ def _validate_promotion_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="purchase_price must be greater than 0.")
 
     loan_type = str(cleaned.get("loan_type") or "").strip().lower()
-    allowed_loan_types = {"cash", "dscr", "conventional", "hard_money", "private_money", "seller_finance"}
+    allowed_loan_types = {
+        "cash",
+        "dscr",
+        "conventional",
+        "hard_money",
+        "private_money",
+        "seller_finance",
+    }
     if loan_type and loan_type not in allowed_loan_types:
         raise HTTPException(status_code=422, detail="loan_type is invalid.")
 
@@ -388,7 +448,10 @@ def _validate_promotion_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if loan_amount in (None, ""):
             missing.append("loan_amount")
         elif isinstance(loan_amount, (int, float)) and loan_amount <= 0:
-            raise HTTPException(status_code=422, detail="loan_amount must be greater than 0 for financed deals.")
+            raise HTTPException(
+                status_code=422,
+                detail="loan_amount must be greater than 0 for financed deals.",
+            )
 
     if missing:
         raise HTTPException(
@@ -403,6 +466,25 @@ def _validate_promotion_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def _property_listing_contact_seed(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> list[dict[str, Any]]:
+    try:
+        return seed_listing_contacts_from_property(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            mark_primary=True,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        return list_participants(db, org_id=org_id, property_id=property_id)
+
+
 def promote_property_to_acquisition(
     db: Session,
     *,
@@ -415,7 +497,22 @@ def promote_property_to_acquisition(
         db.execute(
             text(
                 """
-                select id, org_id, address, city, state, zip, county, asking_price
+                select
+                    id,
+                    org_id,
+                    address,
+                    city,
+                    state,
+                    zip,
+                    county,
+                    asking_price,
+                    listing_agent_name,
+                    listing_agent_phone,
+                    listing_agent_email,
+                    listing_agent_website,
+                    listing_office_name,
+                    listing_office_phone,
+                    listing_office_email
                 from properties
                 where org_id = :org_id and id = :property_id
                 limit 1
@@ -443,6 +540,9 @@ def promote_property_to_acquisition(
         )
 
     cleaned = _validate_promotion_payload(payload)
+
+    _property_listing_contact_seed(db, org_id=org_id, property_id=property_id)
+
     acquisition = update_acquisition_record(
         db,
         org_id=int(org_id),
@@ -480,320 +580,12 @@ def promote_property_to_acquisition(
     }
 
 
-def add_acquisition_document(
+def get_acquisition_detail(
     db: Session,
     *,
     org_id: int,
     property_id: int,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
-
-    extracted_text = (payload.get("extracted_text") or "").strip()
-    extracted_fields = payload.get("extracted_fields") or {}
-
-    db.execute(
-        text(
-            """
-            insert into acquisition_documents (
-                org_id,
-                property_id,
-                kind,
-                name,
-                original_filename,
-                storage_path,
-                storage_url,
-                content_type,
-                file_size_bytes,
-                sha256,
-                upload_status,
-                scan_status,
-                scan_result,
-                parse_status,
-                parser_version,
-                preview_text,
-                status,
-                source_url,
-                extracted_text,
-                extracted_fields_json,
-                notes,
-                replaced_by_document_id,
-                deleted_at,
-                deleted_reason,
-                created_at,
-                updated_at
-            )
-            values (
-                :org_id,
-                :property_id,
-                :kind,
-                :name,
-                :original_filename,
-                :storage_path,
-                :storage_url,
-                :content_type,
-                :file_size_bytes,
-                :sha256,
-                :upload_status,
-                :scan_status,
-                :scan_result,
-                :parse_status,
-                :parser_version,
-                :preview_text,
-                :status,
-                :source_url,
-                :extracted_text,
-                :extracted_fields_json,
-                :notes,
-                :replaced_by_document_id,
-                :deleted_at,
-                :deleted_reason,
-                now(),
-                now()
-            )
-            """
-        ),
-        {
-            "org_id": org_id,
-            "property_id": property_id,
-            "kind": payload.get("kind") or "other",
-            "name": payload.get("name") or "Imported document",
-            "original_filename": payload.get("original_filename"),
-            "storage_path": payload.get("storage_path"),
-            "storage_url": payload.get("storage_url"),
-            "content_type": payload.get("content_type"),
-            "file_size_bytes": payload.get("file_size_bytes"),
-            "sha256": payload.get("sha256"),
-            "upload_status": payload.get("upload_status") or "received",
-            "scan_status": payload.get("scan_status"),
-            "scan_result": payload.get("scan_result"),
-            "parse_status": payload.get("parse_status"),
-            "parser_version": payload.get("parser_version"),
-            "preview_text": payload.get("preview_text"),
-            "status": payload.get("status") or "received",
-            "source_url": payload.get("source_url"),
-            "extracted_text": extracted_text or None,
-            "extracted_fields_json": json.dumps(extracted_fields),
-            "notes": payload.get("notes"),
-            "replaced_by_document_id": payload.get("replaced_by_document_id"),
-            "deleted_at": payload.get("deleted_at"),
-            "deleted_reason": payload.get("deleted_reason"),
-        },
-    )
-    db.commit()
-
-    doc = _row_to_dict(
-        db.execute(
-            text(
-                """
-                select *
-                from acquisition_documents
-                where org_id = :org_id and property_id = :property_id
-                order by id desc
-                limit 1
-                """
-            ),
-            {"org_id": org_id, "property_id": property_id},
-        ).fetchone()
-    ) or {}
-    doc["extracted_fields"] = _safe_json_load(doc.get("extracted_fields_json"), {})
-    if doc.get("id") and extracted_fields:
-        create_field_suggestions_from_document(
-            db,
-            org_id=org_id,
-            property_id=property_id,
-            document_id=int(doc["id"]),
-            extracted_fields=extracted_fields,
-            extraction_version=payload.get("parser_version") or "v1",
-        )
-    return doc
-
-
-def upload_acquisition_document_file(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-    kind: str,
-    name: str | None,
-    notes: str | None,
-    upload: UploadFile,
-    replace_document_id: int | None = None,
-) -> dict[str, Any]:
-    ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
-
-    original_filename = _sanitize_filename(upload.filename)
-    ext = _validate_extension_and_content_type(original_filename, upload.content_type)
-
-    base_dir = _acquisition_upload_root() / f"org_{org_id}" / f"property_{property_id}"
-    base_dir.mkdir(parents=True, exist_ok=True)
-
-    file_token = uuid.uuid4().hex
-    stored_filename = f"{file_token}_{original_filename}"
-    stored_path = (base_dir / stored_filename).resolve()
-
-    if base_dir not in stored_path.parents:
-        raise HTTPException(status_code=400, detail="Invalid upload path.")
-
-    streamed = _stream_upload_to_disk(upload, stored_path)
-    _sniff_magic_bytes(ext, streamed["head"])
-    if ext == ".docx":
-        _validate_docx_safely(stored_path)
-
-    scan = scan_file(stored_path)
-    if scan.get("infected"):
-        stored_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="Upload blocked: file failed malware scan.")
-
-    parse = parse_document(stored_path, upload.content_type)
-    relative_storage_path = str(stored_path.relative_to(_acquisition_upload_root()))
-
-    created = add_acquisition_document(
-        db,
-        org_id=org_id,
-        property_id=property_id,
-        payload={
-            "kind": kind or "other",
-            "name": (name or os.path.splitext(original_filename)[0] or "Uploaded document").strip(),
-            "original_filename": original_filename,
-            "storage_path": relative_storage_path,
-            "storage_url": None,
-            "content_type": (upload.content_type or ALLOWED_UPLOAD_EXTENSIONS.get(ext) or "").strip().lower() or None,
-            "file_size_bytes": streamed["size_bytes"],
-            "sha256": streamed["sha256"],
-            "upload_status": "stored",
-            "scan_status": scan.get("scan_status"),
-            "scan_result": scan.get("scan_result"),
-            "parse_status": parse.get("parse_status"),
-            "parser_version": parse.get("parser_version"),
-            "preview_text": parse.get("preview_text"),
-            "status": "received",
-            "source_url": None,
-            "notes": (notes or "").strip() or None,
-            "extracted_text": parse.get("extracted_text"),
-            "extracted_fields": parse.get("extracted_fields") or {},
-        },
-    )
-
-    if replace_document_id:
-        replace_acquisition_document(
-            db,
-            org_id=org_id,
-            property_id=property_id,
-            document_id=int(replace_document_id),
-            replacement_document_id=int(created["id"]),
-            reason="replaced_by_new_upload",
-        )
-    return created
-
-
-def replace_acquisition_document(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-    document_id: int,
-    replacement_document_id: int,
-    reason: str | None = None,
-) -> dict[str, Any]:
-    existing = _row_to_dict(
-        db.execute(
-            text(
-                """
-                select *
-                from acquisition_documents
-                where id = :document_id and org_id = :org_id and property_id = :property_id
-                """
-            ),
-            {"document_id": int(document_id), "org_id": int(org_id), "property_id": int(property_id)},
-        ).fetchone()
-    )
-    if not existing:
-        raise HTTPException(status_code=404, detail="Document not found.")
-
-    db.execute(
-        text(
-            """
-            update acquisition_documents
-            set status = 'replaced',
-                replaced_by_document_id = :replacement_document_id,
-                deleted_reason = :reason,
-                updated_at = now()
-            where id = :document_id and org_id = :org_id and property_id = :property_id
-            """
-        ),
-        {
-            "document_id": int(document_id),
-            "replacement_document_id": int(replacement_document_id),
-            "reason": (reason or "").strip() or "replaced",
-            "org_id": int(org_id),
-            "property_id": int(property_id),
-        },
-    )
-    db.commit()
-    return _row_to_dict(
-        db.execute(text("select * from acquisition_documents where id = :id"), {"id": int(document_id)}).fetchone()
-    ) or {}
-
-
-def delete_acquisition_document(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-    document_id: int,
-    reason: str | None = None,
-    hard_delete_file: bool = False,
-) -> dict[str, Any]:
-    row = _row_to_dict(
-        db.execute(
-            text(
-                """
-                select *
-                from acquisition_documents
-                where id = :document_id and org_id = :org_id and property_id = :property_id
-                """
-            ),
-            {"document_id": int(document_id), "org_id": int(org_id), "property_id": int(property_id)},
-        ).fetchone()
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="Document not found.")
-
-    db.execute(
-        text(
-            """
-            update acquisition_documents
-            set status = 'deleted',
-                deleted_at = now(),
-                deleted_reason = :reason,
-                updated_at = now()
-            where id = :document_id and org_id = :org_id and property_id = :property_id
-            """
-        ),
-        {
-            "document_id": int(document_id),
-            "org_id": int(org_id),
-            "property_id": int(property_id),
-            "reason": (reason or "").strip() or "deleted",
-        },
-    )
-    db.commit()
-
-    if hard_delete_file:
-        rel = row.get("storage_path")
-        if rel:
-            root = _acquisition_upload_root()
-            path = (root / rel).resolve()
-            if root in path.parents and path.exists():
-                path.unlink(missing_ok=True)
-
-    return _row_to_dict(
-        db.execute(text("select * from acquisition_documents where id = :id"), {"id": int(document_id)}).fetchone()
-    ) or {}
-
-
-def get_acquisition_detail(db: Session, *, org_id: int, property_id: int) -> dict[str, Any] | None:
+) -> dict[str, Any] | None:
     property_row = _row_to_dict(
         db.execute(
             text(
@@ -810,21 +602,52 @@ def get_acquisition_detail(db: Session, *, org_id: int, property_id: int) -> dic
                     p.square_feet,
                     p.year_built,
                     p.property_type,
-                    ps.current_stage
+                    ps.current_stage,
+
+                    p.listing_status,
+                    p.listing_days_on_market,
+                    p.listing_listed_at,
+                    p.listing_last_seen_at,
+                    p.listing_removed_at,
+                    p.listing_zillow_url,
+
+                    p.listing_agent_name,
+                    p.listing_agent_phone,
+                    p.listing_agent_email,
+                    p.listing_agent_website,
+
+                    p.listing_office_name,
+                    p.listing_office_phone,
+                    p.listing_office_email
                 from properties p
                 left join property_states ps
-                    on ps.org_id = p.org_id and ps.property_id = p.id
+                  on ps.org_id = p.org_id and ps.property_id = p.id
                 where p.org_id = :org_id and p.id = :property_id
                 limit 1
                 """
             ),
-            {"org_id": org_id, "property_id": property_id},
+            {"org_id": int(org_id), "property_id": int(property_id)},
         ).fetchone()
     )
     if not property_row:
         return None
 
-    acquisition_row = ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+    ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+    _property_listing_contact_seed(db, org_id=org_id, property_id=property_id)
+
+    acquisition_row = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_records
+                where org_id = :org_id and property_id = :property_id
+                limit 1
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        ).fetchone()
+    ) or {}
 
     documents = _rows_to_dicts(
         db.execute(
@@ -886,16 +709,76 @@ def get_acquisition_detail(db: Session, *, org_id: int, property_id: int) -> dic
     has_overdue = any(bool(x.get("is_overdue")) for x in deadlines)
     suggested_count = sum(1 for x in field_values if str(x.get("review_state") or "") == "suggested")
 
+    merged_contacts = _merge_contacts_json_with_participants(
+        existing_contacts=contacts if isinstance(contacts, list) else [],
+        participants=participants,
+    )
+
+    queue_waiting = str(acquisition_row.get("waiting_on") or "").strip().lower()
+    waiting_on_roles = {
+        "lender": {"loan_officer", "lender"},
+        "title": {"title_company", "escrow", "escrow_officer"},
+        "seller": {"seller"},
+        "operator": {"operator", "internal_team", "analyst"},
+        "document": {"document_coordinator", "closing_coordinator"},
+    }
+
+    normalized_participants: list[dict[str, Any]] = []
+    for row in participants:
+        role = str(row.get("role") or "").strip().lower()
+        waiting = bool(row.get("waiting_on") or False)
+
+        if "lender" in queue_waiting and role in waiting_on_roles["lender"]:
+            waiting = True
+        elif "title" in queue_waiting and role in waiting_on_roles["title"]:
+            waiting = True
+        elif "seller" in queue_waiting and role in waiting_on_roles["seller"]:
+            waiting = True
+        elif "operator" in queue_waiting and role in waiting_on_roles["operator"]:
+            waiting = True
+        elif "document" in queue_waiting and role in waiting_on_roles["document"]:
+            waiting = True
+
+        normalized_participants.append({**row, "waiting_on": waiting})
+
+    listing_contacts = []
+    if property_row.get("listing_agent_name") or property_row.get("listing_agent_phone") or property_row.get("listing_agent_email"):
+        listing_contacts.append(
+            {
+                "role": "listing_agent",
+                "name": property_row.get("listing_agent_name"),
+                "email": property_row.get("listing_agent_email"),
+                "phone": property_row.get("listing_agent_phone"),
+                "company": property_row.get("listing_office_name"),
+                "website": property_row.get("listing_agent_website"),
+                "source_type": "listing_import",
+            }
+        )
+    if property_row.get("listing_office_name") or property_row.get("listing_office_phone") or property_row.get("listing_office_email"):
+        listing_contacts.append(
+            {
+                "role": "listing_office",
+                "name": property_row.get("listing_office_name"),
+                "email": property_row.get("listing_office_email"),
+                "phone": property_row.get("listing_office_phone"),
+                "company": property_row.get("listing_office_name"),
+                "source_type": "listing_import",
+            }
+        )
+
     return {
         "property": property_row,
         "acquisition": {
             **acquisition_row,
-            "contacts": contacts,
+            "contacts": merged_contacts,
+            "listing_contacts": listing_contacts,
             "milestones": milestones,
             "days_to_close": _days_to_close(target_close),
+            "deadlines": deadlines,
+            "field_values": field_values,
         },
         "documents": documents,
-        "participants": participants,
+        "participants": normalized_participants,
         "deadlines": deadlines,
         "field_values": field_values,
         "required_documents": required_docs,
@@ -929,131 +812,546 @@ def list_acquisition_queue(
     status = (status or "").strip().lower() or None
     waiting_on = (waiting_on or "").strip().lower() or None
 
-    rows = db.execute(
-        text(
-            """
-            select
-                p.id as property_id,
-                p.address,
-                p.city,
-                p.state,
-                p.zip,
-                p.county,
-                p.bedrooms,
-                p.bathrooms,
-                p.square_feet,
-                ps.current_stage,
-                ar.status,
-                ar.waiting_on,
-                ar.next_step,
-                ar.contract_date,
-                ar.target_close_date,
-                ar.closing_date,
-                ar.purchase_price,
-                ar.loan_amount,
-                ar.cash_to_close,
-                ar.closing_costs,
-                ar.updated_at as acquisition_updated_at,
-                (
-                    select count(*)
-                    from acquisition_documents ad
-                    where ad.org_id = p.org_id and ad.property_id = p.id
-                      and coalesce(ad.status, 'received') not in ('deleted', 'replaced')
-                ) as document_count,
-                (
-                    select count(*)
-                    from acquisition_field_values fv
-                    where fv.org_id = p.org_id and fv.property_id = p.id
-                      and fv.review_state = 'suggested'
-                ) as suggested_field_count,
-                (
-                    select count(*)
-                    from acquisition_deadlines dl
-                    where dl.org_id = p.org_id and dl.property_id = p.id
-                      and dl.status not in ('completed', 'waived')
-                      and dl.due_at < now()
-                ) as overdue_deadline_count
-            from properties p
-            left join property_states ps
-                on ps.org_id = p.org_id and ps.property_id = p.id
-            left join acquisition_records ar
-                on ar.org_id = p.org_id and ar.property_id = p.id
-            where p.org_id = :org_id
-              and (
-                ar.id is not null
-                or lower(coalesce(ps.current_stage, '')) in ('offer', 'under_contract', 'acquisition', 'closing', 'escrow')
-              )
-            order by
-                (
-                    select min(dl2.due_at)
-                    from acquisition_deadlines dl2
-                    where dl2.org_id = p.org_id and dl2.property_id = p.id and dl2.status not in ('completed', 'waived')
-                ) asc nulls last,
-                coalesce(ar.target_close_date, ar.closing_date) asc nulls last,
-                coalesce(ar.updated_at, now()) desc
-            limit :limit
-            offset :offset
-            """
-        ),
-        {"org_id": org_id, "limit": limit, "offset": offset},
-    ).fetchall()
+    rows = _rows_to_dicts(
+        db.execute(
+            text(
+                """
+                select
+                    p.id as property_id,
+                    p.address,
+                    p.city,
+                    p.state,
+                    p.zip,
+                    p.county,
+                    p.bedrooms,
+                    p.bathrooms,
+                    p.square_feet,
 
-    items = _rows_to_dicts(rows)
+                    p.listing_status,
+                    p.listing_days_on_market,
+                    p.listing_zillow_url,
+                    p.listing_agent_name,
+                    p.listing_agent_phone,
+                    p.listing_agent_email,
+                    p.listing_office_name,
+                    p.listing_office_phone,
+                    p.listing_office_email,
+
+                    ps.current_stage,
+                    ar.status,
+                    ar.waiting_on,
+                    ar.next_step,
+                    ar.contract_date,
+                    ar.target_close_date,
+                    ar.closing_date,
+                    ar.purchase_price,
+                    ar.loan_amount,
+                    ar.cash_to_close,
+                    ar.closing_costs,
+                    ar.updated_at as acquisition_updated_at,
+                    (
+                        select count(*)
+                        from acquisition_documents ad
+                        where ad.org_id = p.org_id and ad.property_id = p.id
+                          and coalesce(ad.status, 'received') not in ('deleted', 'replaced')
+                    ) as document_count,
+                    (
+                        select count(*)
+                        from acquisition_field_values fv
+                        where fv.org_id = p.org_id and fv.property_id = p.id
+                          and fv.review_state = 'suggested'
+                    ) as suggested_field_count,
+                    (
+                        select count(*)
+                        from acquisition_deadlines dl
+                        where dl.org_id = p.org_id and dl.property_id = p.id
+                          and dl.status = 'active'
+                          and dl.due_at::date < current_date
+                    ) as overdue_deadline_count
+                from properties p
+                join acquisition_records ar
+                  on ar.org_id = p.org_id and ar.property_id = p.id
+                left join property_states ps
+                  on ps.org_id = p.org_id and ps.property_id = p.id
+                where p.org_id = :org_id
+                order by ar.updated_at desc nulls last, p.id desc
+                limit :limit
+                offset :offset
+                """
+            ),
+            {
+                "org_id": int(org_id),
+                "limit": int(limit),
+                "offset": int(offset),
+            },
+        ).fetchall()
+    )
+
     filtered: list[dict[str, Any]] = []
-
-    for item in items:
-        haystack = " ".join(
-            [
-                str(item.get("address") or ""),
-                str(item.get("city") or ""),
-                str(item.get("state") or ""),
-                str(item.get("zip") or ""),
-                str(item.get("county") or ""),
-                str(item.get("status") or ""),
-                str(item.get("waiting_on") or ""),
-                str(item.get("next_step") or ""),
+    for row in rows:
+        text_blob = " ".join(
+            str(x or "")
+            for x in [
+                row.get("address"),
+                row.get("city"),
+                row.get("state"),
+                row.get("zip"),
+                row.get("county"),
+                row.get("waiting_on"),
+                row.get("next_step"),
+                row.get("listing_agent_name"),
+                row.get("listing_office_name"),
             ]
         ).lower()
 
-        if q and q not in haystack:
-            continue
-        if status and str(item.get("status") or "").lower() != status:
-            continue
-        if waiting_on and waiting_on not in str(item.get("waiting_on") or "").lower():
-            continue
-        if has_overdue_deadlines is True and int(item.get("overdue_deadline_count") or 0) <= 0:
-            continue
-        if needs_review is True and int(item.get("suggested_field_count") or 0) <= 0:
+        if q and q not in text_blob:
             continue
 
-        target_close = item.get("target_close_date") or item.get("closing_date")
-        item["days_to_close"] = _days_to_close(str(target_close) if target_close else None)
+        row_status = str(row.get("status") or "").strip().lower()
+        if status and row_status != status:
+            continue
 
-        active_doc_rows = _rows_to_dicts(
-            db.execute(
-                text(
-                    """
-                    select kind, status
-                    from acquisition_documents
-                    where org_id = :org_id and property_id = :property_id
-                      and coalesce(status, 'received') not in ('deleted', 'replaced')
-                    """
-                ),
-                {"org_id": int(org_id), "property_id": int(item["property_id"])},
-            ).fetchall()
+        row_waiting = str(row.get("waiting_on") or "").strip().lower()
+        if waiting_on and waiting_on not in row_waiting:
+            continue
+
+        detail = get_acquisition_detail(db, org_id=org_id, property_id=int(row["property_id"]))
+        required_documents = detail.get("required_documents") if detail else []
+        field_values = detail.get("field_values") if detail else []
+        participants = detail.get("participants") if detail else []
+
+        conflict_count = 0
+        grouped_values: dict[str, set[str]] = {}
+        for fv in field_values:
+            key = str(fv.get("field_name") or "").strip().lower()
+            value = str(
+                fv.get("value_text")
+                if fv.get("value_text") is not None
+                else fv.get("extracted_value") or fv.get("value_number") or ""
+            ).strip().lower()
+            if not key or not value:
+                continue
+            grouped_values.setdefault(key, set()).add(value)
+        conflict_count = sum(1 for values in grouped_values.values() if len(values) > 1)
+
+        missing_document_groups = [
+            {"kind": doc.get("kind"), "label": doc.get("label")}
+            for doc in required_documents
+            if not doc.get("present")
+        ]
+
+        has_overdue = int(row.get("overdue_deadline_count") or 0) > 0
+        has_missing_docs = bool(missing_document_groups)
+        suggested_field_count = int(row.get("suggested_field_count") or 0)
+
+        if has_overdue_deadlines is True and not has_overdue:
+            continue
+        if has_missing_required_docs is True and not has_missing_docs:
+            continue
+        if needs_review is True and not (suggested_field_count > 0 or conflict_count > 0):
+            continue
+
+        readiness = 0
+        total_docs = len(required_documents)
+        present_docs = total_docs - len(missing_document_groups)
+        if total_docs > 0:
+            readiness += round((present_docs / total_docs) * 50)
+        readiness += min(int(row.get("document_count") or 0) * 4, 20)
+        days = _days_to_close(row.get("target_close_date") or row.get("closing_date"))
+        if days is not None:
+            if days > 14:
+                readiness += 20
+            elif days >= 7:
+                readiness += 14
+            elif days >= 0:
+                readiness += 8
+            else:
+                readiness -= 10
+        if "document" in row_waiting:
+            readiness -= 10
+        if conflict_count > 0:
+            readiness -= min(conflict_count * 8, 20)
+        readiness = max(0, min(100, readiness))
+
+        listing_contacts = []
+        if row.get("listing_agent_name") or row.get("listing_agent_phone") or row.get("listing_agent_email"):
+            listing_contacts.append(
+                {
+                    "role": "listing_agent",
+                    "name": row.get("listing_agent_name"),
+                    "email": row.get("listing_agent_email"),
+                    "phone": row.get("listing_agent_phone"),
+                    "company": row.get("listing_office_name"),
+                    "source_type": "listing_import",
+                }
+            )
+        if row.get("listing_office_name") or row.get("listing_office_phone") or row.get("listing_office_email"):
+            listing_contacts.append(
+                {
+                    "role": "listing_office",
+                    "name": row.get("listing_office_name"),
+                    "email": row.get("listing_office_email"),
+                    "phone": row.get("listing_office_phone"),
+                    "company": row.get("listing_office_name"),
+                    "source_type": "listing_import",
+                }
+            )
+
+        filtered.append(
+            {
+                **row,
+                "days_to_close": days,
+                "conflict_count": conflict_count,
+                "missing_document_groups": missing_document_groups,
+                "estimated_close_readiness": readiness,
+                "listing_contacts": listing_contacts,
+                "participant_count": len(participants),
+                "suggested_field_count": suggested_field_count,
+            }
         )
-        present_kinds = {str(x.get("kind") or "") for x in active_doc_rows}
-        missing_required = [doc for doc in DEFAULT_REQUIRED_DOCS if doc["kind"] not in present_kinds]
-        item["missing_required_document_count"] = len(missing_required)
-        item["missing_required_document_kinds"] = [doc["kind"] for doc in missing_required]
-        item["has_missing_required_docs"] = bool(missing_required)
 
-        if has_missing_required_docs is True and not missing_required:
-            continue
+    return {
+        "items": filtered,
+        "count": len(filtered),
+    }
 
-        filtered.append(item)
 
-    return {"items": filtered, "count": len(filtered)}
+def add_acquisition_document(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+
+    db.execute(
+        text(
+            """
+            insert into acquisition_documents (
+                org_id,
+                property_id,
+                kind,
+                name,
+                status,
+                source_url,
+                extracted_text,
+                extracted_fields_json,
+                notes,
+                created_at,
+                updated_at
+            )
+            values (
+                :org_id,
+                :property_id,
+                :kind,
+                :name,
+                :status,
+                :source_url,
+                :extracted_text,
+                :extracted_fields_json,
+                :notes,
+                now(),
+                now()
+            )
+            """
+        ),
+        {
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "kind": payload.get("kind"),
+            "name": payload.get("name"),
+            "status": payload.get("status") or "received",
+            "source_url": payload.get("source_url"),
+            "extracted_text": payload.get("extracted_text"),
+            "extracted_fields_json": json.dumps(payload.get("extracted_fields") or {}),
+            "notes": payload.get("notes"),
+        },
+    )
+    db.commit()
+    row = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_documents
+                where org_id = :org_id and property_id = :property_id
+                order by id desc
+                limit 1
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        ).fetchone()
+    ) or {}
+    row["extracted_fields"] = _safe_json_load(row.get("extracted_fields_json"), {})
+    return row
+
+
+def upload_acquisition_document_file(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    kind: str,
+    name: str | None,
+    notes: str | None,
+    upload: UploadFile,
+    replace_document_id: int | None = None,
+) -> dict[str, Any]:
+    ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
+
+    filename = _sanitize_filename(upload.filename or name or "upload")
+    ext = _validate_extension_and_content_type(filename, upload.content_type)
+
+    root = _acquisition_upload_root()
+    property_dir = root / str(org_id) / str(property_id)
+    unique_name = f"{uuid.uuid4().hex}_{filename}"
+    target_path = property_dir / unique_name
+
+    meta = _stream_upload_to_disk(upload, target_path)
+    _sniff_magic_bytes(ext, meta["head"])
+    if ext == ".docx":
+        _validate_docx_safely(target_path)
+
+    scan_result = scan_file(target_path)
+    scan_status = "clean"
+    scan_result_text = "clean"
+    if isinstance(scan_result, dict):
+        scan_status = str(scan_result.get("status") or "clean")
+        scan_result_text = str(scan_result.get("result") or scan_result.get("detail") or scan_status)
+    elif isinstance(scan_result, str):
+        scan_result_text = scan_result
+
+    parsed = parse_document(target_path)
+    preview_text = None
+    extracted_text = None
+    extracted_fields = {}
+    parser_version = None
+    parse_status = "parsed"
+
+    if isinstance(parsed, dict):
+        preview_text = parsed.get("preview_text")
+        extracted_text = parsed.get("text")
+        extracted_fields = parsed.get("fields") or {}
+        parser_version = parsed.get("parser_version")
+        parse_status = str(parsed.get("status") or "parsed")
+
+    db.execute(
+        text(
+            """
+            insert into acquisition_documents (
+                org_id,
+                property_id,
+                kind,
+                name,
+                original_filename,
+                storage_path,
+                content_type,
+                file_size_bytes,
+                sha256,
+                upload_status,
+                scan_status,
+                scan_result,
+                parse_status,
+                parser_version,
+                preview_text,
+                status,
+                extracted_text,
+                extracted_fields_json,
+                notes,
+                created_at,
+                updated_at
+            )
+            values (
+                :org_id,
+                :property_id,
+                :kind,
+                :name,
+                :original_filename,
+                :storage_path,
+                :content_type,
+                :file_size_bytes,
+                :sha256,
+                'uploaded',
+                :scan_status,
+                :scan_result,
+                :parse_status,
+                :parser_version,
+                :preview_text,
+                'received',
+                :extracted_text,
+                :extracted_fields_json,
+                :notes,
+                now(),
+                now()
+            )
+            """
+        ),
+        {
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "kind": _clean_text(kind) or "other",
+            "name": _clean_text(name) or filename,
+            "original_filename": upload.filename or filename,
+            "storage_path": str(target_path),
+            "content_type": upload.content_type,
+            "file_size_bytes": meta["size_bytes"],
+            "sha256": meta["sha256"],
+            "scan_status": scan_status,
+            "scan_result": scan_result_text,
+            "parse_status": parse_status,
+            "parser_version": parser_version,
+            "preview_text": preview_text,
+            "extracted_text": extracted_text,
+            "extracted_fields_json": json.dumps(extracted_fields or {}),
+            "notes": _clean_text(notes),
+        },
+    )
+    db.commit()
+
+    row = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_documents
+                where org_id = :org_id and property_id = :property_id
+                order by id desc
+                limit 1
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        ).fetchone()
+    ) or {}
+    row["extracted_fields"] = _safe_json_load(row.get("extracted_fields_json"), {})
+
+    if row.get("id"):
+        create_field_suggestions_from_document(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            document_id=int(row["id"]),
+        )
+
+    return row
+
+
+def replace_acquisition_document(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    document_id: int,
+    replacement_document_id: int,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    row = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_documents
+                where id = :document_id and org_id = :org_id and property_id = :property_id
+                """
+            ),
+            {
+                "document_id": int(document_id),
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+            },
+        ).fetchone()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    db.execute(
+        text(
+            """
+            update acquisition_documents
+            set status = 'replaced',
+                replaced_by_document_id = :replacement_document_id,
+                deleted_reason = :reason,
+                updated_at = now()
+            where id = :document_id
+            """
+        ),
+        {
+            "document_id": int(document_id),
+            "replacement_document_id": int(replacement_document_id),
+            "reason": _clean_text(reason),
+        },
+    )
+    db.commit()
+
+    updated = _row_to_dict(
+        db.execute(
+            text("select * from acquisition_documents where id = :document_id"),
+            {"document_id": int(document_id)},
+        ).fetchone()
+    ) or {}
+    updated["extracted_fields"] = _safe_json_load(updated.get("extracted_fields_json"), {})
+    return updated
+
+
+def delete_acquisition_document(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    document_id: int,
+    reason: str | None = None,
+    hard_delete_file: bool = False,
+) -> dict[str, Any]:
+    row = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_documents
+                where id = :document_id and org_id = :org_id and property_id = :property_id
+                """
+            ),
+            {
+                "document_id": int(document_id),
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+            },
+        ).fetchone()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    storage_path = _clean_text(row.get("storage_path"))
+
+    db.execute(
+        text(
+            """
+            update acquisition_documents
+            set status = 'deleted',
+                deleted_at = now(),
+                deleted_reason = :reason,
+                updated_at = now()
+            where id = :document_id
+            """
+        ),
+        {"document_id": int(document_id), "reason": _clean_text(reason)},
+    )
+    db.commit()
+
+    if hard_delete_file and storage_path:
+        try:
+            Path(storage_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    updated = _row_to_dict(
+        db.execute(
+            text("select * from acquisition_documents where id = :document_id"),
+            {"document_id": int(document_id)},
+        ).fetchone()
+    ) or {}
+    updated["extracted_fields"] = _safe_json_load(updated.get("extracted_fields_json"), {})
+    return updated
 
 
 def get_document_file_response(
@@ -1063,62 +1361,35 @@ def get_document_file_response(
     property_id: int,
     document_id: int,
     disposition: str = "inline",
-) -> FileResponse:
+):
     row = _row_to_dict(
         db.execute(
             text(
                 """
-                select
-                    id,
-                    org_id,
-                    property_id,
-                    original_filename,
-                    storage_path,
-                    content_type,
-                    upload_status,
-                    scan_status,
-                    status
+                select *
                 from acquisition_documents
-                where org_id = :org_id
-                  and property_id = :property_id
-                  and id = :document_id
-                limit 1
+                where id = :document_id and org_id = :org_id and property_id = :property_id
                 """
             ),
             {
-                "org_id": org_id,
-                "property_id": property_id,
-                "document_id": document_id,
+                "document_id": int(document_id),
+                "org_id": int(org_id),
+                "property_id": int(property_id),
             },
         ).fetchone()
     )
-
     if not row:
         raise HTTPException(status_code=404, detail="Document not found.")
-    if row.get("upload_status") != "stored":
-        raise HTTPException(status_code=400, detail="Document file is not available.")
-    if row.get("scan_status") not in {"clean", "skipped", "error"}:
-        raise HTTPException(status_code=400, detail="Document is not cleared for access.")
-    if str(row.get("status") or "").lower() == "deleted":
-        raise HTTPException(status_code=400, detail="Document has been deleted.")
 
-    rel = row.get("storage_path")
-    if not rel:
-        raise HTTPException(status_code=400, detail="Document storage path is missing.")
-
-    root = _acquisition_upload_root()
-    path = (root / rel).resolve()
-    if root not in path.parents:
-        raise HTTPException(status_code=400, detail="Invalid storage path.")
-    if not path.exists():
+    storage_path = _clean_text(row.get("storage_path"))
+    if not storage_path or not Path(storage_path).exists():
         raise HTTPException(status_code=404, detail="Stored file not found.")
 
-    filename = row.get("original_filename") or path.name
-    media_type = row.get("content_type") or "application/octet-stream"
-
+    filename = _clean_text(row.get("original_filename")) or _clean_text(row.get("name")) or f"document-{document_id}"
+    media_type = _clean_text(row.get("content_type")) or "application/octet-stream"
     return FileResponse(
-        path=str(path),
+        path=storage_path,
         media_type=media_type,
         filename=filename,
-        content_disposition_type=disposition,
+        content_disposition_type="attachment" if disposition == "attachment" else "inline",
     )

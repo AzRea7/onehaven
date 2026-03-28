@@ -1,13 +1,13 @@
 import React from "react";
 import {
-  MapPinned,
-  ShieldAlert,
-  Users,
-  LocateFixed,
   AlertTriangle,
   BadgeCheck,
+  LocateFixed,
   Map,
+  MapPinned,
+  ShieldAlert,
   ShieldCheck,
+  Users,
 } from "lucide-react";
 
 function formatConfidence(v?: number | null) {
@@ -157,6 +157,7 @@ export default function RiskBadges({
   normalizedAddress,
   geocodeSource,
   geocodeConfidence,
+  compact = false,
 }: {
   county?: string | null;
   isRedZone?: boolean | null;
@@ -167,6 +168,7 @@ export default function RiskBadges({
   normalizedAddress?: string | null;
   geocodeSource?: string | null;
   geocodeConfidence?: number | null;
+  compact?: boolean;
 }) {
   const redTone = isRedZone ? "oh-pill oh-pill-bad" : "oh-pill oh-pill-good";
   const loc = locationStatus(lat, lng, normalizedAddress, geocodeConfidence);
@@ -194,6 +196,53 @@ export default function RiskBadges({
       : summary === "warn"
         ? "At least one signal, such as crime, offender count, or approximate location confidence, deserves operator review."
         : "Missing location data, red-zone status, or other higher-risk signals may weaken decisions until reviewed or corrected.";
+
+  if (compact) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {county ? (
+          <span className="oh-pill">
+            <MapPinned className="h-3.5 w-3.5" />
+            {county}
+          </span>
+        ) : null}
+
+        <span className={loc.pillClass}>
+          <LocateFixed className="h-3.5 w-3.5" />
+          {loc.label}
+        </span>
+
+        {geocodeSource ? (
+          <span className="oh-pill">
+            <Map className="h-3.5 w-3.5" />
+            {geocodeSource}
+            {conf ? ` ${conf}` : ""}
+          </span>
+        ) : null}
+
+        <span className={redTone}>
+          <AlertTriangle className="h-3.5 w-3.5" />
+          {isRedZone ? "Red zone" : "Not red zone"}
+        </span>
+
+        <span className={crimeTone(crimeScore)}>
+          <ShieldAlert className="h-3.5 w-3.5" />
+          Crime{" "}
+          {crimeScore != null && Number.isFinite(Number(crimeScore))
+            ? Number(crimeScore).toFixed(0)
+            : "—"}
+        </span>
+
+        <span className={offenderTone(offenderCount)}>
+          <Users className="h-3.5 w-3.5" />
+          Offenders{" "}
+          {offenderCount != null && Number.isFinite(Number(offenderCount))
+            ? Number(offenderCount)
+            : "—"}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -226,84 +275,50 @@ export default function RiskBadges({
         {geocodeSource ? (
           <span className="oh-pill">
             <Map className="h-3.5 w-3.5" />
-            source {geocodeSource}
-          </span>
-        ) : null}
-
-        {conf ? (
-          <span className="oh-pill">
-            <BadgeCheck className="h-3.5 w-3.5" />
-            confidence {conf}
+            {geocodeSource}
+            {conf ? ` ${conf}` : ""}
           </span>
         ) : null}
 
         <span className={redTone}>
-          <ShieldAlert className="h-3.5 w-3.5" />
+          {isRedZone ? (
+            <AlertTriangle className="h-3.5 w-3.5" />
+          ) : (
+            <BadgeCheck className="h-3.5 w-3.5" />
+          )}
           {isRedZone ? "Red zone" : "Not red zone"}
         </span>
 
-        {crimeScore != null ? (
-          <span className={crimeTone(crimeScore)}>
-            crime {Number(crimeScore).toFixed(1)}
-          </span>
-        ) : null}
+        <span className={crimeTone(crimeScore)}>
+          <ShieldAlert className="h-3.5 w-3.5" />
+          Crime{" "}
+          {crimeScore != null && Number.isFinite(Number(crimeScore))
+            ? Number(crimeScore).toFixed(0)
+            : "—"}
+        </span>
 
-        {offenderCount != null ? (
-          <span className={offenderTone(offenderCount)}>
-            <Users className="h-3.5 w-3.5" />
-            offenders {offenderCount}
-          </span>
-        ) : null}
-
-        {lat != null && lng != null ? (
-          <span className="oh-pill">
-            {Number(lat).toFixed(4)}, {Number(lng).toFixed(4)}
-          </span>
-        ) : (
-          <span className="oh-pill oh-pill-warn">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            no coordinates
-          </span>
-        )}
+        <span className={offenderTone(offenderCount)}>
+          <Users className="h-3.5 w-3.5" />
+          Offenders{" "}
+          {offenderCount != null && Number.isFinite(Number(offenderCount))
+            ? Number(offenderCount)
+            : "—"}
+        </span>
       </div>
 
-      <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-        <div className="text-sm font-semibold text-app-0">
-          Why these signals matter
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            location quality
+          </div>
+          <div className="mt-2 text-sm text-app-1">{loc.detail}</div>
         </div>
-        <div className="mt-2 text-sm leading-6 text-app-3">{loc.detail}</div>
 
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-              Red-zone status
-            </div>
-            <div className="mt-1 text-sm text-app-2">
-              {isRedZone
-                ? "This can materially affect acquisition confidence and downstream operating assumptions."
-                : "No red-zone flag is currently present in this signal set."}
-            </div>
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            location risk summary
           </div>
-
-          <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-              Crime / offenders
-            </div>
-            <div className="mt-1 text-sm text-app-2">
-              These signals do not make decisions by themselves, but they do
-              help explain elevated caution and review needs.
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-              Location quality
-            </div>
-            <div className="mt-1 text-sm text-app-2">
-              Better location confidence improves rule matching, mapping
-              quality, and trust in downstream automation.
-            </div>
-          </div>
+          <div className="mt-2 text-sm text-app-1">{summaryDetail}</div>
         </div>
       </div>
     </div>

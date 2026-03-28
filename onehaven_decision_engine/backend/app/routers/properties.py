@@ -7,6 +7,7 @@ import os
 import re
 import time
 from typing import Any, Optional
+from urllib.parse import quote
 
 from pydantic import BaseModel, Field
 
@@ -80,7 +81,12 @@ def _principal_user_id(p: Any) -> int | None:
     return None
 
 
-def _property_acquisition_meta(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+def _property_acquisition_meta(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
     row = db.execute(
         text(
             """
@@ -88,8 +94,18 @@ def _property_acquisition_meta(db: Session, *, org_id: int, property_id: int) ->
                acquisition_source_provider, acquisition_source_slug, acquisition_source_record_id, acquisition_source_url,
                completeness_geo_status, completeness_rent_status, completeness_rehab_status,
                completeness_risk_status, completeness_jurisdiction_status, completeness_cashflow_status,
+
+               listing_status, listing_hidden, listing_hidden_reason,
+               listing_last_seen_at, listing_removed_at, listing_listed_at, listing_created_at,
+               listing_days_on_market, listing_price,
+               listing_mls_name, listing_mls_number, listing_type,
+               listing_zillow_url,
+               listing_agent_name, listing_agent_phone, listing_agent_email, listing_agent_website,
+               listing_office_name, listing_office_phone, listing_office_email,
+
                acquisition_metadata_json
-        FROM properties WHERE org_id = :org_id AND id = :property_id
+        FROM properties
+        WHERE org_id = :org_id AND id = :property_id
     """
         ),
         {"org_id": int(org_id), "property_id": int(property_id)},
@@ -116,6 +132,36 @@ def _crime_label(score: Any) -> str:
         return "MODERATE"
     return "LOW"
 
+
+
+
+def _derive_zillow_listing_url(*, address: Any = None, city: Any = None, state: Any = None, zip_code: Any = None) -> str | None:
+    raw_parts = [address, city, state, zip_code]
+    parts = [str(part).strip() for part in raw_parts if str(part or '').strip()]
+    if not parts:
+        return None
+
+    query = quote(', '.join(parts))
+    return f"https://www.zillow.com/homes/{query}_rb/"
+
+
+def _resolved_zillow_listing_url(
+    *,
+    stored_url: Any = None,
+    address: Any = None,
+    city: Any = None,
+    state: Any = None,
+    zip_code: Any = None,
+) -> str | None:
+    raw = str(stored_url or '').strip()
+    if raw:
+        return raw
+    return _derive_zillow_listing_url(
+        address=address,
+        city=city,
+        state=state,
+        zip_code=zip_code,
+    )
 
 def _asking_price(prop: Property, deal: Deal | None) -> float | None:
     for attr in ("asking_price", "list_price", "price", "offer_price", "purchase_price"):
@@ -438,6 +484,13 @@ def _build_property_list_item(
                 "jurisdiction": acquisition_meta.get("completeness_jurisdiction_status") or "missing",
                 "cashflow": acquisition_meta.get("completeness_cashflow_status") or "missing",
             },
+            "listing_zillow_url": _resolved_zillow_listing_url(
+                stored_url=acquisition_meta.get("listing_zillow_url"),
+                address=getattr(prop, "address", None),
+                city=getattr(prop, "city", None),
+                state=getattr(prop, "state", None),
+                zip_code=getattr(prop, "zip", None),
+            ),
         }
     )
     return prop_payload
@@ -733,7 +786,40 @@ def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_
     row = db.execute(stmt).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Property not found")
-    return row
+
+    meta = _property_acquisition_meta(db, org_id=p.org_id, property_id=int(row.id))
+    payload = PropertyOut.model_validate(row, from_attributes=True).model_dump()
+    payload.update(
+        {
+            "listing_status": meta.get("listing_status"),
+            "listing_hidden": bool(meta.get("listing_hidden") or False),
+            "listing_hidden_reason": meta.get("listing_hidden_reason"),
+            "listing_last_seen_at": meta.get("listing_last_seen_at"),
+            "listing_removed_at": meta.get("listing_removed_at"),
+            "listing_listed_at": meta.get("listing_listed_at"),
+            "listing_created_at": meta.get("listing_created_at"),
+            "listing_days_on_market": meta.get("listing_days_on_market"),
+            "listing_price": meta.get("listing_price"),
+            "listing_mls_name": meta.get("listing_mls_name"),
+            "listing_mls_number": meta.get("listing_mls_number"),
+            "listing_type": meta.get("listing_type"),
+            "listing_zillow_url": _resolved_zillow_listing_url(
+                stored_url=meta.get("listing_zillow_url"),
+                address=getattr(row, "address", None),
+                city=getattr(row, "city", None),
+                state=getattr(row, "state", None),
+                zip_code=getattr(row, "zip", None),
+            ),
+            "listing_agent_name": meta.get("listing_agent_name"),
+            "listing_agent_phone": meta.get("listing_agent_phone"),
+            "listing_agent_email": meta.get("listing_agent_email"),
+            "listing_agent_website": meta.get("listing_agent_website"),
+            "listing_office_name": meta.get("listing_office_name"),
+            "listing_office_phone": meta.get("listing_office_phone"),
+            "listing_office_email": meta.get("listing_office_email"),
+        }
+    )
+    return PropertyOut.model_validate(payload)
 
 
 @router.post("/{property_id}/geo/enrich", response_model=dict)
@@ -773,8 +859,9 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
 
     jr = _pick_jurisdiction_rule(db, org_id=p.org_id, city=prop.city, state=prop.state)
     friction = compute_friction(jr)
-
     uw = _latest_underwriting(db, org_id=p.org_id, property_id=int(prop.id))
+    meta = _property_acquisition_meta(db, org_id=p.org_id, property_id=int(prop.id))
+    snapshot = build_property_inventory_snapshot(db, org_id=p.org_id, property_id=int(prop.id))
 
     checklist_row = db.scalar(
         select(PropertyChecklist)
@@ -792,12 +879,55 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
 
         items = [ChecklistItemOut(**x) for x in parsed if isinstance(x, dict)]
         items = _merge_checklist_state(db, org_id=p.org_id, property_id=prop.id, items=items)
-        checklist_out = ChecklistOut(property_id=prop.id, city=prop.city, state=prop.state, items=items)
+        checklist_out = ChecklistOut(
+            property_id=prop.id,
+            city=prop.city,
+            state=prop.state,
+            items=items,
+        )
 
-    rent_explain = _rent_explain_for_view(db, org_id=p.org_id, property_id=prop.id, strategy=deal.strategy)
+    rent_explain = _rent_explain_for_view(
+        db,
+        org_id=p.org_id,
+        property_id=prop.id,
+        strategy=deal.strategy,
+    )
+
+    property_payload = PropertyOut.model_validate(prop, from_attributes=True).model_dump()
+
+    property_payload.update(
+        {
+            "listing_status": meta.get("listing_status"),
+            "listing_hidden": bool(meta.get("listing_hidden") or False),
+            "listing_hidden_reason": meta.get("listing_hidden_reason"),
+            "listing_last_seen_at": meta.get("listing_last_seen_at"),
+            "listing_removed_at": meta.get("listing_removed_at"),
+            "listing_listed_at": meta.get("listing_listed_at"),
+            "listing_created_at": meta.get("listing_created_at"),
+            "listing_days_on_market": meta.get("listing_days_on_market"),
+            "listing_price": meta.get("listing_price"),
+            "listing_mls_name": meta.get("listing_mls_name"),
+            "listing_mls_number": meta.get("listing_mls_number"),
+            "listing_type": meta.get("listing_type"),
+            "listing_zillow_url": _resolved_zillow_listing_url(
+                stored_url=meta.get("listing_zillow_url"),
+                address=getattr(prop, "address", None),
+                city=getattr(prop, "city", None),
+                state=getattr(prop, "state", None),
+                zip_code=getattr(prop, "zip", None),
+            ),
+            "listing_agent_name": meta.get("listing_agent_name"),
+            "listing_agent_phone": meta.get("listing_agent_phone"),
+            "listing_agent_email": meta.get("listing_agent_email"),
+            "listing_agent_website": meta.get("listing_agent_website"),
+            "listing_office_name": meta.get("listing_office_name"),
+            "listing_office_phone": meta.get("listing_office_phone"),
+            "listing_office_email": meta.get("listing_office_email"),
+        }
+    )
 
     return PropertyViewOut(
-        property=PropertyOut.model_validate(prop, from_attributes=True),
+        property=PropertyOut.model_validate(property_payload),
         deal=DealOut.model_validate(deal, from_attributes=True),
         rent_explain=rent_explain,
         jurisdiction_rule=JurisdictionRuleOut.model_validate(jr, from_attributes=True) if jr else None,
@@ -807,6 +937,7 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
         },
         last_underwriting_result=UnderwritingResultOut.model_validate(uw) if uw else None,
         checklist=checklist_out,
+        inventory_snapshot=snapshot,
     )
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
@@ -14,14 +14,23 @@ from ..schemas import (
     AcquisitionParticipantUpsert,
     AcquisitionRecordUpdate,
 )
-from ..services.acquisition_deadline_service import delete_deadline, list_deadlines, upsert_deadline_by_code
+from ..services.acquisition_deadline_service import (
+    delete_deadline,
+    list_deadlines,
+    upsert_deadline_by_code,
+)
 from ..services.acquisition_document_review_service import (
     accept_field_value,
     list_document_field_values,
     override_field_value,
     reject_field_value,
 )
-from ..services.acquisition_participant_service import delete_participant, list_participants, upsert_participant
+from ..services.acquisition_participant_service import (
+    delete_participant,
+    list_participants,
+    seed_listing_contacts_from_property,
+    upsert_participant,
+)
 from ..services.acquisition_service import (
     add_acquisition_document,
     delete_acquisition_document,
@@ -80,8 +89,6 @@ def acquisition_property_detail(
     return payload
 
 
-
-
 @router.post("/properties/{property_id}/promote")
 def acquisition_property_promote(
     property_id: int,
@@ -97,6 +104,7 @@ def acquisition_property_promote(
         payload=payload.model_dump(exclude_unset=True),
     )
 
+
 @router.put("/properties/{property_id}")
 def acquisition_property_update(
     property_id: int,
@@ -111,6 +119,82 @@ def acquisition_property_update(
         payload=payload.model_dump(exclude_unset=True),
     )
     return {"ok": True, "acquisition": updated}
+
+
+@router.get("/properties/{property_id}/participants")
+def acquisition_property_participants(
+    property_id: int,
+    include_listing_seed: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    if include_listing_seed:
+        seed_listing_contacts_from_property(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            mark_primary=True,
+        )
+    return {"items": list_participants(db, org_id=p.org_id, property_id=property_id)}
+
+
+@router.post("/properties/{property_id}/participants/seed-listing")
+def acquisition_property_seed_listing_participants(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    items = seed_listing_contacts_from_property(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        mark_primary=True,
+    )
+    return {"ok": True, "items": items}
+
+
+@router.post("/properties/{property_id}/participants")
+def acquisition_property_upsert_participant(
+    property_id: int,
+    payload: AcquisitionParticipantUpsert,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    row = upsert_participant(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        role=payload.role,
+        name=payload.name,
+        email=payload.email,
+        phone=payload.phone,
+        company=payload.company,
+        notes=payload.notes,
+        source_document_id=payload.source_document_id,
+        confidence=payload.confidence,
+        extraction_version=payload.extraction_version,
+        manually_overridden=payload.manually_overridden,
+        is_primary=payload.is_primary,
+        waiting_on=payload.waiting_on,
+        source_type=payload.source_type,
+    )
+    return {"ok": True, "participant": row}
+
+
+@router.delete("/properties/{property_id}/participants/{participant_id}")
+def acquisition_property_delete_participant(
+    property_id: int,
+    participant_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    row = delete_participant(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        participant_id=participant_id,
+    )
+    return {"ok": True, "participant": row}
 
 
 @router.post("/properties/{property_id}/documents")
@@ -226,7 +310,11 @@ def acquisition_document_download(
 
 
 @router.get("/properties/{property_id}/field-values")
-def acquisition_field_values(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
+def acquisition_field_values(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
     return {"items": list_document_field_values(db, org_id=p.org_id, property_id=property_id)}
 
 
@@ -237,7 +325,12 @@ def acquisition_accept_field_value(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    row = accept_field_value(db, org_id=p.org_id, property_id=property_id, field_value_id=field_value_id)
+    row = accept_field_value(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        field_value_id=field_value_id,
+    )
     return {"ok": True, "field_value": row}
 
 
@@ -248,7 +341,12 @@ def acquisition_reject_field_value(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    row = reject_field_value(db, org_id=p.org_id, property_id=property_id, field_value_id=field_value_id)
+    row = reject_field_value(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        field_value_id=field_value_id,
+    )
     return {"ok": True, "field_value": row}
 
 
@@ -272,7 +370,7 @@ def acquisition_override_field_value(
 
 
 @router.get("/properties/{property_id}/deadlines")
-def acquisition_deadlines(
+def acquisition_property_deadlines(
     property_id: int,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
@@ -280,10 +378,9 @@ def acquisition_deadlines(
     return {"items": list_deadlines(db, org_id=p.org_id, property_id=property_id)}
 
 
-@router.put("/properties/{property_id}/deadlines/{code}")
-def acquisition_upsert_deadline(
+@router.post("/properties/{property_id}/deadlines")
+def acquisition_property_upsert_deadline(
     property_id: int,
-    code: str,
     payload: AcquisitionDeadlineUpsert,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
@@ -292,67 +389,26 @@ def acquisition_upsert_deadline(
         db,
         org_id=p.org_id,
         property_id=property_id,
-        code=code,
-        due_at=payload.due_at,
+        code=payload.code,
         label=payload.label,
+        due_at=payload.due_at,
         status=payload.status,
         notes=payload.notes,
-        source_document_id=payload.source_document_id,
-        confidence=payload.confidence,
-        extraction_version=payload.extraction_version,
-        manually_overridden=payload.manually_overridden,
     )
     return {"ok": True, "deadline": row}
 
 
 @router.delete("/properties/{property_id}/deadlines/{deadline_id}")
-def acquisition_delete_deadline(
+def acquisition_property_delete_deadline(
     property_id: int,
     deadline_id: int,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    row = delete_deadline(db, org_id=p.org_id, property_id=property_id, deadline_id=deadline_id)
-    return {"ok": True, "deadline": row}
-
-
-@router.get("/properties/{property_id}/participants")
-def acquisition_participants(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
-    return {"items": list_participants(db, org_id=p.org_id, property_id=property_id)}
-
-
-@router.put("/properties/{property_id}/participants/{role}")
-def acquisition_upsert_participant(
-    property_id: int,
-    role: str,
-    payload: AcquisitionParticipantUpsert,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    row = upsert_participant(
+    row = delete_deadline(
         db,
         org_id=p.org_id,
         property_id=property_id,
-        role=role,
-        name=payload.name,
-        email=payload.email,
-        phone=payload.phone,
-        company=payload.company,
-        notes=payload.notes,
-        source_document_id=payload.source_document_id,
-        confidence=payload.confidence,
-        extraction_version=payload.extraction_version,
-        manually_overridden=payload.manually_overridden,
+        deadline_id=deadline_id,
     )
-    return {"ok": True, "participant": row}
-
-
-@router.delete("/properties/{property_id}/participants/{participant_id}")
-def acquisition_delete_participant(
-    property_id: int,
-    participant_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    row = delete_participant(db, org_id=p.org_id, property_id=property_id, participant_id=participant_id)
-    return {"ok": True, "participant": row}
+    return {"ok": True, "deadline": row}

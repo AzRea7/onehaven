@@ -724,7 +724,7 @@ class PropertyViewOut(BaseModel):
     jurisdiction_friction: dict
     last_underwriting_result: Optional[UnderwritingResultOut] = None
     checklist: Optional[ChecklistOut] = None
-
+    inventory_snapshot: Optional[Dict[str, Any]] = None
 
 # --------------------
 # Jurisdiction Profiles (policy playbooks / overrides)
@@ -1396,7 +1396,8 @@ class AcquisitionFieldOverrideIn(BaseModel):
 
 
 class AcquisitionParticipantUpsert(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
+    role: str
+    name: str
     email: str | None = None
     phone: str | None = None
     company: str | None = None
@@ -1405,10 +1406,23 @@ class AcquisitionParticipantUpsert(BaseModel):
     confidence: float | None = None
     extraction_version: str | None = None
     manually_overridden: bool = False
+    is_primary: bool | None = None
+    waiting_on: bool | None = None
+    source_type: str | None = None
 
-    @field_validator("name", "email", "phone", "company", "notes", mode="before")
+    @field_validator(
+        "role",
+        "name",
+        "email",
+        "phone",
+        "company",
+        "notes",
+        "extraction_version",
+        "source_type",
+        mode="before",
+    )
     @classmethod
-    def normalize_participant_text(cls, value: Any) -> str | None:
+    def normalize_text_fields(cls, value: Any) -> str | None:
         if value is None:
             return None
         text = str(value).strip()

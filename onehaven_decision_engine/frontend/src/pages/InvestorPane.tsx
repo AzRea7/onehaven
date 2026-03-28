@@ -1,73 +1,58 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import {
-  Search,
-  RefreshCcw,
-  SlidersHorizontal,
-  MapPin,
-  BedDouble,
-  Bath,
-  Wallet,
-  Landmark,
-  ShieldAlert,
   ArrowUpRight,
-  ImageOff,
-  Loader2,
+  Bath,
+  BedDouble,
+  BriefcaseBusiness,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  BriefcaseBusiness,
-  GitBranch,
   Clock3,
-  CheckCircle2,
-  Settings2,
+  GitBranch,
+  ImageOff,
+  Landmark,
+  Loader2,
+  MapPin,
   PanelRightOpen,
+  RefreshCcw,
+  Search,
+  Settings2,
+  ShieldAlert,
+  Sparkles,
+  TrendingUp,
+  Wallet,
 } from "lucide-react";
 
-import PageHero from "../components/PageHero";
-import PageShell from "../components/PageShell";
-import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
-import PaneSwitcher from "../components/PaneSwitcher";
 import IngestionErrorsDrawer from "../components/IngestionErrorsDrawer";
+import IngestionLaunchCard from "../components/IngestionLaunchCard";
 import IngestionRunsPanel from "../components/IngestionRunsPanel";
 import MarketSourcePackModal from "../components/MarketSourcePackModal";
-import IngestionLaunchCard from "../components/IngestionLaunchCard";
+import PageHero from "../components/PageHero";
+import PageShell from "../components/PageShell";
+import PaneSwitcher from "../components/PaneSwitcher";
+import RiskBadges from "../components/RiskBadges";
+import StatPill from "../components/StatPill";
+import Surface from "../components/Surface";
 import { api } from "../lib/api";
 import type { SupportedMarket } from "../lib/ingestionClient";
 
 type Row = any;
 type MarketRow = SupportedMarket;
-// type AcquisitionQueueRow = any; // kept out of active use; old queue behavior preserved below in comments
 
 type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
 type FinancingFilter = "ALL" | "CASH" | "DSCR" | "UNKNOWN";
 type CompletenessFilter = "ALL" | "COMPLETE" | "PARTIAL" | "MISSING";
-
-type DealScopeFilter = "CANDIDATES" | "INCLUDE_SUPPRESSED";
-type HiddenReasonFilter =
-  | "ALL"
-  | "INACTIVE"
-  | "LOW_SCORE"
-  | "BAD_RISK"
-  | "WEAK_CASHFLOW"
-  | "WEAK_DSCR";
-
-// type AcquisitionWaitFilter =
-//   | "ALL"
-//   | "LENDER"
-//   | "TITLE"
-//   | "OPERATOR"
-//   | "SELLER"
-//   | "DOCUMENT";
-// type AcquisitionStatusFilter = "ALL" | "OVERDUE" | "DUE_SOON" | "BLOCKED";
-
 type SortKey =
   | "RELEVANCE"
   | "BEST_CASHFLOW"
-  | "LOWEST_PRICE"
-  | "HIGHEST_PRICE"
   | "BEST_DSCR"
-  | "NEWEST";
+  | "BEST_RENT_GAP"
+  | "LOWEST_RISK"
+  | "NEWEST"
+  | "LOWEST_PRICE"
+  | "HIGHEST_PRICE";
 
 const INITIAL_LIMIT = 500;
 const PAGE_SIZE = 25;
@@ -77,9 +62,21 @@ function money(v: any) {
   return `$${Math.round(Number(v)).toLocaleString()}`;
 }
 
+function decimal(v: any, digits = 2) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(digits);
+}
+
 function numberOrNull(v: any) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function percentText(v: any, digits = 1) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toFixed(digits)}%`;
 }
 
 function normalizeDecision(raw?: string) {
@@ -87,13 +84,20 @@ function normalizeDecision(raw?: string) {
     .trim()
     .toUpperCase();
 
-  if (["PASS", "GOOD_DEAL", "GOOD", "APPROVED", "APPROVE"].includes(x)) {
+  if (["PASS", "GOOD_DEAL", "GOOD", "APPROVED", "APPROVE", "BUY"].includes(x)) {
     return "GOOD_DEAL";
   }
-  if (["REJECT", "FAIL", "FAILED", "NO_GO"].includes(x)) {
+  if (["REJECT", "FAIL", "FAILED", "NO_GO", "PASS_ON_IT"].includes(x)) {
     return "REJECT";
   }
   return "REVIEW";
+}
+
+function decisionLabel(raw?: string) {
+  const normalized = normalizeDecision(raw);
+  if (normalized === "GOOD_DEAL") return "Good deal";
+  if (normalized === "REJECT") return "Reject";
+  return "Review";
 }
 
 function decisionPillClass(raw?: string) {
@@ -101,6 +105,18 @@ function decisionPillClass(raw?: string) {
   if (d === "GOOD_DEAL") return "oh-pill oh-pill-good";
   if (d === "REVIEW") return "oh-pill oh-pill-warn";
   return "oh-pill oh-pill-bad";
+}
+
+function completenessPillClass(v: "COMPLETE" | "PARTIAL" | "MISSING") {
+  if (v === "COMPLETE") return "oh-pill oh-pill-good";
+  if (v === "PARTIAL") return "oh-pill oh-pill-warn";
+  return "oh-pill oh-pill-bad";
+}
+
+function completenessLabel(v: "COMPLETE" | "PARTIAL" | "MISSING") {
+  if (v === "COMPLETE") return "Enriched";
+  if (v === "PARTIAL") return "Partial";
+  return "Missing data";
 }
 
 function resolvePropertyId(r: any) {
@@ -140,6 +156,7 @@ function inferMarketRent(r: any) {
     numberOrNull(r?.rent_assumption?.market_rent_estimate) ??
     numberOrNull(r?.monthly_rent_estimate) ??
     numberOrNull(r?.estimated_rent) ??
+    numberOrNull(r?.last_underwriting_result?.market_rent_estimate) ??
     null
   );
 }
@@ -184,10 +201,49 @@ function inferDscr(r: any) {
   );
 }
 
+function inferRentGap(r: any) {
+  const rent = inferMarketRent(r);
+  const mortgage = inferMortgage(r);
+  if (rent == null && mortgage == null) return null;
+  return (rent ?? 0) - (mortgage ?? 0);
+}
+
+function inferRiskScore(r: any) {
+  const explicit =
+    numberOrNull(r?.risk_score) ??
+    numberOrNull(r?.last_underwriting_result?.risk_score) ??
+    numberOrNull(r?.metrics?.risk_score);
+
+  if (explicit != null) return explicit;
+
+  const crime = inferCrime(r) ?? 0;
+  const offenders = inferOffenderCount(r) ?? 0;
+  const redZonePenalty = inferIsRedZone(r) ? 25 : 0;
+  const completenessPenalty =
+    inferCompleteness(r) === "MISSING"
+      ? 15
+      : inferCompleteness(r) === "PARTIAL"
+        ? 7
+        : 0;
+
+  return Math.min(
+    100,
+    crime + offenders * 8 + redZonePenalty + completenessPenalty,
+  );
+}
+
 function inferCrime(r: any) {
   return (
     numberOrNull(r?.crime_score) ??
     numberOrNull(r?.property?.crime_score) ??
+    null
+  );
+}
+
+function inferOffenderCount(r: any) {
+  return (
+    numberOrNull(r?.offender_count) ??
+    numberOrNull(r?.property?.offender_count) ??
     null
   );
 }
@@ -206,6 +262,22 @@ function inferLat(r: any) {
 
 function inferLng(r: any) {
   return numberOrNull(r?.lng) ?? numberOrNull(r?.property?.lng) ?? null;
+}
+
+function inferGeocodeSource(r: any) {
+  return r?.geocode_source || r?.property?.geocode_source || null;
+}
+
+function inferGeocodeConfidence(r: any) {
+  return (
+    numberOrNull(r?.geocode_confidence) ??
+    numberOrNull(r?.property?.geocode_confidence) ??
+    null
+  );
+}
+
+function inferIsRedZone(r: any) {
+  return Boolean(r?.is_red_zone ?? r?.property?.is_red_zone);
 }
 
 function getFinancingType(price?: number | null) {
@@ -244,46 +316,13 @@ function inferCompleteness(r: any): "COMPLETE" | "PARTIAL" | "MISSING" {
 
   const price = inferAskingPrice(r);
   const rent = inferMarketRent(r);
-  const cashflow = inferCashflow(r);
-  const dscr = inferDscr(r);
-  const normalizedAddress = inferNormalizedAddress(r);
   const lat = inferLat(r);
   const lng = inferLng(r);
 
-  const strong =
-    price != null &&
-    rent != null &&
-    cashflow != null &&
-    dscr != null &&
-    normalizedAddress &&
-    lat != null &&
-    lng != null;
-
-  if (strong) return "COMPLETE";
-
-  const partialSignals = [
-    price != null,
-    rent != null,
-    cashflow != null,
-    dscr != null,
-    Boolean(normalizedAddress),
-    lat != null && lng != null,
-  ].filter(Boolean).length;
-
-  if (partialSignals >= 3) return "PARTIAL";
+  const score = [price, rent, lat, lng].filter((x) => x != null).length;
+  if (score >= 4) return "COMPLETE";
+  if (score >= 2) return "PARTIAL";
   return "MISSING";
-}
-
-function completenessPillClass(v: "COMPLETE" | "PARTIAL" | "MISSING") {
-  if (v === "COMPLETE") return "oh-pill oh-pill-good";
-  if (v === "PARTIAL") return "oh-pill oh-pill-warn";
-  return "oh-pill oh-pill-bad";
-}
-
-function completenessLabel(v: "COMPLETE" | "PARTIAL" | "MISSING") {
-  if (v === "COMPLETE") return "Enriched";
-  if (v === "PARTIAL") return "Partial";
-  return "Missing data";
 }
 
 function inferPhotoUrl(r: any) {
@@ -312,8 +351,16 @@ function inferPhotoUrl(r: any) {
   return null;
 }
 
-function metricTone(value: number | null | undefined) {
+function metricTone(
+  value: number | null | undefined,
+  opts?: { inverse?: boolean },
+) {
   if (value == null) return "text-app-0";
+  if (opts?.inverse) {
+    if (value <= 25) return "text-emerald-300";
+    if (value <= 50) return "text-amber-200";
+    return "text-red-300";
+  }
   if (value > 0) return "text-emerald-300";
   if (value < 0) return "text-red-300";
   return "text-app-0";
@@ -360,33 +407,63 @@ function inferTags(r: any): string[] {
   const dscr = inferDscr(r);
   const completeness = inferCompleteness(r);
   const crime = inferCrime(r);
-  const hiddenReason = inferHiddenReason(r);
+  const risk = inferRiskScore(r);
   const isCandidate = inferIsDealCandidate(r);
 
   if (isCandidate) tags.add("Deal candidate");
-  if (hiddenReason === "bad_risk") tags.add("Risk suppressed");
-  if (hiddenReason === "weak_cashflow") tags.add("Weak cashflow");
-  if (hiddenReason === "weak_dscr") tags.add("Weak DSCR");
-  if (hiddenReason === "low_score") tags.add("Low score");
-
   if (
     normalizeDecision(r?.normalized_decision || r?.classification) ===
     "GOOD_DEAL"
   ) {
-    tags.add("Good deal");
+    tags.add("High conviction");
   }
   if (financing === "CASH") tags.add("Cash");
   if (financing === "DSCR") tags.add("DSCR");
-  if (cashflow != null && cashflow > 0) tags.add("Cash flow positive");
+  if (cashflow != null && cashflow > 0) tags.add("Positive cash flow");
   if (dscr != null && dscr >= 1.2) tags.add("Strong DSCR");
   if (completeness === "COMPLETE") tags.add("Fully enriched");
   if (crime != null && crime <= 30) tags.add("Lower crime");
+  if (risk != null && risk <= 25) tags.add("Lower risk");
 
   const p = inferProperty(r);
   if (p?.bedrooms != null && Number(p.bedrooms) >= 3) tags.add("3+ beds");
   if (inferCounty(r)) tags.add(String(inferCounty(r)));
 
   return Array.from(tags).slice(0, 5);
+}
+
+function rankingReason(row: any, sort: SortKey, rank: number) {
+  const cashflow = inferCashflow(row);
+  const dscr = inferDscr(row);
+  const rentGap = inferRentGap(row);
+  const risk = inferRiskScore(row);
+  const reasons: string[] = [];
+
+  if (rank <= 3) reasons.push(`ranked #${rank} in this view`);
+
+  if (sort === "BEST_CASHFLOW" && cashflow != null) {
+    reasons.push(`monthly cashflow is ${money(cashflow)}`);
+  } else if (sort === "BEST_DSCR" && dscr != null) {
+    reasons.push(`DSCR is ${decimal(dscr, 2)}`);
+  } else if (sort === "BEST_RENT_GAP" && rentGap != null) {
+    reasons.push(`rent gap is ${money(rentGap)}`);
+  } else if (sort === "LOWEST_RISK" && risk != null) {
+    reasons.push(`risk score is ${decimal(risk, 0)} and lower is better`);
+  } else {
+    if (cashflow != null && cashflow > 0)
+      reasons.push(`${money(cashflow)} cashflow`);
+    if (dscr != null && dscr >= 1.2) reasons.push(`${decimal(dscr, 2)} DSCR`);
+    if (risk != null && risk <= 30)
+      reasons.push(`${decimal(risk, 0)} risk score`);
+    if (rentGap != null && rentGap > 0)
+      reasons.push(`${money(rentGap)} rent gap`);
+  }
+
+  if (inferCompleteness(row) === "COMPLETE") {
+    reasons.push("fully enriched data");
+  }
+
+  return reasons.slice(0, 3);
 }
 
 function buildPagination(currentPage: number, totalPages: number) {
@@ -472,6 +549,203 @@ function marketSubLabel(market: any) {
     .join(" • ");
 }
 
+function sortToApiValue(sort: SortKey) {
+  if (sort === "BEST_CASHFLOW") return "best_cashflow";
+  if (sort === "BEST_DSCR") return "best_dscr";
+  if (sort === "BEST_RENT_GAP") return "best_rent_gap";
+  if (sort === "LOWEST_RISK") return "lowest_risk";
+  if (sort === "LOWEST_PRICE") return "lowest_price";
+  if (sort === "HIGHEST_PRICE") return "highest_price";
+  if (sort === "NEWEST") return "newest";
+  return "relevance";
+}
+
+function compareRows(a: any, b: any, sort: SortKey) {
+  const aCashflow = inferCashflow(a);
+  const bCashflow = inferCashflow(b);
+  const aDscr = inferDscr(a);
+  const bDscr = inferDscr(b);
+  const aRentGap = inferRentGap(a);
+  const bRentGap = inferRentGap(b);
+  const aRisk = inferRiskScore(a);
+  const bRisk = inferRiskScore(b);
+
+  if (sort === "BEST_CASHFLOW") {
+    return (
+      (bCashflow ?? Number.NEGATIVE_INFINITY) -
+      (aCashflow ?? Number.NEGATIVE_INFINITY)
+    );
+  }
+
+  if (sort === "BEST_DSCR") {
+    return (
+      (bDscr ?? Number.NEGATIVE_INFINITY) - (aDscr ?? Number.NEGATIVE_INFINITY)
+    );
+  }
+
+  if (sort === "BEST_RENT_GAP") {
+    return (
+      (bRentGap ?? Number.NEGATIVE_INFINITY) -
+      (aRentGap ?? Number.NEGATIVE_INFINITY)
+    );
+  }
+
+  if (sort === "LOWEST_RISK") {
+    return (
+      (aRisk ?? Number.POSITIVE_INFINITY) - (bRisk ?? Number.POSITIVE_INFINITY)
+    );
+  }
+
+  if (sort === "LOWEST_PRICE") {
+    return (
+      (inferAskingPrice(a) ?? Number.POSITIVE_INFINITY) -
+      (inferAskingPrice(b) ?? Number.POSITIVE_INFINITY)
+    );
+  }
+
+  if (sort === "HIGHEST_PRICE") {
+    return (
+      (inferAskingPrice(b) ?? Number.NEGATIVE_INFINITY) -
+      (inferAskingPrice(a) ?? Number.NEGATIVE_INFINITY)
+    );
+  }
+
+  if (sort === "NEWEST") {
+    return (
+      new Date(inferUpdatedAt(b) || 0).getTime() -
+      new Date(inferUpdatedAt(a) || 0).getTime()
+    );
+  }
+
+  const candidateDelta =
+    Number(inferIsDealCandidate(b)) - Number(inferIsDealCandidate(a));
+  if (candidateDelta !== 0) return candidateDelta;
+
+  const cashflowDelta =
+    (bCashflow ?? Number.NEGATIVE_INFINITY) -
+    (aCashflow ?? Number.NEGATIVE_INFINITY);
+  if (cashflowDelta !== 0) return cashflowDelta;
+
+  const dscrDelta =
+    (bDscr ?? Number.NEGATIVE_INFINITY) - (aDscr ?? Number.NEGATIVE_INFINITY);
+  if (dscrDelta !== 0) return dscrDelta;
+
+  const riskDelta =
+    (aRisk ?? Number.POSITIVE_INFINITY) - (bRisk ?? Number.POSITIVE_INFINITY);
+  if (riskDelta !== 0) return riskDelta;
+
+  return (
+    new Date(inferUpdatedAt(b) || 0).getTime() -
+    new Date(inferUpdatedAt(a) || 0).getTime()
+  );
+}
+
+function TopDealCard({
+  row,
+  index,
+  sort,
+}: {
+  row: any;
+  index: number;
+  sort: SortKey;
+}) {
+  const property = inferProperty(row);
+  const propertyId = resolvePropertyId(row);
+  const cashflow = inferCashflow(row);
+  const dscr = inferDscr(row);
+  const rentGap = inferRentGap(row);
+  const risk = inferRiskScore(row);
+  const photoUrl = inferPhotoUrl(row);
+  const reasons = rankingReason(row, sort, index + 1);
+
+  return (
+    <div className="overflow-hidden rounded-3xl border border-app bg-app-panel">
+      <div className="h-44 bg-app-muted">
+        <Photo url={photoUrl} alt={property?.address || "Property"} />
+      </div>
+
+      <div className="p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="oh-pill oh-pill-good">
+            <Sparkles className="h-3.5 w-3.5" />
+            Top {index + 1}
+          </div>
+          <span
+            className={decisionPillClass(
+              row?.normalized_decision || row?.classification,
+            )}
+          >
+            {decisionLabel(row?.normalized_decision || row?.classification)}
+          </span>
+        </div>
+
+        <div className="mt-3 line-clamp-2 text-base font-semibold text-app-0">
+          {property?.address || "Unknown address"}
+        </div>
+
+        <div className="mt-1 text-sm text-app-4">
+          {[property?.city, property?.state, property?.zip]
+            .filter(Boolean)
+            .join(", ")}
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <StatPill
+            label="Cashflow"
+            value={money(cashflow)}
+            tone={cashflow != null && cashflow > 0 ? "good" : "warn"}
+          />
+          <StatPill
+            label="DSCR"
+            value={decimal(dscr, 2)}
+            tone={dscr != null && dscr >= 1.2 ? "good" : "warn"}
+          />
+          <StatPill
+            label="Rent gap"
+            value={money(rentGap)}
+            tone={rentGap != null && rentGap > 0 ? "good" : "warn"}
+          />
+          <StatPill
+            label="Risk"
+            value={decimal(risk, 0)}
+            tone={
+              risk != null && risk <= 25
+                ? "good"
+                : risk != null && risk <= 50
+                  ? "warn"
+                  : "bad"
+            }
+          />
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Why this ranks highly
+          </div>
+          <ul className="mt-2 space-y-1 text-sm text-app-2">
+            {reasons.map((reason) => (
+              <li key={reason} className="flex items-start gap-2">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                <span>{reason}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {propertyId ? (
+          <Link
+            to={`/properties/${propertyId}`}
+            className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-app-1 hover:text-app-0"
+          >
+            Open property
+            <ArrowUpRight className="h-4 w-4" />
+          </Link>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function InvestorPane() {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [markets, setMarkets] = React.useState<MarketRow[]>([]);
@@ -493,13 +767,6 @@ export default function InvestorPane() {
   const [sort, setSort] = React.useState<SortKey>("RELEVANCE");
   const [currentPage, setCurrentPage] = React.useState(1);
 
-  const [dealScope, setDealScope] =
-      React.useState<DealScopeFilter>("CANDIDATES");
-  const [hiddenReason, setHiddenReason] =
-      React.useState<HiddenReasonFilter>("ALL");
-  // OLD CITY-ONLY FILTER KEPT FOR REFERENCE
-  // const [selectedCity, setSelectedCity] = React.useState<string>("ALL");
-
   const [activeRunId, setActiveRunId] = React.useState<number | null>(null);
   const [runsOpen, setRunsOpen] = React.useState(false);
   const [sourcePackMarket, setSourcePackMarket] =
@@ -507,17 +774,6 @@ export default function InvestorPane() {
   const [selectedMarket, setSelectedMarket] =
     React.useState<SupportedMarket | null>(null);
   const [marketRefreshNonce, setMarketRefreshNonce] = React.useState(0);
-
-  // OLD ACQUISITION QUEUE STATE KEPT FOR REFERENCE
-  // const [acquisitionQueue, setAcquisitionQueue] = React.useState<AcquisitionQueueRow[]>([]);
-  // const [acquisitionIds, setAcquisitionIds] = React.useState<Set<number>>(new Set());
-  // const [queueErr, setQueueErr] = React.useState<string | null>(null);
-  // const [queueLoading, setQueueLoading] = React.useState(false);
-  // const [queueSearch, setQueueSearch] = React.useState("");
-  // const [waitFilter, setWaitFilter] =
-  //   React.useState<AcquisitionWaitFilter>("ALL");
-  // const [queueStatusFilter, setQueueStatusFilter] =
-  //   React.useState<AcquisitionStatusFilter>("ALL");
 
   const loadInventory = React.useCallback(async () => {
     setInventoryLoading(true);
@@ -527,28 +783,15 @@ export default function InvestorPane() {
       const params: Record<string, any> = {
         limit: INITIAL_LIMIT,
         deals_only: "true",
-        include_suppressed:
-          dealScope === "INCLUDE_SUPPRESSED" ? "true" : undefined,
-            };
+        include_suppressed: undefined,
+        sort: sortToApiValue(sort),
+      };
 
       if (selectedMarket?.state) params.state = selectedMarket.state;
       if (selectedMarket?.county) params.county = selectedMarket.county;
       if (selectedMarket?.city) params.city = selectedMarket.city;
       if (deferredQ.trim()) params.q = deferredQ.trim();
 
-      if (sort === "RELEVANCE") params.sort = "relevance";
-      if (sort === "BEST_CASHFLOW") params.sort = "best_cashflow";
-      if (sort === "LOWEST_PRICE") params.sort = "lowest_price";
-      if (sort === "HIGHEST_PRICE") params.sort = "highest_price";
-      if (sort === "BEST_DSCR") params.sort = "best_dscr";
-      if (sort === "NEWEST") params.sort = "newest";
-
-      if (hiddenReason === "INACTIVE") params.hidden_reason = "inactive_listing";
-      if (hiddenReason === "LOW_SCORE") params.hidden_reason = "low_score";
-      if (hiddenReason === "BAD_RISK") params.hidden_reason = "bad_risk";
-      if (hiddenReason === "WEAK_CASHFLOW") params.hidden_reason = "weak_cashflow";
-      if (hiddenReason === "WEAK_DSCR") params.hidden_reason = "weak_dscr";
-      
       const propertiesRes = await api.get<any>("/properties", { params });
       const propertyItems =
         propertiesRes?.items || propertiesRes?.rows || propertiesRes || [];
@@ -560,7 +803,7 @@ export default function InvestorPane() {
     } finally {
       setInventoryLoading(false);
     }
-  }, [deferredQ, selectedMarket, sort, dealScope, hiddenReason]);
+  }, [deferredQ, selectedMarket, sort]);
 
   const loadMarkets = React.useCallback(async () => {
     setMarketsLoading(true);
@@ -603,8 +846,7 @@ export default function InvestorPane() {
         : [];
 
       setMarkets(normalized);
-
-      setSelectedMarket((prev): SupportedMarket | null => {
+      setSelectedMarket((prev) => {
         if (prev?.slug) {
           return (
             normalized.find((m) => m.slug === prev.slug) ??
@@ -623,38 +865,6 @@ export default function InvestorPane() {
     }
   }, []);
 
-  // OLD QUEUE LOAD PATH KEPT FOR REFERENCE
-  // const loadQueue = React.useCallback(async () => {
-  //   setQueueLoading(true);
-  //   setQueueErr(null);
-  //
-  //   try {
-  //     const queueRes = await api.get<any>("/acquisition/queue", {
-  //       params: { limit: 1000 },
-  //     });
-  //
-  //     const items = Array.isArray(queueRes?.items) ? queueRes.items : [];
-  //     setAcquisitionQueue(items);
-  //
-  //     const propertyIds = new Set<number>(
-  //       items
-  //         .map((x: any) => Number(x?.property_id))
-  //         .filter((n: number) => Number.isFinite(n) && n > 0),
-  //     );
-  //     setAcquisitionIds(propertyIds);
-  //   } catch (e: any) {
-  //     setQueueErr(formatApiError(e, "Failed to load acquisition queue."));
-  //     setAcquisitionQueue([]);
-  //     setAcquisitionIds(new Set());
-  //   } finally {
-  //     setQueueLoading(false);
-  //   }
-  // }, []);
-
-  const load = React.useCallback(async () => {
-    await Promise.all([loadMarkets(), loadInventory()]);
-  }, [loadInventory, loadMarkets]);
-
   React.useEffect(() => {
     loadMarkets();
   }, [loadMarkets]);
@@ -663,109 +873,112 @@ export default function InvestorPane() {
     loadInventory();
   }, [loadInventory, marketRefreshNonce]);
 
-    const filteredRows = React.useMemo(() => {
-      return rows
-        .filter((row) => {
-          const normalizedDecision = normalizeDecision(
-            row?.normalized_decision || row?.classification,
-          );
-          if (decision !== "ALL" && normalizedDecision !== decision)
-            return false;
+  const filteredRows = React.useMemo(() => {
+    return rows
+      .filter((row) => {
+        const hiddenReason = inferHiddenReason(row);
+        const status = inferDealFilterStatus(row);
 
-          const financingType = getFinancingType(inferAskingPrice(row));
-          if (financing !== "ALL" && financingType !== financing) return false;
+        if (hiddenReason === "inactive_listing") return false;
+        if (!inferIsDealCandidate(row)) return false;
+        if (status === "suppressed" || status === "hidden") return false;
 
-          const completenessValue = inferCompleteness(row);
-          if (completeness !== "ALL" && completenessValue !== completeness) {
-            return false;
-          }
+        const normalizedDecision = normalizeDecision(
+          row?.normalized_decision || row?.classification,
+        );
+        if (decision !== "ALL" && normalizedDecision !== decision) return false;
 
-          if (dealScope === "CANDIDATES" && !inferIsDealCandidate(row)) {
-            return false;
-          }
+        const financingType = getFinancingType(inferAskingPrice(row));
+        if (financing !== "ALL" && financingType !== financing) return false;
 
-          if (hiddenReason !== "ALL") {
-            const reason = inferHiddenReason(row);
-            if (hiddenReason === "INACTIVE" && reason !== "inactive_listing")
-              return false;
-            if (hiddenReason === "LOW_SCORE" && reason !== "low_score")
-              return false;
-            if (hiddenReason === "BAD_RISK" && reason !== "bad_risk")
-              return false;
-            if (hiddenReason === "WEAK_CASHFLOW" && reason !== "weak_cashflow")
-              return false;
-            if (hiddenReason === "WEAK_DSCR" && reason !== "weak_dscr")
-              return false;
-          }
+        const completenessValue = inferCompleteness(row);
+        if (completeness !== "ALL" && completenessValue !== completeness) {
+          return false;
+        }
 
-          return true;
-        })
-        .sort((a, b) => {
-          const aCandidate = inferIsDealCandidate(a) ? 1 : 0;
-          const bCandidate = inferIsDealCandidate(b) ? 1 : 0;
+        if (deferredQ.trim()) {
+          const haystack = [
+            row?.address,
+            row?.normalized_address,
+            row?.city,
+            row?.state,
+            row?.zip,
+            row?.county,
+            row?.property?.address,
+            row?.property?.city,
+            row?.property?.state,
+            row?.property?.zip,
+            row?.property?.county,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
 
-          if (sort === "BEST_CASHFLOW") {
-            return (
-              (inferCashflow(b) ?? Number.NEGATIVE_INFINITY) -
-              (inferCashflow(a) ?? Number.NEGATIVE_INFINITY)
-            );
-          }
+          if (!haystack.includes(deferredQ.trim().toLowerCase())) return false;
+        }
 
-          if (sort === "BEST_DSCR") {
-            return (
-              (inferDscr(b) ?? Number.NEGATIVE_INFINITY) -
-              (inferDscr(a) ?? Number.NEGATIVE_INFINITY)
-            );
-          }
+        return true;
+      })
+      .sort((a, b) => compareRows(a, b, sort));
+  }, [rows, decision, financing, completeness, deferredQ, sort]);
 
-          if (sort === "LOWEST_PRICE") {
-            return (
-              (inferAskingPrice(a) ?? Number.POSITIVE_INFINITY) -
-              (inferAskingPrice(b) ?? Number.POSITIVE_INFINITY)
-            );
-          }
+  const topDeals = React.useMemo(
+    () => filteredRows.slice(0, 3),
+    [filteredRows],
+  );
 
-          if (sort === "HIGHEST_PRICE") {
-            return (
-              (inferAskingPrice(b) ?? Number.NEGATIVE_INFINITY) -
-              (inferAskingPrice(a) ?? Number.NEGATIVE_INFINITY)
-            );
-          }
+  const stats = React.useMemo(() => {
+    const totals = filteredRows.reduce(
+      (acc, row) => {
+        const cashflow = inferCashflow(row);
+        const dscr = inferDscr(row);
+        const rentGap = inferRentGap(row);
+        const risk = inferRiskScore(row);
 
-          if (sort === "NEWEST") {
-            return (
-              new Date(inferUpdatedAt(b) || 0).getTime() -
-              new Date(inferUpdatedAt(a) || 0).getTime()
-            );
-          }
+        if (cashflow != null) {
+          acc.cashflowSum += cashflow;
+          acc.cashflowCount += 1;
+        }
+        if (dscr != null) {
+          acc.dscrSum += dscr;
+          acc.dscrCount += 1;
+        }
+        if (rentGap != null) {
+          acc.rentGapSum += rentGap;
+          acc.rentGapCount += 1;
+        }
+        if (risk != null) {
+          acc.riskSum += risk;
+          acc.riskCount += 1;
+        }
+        return acc;
+      },
+      {
+        cashflowSum: 0,
+        cashflowCount: 0,
+        dscrSum: 0,
+        dscrCount: 0,
+        rentGapSum: 0,
+        rentGapCount: 0,
+        riskSum: 0,
+        riskCount: 0,
+      },
+    );
 
-          // relevance: deal candidates first, then cashflow, then dscr, then freshness
-          if (bCandidate !== aCandidate) return bCandidate - aCandidate;
-
-          const cashflowDelta =
-            (inferCashflow(b) ?? Number.NEGATIVE_INFINITY) -
-            (inferCashflow(a) ?? Number.NEGATIVE_INFINITY);
-          if (cashflowDelta !== 0) return cashflowDelta;
-
-          const dscrDelta =
-            (inferDscr(b) ?? Number.NEGATIVE_INFINITY) -
-            (inferDscr(a) ?? Number.NEGATIVE_INFINITY);
-          if (dscrDelta !== 0) return dscrDelta;
-
-          return (
-            new Date(inferUpdatedAt(b) || 0).getTime() -
-            new Date(inferUpdatedAt(a) || 0).getTime()
-          );
-        });
-    }, [
-      rows,
-      decision,
-      financing,
-      completeness,
-      dealScope,
-      hiddenReason,
-      sort,
-    ]);
+    return {
+      visible: filteredRows.length,
+      avgCashflow:
+        totals.cashflowCount > 0
+          ? totals.cashflowSum / totals.cashflowCount
+          : null,
+      avgDscr: totals.dscrCount > 0 ? totals.dscrSum / totals.dscrCount : null,
+      avgRentGap:
+        totals.rentGapCount > 0
+          ? totals.rentGapSum / totals.rentGapCount
+          : null,
+      avgRisk: totals.riskCount > 0 ? totals.riskSum / totals.riskCount : null,
+    };
+  }, [filteredRows]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -781,10 +994,7 @@ export default function InvestorPane() {
     decision,
     financing,
     completeness,
-    dealScope,
-    hiddenReason,
     sort,
-    deferredQ,
     selectedMarket?.slug,
   ]);
 
@@ -811,114 +1021,79 @@ export default function InvestorPane() {
     <PageShell>
       <PageHero
         eyebrow="Investor pane"
-        title="Curated inventory across supported markets"
-        subtitle="Search your covered inventory, refresh the selected market, and inspect sync behavior without dropping into raw ingestion details."
+        title="Ranked deal inventory"
+        subtitle="This view stays deal-focused. Inactive and suppressed inventory are kept out, top candidates are surfaced first, and every row shows why it ranks where it does."
+        right={<PaneSwitcher activePane="investor" />}
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
           <Surface
-            title="Inventory controls"
-            subtitle="Scope the investor catalog to a supported market and sort the results that matter."
+            title="Ranking controls"
+            subtitle="Search one supported market at a time, then sort by the deal signal you care about."
           >
-            <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr_auto]">
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <Search className="h-4 w-4" />
-                  Search inventory
-                </div>
-                <div className="mt-2 flex items-center gap-3">
-                  <Search className="h-4 w-4 text-app-4" />
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="Address, city, ZIP, county"
-                    className="w-full bg-transparent text-sm text-app-0 outline-none placeholder:text-app-4"
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <MapPin className="h-4 w-4" />
-                  Supported market
-                </div>
-                <div className="mt-2">
-                  <select
-                    value={selectedMarket?.slug || ""}
-                    onChange={(e) =>
-                      setSelectedMarket(
-                        markets.find((m) => m.slug === e.target.value) || null,
-                      )
-                    }
-                    className="w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
-                  >
-                    {markets.map((market) => (
-                      <option key={market.slug} value={market.slug}>
-                        {marketDisplayName(market)}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="mt-2 text-xs text-app-4">
-                    {selectedMarket
-                      ? marketSubLabel(selectedMarket)
-                      : "No market selected"}
-                  </div>
-                </div>
-              </div>
-
+            <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr_auto]">
               <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
                 <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
                   <BriefcaseBusiness className="h-4 w-4" />
-                  Deal scope
+                  Market
                 </div>
+
                 <select
-                  value={dealScope}
+                  value={selectedMarket?.slug || ""}
                   onChange={(e) =>
-                    setDealScope(e.target.value as DealScopeFilter)
+                    setSelectedMarket(
+                      markets.find((m) => m.slug === e.target.value) || null,
+                    )
                   }
                   className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
                 >
-                  <option value="CANDIDATES">Deal candidates only</option>
-                  <option value="INCLUDE_SUPPRESSED">Include suppressed</option>
+                  {markets.map((market) => (
+                    <option key={market.slug} value={market.slug}>
+                      {marketDisplayName(market)}
+                    </option>
+                  ))}
                 </select>
+
+                {selectedMarket ? (
+                  <div className="mt-2 text-xs text-app-4">
+                    {marketSubLabel(selectedMarket)}
+                  </div>
+                ) : null}
               </div>
 
-              <div className="flex items-stretch gap-3">
-                <button
-                  type="button"
-                  className="oh-btn"
-                  disabled={!selectedMarket || refreshing}
-                  onClick={refreshSelectedMarket}
-                >
-                  {refreshing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Syncing…
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCcw className="h-4 w-4" />
-                      Sync now
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  className="oh-btn oh-btn-secondary"
-                  onClick={() => setRunsOpen((v) => !v)}
-                >
-                  <PanelRightOpen className="h-4 w-4" />
-                  {runsOpen ? "Hide runs" : "View runs"}
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
               <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
                 <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <SlidersHorizontal className="h-4 w-4" />
+                  <Search className="h-4 w-4" />
+                  Search
+                </div>
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Address, city, zip, county"
+                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={refreshSelectedMarket}
+                disabled={refreshing || !selectedMarket?.slug}
+                className="inline-flex h-full min-h-[88px] items-center justify-center gap-2 rounded-2xl border border-app bg-app-panel px-5 py-3 text-sm font-medium text-app-0 transition hover:bg-app-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {refreshing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-4 w-4" />
+                )}
+                Sync now
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <GitBranch className="h-4 w-4" />
                   Decision
                 </div>
                 <select
@@ -973,31 +1148,10 @@ export default function InvestorPane() {
                 </select>
               </div>
 
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <ShieldAlert className="h-4 w-4" />
-                  Suppression reason
-                </div>
-                <select
-                  value={hiddenReason}
-                  onChange={(e) =>
-                    setHiddenReason(e.target.value as HiddenReasonFilter)
-                  }
-                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
-                >
-                  <option value="ALL">All</option>
-                  <option value="BAD_RISK">Bad risk</option>
-                  <option value="WEAK_CASHFLOW">Weak cashflow</option>
-                  <option value="WEAK_DSCR">Weak DSCR</option>
-                  <option value="LOW_SCORE">Low score</option>
-                  <option value="INACTIVE">Inactive listing</option>
-                </select>
-              </div>
-
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3 md:col-span-2">
                 <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
                   <Settings2 className="h-4 w-4" />
-                  Sort
+                  Sort ranked deals by
                 </div>
                 <select
                   value={sort}
@@ -1006,10 +1160,12 @@ export default function InvestorPane() {
                 >
                   <option value="RELEVANCE">Relevance</option>
                   <option value="BEST_CASHFLOW">Best cashflow</option>
+                  <option value="BEST_DSCR">Best DSCR</option>
+                  <option value="BEST_RENT_GAP">Best rent gap</option>
+                  <option value="LOWEST_RISK">Lowest risk</option>
+                  <option value="NEWEST">Newest</option>
                   <option value="LOWEST_PRICE">Lowest price</option>
                   <option value="HIGHEST_PRICE">Highest price</option>
-                  <option value="BEST_DSCR">Best DSCR</option>
-                  <option value="NEWEST">Newest</option>
                 </select>
               </div>
             </div>
@@ -1027,9 +1183,71 @@ export default function InvestorPane() {
             ) : null}
           </Surface>
 
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Surface
+              title="Visible deals"
+              subtitle="Filtered active ranked deals only"
+            >
+              <div className="text-3xl font-semibold text-app-0">
+                {stats.visible}
+              </div>
+            </Surface>
+
+            <Surface title="Average cashflow">
+              <div
+                className={`text-3xl font-semibold ${metricTone(stats.avgCashflow)}`}
+              >
+                {money(stats.avgCashflow)}
+              </div>
+            </Surface>
+
+            <Surface title="Average DSCR">
+              <div
+                className={`text-3xl font-semibold ${metricTone(stats.avgDscr)}`}
+              >
+                {decimal(stats.avgDscr, 2)}
+              </div>
+            </Surface>
+
+            <Surface title="Average risk">
+              <div
+                className={`text-3xl font-semibold ${metricTone(stats.avgRisk, { inverse: true })}`}
+              >
+                {decimal(stats.avgRisk, 0)}
+              </div>
+            </Surface>
+          </div>
+
           <Surface
-            title="Investor inventory"
-            subtitle="Your local supported-market catalog, sorted for action instead of raw provider order."
+            title="Top ranked deals"
+            subtitle="The three strongest candidates in the current filtered view."
+          >
+            {inventoryLoading || marketsLoading ? (
+              <div className="flex items-center justify-center py-16 text-app-4">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
+            ) : !topDeals.length ? (
+              <EmptyState
+                title="No ranked deals yet"
+                description="Try a different supported market or relax one of the filters."
+              />
+            ) : (
+              <div className="grid gap-4 xl:grid-cols-3">
+                {topDeals.map((row, index) => (
+                  <TopDealCard
+                    key={`${resolvePropertyId(row) || index}-${index}`}
+                    row={row}
+                    index={index}
+                    sort={sort}
+                  />
+                ))}
+              </div>
+            )}
+          </Surface>
+
+          <Surface
+            title="Ranked deal list"
+            subtitle="Every row shows the main financial signals and the reason the property is floating to the top."
           >
             {inventoryLoading || marketsLoading ? (
               <div className="flex items-center justify-center py-16 text-app-4">
@@ -1038,30 +1256,38 @@ export default function InvestorPane() {
             ) : !pageRows.length ? (
               <EmptyState
                 title="No properties match the current filters"
-                description="Try a different market, search term, or decision filter."
+                description="Try a different market, search term, or ranking sort."
               />
             ) : (
               <>
                 <div className="grid gap-4">
-                  {pageRows.map((row) => {
+                  {pageRows.map((row, index) => {
                     const property = inferProperty(row);
                     const propertyId = resolvePropertyId(row);
                     const askingPrice = inferAskingPrice(row);
                     const marketRent = inferMarketRent(row);
                     const cashflow = inferCashflow(row);
                     const dscr = inferDscr(row);
+                    const rentGap = inferRentGap(row);
+                    const risk = inferRiskScore(row);
                     const completenessValue = inferCompleteness(row);
                     const photoUrl = inferPhotoUrl(row);
                     const tags = inferTags(row);
                     const updatedAt = inferUpdatedAt(row);
+                    const absoluteRank =
+                      (safeCurrentPage - 1) * PAGE_SIZE + index + 1;
+                    const reasons = rankingReason(row, sort, absoluteRank);
 
                     return (
                       <div
-                        key={propertyId || property?.id || Math.random()}
+                        key={
+                          propertyId ||
+                          `${property?.address || "property"}-${absoluteRank}`
+                        }
                         className="overflow-hidden rounded-3xl border border-app bg-app-panel"
                       >
-                        <div className="grid gap-0 md:grid-cols-[280px_minmax(0,1fr)]">
-                          <div className="h-[220px] bg-app-muted">
+                        <div className="grid gap-0 xl:grid-cols-[260px_minmax(0,1fr)]">
+                          <div className="h-[220px] bg-app-muted xl:h-full">
                             <Photo
                               url={photoUrl}
                               alt={property?.address || "Property"}
@@ -1069,16 +1295,22 @@ export default function InvestorPane() {
                           </div>
 
                           <div className="p-5">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="flex flex-wrap items-start justify-between gap-4">
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
+                                  <span className="oh-pill">
+                                    <TrendingUp className="h-3.5 w-3.5" />
+                                    Rank #{absoluteRank}
+                                  </span>
                                   <span
                                     className={decisionPillClass(
-                                      row?.normalized_decision,
+                                      row?.normalized_decision ||
+                                        row?.classification,
                                     )}
                                   >
-                                    {normalizeDecision(
-                                      row?.normalized_decision,
+                                    {decisionLabel(
+                                      row?.normalized_decision ||
+                                        row?.classification,
                                     )}
                                   </span>
                                   <span
@@ -1088,14 +1320,9 @@ export default function InvestorPane() {
                                   >
                                     {completenessLabel(completenessValue)}
                                   </span>
-
-                                  {inferIsDealCandidate(row) ? (
-                                        <span className="oh-pill oh-pill-good">Deal candidate</span>
-                                      ) : (
-                                        <span className="oh-pill oh-pill-warn">
-                                          Suppressed{inferHiddenReason(row) ? ` • ${inferHiddenReason(row)}` : ""}
-                                        </span>
-                                      )}
+                                  <span className="oh-pill oh-pill-good">
+                                    Active deal
+                                  </span>
                                 </div>
 
                                 <div className="mt-3 text-xl font-semibold text-app-0">
@@ -1128,6 +1355,53 @@ export default function InvestorPane() {
                               </div>
                             </div>
 
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <StatPill
+                                label="Cashflow"
+                                value={money(cashflow)}
+                                tone={
+                                  cashflow != null && cashflow > 0
+                                    ? "good"
+                                    : cashflow != null && cashflow < 0
+                                      ? "bad"
+                                      : "neutral"
+                                }
+                              />
+                              <StatPill
+                                label="DSCR"
+                                value={decimal(dscr, 2)}
+                                tone={
+                                  dscr != null && dscr >= 1.2
+                                    ? "good"
+                                    : dscr != null && dscr < 1
+                                      ? "bad"
+                                      : "warn"
+                                }
+                              />
+                              <StatPill
+                                label="Rent gap"
+                                value={money(rentGap)}
+                                tone={
+                                  rentGap != null && rentGap > 0
+                                    ? "good"
+                                    : rentGap != null && rentGap < 0
+                                      ? "bad"
+                                      : "neutral"
+                                }
+                              />
+                              <StatPill
+                                label="Risk"
+                                value={decimal(risk, 0)}
+                                tone={
+                                  risk != null && risk <= 25
+                                    ? "good"
+                                    : risk != null && risk <= 50
+                                      ? "warn"
+                                      : "bad"
+                                }
+                              />
+                            </div>
+
                             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                               <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
                                 <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
@@ -1146,77 +1420,106 @@ export default function InvestorPane() {
                                   <Landmark className="h-4 w-4" />
                                   DSCR
                                 </div>
-                                <div className="mt-2 text-lg font-semibold text-app-0">
-                                  {dscr != null ? dscr.toFixed(2) : "—"}
+                                <div
+                                  className={`mt-2 text-lg font-semibold ${metricTone(dscr)}`}
+                                >
+                                  {decimal(dscr, 2)}
                                 </div>
                               </div>
 
                               <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
                                 <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                  <BriefcaseBusiness className="h-4 w-4" />
-                                  Rent est.
+                                  <TrendingUp className="h-4 w-4" />
+                                  Rent gap
                                 </div>
-                                <div className="mt-2 text-lg font-semibold text-app-0">
-                                  {money(marketRent)}
+                                <div
+                                  className={`mt-2 text-lg font-semibold ${metricTone(rentGap)}`}
+                                >
+                                  {money(rentGap)}
+                                </div>
+                                <div className="mt-1 text-xs text-app-4">
+                                  Rent {money(marketRent)}
                                 </div>
                               </div>
 
                               <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
                                 <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
                                   <ShieldAlert className="h-4 w-4" />
-                                  Crime
+                                  Risk
                                 </div>
-                                <div className="mt-2 text-lg font-semibold text-app-0">
-                                  {numberOrNull(inferCrime(row)) ?? "—"}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              {tags.map((tag) => (
-                                <span
-                                  key={tag}
-                                  className="oh-pill oh-pill-secondary"
+                                <div
+                                  className={`mt-2 text-lg font-semibold ${metricTone(risk, { inverse: true })}`}
                                 >
-                                  {tag}
-                                </span>
-                              ))}
+                                  {decimal(risk, 0)}
+                                </div>
+                                <div className="mt-1 text-xs text-app-4">
+                                  Lower is better
+                                </div>
+                              </div>
                             </div>
 
-                            <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-                              <div className="flex flex-wrap items-center gap-4 text-sm text-app-4">
-                                <span className="inline-flex items-center gap-1">
-                                  <BedDouble className="h-4 w-4" />
-                                  {property?.bedrooms ?? "—"} beds
-                                </span>
-                                <span className="inline-flex items-center gap-1">
-                                  <Bath className="h-4 w-4" />
-                                  {property?.bathrooms ?? "—"} baths
-                                </span>
-                                <span className="inline-flex items-center gap-1">
-                                  <GitBranch className="h-4 w-4" />
-                                  {inferCounty(row) || "Unknown county"}
-                                </span>
+                            <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                                Why this deal is ranking highly
+                              </div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {reasons.map((reason) => (
+                                  <span key={reason} className="oh-pill">
+                                    {reason}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="mt-4">
+                              <RiskBadges
+                                compact
+                                county={inferCounty(row)}
+                                isRedZone={inferIsRedZone(row)}
+                                crimeScore={inferCrime(row)}
+                                offenderCount={inferOffenderCount(row)}
+                                lat={inferLat(row)}
+                                lng={inferLng(row)}
+                                normalizedAddress={inferNormalizedAddress(row)}
+                                geocodeSource={inferGeocodeSource(row)}
+                                geocodeConfidence={inferGeocodeConfidence(row)}
+                              />
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex flex-wrap gap-2">
+                                {tags.map((tag) => (
+                                  <span key={tag} className="oh-pill">
+                                    {tag}
+                                  </span>
+                                ))}
                               </div>
 
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-3">
+                                <div className="text-xs text-app-4">
+                                  {property?.bedrooms != null ? (
+                                    <span className="inline-flex items-center gap-1">
+                                      <BedDouble className="h-4 w-4" />
+                                      {property.bedrooms} bd
+                                    </span>
+                                  ) : null}
+                                  {property?.bathrooms != null ? (
+                                    <span className="ml-3 inline-flex items-center gap-1">
+                                      <Bath className="h-4 w-4" />
+                                      {property.bathrooms} ba
+                                    </span>
+                                  ) : null}
+                                </div>
+
                                 {propertyId ? (
                                   <Link
                                     to={`/properties/${propertyId}`}
-                                    className="oh-btn"
+                                    className="inline-flex items-center gap-2 rounded-xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0 transition hover:bg-app-panel"
                                   >
-                                    View property
+                                    Open
                                     <ArrowUpRight className="h-4 w-4" />
                                   </Link>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className="oh-btn oh-btn-secondary"
-                                    disabled
-                                  >
-                                    Missing property id
-                                  </button>
-                                )}
+                                ) : null}
                               </div>
                             </div>
                           </div>
@@ -1226,55 +1529,66 @@ export default function InvestorPane() {
                   })}
                 </div>
 
-                <div className="mt-5 flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    className="oh-btn oh-btn-secondary"
-                    disabled={safeCurrentPage <= 1}
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    Previous
-                  </button>
+                {totalPages > 1 ? (
+                  <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm text-app-4">
+                      Showing {(safeCurrentPage - 1) * PAGE_SIZE + 1}–
+                      {Math.min(
+                        safeCurrentPage * PAGE_SIZE,
+                        filteredRows.length,
+                      )}{" "}
+                      of {filteredRows.length}
+                    </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    {pagination.map((token, index) =>
-                      typeof token === "string" ? (
-                        <span
-                          key={`ellipsis-${index}`}
-                          className="px-2 text-sm text-app-4"
-                        >
-                          {token}
-                        </span>
-                      ) : (
-                        <button
-                          key={token}
-                          type="button"
-                          className={
-                            token === safeCurrentPage
-                              ? "oh-btn"
-                              : "oh-btn oh-btn-secondary"
-                          }
-                          onClick={() => setCurrentPage(token)}
-                        >
-                          {token}
-                        </button>
-                      ),
-                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCurrentPage((p) => Math.max(1, p - 1))
+                        }
+                        disabled={safeCurrentPage <= 1}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-app bg-app-panel text-app-0 disabled:opacity-50"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+
+                      {pagination.map((item, index) =>
+                        typeof item === "string" ? (
+                          <span
+                            key={`${item}-${index}`}
+                            className="px-2 text-app-4"
+                          >
+                            {item}
+                          </span>
+                        ) : (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => setCurrentPage(item)}
+                            className={`inline-flex h-9 min-w-9 items-center justify-center rounded-xl border px-3 text-sm ${
+                              item === safeCurrentPage
+                                ? "border-app-strong bg-app-muted text-app-0"
+                                : "border-app bg-app-panel text-app-3"
+                            }`}
+                          >
+                            {item}
+                          </button>
+                        ),
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCurrentPage((p) => Math.min(totalPages, p + 1))
+                        }
+                        disabled={safeCurrentPage >= totalPages}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-app bg-app-panel text-app-0 disabled:opacity-50"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-
-                  <button
-                    type="button"
-                    className="oh-btn oh-btn-secondary"
-                    disabled={safeCurrentPage >= totalPages}
-                    onClick={() =>
-                      setCurrentPage((p) => Math.min(totalPages, p + 1))
-                    }
-                  >
-                    Next
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                </div>
+                ) : null}
               </>
             )}
           </Surface>
@@ -1282,69 +1596,130 @@ export default function InvestorPane() {
 
         <div className="space-y-6">
           <Surface
-            title="Supported market operations"
-            subtitle="Source packs and refresh controls for the currently selected supported region."
+            title="Current market"
+            subtitle="Selected supported market and current ranking mode."
           >
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-app-4">
-                  Current market
+            {selectedMarket ? (
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                  <div className="text-sm font-semibold text-app-0">
+                    {marketDisplayName(selectedMarket)}
+                  </div>
+                  <div className="mt-1 text-sm text-app-4">
+                    {marketSubLabel(selectedMarket)}
+                  </div>
                 </div>
-                <div className="mt-2 text-base font-semibold text-app-0">
-                  {selectedMarket
-                    ? marketDisplayName(selectedMarket)
-                    : "No market"}
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                      Active sort
+                    </div>
+                    <div className="mt-2 text-sm font-medium text-app-0">
+                      {sort === "RELEVANCE"
+                        ? "Relevance"
+                        : sort === "BEST_CASHFLOW"
+                          ? "Best cashflow"
+                          : sort === "BEST_DSCR"
+                            ? "Best DSCR"
+                            : sort === "BEST_RENT_GAP"
+                              ? "Best rent gap"
+                              : sort === "LOWEST_RISK"
+                                ? "Lowest risk"
+                                : sort === "LOWEST_PRICE"
+                                  ? "Lowest price"
+                                  : sort === "HIGHEST_PRICE"
+                                    ? "Highest price"
+                                    : "Newest"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                      Coverage tier
+                    </div>
+                    <div className="mt-2 text-sm font-medium text-app-0">
+                      {selectedMarket.coverage_tier || "—"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                      Price band
+                    </div>
+                    <div className="mt-2 text-sm font-medium text-app-0">
+                      {money(selectedMarket.min_price)} to{" "}
+                      {money(selectedMarket.max_price)}
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-1 text-sm text-app-4">
-                  {selectedMarket
-                    ? marketSubLabel(selectedMarket)
-                    : "Select a supported market."}
-                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSourcePackMarket(selectedMarket)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm font-medium text-app-0 hover:bg-app-muted"
+                >
+                  <PanelRightOpen className="h-4 w-4" />
+                  View market source pack
+                </button>
               </div>
-
-              <IngestionLaunchCard
-                market={selectedMarket}
-                onRunQueued={() => {
-                  setMarketRefreshNonce((v) => v + 1);
-                  setRunsOpen(true);
-                }}
-                onManageSources={() => setSourcePackMarket(selectedMarket)}
-              />
-
-              <button
-                type="button"
-                className="oh-btn oh-btn-secondary w-full"
-                disabled={!selectedMarket}
-                onClick={() => setSourcePackMarket(selectedMarket)}
-              >
-                <Settings2 className="h-4 w-4" />
-                Manage market sources
-              </button>
-            </div>
+            ) : (
+              <EmptyState title="No supported market selected" />
+            )}
           </Surface>
 
-          {runsOpen ? (
-            <IngestionRunsPanel
-              open={runsOpen}
-              refreshKey={marketRefreshNonce}
-              onClose={() => setRunsOpen(false)}
-              onSelectRun={(runId) => setActiveRunId(runId)}
-            />
-          ) : null}
+          <IngestionLaunchCard
+            market={selectedMarket}
+            onRunQueued={() => {
+              setMarketRefreshNonce((v) => v + 1);
+              setRunsOpen(true);
+            }}
+            onManageSources={() => setSourcePackMarket(selectedMarket)}
+          />
+
+          <Surface
+            title="Recent sync activity"
+            subtitle="Keep sync feedback close to the investor pane."
+          >
+            <button
+              type="button"
+              onClick={() => setRunsOpen((v) => !v)}
+              className="inline-flex w-full items-center justify-between rounded-2xl border border-app bg-app-panel px-4 py-3 text-left text-sm text-app-0 hover:bg-app-muted"
+            >
+              <span className="inline-flex items-center gap-2">
+                <Clock3 className="h-4 w-4" />
+                {runsOpen ? "Hide run history" : "Show run history"}
+              </span>
+              <ChevronRight
+                className={`h-4 w-4 transition ${runsOpen ? "rotate-90" : ""}`}
+              />
+            </button>
+
+            {runsOpen ? (
+              <div className="mt-4">
+                <IngestionRunsPanel
+                  open={runsOpen}
+                  refreshKey={marketRefreshNonce}
+                  onClose={() => setRunsOpen(false)}
+                  onSelectRun={(runId) => setActiveRunId(runId)}
+                />
+              </div>
+            ) : null}
+          </Surface>
+
+          <IngestionErrorsDrawer
+            runId={activeRunId}
+            onClose={() => setActiveRunId(null)}
+          />
         </div>
       </div>
-
-      <IngestionErrorsDrawer
-        runId={activeRunId}
-        onClose={() => setActiveRunId(null)}
-      />
 
       <MarketSourcePackModal
         open={Boolean(sourcePackMarket)}
         market={sourcePackMarket}
         onClose={() => setSourcePackMarket(null)}
-        onChanged={load}
       />
     </PageShell>
   );
 }
+

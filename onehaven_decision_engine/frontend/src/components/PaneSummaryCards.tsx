@@ -6,6 +6,8 @@ import {
   BriefcaseBusiness,
   ClipboardCheck,
   Settings2,
+  Sparkles,
+  TrendingUp,
   Users,
   Wallet,
 } from "lucide-react";
@@ -58,6 +60,43 @@ function hrefForPane(pane?: string) {
   }
 }
 
+function money(v: any) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `$${Math.round(n).toLocaleString()}`;
+}
+
+function decimal(v: any, digits = 2) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(digits);
+}
+
+function investorHighlights(kpis?: Record<string, any>) {
+  if (!kpis) return [];
+
+  const out: Array<{ label: string; value: string; icon: React.ReactNode }> =
+    [];
+
+  if (kpis.avg_projected_monthly_cashflow != null) {
+    out.push({
+      label: "Avg cashflow",
+      value: money(kpis.avg_projected_monthly_cashflow),
+      icon: <TrendingUp className="h-3.5 w-3.5" />,
+    });
+  }
+
+  if (kpis.avg_dscr != null) {
+    out.push({
+      label: "Avg DSCR",
+      value: decimal(kpis.avg_dscr, 2),
+      icon: <Sparkles className="h-3.5 w-3.5" />,
+    });
+  }
+
+  return out.slice(0, 2);
+}
+
 export default function PaneSummaryCards({
   panes,
 }: {
@@ -72,6 +111,8 @@ export default function PaneSummaryCards({
       {rows.map((pane) => {
         const blocker = pane.blockers?.[0];
         const action = pane.next_actions?.[0]?.action;
+        const highlights =
+          String(pane.pane) === "investor" ? investorHighlights(pane.kpis) : [];
 
         return (
           <Link
@@ -97,6 +138,25 @@ export default function PaneSummaryCards({
             <div className="mt-1 text-xs text-app-4">
               visible properties in this pane
             </div>
+
+            {highlights.length ? (
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {highlights.map((item) => (
+                  <div
+                    key={item.label}
+                    className="rounded-2xl border border-app bg-app-muted px-3 py-3"
+                  >
+                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                      {item.icon}
+                      {item.label}
+                    </div>
+                    <div className="mt-2 text-sm font-semibold text-app-0">
+                      {item.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {blocker?.blocker ? (
               <div className="mt-4 rounded-2xl border border-app bg-app-muted px-3 py-3">
