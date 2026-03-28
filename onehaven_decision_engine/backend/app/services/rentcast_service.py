@@ -120,7 +120,17 @@ class RentCastClient:
         allow_status_fallback: bool = True,
         allow_location_fallback: bool = True,
     ) -> RentCastSaleListingResult | None:
+        """
+        Exact-address lookup with explicit listing truth.
+
+        Rules:
+        - never omit status when determining exact status truth
+        - Active can fall back to Inactive
+        - location fallback can happen, but still only with explicit status
+        """
         attempts: list[dict[str, Any]] = []
+
+        normalized_status = str(status or "").strip() or None
 
         search_variants: list[dict[str, Any]] = [
             {
@@ -128,14 +138,12 @@ class RentCastClient:
                 "city": city,
                 "state": state,
                 "zip_code": zip_code,
-                "status": status,
-                "label": "strict_active" if status else "strict_any_status",
+                "status": normalized_status,
+                "label": "strict_active" if normalized_status == "Active" else "strict_any_status",
             }
         ]
 
-        normalized_status = str(status or "").strip().lower() or None
-
-        if allow_status_fallback and normalized_status == "active":
+        if allow_status_fallback and normalized_status == "Active":
             search_variants.append(
                 {
                     "address": address,
@@ -154,11 +162,12 @@ class RentCastClient:
                     "city": None,
                     "state": None,
                     "zip_code": None,
-                    "status": status,
-                    "label": "address_only_active" if status else "address_only_any_status",
+                    "status": normalized_status,
+                    "label": "address_only_active" if normalized_status == "Active" else "address_only_any_status",
                 }
             )
-            if allow_status_fallback and normalized_status == "active":
+
+            if allow_status_fallback and normalized_status == "Active":
                 search_variants.append(
                     {
                         "address": address,
@@ -172,6 +181,7 @@ class RentCastClient:
 
         seen_fingerprints: set[tuple[str, str, str, str, str]] = set()
         deduped_variants: list[dict[str, Any]] = []
+
         for variant in search_variants:
             fp = (
                 str(variant.get("address") or "").strip().lower(),
@@ -204,6 +214,7 @@ class RentCastClient:
                     "row_count": len(rows),
                 }
             )
+
             if not rows:
                 continue
 
@@ -219,6 +230,7 @@ class RentCastClient:
 
             raw_json = dict(best)
             raw_json.setdefault("_lookup_attempts", attempts)
+            raw_json["_resolved_lookup_status"] = variant.get("status")
 
             return RentCastSaleListingResult(
                 id=str(best.get("id") or best.get("listingId") or best.get("mlsNumber") or "").strip() or None,

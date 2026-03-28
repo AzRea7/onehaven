@@ -444,51 +444,87 @@ def _build_property_list_item(
 
 
 def _sort_inventory_rows(rows: list[dict[str, Any]], wanted_sort: str) -> list[dict[str, Any]]:
-    if wanted_sort == "best_cashflow":
+    sort_key = str(wanted_sort or "rank_score").strip().lower()
+
+    if sort_key in {"rank_score", "relevance"}:
+        rows.sort(
+            key=lambda item: (
+                float(item.get("rank_score") or float("-inf")),
+                float(item.get("risk_adjusted_score") or float("-inf")),
+                float(item.get("projected_monthly_cashflow") or float("-inf")),
+                float(item.get("dscr") or float("-inf")),
+                float(item.get("freshness_score") or 0.0),
+                int(item.get("id") or 0),
+            ),
+            reverse=True,
+        )
+    elif sort_key == "best_cashflow":
         rows.sort(
             key=lambda item: (
                 float(item.get("projected_monthly_cashflow") or float("-inf")),
+                float(item.get("rank_score") or float("-inf")),
+                float(item.get("dscr") or float("-inf")),
                 float(item.get("freshness_score") or 0.0),
-                float(item.get("relevance_score") or 0.0),
                 int(item.get("id") or 0),
             ),
             reverse=True,
         )
-    elif wanted_sort == "lowest_price":
-        rows.sort(
-            key=lambda item: (
-                float(item.get("asking_price") or float("inf")),
-                -float(item.get("freshness_score") or 0.0),
-                -float(item.get("relevance_score") or 0.0),
-                -int(item.get("id") or 0),
-            )
-        )
-    elif wanted_sort == "highest_price":
-        rows.sort(
-            key=lambda item: (
-                float(item.get("asking_price") or float("-inf")),
-                float(item.get("freshness_score") or 0.0),
-                float(item.get("relevance_score") or 0.0),
-                int(item.get("id") or 0),
-            ),
-            reverse=True,
-        )
-    elif wanted_sort == "best_dscr":
+    elif sort_key == "best_dscr":
         rows.sort(
             key=lambda item: (
                 float(item.get("dscr") or float("-inf")),
+                float(item.get("rank_score") or float("-inf")),
+                float(item.get("projected_monthly_cashflow") or float("-inf")),
                 float(item.get("freshness_score") or 0.0),
-                float(item.get("relevance_score") or 0.0),
                 int(item.get("id") or 0),
             ),
             reverse=True,
         )
-    elif wanted_sort == "newest":
+    elif sort_key == "best_rent_gap":
+        rows.sort(
+            key=lambda item: (
+                float(item.get("rent_gap") or float("-inf")),
+                float(item.get("rank_score") or float("-inf")),
+                float(item.get("projected_monthly_cashflow") or float("-inf")),
+                float(item.get("freshness_score") or 0.0),
+                int(item.get("id") or 0),
+            ),
+            reverse=True,
+        )
+    elif sort_key == "lowest_risk":
+        rows.sort(
+            key=lambda item: (
+                float(item.get("risk_score") or float("inf")),
+                -float(item.get("rank_score") or float("-inf")),
+                -float(item.get("projected_monthly_cashflow") or float("-inf")),
+                -float(item.get("freshness_score") or 0.0),
+                -int(item.get("id") or 0),
+            )
+        )
+    elif sort_key == "lowest_price":
+        rows.sort(
+            key=lambda item: (
+                float(item.get("asking_price") or float("inf")),
+                -float(item.get("rank_score") or float("-inf")),
+                -float(item.get("freshness_score") or 0.0),
+                -int(item.get("id") or 0),
+            )
+        )
+    elif sort_key == "highest_price":
+        rows.sort(
+            key=lambda item: (
+                float(item.get("asking_price") or float("-inf")),
+                float(item.get("rank_score") or float("-inf")),
+                float(item.get("freshness_score") or 0.0),
+                int(item.get("id") or 0),
+            ),
+            reverse=True,
+        )
+    elif sort_key == "newest":
         rows.sort(
             key=lambda item: (
                 bool(item.get("is_new_this_sync")),
                 bool(item.get("is_recently_refreshed")),
-                float(item.get("freshness_score") or 0.0),
                 str(
                     item.get("source_updated_at")
                     or item.get("acquisition_last_seen_at")
@@ -496,6 +532,8 @@ def _sort_inventory_rows(rows: list[dict[str, Any]], wanted_sort: str) -> list[d
                     or item.get("created_at")
                     or ""
                 ),
+                float(item.get("freshness_score") or 0.0),
+                float(item.get("rank_score") or float("-inf")),
                 int(item.get("id") or 0),
             ),
             reverse=True,
@@ -503,9 +541,10 @@ def _sort_inventory_rows(rows: list[dict[str, Any]], wanted_sort: str) -> list[d
     else:
         rows.sort(
             key=lambda item: (
-                float(item.get("relevance_score") or 0.0),
-                bool(item.get("is_new_this_sync")),
-                bool(item.get("is_recently_refreshed")),
+                float(item.get("rank_score") or float("-inf")),
+                float(item.get("risk_adjusted_score") or float("-inf")),
+                float(item.get("projected_monthly_cashflow") or float("-inf")),
+                float(item.get("dscr") or float("-inf")),
                 float(item.get("freshness_score") or 0.0),
                 -int(bool(item.get("is_stale"))),
                 -int(bool(item.get("is_very_stale"))),
@@ -513,6 +552,7 @@ def _sort_inventory_rows(rows: list[dict[str, Any]], wanted_sort: str) -> list[d
             ),
             reverse=True,
         )
+
     return rows
 
 
@@ -548,10 +588,13 @@ def list_properties(
     hide_stale: bool = Query(default=False),
     hide_very_stale: bool = Query(default=False),
     freshness: Optional[str] = Query(default=None),
-    sort: Optional[str] = Query(default="relevance"),
     limit: int = Query(default=100, ge=1, le=1000),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
+    include_hidden: bool = Query(default=False),
+    deals_only: bool = Query(default=False),
+    include_suppressed: bool = Query(default=False),
+    sort: Optional[str] = Query(default="rank_score"),
 ):
     req_t0 = time.perf_counter()
 
@@ -564,9 +607,10 @@ def list_properties(
         q=q,
         assigned_user_id=_principal_user_id(p),
         limit=limit,
+        include_hidden=include_hidden,
     )
 
-    rows = list(scope.get("items") or [])
+    rows = list(scope.get("rows") or [])
     wanted_freshness = str(freshness or "").strip().lower() or None
 
     def keep(row: dict[str, Any]) -> bool:
@@ -585,6 +629,14 @@ def list_properties(
             normalized = normalize_decision_bucket(row_decision)
             if normalized != wanted:
                 return False
+
+        if deals_only:
+            if include_suppressed:
+                if str(row.get("deal_filter_status") or "").strip().lower() == "hidden":
+                    return False
+            else:
+                if not bool(row.get("is_deal_candidate")):
+                    return False
 
         if only_red_zone and not bool(is_red_zone):
             return False
@@ -632,7 +684,17 @@ def list_properties(
 
     rows = [row for row in rows if keep(row)]
 
-    wanted_sort = str(sort or "relevance").strip().lower()
+    if deals_only:
+        if include_suppressed:
+            rows = [
+                row
+                for row in rows
+                if str(row.get("deal_filter_status") or "").strip().lower() != "hidden"
+            ]
+        else:
+            rows = [row for row in rows if bool(row.get("is_deal_candidate"))]
+
+    wanted_sort = str(sort or "rank_score").strip().lower()
     rows = _sort_inventory_rows(rows, wanted_sort)
 
     total_ms = round((time.perf_counter() - req_t0) * 1000, 2)

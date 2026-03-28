@@ -127,6 +127,11 @@ class Property(Base):
         Index("ix_properties_org_is_red_zone", "org_id", "is_red_zone"),
         Index("ix_properties_org_normalized_address", "org_id", "normalized_address"),
         Index("ix_properties_org_geocode_last_refreshed", "org_id", "geocode_last_refreshed"),
+        Index("ix_properties_org_listing_hidden", "org_id", "listing_hidden"),
+        Index("ix_properties_org_listing_status", "org_id", "listing_status"),
+        Index("ix_properties_org_listing_last_seen_at", "org_id", "listing_last_seen_at"),
+        Index("ix_properties_org_listing_removed_at", "org_id", "listing_removed_at"),
+        Index("ix_properties_org_listing_hidden_status", "org_id", "listing_hidden", "listing_status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -154,6 +159,34 @@ class Property(Base):
     geocode_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     geocode_last_refreshed: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+
+        # ---- durable listing visibility / lifecycle fields ----
+    listing_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    listing_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    listing_hidden_reason: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
+    listing_last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    listing_removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    listing_listed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    listing_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    listing_days_on_market: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    listing_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    listing_mls_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    listing_mls_number: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    listing_type: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
+    listing_zillow_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+
+    listing_agent_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    listing_agent_phone: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    listing_agent_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    listing_agent_website: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+
+    listing_office_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    listing_office_phone: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    listing_office_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
 
     is_red_zone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

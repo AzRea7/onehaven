@@ -100,6 +100,9 @@ def _apply_run_finish_state(
     row.photos_upserted = int(final_summary.get("photos_upserted") or 0)
     row.duplicates_skipped = int(final_summary.get("duplicates_skipped") or 0)
     row.invalid_rows = int(final_summary.get("invalid_rows") or 0)
+    final_summary.setdefault("inactive_listings_hidden", int(final_summary.get("inactive_listings_hidden") or 0))
+    final_summary.setdefault("listing_status_changes", int(final_summary.get("listing_status_changes") or 0))
+    final_summary.setdefault("listing_price_changes", int(final_summary.get("listing_price_changes") or 0))
     row.summary_json = final_summary
     row.error_summary = error_summary
     row.error_json = _json_safe(error_json) if error_json is not None else None

@@ -300,6 +300,99 @@ def _build_lock_owner(*, org_id: int, source_id: int, dataset_key: str) -> str:
     pid = os.getpid()
     return f"ingestion:{host}:{pid}:{int(org_id)}:{int(source_id)}:{dataset_key}"
 
+def _parse_dt_utc(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    try:
+        raw = str(value).strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(raw)
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _normalize_listing_status(value: Any) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    if raw == "active":
+        return "Active"
+    if raw == "inactive":
+        return "Inactive"
+    return str(value).strip() or None
+
+
+def _build_listing_reconciliation_metadata(payload: dict[str, Any], *, trigger_type: str) -> dict[str, Any]:
+    raw = dict(payload.get("raw") or {})
+    listing_status = _normalize_listing_status(raw.get("status") or payload.get("listing_status"))
+    removed_at = _parse_dt_utc(raw.get("removedDate") or raw.get("removed_date"))
+    listed_at = _parse_dt_utc(raw.get("listedDate") or raw.get("listed_date"))
+    created_at = _parse_dt_utc(raw.get("createdDate") or raw.get("created_date"))
+    last_seen_at = _parse_dt_utc(raw.get("lastSeenDate") or raw.get("last_seen_date"))
+
+    listing_hidden = listing_status == "Inactive"
+
+    return {
+        "trigger_type": trigger_type,
+        "listing_status": listing_status,
+        "listing_hidden": bool(listing_hidden),
+        "listing_listed_at": listed_at.isoformat() if listed_at else None,
+        "listing_created_at": created_at.isoformat() if created_at else None,
+        "listing_removed_at": removed_at.isoformat() if removed_at else None,
+        "listing_last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
+        "listing_days_on_market": _safe_int(raw.get("daysOnMarket") or raw.get("days_on_market")),
+        "listing_price": _safe_float(raw.get("price") or payload.get("asking_price")),
+        "listing_mls_name": str(raw.get("mlsName") or "").strip() or None,
+        "listing_mls_number": str(raw.get("mlsNumber") or "").strip() or None,
+        "listing_type": str(raw.get("listingType") or "").strip() or None,
+        "listing_hidden_reason": "inactive_listing" if listing_hidden else None,
+        "listing_agent": dict(raw.get("listingAgent") or {}) if isinstance(raw.get("listingAgent"), dict) else None,
+        "listing_office": dict(raw.get("listingOffice") or {}) if isinstance(raw.get("listingOffice"), dict) else None,
+        "raw": raw,
+    }
+
+
+def _read_property_metadata(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    row = db.execute(
+        text(
+            """
+            SELECT acquisition_metadata_json
+            FROM properties
+            WHERE org_id = :org_id AND id = :property_id
+            """
+        ),
+        {"org_id": int(org_id), "property_id": int(property_id)},
+    ).fetchone()
+    if row is None:
+        return {}
+    raw = row._mapping.get("acquisition_metadata_json")
+    return dict(raw or {}) if isinstance(raw, dict) else {}
+
+
+def _mark_deal_visibility_from_listing(db: Session, *, org_id: int, property_id: int, listing_hidden: bool) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE deals
+            SET updated_at = NOW(),
+                metadata_json = COALESCE(metadata_json, '{}'::jsonb) || CAST(:meta AS JSONB)
+            WHERE org_id = :org_id AND property_id = :property_id
+            """
+        ),
+        {
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "meta": json.dumps(
+                {
+                    "listing_hidden": bool(listing_hidden),
+                    "listing_hidden_reason": "inactive_listing" if listing_hidden else None,
+                },
+                default=str,
+            ),
+        },
+    )
 
 def _persist_property_acquisition_metadata(
     db: Session,
@@ -311,16 +404,83 @@ def _persist_property_acquisition_metadata(
     trigger_type: str,
 ) -> None:
     now = datetime.now(timezone.utc)
+
+    existing_meta = _read_property_metadata(
+        db,
+        org_id=int(org_id),
+        property_id=int(property_id),
+    )
+
+    reconciled = _build_listing_reconciliation_metadata(
+        payload,
+        trigger_type=trigger_type,
+    )
+
+    prior_price = _safe_float(existing_meta.get("listing_price"))
+    next_price = _safe_float(reconciled.get("listing_price"))
+    if prior_price is not None and next_price is not None and prior_price != next_price:
+        reconciled["listing_price_changed"] = True
+        reconciled["listing_previous_price"] = prior_price
+    else:
+        reconciled["listing_price_changed"] = False
+        reconciled["listing_previous_price"] = prior_price
+
+    prior_status = _normalize_listing_status(existing_meta.get("listing_status"))
+    next_status = _normalize_listing_status(reconciled.get("listing_status"))
+    reconciled["listing_status_changed"] = bool(prior_status and next_status and prior_status != next_status)
+    reconciled["listing_previous_status"] = prior_status
+
+    agent = dict(reconciled.get("listing_agent") or {})
+    office = dict(reconciled.get("listing_office") or {})
+    raw = dict(reconciled.get("raw") or payload.get("raw") or {})
+
+    zillow_url = (
+        raw.get("zillowUrl")
+        or raw.get("zillow_url")
+        or raw.get("listingUrl")
+        or payload.get("external_url")
+    )
+
+    metadata_json = {
+        "trigger_type": trigger_type,
+        "last_payload_address": payload.get("address"),
+        "last_payload_city": payload.get("city"),
+        "inventory_count": payload.get("inventory_count"),
+        **reconciled,
+    }
+
     db.execute(
         text(
             """
             UPDATE properties
             SET acquisition_first_seen_at = COALESCE(acquisition_first_seen_at, :now_ts),
-                acquisition_last_seen_at = :now_ts,
+                acquisition_last_seen_at = COALESCE(:listing_last_seen_at, :now_ts),
                 acquisition_source_provider = :provider,
                 acquisition_source_slug = :slug,
                 acquisition_source_record_id = :record_id,
                 acquisition_source_url = COALESCE(:source_url, acquisition_source_url),
+
+                listing_status = :listing_status,
+                listing_hidden = :listing_hidden,
+                listing_hidden_reason = :listing_hidden_reason,
+                listing_last_seen_at = :listing_last_seen_at,
+                listing_removed_at = :listing_removed_at,
+                listing_listed_at = :listing_listed_at,
+                listing_created_at = :listing_created_at,
+                listing_days_on_market = :listing_days_on_market,
+                listing_price = :listing_price,
+                listing_mls_name = :listing_mls_name,
+                listing_mls_number = :listing_mls_number,
+                listing_type = :listing_type,
+                listing_zillow_url = COALESCE(:listing_zillow_url, listing_zillow_url),
+                listing_agent_name = :listing_agent_name,
+                listing_agent_phone = :listing_agent_phone,
+                listing_agent_email = :listing_agent_email,
+                listing_agent_website = :listing_agent_website,
+                listing_office_name = :listing_office_name,
+                listing_office_phone = :listing_office_phone,
+                listing_office_email = :listing_office_email,
+
                 acquisition_metadata_json = COALESCE(acquisition_metadata_json, '{}'::jsonb) || CAST(:metadata_json AS JSONB)
             WHERE org_id = :org_id AND id = :property_id
             """
@@ -329,21 +489,41 @@ def _persist_property_acquisition_metadata(
             "org_id": int(org_id),
             "property_id": int(property_id),
             "now_ts": now,
+            "listing_last_seen_at": _parse_dt_utc(reconciled.get("listing_last_seen_at")) or now,
+            "listing_removed_at": _parse_dt_utc(reconciled.get("listing_removed_at")),
+            "listing_listed_at": _parse_dt_utc(reconciled.get("listing_listed_at")),
+            "listing_created_at": _parse_dt_utc(reconciled.get("listing_created_at")),
             "provider": str(getattr(source, "provider", "") or "").strip() or None,
             "slug": str(getattr(source, "slug", "") or "").strip() or None,
             "record_id": str(payload.get("external_record_id") or "").strip() or None,
             "source_url": payload.get("external_url"),
-            "metadata_json": json.dumps(
-                {
-                    "trigger_type": trigger_type,
-                    "last_payload_address": payload.get("address"),
-                    "last_payload_city": payload.get("city"),
-                    "inventory_count": payload.get("inventory_count"),
-                    "raw": payload.get("raw") or payload,
-                },
-                default=str,
-            ),
+
+            "listing_status": reconciled.get("listing_status"),
+            "listing_hidden": bool(reconciled.get("listing_hidden")),
+            "listing_hidden_reason": reconciled.get("listing_hidden_reason"),
+            "listing_days_on_market": _safe_int(reconciled.get("listing_days_on_market")),
+            "listing_price": _safe_float(reconciled.get("listing_price")),
+            "listing_mls_name": reconciled.get("listing_mls_name"),
+            "listing_mls_number": reconciled.get("listing_mls_number"),
+            "listing_type": reconciled.get("listing_type"),
+            "listing_zillow_url": zillow_url,
+            "listing_agent_name": str(agent.get("name") or "").strip() or None,
+            "listing_agent_phone": str(agent.get("phone") or "").strip() or None,
+            "listing_agent_email": str(agent.get("email") or "").strip() or None,
+            "listing_agent_website": str(agent.get("website") or "").strip() or None,
+            "listing_office_name": str(office.get("name") or "").strip() or None,
+            "listing_office_phone": str(office.get("phone") or "").strip() or None,
+            "listing_office_email": str(office.get("email") or "").strip() or None,
+
+            "metadata_json": json.dumps(metadata_json, default=str),
         },
+    )
+
+    _mark_deal_visibility_from_listing(
+        db,
+        org_id=int(org_id),
+        property_id=int(property_id),
+        listing_hidden=bool(reconciled.get("listing_hidden")),
     )
 
 
@@ -400,6 +580,10 @@ def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
         zip_code=payload["zip"],
     )
 
+    raw = dict(payload.get("raw") or {})
+    incoming_price = _safe_float(raw.get("price") or payload.get("asking_price"))
+    incoming_status = _normalize_listing_status(raw.get("status") or payload.get("listing_status"))
+
     created = False
     if existing is None:
         existing = Property(
@@ -426,23 +610,37 @@ def _upsert_property(db: Session, *, org_id: int, payload: dict[str, Any]):
         db.flush()
         created = True
     else:
-        existing.address = payload["address"]
-        existing.city = payload["city"]
-        existing.state = payload["state"]
-        existing.zip = payload["zip"]
-        existing.county = payload.get("county") or getattr(existing, "county", None)
+        existing.county = payload.get("county") or existing.county
         existing.bedrooms = int(payload["bedrooms"] or existing.bedrooms or 0)
         existing.bathrooms = float(payload["bathrooms"] or existing.bathrooms or 1)
         existing.square_feet = payload.get("square_feet") or existing.square_feet
         existing.year_built = payload.get("year_built") or existing.year_built
         existing.property_type = payload.get("property_type") or existing.property_type
         if hasattr(existing, "normalized_address"):
-            existing.normalized_address = payload.get("normalized_address") or normalize_full_address(
+            existing.normalized_address = normalize_full_address(
                 payload.get("address"),
                 payload.get("city"),
                 payload.get("state"),
                 payload.get("zip"),
             ).full_address
+        db.add(existing)
+        db.flush()
+
+    # Keep raw listing truth on the property row if your model already has these economics fields.
+    # No hard-delete behavior here. Inactive hiding is handled through metadata.
+    if incoming_price is not None and hasattr(existing, "asking_price"):
+        try:
+            existing.asking_price = incoming_price
+            db.add(existing)
+            db.flush()
+        except Exception:
+            rollback_quietly(db)
+            raise
+
+    if incoming_status and hasattr(existing, "raw_json"):
+        current_raw = dict(getattr(existing, "raw_json", None) or {})
+        current_raw["listing_status"] = incoming_status
+        setattr(existing, "raw_json", current_raw)
         db.add(existing)
         db.flush()
 
@@ -1267,6 +1465,25 @@ def execute_source_sync(
                     payload=payload,
                     trigger_type=str(trigger_type),
                 )
+
+                meta_after = _read_property_metadata(
+                    db,
+                    org_id=int(org_id),
+                    property_id=int(prop_row.id),
+                )
+
+                if bool(meta_after.get("listing_hidden")):
+                    summary["inactive_listings_hidden"] = int(summary.get("inactive_listings_hidden") or 0) + 1
+                    page_stat["inactive_listings_hidden"] = int(page_stat.get("inactive_listings_hidden") or 0) + 1
+
+                if bool(meta_after.get("listing_status_changed")):
+                    summary["listing_status_changes"] = int(summary.get("listing_status_changes") or 0) + 1
+                    page_stat["listing_status_changes"] = int(page_stat.get("listing_status_changes") or 0) + 1
+
+                if bool(meta_after.get("listing_price_changed")):
+                    summary["listing_price_changes"] = int(summary.get("listing_price_changes") or 0) + 1
+                    page_stat["listing_price_changes"] = int(page_stat.get("listing_price_changes") or 0) + 1
+
                 _seed_missing_completeness_columns(
                     db,
                     org_id=int(org_id),

@@ -17,6 +17,7 @@ from ..domain.workflow.panes import (
 )
 from ..models import Deal, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
+from ..services.risk_scoring import classify_deal_candidate, compute_risk_adjusted_score
 
 log = logging.getLogger("onehaven.panes")
 
@@ -170,9 +171,12 @@ def _base_property_stmt(
     city: Optional[str] = None,
     q: Optional[str] = None,
     assigned_user: Optional[int] = None,
+    include_hidden: bool = False,
 ) -> Any:
     stmt = select(Property).where(Property.org_id == org_id)
 
+    if not include_hidden and hasattr(Property, "listing_hidden"):
+        stmt = stmt.where(Property.listing_hidden.is_(False))
     if state:
         stmt = stmt.where(Property.state == state)
     if county:
@@ -290,6 +294,31 @@ def _build_row(
         blocked_count=blocked_count,
     )
 
+    risk_score = getattr(prop, "risk_score", None)
+    deal_filter = classify_deal_candidate(
+        normalized_decision=state_payload.get("normalized_decision"),
+        risk_score=_safe_float(risk_score, 0.0) if risk_score is not None else None,
+        projected_monthly_cashflow=_safe_float(getattr(uw_row, "cash_flow", None), 0.0) if uw_row else None,
+        dscr=_safe_float(getattr(uw_row, "dscr", None), 0.0) if uw_row else None,
+        listing_hidden=bool(getattr(prop, "listing_hidden", False)),
+    )
+
+    market_rent_estimate = None
+    if isinstance(constraints.get("cash"), dict):
+        market_rent_estimate = _safe_float((constraints.get("cash") or {}).get("expected_rent"), 0.0)
+
+    rent_gap = None
+    asking_price = _asking_price(prop, deal_row)
+    if market_rent_estimate is not None and asking_price is not None:
+        rent_gap = market_rent_estimate - max((asking_price * 0.01), 0.0)
+
+    ranking = compute_risk_adjusted_score(
+        projected_monthly_cashflow=_safe_float(getattr(uw_row, "cash_flow", None), 0.0) if uw_row else None,
+        dscr=_safe_float(getattr(uw_row, "dscr", None), 0.0) if uw_row else None,
+        rent_gap=rent_gap,
+        risk_score=_safe_float(risk_score, 0.0) if risk_score is not None else None,
+    )
+
     return {
         "property_id": int(prop.id),
         "address": getattr(prop, "address", None),
@@ -310,6 +339,24 @@ def _build_row(
         "dscr": _safe_float(getattr(uw_row, "dscr", None), 0.0) if uw_row else None,
         "next_actions": state_payload.get("next_actions") or [],
         "blockers": blockers,
+        "market_rent_estimate": market_rent_estimate,
+        "rent_gap": round(rent_gap, 2) if rent_gap is not None else None,
+        "cashflow_score": ranking.get("cashflow_score"),
+        "dscr_score": ranking.get("dscr_score"),
+        "rent_gap_score": ranking.get("rent_gap_score"),
+        "risk_penalty": ranking.get("risk_penalty"),
+        "risk_adjusted_score": ranking.get("risk_adjusted_score"),
+        "rank_score": ranking.get("rank_score"),
+        "risk_score": getattr(prop, "risk_score", None),
+        "deal_filter_status": deal_filter.get("deal_filter_status"),
+        "is_deal_candidate": bool(deal_filter.get("is_deal_candidate")),
+        "suppress_from_investor": bool(deal_filter.get("suppress_from_investor")),
+        "hidden_reason": deal_filter.get("hidden_reason"),
+        "deal_candidate_reasons": list(deal_filter.get("candidate_reasons") or []),
+        "deal_suppress_reasons": list(deal_filter.get("suppress_reasons") or []),
+        "listing_status": getattr(prop, "listing_status", None),
+        "listing_hidden": bool(getattr(prop, "listing_hidden", False)),
+        "listing_hidden_reason": getattr(prop, "listing_hidden_reason", None),
         "updated_at": state_payload.get("updated_at"),
         "urgency": urgency,
         "is_stale": jurisdiction_is_stale,
@@ -545,6 +592,8 @@ def _filter_rows_for_pane(
     status: Optional[str],
     stage: Optional[str],
     urgency: Optional[str],
+    deals_only: bool = False,
+    include_suppressed: bool = False,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
 
@@ -558,6 +607,11 @@ def _filter_rows_for_pane(
             continue
         if not _property_matches_urgency(row, urgency=urgency):
             continue
+        if deals_only and pane == "investor":
+            if include_suppressed:
+                pass
+            elif not bool(row.get("is_deal_candidate")):
+                continue
 
         out.append(row)
 
@@ -574,6 +628,7 @@ def _build_rows_for_scope(
     q: Optional[str] = None,
     assigned_user: Optional[int] = None,
     max_scan: int = 1000,
+    include_hidden: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     scope_t0 = time.perf_counter()
 
@@ -584,6 +639,7 @@ def _build_rows_for_scope(
         city=city,
         q=q,
         assigned_user=assigned_user,
+        include_hidden=include_hidden,
     )
 
     query_t0 = time.perf_counter()
@@ -645,6 +701,8 @@ def _build_contract_response(
     stage: Optional[str],
     urgency: Optional[str],
     limit: int,
+    deals_only: bool = False,
+    include_suppressed: bool = False,
 ) -> dict[str, Any]:
     allowed = allowed_panes_for_principal(principal)
     if pane_key not in allowed and pane_key != "admin":
@@ -662,7 +720,20 @@ def _build_contract_response(
         status=status,
         stage=stage,
         urgency=urgency,
+        deals_only=deals_only,
+        include_suppressed=include_suppressed,
     )
+
+    if pane_key == "investor":
+        pane_rows = sorted(
+            pane_rows,
+            key=lambda row: (
+                _safe_float(row.get("rank_score"), -10**12),
+                _safe_float(row.get("projected_monthly_cashflow"), -10**12),
+                _safe_float(row.get("dscr"), -10**12),
+            ),
+            reverse=True,
+        )
 
     plan = _build_plan_context(principal)
     response: dict[str, Any] = {
@@ -740,6 +811,9 @@ def build_pane_dashboard(
     assigned_user: Optional[int] = None,
     q: Optional[str] = None,
     limit: int = 200,
+    include_hidden: bool = False,
+    deals_only: bool = False,
+    include_suppressed: bool = False,
 ) -> dict[str, Any]:
     pane_key = clamp_pane(pane)
     t0 = time.perf_counter()
@@ -753,6 +827,7 @@ def build_pane_dashboard(
         q=q,
         assigned_user=assigned_user,
         max_scan=max(int(limit) * 5, 500),
+        include_hidden=include_hidden,
     )
 
     response = _build_contract_response(
@@ -767,6 +842,8 @@ def build_pane_dashboard(
         stage=stage,
         urgency=urgency,
         limit=limit,
+        include_suppressed=include_suppressed,
+        deals_only=deals_only,
     )
 
     total_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -808,7 +885,10 @@ def build_all_pane_summaries(
     urgency: Optional[str] = None,
     assigned_user: Optional[int] = None,
     q: Optional[str] = None,
+    include_hidden: bool = False,
     limit: int = 100,
+    deals_only: bool = False,
+    include_suppressed: bool = False,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
     allowed = allowed_panes_for_principal(principal)
@@ -822,6 +902,7 @@ def build_all_pane_summaries(
         q=q,
         assigned_user=assigned_user,
         max_scan=max(int(limit) * 8, 800),
+        include_hidden=include_hidden,
     )
 
     panes: list[dict[str, Any]] = []
@@ -841,6 +922,8 @@ def build_all_pane_summaries(
             stage=stage,
             urgency=urgency,
             limit=limit,
+            include_suppressed=include_suppressed,
+            deals_only=deals_only,
         )
 
         panes.append(
@@ -910,6 +993,9 @@ def build_portfolio_rollup_with_panes(
     urgency: Optional[str] = None,
     assigned_user: Optional[int] = None,
     limit: int = 500,
+    include_hidden: bool = False,
+    deals_only: bool = False,
+    include_suppressed: bool = False,
 ) -> dict[str, Any]:
     raw_rows, _ = _build_rows_for_scope(
         db,
@@ -919,6 +1005,9 @@ def build_portfolio_rollup_with_panes(
         city=city,
         assigned_user=assigned_user,
         max_scan=max(int(limit), 500),
+        include_hidden=include_hidden,
+        deals_only=deals_only,
+        include_suppressed=include_suppressed,
     )
 
     filtered_rows = [

@@ -12,6 +12,10 @@ export type Filters = {
   offender_max?: string;
   offender_min?: string;
 
+  deals_only?: string; // "true" | "false"
+  include_suppressed?: string; // "true" | "false"
+  hidden_reason?: string; // inactive_listing | low_score | bad_risk | weak_cashflow
+
   sort?: string;
 };
 
@@ -27,6 +31,9 @@ export const FILTER_KEYS: (keyof Filters)[] = [
   "crime_min",
   "offender_max",
   "offender_min",
+  "deals_only",
+  "include_suppressed",
+  "hidden_reason",
   "sort",
 ];
 
@@ -79,6 +86,9 @@ export function filtersToApiParams(filters: Filters): Record<string, any> {
     max_crime_score: filters.crime_max || undefined,
     min_offender_count: filters.offender_min || undefined,
     max_offender_count: filters.offender_max || undefined,
+    deals_only: filters.deals_only || undefined,
+    include_suppressed: filters.include_suppressed || undefined,
+    hidden_reason: filters.hidden_reason || undefined,
     sort: filters.sort || undefined,
   };
 

@@ -95,6 +95,157 @@ def compute_property_risk(
     }
 
 
+def classify_deal_candidate(
+    *,
+    normalized_decision: str | None,
+    risk_score: float | None,
+    projected_monthly_cashflow: float | None,
+    dscr: float | None,
+    listing_hidden: bool = False,
+) -> dict[str, Any]:
+    """
+    Decide whether a property should show up in the investor pane as a deal candidate.
+
+    Status meanings:
+    - candidate: worthy of showing in main investor list
+    - suppressed: stays in inventory/history but hidden from the main deals-first list
+    - hidden: already hidden for stronger reasons (inactive listing, etc.)
+    """
+    if listing_hidden:
+        return {
+            "deal_filter_status": "hidden",
+            "is_deal_candidate": False,
+            "suppress_from_investor": True,
+            "hidden_reason": "inactive_listing",
+            "candidate_reasons": [],
+            "suppress_reasons": ["inactive_listing"],
+        }
+
+    decision = str(normalized_decision or "").strip().upper() or "REVIEW"
+    risk = float(risk_score) if risk_score is not None else None
+    cashflow = float(projected_monthly_cashflow) if projected_monthly_cashflow is not None else None
+    dscr_value = float(dscr) if dscr is not None else None
+
+    candidate_reasons: list[str] = []
+    suppress_reasons: list[str] = []
+
+    if decision == "GOOD":
+        candidate_reasons.append("good_decision")
+    elif decision == "REJECT":
+        suppress_reasons.append("rejected_decision")
+
+    if cashflow is not None:
+        if cashflow > 0:
+            candidate_reasons.append("positive_cashflow")
+        elif cashflow < 0:
+            suppress_reasons.append("negative_cashflow")
+    else:
+        suppress_reasons.append("missing_cashflow")
+
+    if dscr_value is not None:
+        if dscr_value >= 1.20:
+            candidate_reasons.append("strong_dscr")
+        elif dscr_value < 1.0:
+            suppress_reasons.append("weak_dscr")
+    else:
+        suppress_reasons.append("missing_dscr")
+
+    if risk is not None:
+        if risk >= 80:
+            suppress_reasons.append("bad_risk")
+        elif risk <= 35:
+            candidate_reasons.append("acceptable_risk")
+    else:
+        suppress_reasons.append("missing_risk")
+
+    is_candidate = (
+        decision != "REJECT"
+        and cashflow is not None
+        and cashflow > 0
+        and dscr_value is not None
+        and dscr_value >= 1.0
+        and risk is not None
+        and risk < 80
+    )
+
+    if is_candidate:
+        return {
+            "deal_filter_status": "candidate",
+            "is_deal_candidate": True,
+            "suppress_from_investor": False,
+            "hidden_reason": None,
+            "candidate_reasons": candidate_reasons,
+            "suppress_reasons": [],
+        }
+
+    primary_reason = (
+        "bad_risk"
+        if "bad_risk" in suppress_reasons
+        else "weak_cashflow"
+        if "negative_cashflow" in suppress_reasons or "missing_cashflow" in suppress_reasons
+        else "weak_dscr"
+        if "weak_dscr" in suppress_reasons or "missing_dscr" in suppress_reasons
+        else "low_score"
+    )
+
+    return {
+        "deal_filter_status": "suppressed",
+        "is_deal_candidate": False,
+        "suppress_from_investor": True,
+        "hidden_reason": primary_reason,
+        "candidate_reasons": candidate_reasons,
+        "suppress_reasons": suppress_reasons,
+    }
+
+def compute_risk_adjusted_score(
+    *,
+    projected_monthly_cashflow: float | None,
+    dscr: float | None,
+    rent_gap: float | None,
+    risk_score: float | None,
+) -> dict[str, Any]:
+    cashflow = float(projected_monthly_cashflow) if projected_monthly_cashflow is not None else None
+    dscr_value = float(dscr) if dscr is not None else None
+    gap = float(rent_gap) if rent_gap is not None else None
+    risk = float(risk_score) if risk_score is not None else None
+
+    cashflow_score = 0.0
+    if cashflow is not None:
+        # saturates around +500/mo
+        cashflow_score = max(-25.0, min(35.0, cashflow / 15.0))
+
+    dscr_score = 0.0
+    if dscr_value is not None:
+        if dscr_value >= 1.5:
+            dscr_score = 25.0
+        elif dscr_value >= 1.2:
+            dscr_score = 18.0
+        elif dscr_value >= 1.0:
+            dscr_score = 8.0
+        else:
+            dscr_score = -20.0
+
+    rent_gap_score = 0.0
+    if gap is not None:
+        # positive gap is good, but cap the effect
+        rent_gap_score = max(-15.0, min(20.0, gap / 20.0))
+
+    risk_penalty = 0.0
+    if risk is not None:
+        # higher risk should reduce score
+        risk_penalty = max(0.0, min(45.0, risk * 0.45))
+
+    rank_score = round(cashflow_score + dscr_score + rent_gap_score - risk_penalty, 2)
+
+    return {
+        "cashflow_score": round(cashflow_score, 2),
+        "dscr_score": round(dscr_score, 2),
+        "rent_gap_score": round(rent_gap_score, 2),
+        "risk_penalty": round(risk_penalty, 2),
+        "risk_adjusted_score": rank_score,
+        "rank_score": rank_score,
+    }
+
 def refresh_property_risk(
     db: Session,
     *,

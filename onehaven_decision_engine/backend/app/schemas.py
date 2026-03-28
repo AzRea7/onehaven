@@ -504,8 +504,35 @@ class RentRecomputeOut(BaseModel):
     strategy: str
     rent_used: Optional[float]
 
+class PropertyListingMetadataOut(BaseModel):
+    listing_status: Optional[str] = None
+    listing_hidden: bool = False
+    listing_hidden_reason: Optional[str] = None
 
-class PropertyOut(PropertyCreate):
+    listing_last_seen_at: Optional[datetime] = None
+    listing_removed_at: Optional[datetime] = None
+    listing_listed_at: Optional[datetime] = None
+    listing_created_at: Optional[datetime] = None
+
+    listing_days_on_market: Optional[int] = None
+    listing_price: Optional[float] = None
+
+    listing_mls_name: Optional[str] = None
+    listing_mls_number: Optional[str] = None
+    listing_type: Optional[str] = None
+
+    listing_zillow_url: Optional[str] = None
+
+    listing_agent_name: Optional[str] = None
+    listing_agent_phone: Optional[str] = None
+    listing_agent_email: Optional[str] = None
+    listing_agent_website: Optional[str] = None
+
+    listing_office_name: Optional[str] = None
+    listing_office_phone: Optional[str] = None
+    listing_office_email: Optional[str] = None
+
+class PropertyOut(PropertyCreate, PropertyListingMetadataOut):
     id: int
     org_id: Optional[int] = None
     rent_assumption: Optional[RentAssumptionOut] = None
@@ -514,6 +541,15 @@ class PropertyOut(PropertyCreate):
     updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
+class PropertyListQuery(BaseModel):
+    q: Optional[str] = None
+    city: Optional[str] = None
+    county: Optional[str] = None
+    state: Optional[str] = None
+
+    listing_hidden: Optional[bool] = None
+    listing_status: Optional[str] = None
+    exclude_hidden: bool = True
 
 # --------------------
 # Underwriting Results

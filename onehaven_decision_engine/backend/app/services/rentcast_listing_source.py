@@ -92,8 +92,18 @@ class RentCastListingSource:
         allow_status_fallback: bool = True,
         allow_location_fallback: bool = True,
     ) -> dict[str, Any] | None:
+        """
+        Exact-address lookup with explicit listing-status truth.
+
+        Important behavior:
+        - We never do a "status omitted" fallback when status truth matters.
+        - If caller asks for Active and allows fallback, we only try Inactive next.
+        - Location fallback is still allowed, but remains status-explicit.
+        """
         api_key = self._get_api_key(credentials or {})
         attempts: list[dict[str, Any]] = []
+
+        normalized_status = str(status or "").strip() or None
 
         search_variants: list[dict[str, Any]] = [
             {
@@ -101,20 +111,20 @@ class RentCastListingSource:
                 "city": str(city).strip() if city else None,
                 "state": str(state).strip() if state else None,
                 "zip_code": str(zip_code).strip() if zip_code else None,
-                "status": status,
-                "label": "strict_active" if status else "strict_any_status",
+                "status": normalized_status,
+                "label": "strict_active" if normalized_status == "Active" else "strict_any_status",
             }
         ]
 
-        if allow_status_fallback and status:
+        if allow_status_fallback and normalized_status == "Active":
             search_variants.append(
                 {
                     "address": str(address or "").strip(),
                     "city": str(city).strip() if city else None,
                     "state": str(state).strip() if state else None,
                     "zip_code": str(zip_code).strip() if zip_code else None,
-                    "status": None,
-                    "label": "strict_without_status",
+                    "status": "Inactive",
+                    "label": "strict_inactive",
                 }
             )
 
@@ -125,24 +135,26 @@ class RentCastListingSource:
                     "city": None,
                     "state": None,
                     "zip_code": None,
-                    "status": status,
-                    "label": "address_only_active" if status else "address_only_any_status",
+                    "status": normalized_status,
+                    "label": "address_only_active" if normalized_status == "Active" else "address_only_any_status",
                 }
             )
-            if allow_status_fallback and status:
+
+            if allow_status_fallback and normalized_status == "Active":
                 search_variants.append(
                     {
                         "address": str(address or "").strip(),
                         "city": None,
                         "state": None,
                         "zip_code": None,
-                        "status": None,
-                        "label": "address_only_without_status",
+                        "status": "Inactive",
+                        "label": "address_only_inactive",
                     }
                 )
 
         seen_fingerprints: set[tuple[str, str, str, str, str]] = set()
         deduped_variants: list[dict[str, Any]] = []
+
         for variant in search_variants:
             fp = (
                 str(variant.get("address") or "").strip().lower(),
@@ -166,6 +178,7 @@ class RentCastListingSource:
                 limit=limit,
                 status=variant.get("status"),
             )
+
             attempts.append(
                 {
                     "label": variant["label"],
@@ -176,6 +189,7 @@ class RentCastListingSource:
                     "row_count": len(rows),
                 }
             )
+
             if not rows:
                 continue
 
@@ -190,6 +204,7 @@ class RentCastListingSource:
                 ),
                 reverse=True,
             )
+
             best = ranked[0]
             if self._score_exact_address_match(
                 row=best,
@@ -202,6 +217,7 @@ class RentCastListingSource:
 
             enriched = dict(best)
             enriched.setdefault("_lookup_attempts", attempts)
+            enriched["_resolved_lookup_status"] = variant.get("status")
             return enriched
 
         return None

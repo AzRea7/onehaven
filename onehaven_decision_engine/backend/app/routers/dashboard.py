@@ -62,6 +62,9 @@ def pane_dashboard_overview(
     limit: int = Query(default=50, ge=1, le=250),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
+    include_hidden: bool = Query(default=False),
+    deals_only: bool = Query(default=True),
+    include_suppressed: bool = Query(default=False),
 ):
     t0 = time.perf_counter()
 
@@ -78,6 +81,9 @@ def pane_dashboard_overview(
         assigned_user=assigned_user,
         q=q,
         limit=limit,
+        include_hidden=include_hidden,
+        deals_only=deals_only,
+        include_suppressed=include_suppressed,
     )
 
     total_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -112,6 +118,9 @@ def pane_dashboard(
     limit: int = Query(default=50, ge=1, le=250),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
+    include_hidden: bool = Query(default=False),
+    deals_only: bool = Query(default=True),
+    include_suppressed: bool = Query(default=False),    
 ):
     pane_name = ensure_pane_access(principal=p, pane=clamp_pane(pane))
     t0 = time.perf_counter()
@@ -130,6 +139,9 @@ def pane_dashboard(
         assigned_user=assigned_user,
         q=q,
         limit=limit,
+        include_hidden=include_hidden,
+        deals_only=deals_only,
+        include_suppressed=include_suppressed,
     )
 
     total_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -163,6 +175,7 @@ def portfolio_rollup(
     limit: int = Query(default=250, ge=1, le=1000),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
+    include_hidden: bool = Query(default=False),
 ):
     t0 = time.perf_counter()
 
@@ -178,6 +191,8 @@ def portfolio_rollup(
         urgency=urgency,
         assigned_user=assigned_user,
         limit=limit,
+        include_hidden=include_hidden,
+
     )
 
     total_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -213,6 +228,9 @@ def dashboard_rollups(
     limit: int = Query(default=250, ge=1, le=1000),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
+    include_hidden: bool = Query(default=False),
+    deals_only: bool = Query(default=True),
+    include_suppressed: bool = Query(default=False),
 ):
     t0 = time.perf_counter()
 
@@ -234,6 +252,9 @@ def dashboard_rollups(
         assigned_user=assigned_user,
         urgency=urgency,
         limit=limit,
+        include_hidden=include_hidden,
+        deals_only=deals_only,
+        include_suppressed=include_suppressed,
     )
 
     total_ms = round((time.perf_counter() - t0) * 1000, 2)

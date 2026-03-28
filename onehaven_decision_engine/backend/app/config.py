@@ -186,6 +186,14 @@ class Settings(BaseSettings):
     agents_enable_trust_recompute: bool = True
     agents_enable_photo_rehab: bool = True
 
+    # ---- Listing visibility / lifecycle persistence ----
+    listing_default_hide_inactive: bool = True
+    listing_default_status_active_value: str = "Active"
+    listing_default_status_inactive_value: str = "Inactive"
+    listing_exclude_hidden_by_default: bool = True
+    listing_stale_after_hours: int = 24 * 14
+
+
     # ---- LM Studio / local LLM ----
     llm_provider: str = "lm_studio"
     lm_studio_enabled: bool = True

@@ -318,8 +318,21 @@ def _build_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
     asking_count = 0
     cashflow_count = 0
     dscr_count = 0
+    total_rank = 0.0
+    rank_count = 0
+    total_rent_gap = 0.0
+    rent_gap_count = 0
 
     for row in rows:
+        rank_value = row.get("rank_score")
+        rent_gap_value = row.get("rent_gap")
+
+        if rank_value is not None:
+            total_rank += _safe_float(rank_value)
+            rank_count += 1
+        if rent_gap_value is not None:
+            total_rent_gap += _safe_float(rent_gap_value)
+            rent_gap_count += 1
         if row.get("asking_price") is not None:
             total_asking += _safe_float(row.get("asking_price"))
             asking_count += 1
@@ -339,39 +352,51 @@ def _build_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "high_priority_items": high_count,
         "avg_asking_price": round(total_asking / asking_count, 2) if asking_count else 0.0,
         "avg_projected_monthly_cashflow": round(total_cashflow / cashflow_count, 2) if cashflow_count else 0.0,
+        "avg_rank_score": round(total_rank / rank_count, 2) if rank_count else 0.0,
+        "avg_rent_gap": round(total_rent_gap / rent_gap_count, 2) if rent_gap_count else 0.0,
         "avg_dscr": round(total_dscr / dscr_count, 3) if dscr_count else 0.0,
     }
 
 
 def _leaderboards(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    candidate_rows = [r for r in rows if bool(r.get("is_deal_candidate"))]
+    source_rows = candidate_rows or rows
+
+    top_ranked = sorted(
+        source_rows,
+        key=lambda r: _safe_float(r.get("rank_score"), -10**12),
+        reverse=True,
+    )[:10]
+
     cashflow = sorted(
-        rows,
+        source_rows,
         key=lambda r: _safe_float(r.get("projected_monthly_cashflow"), -10**12),
         reverse=True,
     )[:10]
 
-    lowest_crime = sorted(
-        [r for r in rows if r.get("crime_score") is not None],
-        key=lambda r: _safe_float(r.get("crime_score"), 10**12),
-    )[:10]
-
-    most_blocked = sorted(
-        rows,
-        key=lambda r: len(r.get("blockers") or []),
-        reverse=True,
-    )[:10]
-
     best_dscr = sorted(
-        [r for r in rows if r.get("dscr") is not None],
+        [r for r in source_rows if r.get("dscr") is not None],
         key=lambda r: _safe_float(r.get("dscr"), -10**12),
         reverse=True,
     )[:10]
 
+    best_rent_gap = sorted(
+        [r for r in source_rows if r.get("rent_gap") is not None],
+        key=lambda r: _safe_float(r.get("rent_gap"), -10**12),
+        reverse=True,
+    )[:10]
+
+    lowest_risk = sorted(
+        [r for r in source_rows if r.get("risk_score") is not None],
+        key=lambda r: _safe_float(r.get("risk_score"), 10**12),
+    )[:10]
+
     return {
+        "top_ranked": top_ranked,
         "cashflow": cashflow,
-        "lowest_crime": lowest_crime,
-        "most_blocked": most_blocked,
         "best_dscr": best_dscr,
+        "best_rent_gap": best_rent_gap,
+        "lowest_risk": lowest_risk,
     }
 
 
@@ -397,6 +422,9 @@ def compute_rollups(
     max_crime_score: Optional[float] = None,
     min_offender_count: Optional[int] = None,
     max_offender_count: Optional[int] = None,
+    include_hidden: bool = False,
+    deals_only: bool = False,
+    include_suppressed: bool = False,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
 
@@ -408,18 +436,37 @@ def compute_rollups(
         city=city,
         q=q,
         assigned_user_id=assigned_user,
+        include_hidden=include_hidden,
         limit=max(int(limit), 500),
     )
     rows = list(inventory.get("rows") or [])
     prefilter_count = len(rows)
 
     normalized_rows: list[dict[str, Any]] = []
+
     for row in rows:
         normalized = dict(row)
         normalized["urgency"] = _derive_urgency(normalized)
         normalized_rows.append(normalized)
     rows = normalized_rows
 
+    if not include_hidden:
+        rows = [row for row in rows if not bool(row.get("listing_hidden"))]    
+    if deals_only:
+        if include_suppressed:
+            rows = [row for row in rows if row.get("deal_filter_status") != "hidden"]
+        else:
+            rows = [row for row in rows if bool(row.get("is_deal_candidate"))]
+    
+    rows.sort(
+        key=lambda row: (
+            _safe_float(row.get("rank_score"), -10**12),
+            _safe_float(row.get("projected_monthly_cashflow"), -10**12),
+            _safe_float(row.get("dscr"), -10**12),
+        ),
+        reverse=True,
+    )
+    
     if only_red_zone:
         rows = [r for r in rows if bool(r.get("is_red_zone"))]
     elif exclude_red_zone:

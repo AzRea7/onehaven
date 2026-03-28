@@ -43,6 +43,15 @@ type DecisionFilter = "ALL" | "GOOD_DEAL" | "REVIEW" | "REJECT";
 type FinancingFilter = "ALL" | "CASH" | "DSCR" | "UNKNOWN";
 type CompletenessFilter = "ALL" | "COMPLETE" | "PARTIAL" | "MISSING";
 
+type DealScopeFilter = "CANDIDATES" | "INCLUDE_SUPPRESSED";
+type HiddenReasonFilter =
+  | "ALL"
+  | "INACTIVE"
+  | "LOW_SCORE"
+  | "BAD_RISK"
+  | "WEAK_CASHFLOW"
+  | "WEAK_DSCR";
+
 // type AcquisitionWaitFilter =
 //   | "ALL"
 //   | "LENDER"
@@ -205,6 +214,26 @@ function getFinancingType(price?: number | null) {
   return "DSCR";
 }
 
+function inferDealFilterStatus(r: any) {
+  return (
+    String(r?.deal_filter_status || "")
+      .trim()
+      .toLowerCase() || "candidate"
+  );
+}
+
+function inferIsDealCandidate(r: any) {
+  return Boolean(r?.is_deal_candidate);
+}
+
+function inferHiddenReason(r: any) {
+  return (
+    String(r?.hidden_reason || "")
+      .trim()
+      .toLowerCase() || null
+  );
+}
+
 function inferCompleteness(r: any): "COMPLETE" | "PARTIAL" | "MISSING" {
   const explicit = String(r?.completeness || "")
     .trim()
@@ -331,6 +360,14 @@ function inferTags(r: any): string[] {
   const dscr = inferDscr(r);
   const completeness = inferCompleteness(r);
   const crime = inferCrime(r);
+  const hiddenReason = inferHiddenReason(r);
+  const isCandidate = inferIsDealCandidate(r);
+
+  if (isCandidate) tags.add("Deal candidate");
+  if (hiddenReason === "bad_risk") tags.add("Risk suppressed");
+  if (hiddenReason === "weak_cashflow") tags.add("Weak cashflow");
+  if (hiddenReason === "weak_dscr") tags.add("Weak DSCR");
+  if (hiddenReason === "low_score") tags.add("Low score");
 
   if (
     normalizeDecision(r?.normalized_decision || r?.classification) ===
@@ -456,6 +493,10 @@ export default function InvestorPane() {
   const [sort, setSort] = React.useState<SortKey>("RELEVANCE");
   const [currentPage, setCurrentPage] = React.useState(1);
 
+  const [dealScope, setDealScope] =
+      React.useState<DealScopeFilter>("CANDIDATES");
+  const [hiddenReason, setHiddenReason] =
+      React.useState<HiddenReasonFilter>("ALL");
   // OLD CITY-ONLY FILTER KEPT FOR REFERENCE
   // const [selectedCity, setSelectedCity] = React.useState<string>("ALL");
 
@@ -485,7 +526,10 @@ export default function InvestorPane() {
     try {
       const params: Record<string, any> = {
         limit: INITIAL_LIMIT,
-      };
+        deals_only: "true",
+        include_suppressed:
+          dealScope === "INCLUDE_SUPPRESSED" ? "true" : undefined,
+            };
 
       if (selectedMarket?.state) params.state = selectedMarket.state;
       if (selectedMarket?.county) params.county = selectedMarket.county;
@@ -499,6 +543,12 @@ export default function InvestorPane() {
       if (sort === "BEST_DSCR") params.sort = "best_dscr";
       if (sort === "NEWEST") params.sort = "newest";
 
+      if (hiddenReason === "INACTIVE") params.hidden_reason = "inactive_listing";
+      if (hiddenReason === "LOW_SCORE") params.hidden_reason = "low_score";
+      if (hiddenReason === "BAD_RISK") params.hidden_reason = "bad_risk";
+      if (hiddenReason === "WEAK_CASHFLOW") params.hidden_reason = "weak_cashflow";
+      if (hiddenReason === "WEAK_DSCR") params.hidden_reason = "weak_dscr";
+      
       const propertiesRes = await api.get<any>("/properties", { params });
       const propertyItems =
         propertiesRes?.items || propertiesRes?.rows || propertiesRes || [];
@@ -510,7 +560,7 @@ export default function InvestorPane() {
     } finally {
       setInventoryLoading(false);
     }
-  }, [deferredQ, selectedMarket, sort]);
+  }, [deferredQ, selectedMarket, sort, dealScope, hiddenReason]);
 
   const loadMarkets = React.useCallback(async () => {
     setMarketsLoading(true);
@@ -613,23 +663,109 @@ export default function InvestorPane() {
     loadInventory();
   }, [loadInventory, marketRefreshNonce]);
 
-  const filteredRows = React.useMemo(() => {
-    return rows.filter((row) => {
-      const normalizedDecision = normalizeDecision(
-        row?.normalized_decision || row?.classification,
-      );
-      if (decision !== "ALL" && normalizedDecision !== decision) return false;
+    const filteredRows = React.useMemo(() => {
+      return rows
+        .filter((row) => {
+          const normalizedDecision = normalizeDecision(
+            row?.normalized_decision || row?.classification,
+          );
+          if (decision !== "ALL" && normalizedDecision !== decision)
+            return false;
 
-      const financingType = getFinancingType(inferAskingPrice(row));
-      if (financing !== "ALL" && financingType !== financing) return false;
+          const financingType = getFinancingType(inferAskingPrice(row));
+          if (financing !== "ALL" && financingType !== financing) return false;
 
-      const completenessValue = inferCompleteness(row);
-      if (completeness !== "ALL" && completenessValue !== completeness)
-        return false;
+          const completenessValue = inferCompleteness(row);
+          if (completeness !== "ALL" && completenessValue !== completeness) {
+            return false;
+          }
 
-      return true;
-    });
-  }, [rows, decision, financing, completeness]);
+          if (dealScope === "CANDIDATES" && !inferIsDealCandidate(row)) {
+            return false;
+          }
+
+          if (hiddenReason !== "ALL") {
+            const reason = inferHiddenReason(row);
+            if (hiddenReason === "INACTIVE" && reason !== "inactive_listing")
+              return false;
+            if (hiddenReason === "LOW_SCORE" && reason !== "low_score")
+              return false;
+            if (hiddenReason === "BAD_RISK" && reason !== "bad_risk")
+              return false;
+            if (hiddenReason === "WEAK_CASHFLOW" && reason !== "weak_cashflow")
+              return false;
+            if (hiddenReason === "WEAK_DSCR" && reason !== "weak_dscr")
+              return false;
+          }
+
+          return true;
+        })
+        .sort((a, b) => {
+          const aCandidate = inferIsDealCandidate(a) ? 1 : 0;
+          const bCandidate = inferIsDealCandidate(b) ? 1 : 0;
+
+          if (sort === "BEST_CASHFLOW") {
+            return (
+              (inferCashflow(b) ?? Number.NEGATIVE_INFINITY) -
+              (inferCashflow(a) ?? Number.NEGATIVE_INFINITY)
+            );
+          }
+
+          if (sort === "BEST_DSCR") {
+            return (
+              (inferDscr(b) ?? Number.NEGATIVE_INFINITY) -
+              (inferDscr(a) ?? Number.NEGATIVE_INFINITY)
+            );
+          }
+
+          if (sort === "LOWEST_PRICE") {
+            return (
+              (inferAskingPrice(a) ?? Number.POSITIVE_INFINITY) -
+              (inferAskingPrice(b) ?? Number.POSITIVE_INFINITY)
+            );
+          }
+
+          if (sort === "HIGHEST_PRICE") {
+            return (
+              (inferAskingPrice(b) ?? Number.NEGATIVE_INFINITY) -
+              (inferAskingPrice(a) ?? Number.NEGATIVE_INFINITY)
+            );
+          }
+
+          if (sort === "NEWEST") {
+            return (
+              new Date(inferUpdatedAt(b) || 0).getTime() -
+              new Date(inferUpdatedAt(a) || 0).getTime()
+            );
+          }
+
+          // relevance: deal candidates first, then cashflow, then dscr, then freshness
+          if (bCandidate !== aCandidate) return bCandidate - aCandidate;
+
+          const cashflowDelta =
+            (inferCashflow(b) ?? Number.NEGATIVE_INFINITY) -
+            (inferCashflow(a) ?? Number.NEGATIVE_INFINITY);
+          if (cashflowDelta !== 0) return cashflowDelta;
+
+          const dscrDelta =
+            (inferDscr(b) ?? Number.NEGATIVE_INFINITY) -
+            (inferDscr(a) ?? Number.NEGATIVE_INFINITY);
+          if (dscrDelta !== 0) return dscrDelta;
+
+          return (
+            new Date(inferUpdatedAt(b) || 0).getTime() -
+            new Date(inferUpdatedAt(a) || 0).getTime()
+          );
+        });
+    }, [
+      rows,
+      decision,
+      financing,
+      completeness,
+      dealScope,
+      hiddenReason,
+      sort,
+    ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -645,6 +781,8 @@ export default function InvestorPane() {
     decision,
     financing,
     completeness,
+    dealScope,
+    hiddenReason,
     sort,
     deferredQ,
     selectedMarket?.slug,
@@ -727,6 +865,23 @@ export default function InvestorPane() {
                       : "No market selected"}
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <BriefcaseBusiness className="h-4 w-4" />
+                  Deal scope
+                </div>
+                <select
+                  value={dealScope}
+                  onChange={(e) =>
+                    setDealScope(e.target.value as DealScopeFilter)
+                  }
+                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
+                >
+                  <option value="CANDIDATES">Deal candidates only</option>
+                  <option value="INCLUDE_SUPPRESSED">Include suppressed</option>
+                </select>
               </div>
 
               <div className="flex items-stretch gap-3">
@@ -815,6 +970,27 @@ export default function InvestorPane() {
                   <option value="COMPLETE">Complete</option>
                   <option value="PARTIAL">Partial</option>
                   <option value="MISSING">Missing</option>
+                </select>
+              </div>
+
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <ShieldAlert className="h-4 w-4" />
+                  Suppression reason
+                </div>
+                <select
+                  value={hiddenReason}
+                  onChange={(e) =>
+                    setHiddenReason(e.target.value as HiddenReasonFilter)
+                  }
+                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
+                >
+                  <option value="ALL">All</option>
+                  <option value="BAD_RISK">Bad risk</option>
+                  <option value="WEAK_CASHFLOW">Weak cashflow</option>
+                  <option value="WEAK_DSCR">Weak DSCR</option>
+                  <option value="LOW_SCORE">Low score</option>
+                  <option value="INACTIVE">Inactive listing</option>
                 </select>
               </div>
 
@@ -912,6 +1088,14 @@ export default function InvestorPane() {
                                   >
                                     {completenessLabel(completenessValue)}
                                   </span>
+
+                                  {inferIsDealCandidate(row) ? (
+                                        <span className="oh-pill oh-pill-good">Deal candidate</span>
+                                      ) : (
+                                        <span className="oh-pill oh-pill-warn">
+                                          Suppressed{inferHiddenReason(row) ? ` • ${inferHiddenReason(row)}` : ""}
+                                        </span>
+                                      )}
                                 </div>
 
                                 <div className="mt-3 text-xl font-semibold text-app-0">

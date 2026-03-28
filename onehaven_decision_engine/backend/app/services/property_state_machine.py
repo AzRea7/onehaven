@@ -36,6 +36,7 @@ from ..policy_models import JurisdictionProfile
 from .inspection_failure_task_service import build_failure_next_actions
 from .inspection_readiness_service import build_property_readiness_summary
 from .jurisdiction_task_mapper import map_profile_jurisdiction_task_dicts
+from .risk_scoring import classify_deal_candidate
 
 log = logging.getLogger("onehaven.state_machine")
 
@@ -226,6 +227,10 @@ def _latest_jurisdiction_profile(
     )
     return scoped[0]
 
+def _property_listing_hidden(prop: Optional[Property]) -> bool:
+    if prop is None:
+        return False
+    return bool(getattr(prop, "listing_hidden", False))
 
 def _asking_price(prop: Optional[Property], deal: Optional[Deal]) -> Optional[float]:
     for attr in ("asking_price", "list_price", "price", "offer_price", "purchase_price"):
@@ -634,6 +639,26 @@ def derive_stage_and_constraints(
     )
     asking_price = _asking_price(prop, deal)
 
+    projected_cashflow = None
+    if uw is not None and getattr(uw, "cash_flow", None) is not None:
+        projected_cashflow = _safe_float(getattr(uw, "cash_flow", None), 0.0)
+
+    projected_dscr = None
+    if uw is not None and getattr(uw, "dscr", None) is not None:
+        projected_dscr = _safe_float(getattr(uw, "dscr", None), 0.0)
+
+    risk_score = None
+    if prop is not None and getattr(prop, "risk_score", None) is not None:
+        risk_score = _safe_float(getattr(prop, "risk_score", None), 0.0)
+
+    deal_filter = classify_deal_candidate(
+        normalized_decision=decision_bucket,
+        risk_score=risk_score,
+        projected_monthly_cashflow=projected_cashflow,
+        dscr=projected_dscr,
+        listing_hidden=_property_listing_hidden(prop),
+    )
+
     deal_exists = deal is not None or uw is not None
     underwriting_complete = uw is not None
 
@@ -839,6 +864,13 @@ def derive_stage_and_constraints(
         "asking_price": asking_price,
         "crime_score": getattr(prop, "crime_score", None),
         "crime_label": normalize_crime_label(getattr(prop, "crime_score", None)),
+        "deal_filter": deal_filter,
+        "is_deal_candidate": bool(deal_filter.get("is_deal_candidate")),
+        "suppress_from_investor": bool(deal_filter.get("suppress_from_investor")),
+        "deal_filter_status": deal_filter.get("deal_filter_status"),
+        "deal_candidate_reasons": list(deal_filter.get("candidate_reasons") or []),
+        "deal_suppress_reasons": list(deal_filter.get("suppress_reasons") or []),
+        "hidden_reason": deal_filter.get("hidden_reason"),
         "deal_exists": deal_exists,
         "underwriting_complete": underwriting_complete,
         "offer_ready": offer_ready,

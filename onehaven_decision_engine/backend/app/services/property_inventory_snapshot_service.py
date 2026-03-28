@@ -13,6 +13,7 @@ from ..models import Deal, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
 from ..services.runtime_metrics import METRICS
 from .acquisition_tag_service import list_tags_for_properties
+from ..services.risk_scoring import compute_risk_adjusted_score
 
 log = logging.getLogger("onehaven.inventory_snapshot")
 
@@ -50,6 +51,22 @@ def _asking_price(prop: Property, deal: Deal | None) -> float | None:
             return _safe_float(getattr(prop, attr, None))
     return None
 
+def _market_rent_estimate_from_snapshot(snapshot: dict[str, Any]) -> float | None:
+    return _safe_float(
+        snapshot.get("market_rent_estimate")
+        or snapshot.get("rent_assumption", {}).get("market_rent_estimate")
+        if isinstance(snapshot.get("rent_assumption"), dict) else snapshot.get("market_rent_estimate")
+    )
+
+
+def _section8_rent_used_from_snapshot(snapshot: dict[str, Any]) -> float | None:
+    acquisition_meta = snapshot.get("acquisition_metadata") or {}
+    return _safe_float(
+        snapshot.get("rent_used")
+        or snapshot.get("approved_rent_ceiling")
+        or acquisition_meta.get("rent_used")
+        or acquisition_meta.get("listing_price")
+    )
 
 def _latest_deal(db: Session, *, org_id: int, property_id: int) -> Deal | None:
     return db.scalar(
@@ -78,9 +95,21 @@ def _normalized_query_stmt(
     city: Optional[str] = None,
     q: Optional[str] = None,
     assigned_user_id: Optional[int] = None,
+    include_hidden: bool = False,
 ):
     stmt = select(Property).where(Property.org_id == org_id)
 
+    if not include_hidden:
+        if hasattr(Property, "listing_hidden"):
+            stmt = stmt.where(Property.listing_hidden.is_(False))
+        else:
+            # fallback for pre-migration safety
+            stmt = stmt.where(
+                or_(
+                    Property.acquisition_metadata_json.is_(None),
+                    text("COALESCE(acquisition_metadata_json->>'listing_hidden', 'false') <> 'true'")
+                )
+            )
     if state:
         stmt = stmt.where(Property.state == state)
     if county:
@@ -132,6 +161,13 @@ def _load_property_meta(db: Session, *, org_id: int, property_id: int) -> dict[s
                    acquisition_source_provider, acquisition_source_slug, acquisition_source_record_id, acquisition_source_url,
                    completeness_geo_status, completeness_rent_status, completeness_rehab_status,
                    completeness_risk_status, completeness_jurisdiction_status, completeness_cashflow_status,
+                   listing_status, listing_hidden, listing_hidden_reason,
+                   listing_last_seen_at, listing_removed_at, listing_listed_at, listing_created_at,
+                   listing_days_on_market, listing_price,
+                   listing_mls_name, listing_mls_number, listing_type,
+                   listing_zillow_url,
+                   listing_agent_name, listing_agent_phone, listing_agent_email, listing_agent_website,
+                   listing_office_name, listing_office_phone, listing_office_email,
                    acquisition_metadata_json
             FROM properties
             WHERE org_id = :org_id AND id = :property_id
@@ -344,6 +380,34 @@ def _buy_box_score(snapshot: dict[str, Any], search_context: dict[str, Any]) -> 
 
     return score
 
+def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
+    asking_price = _safe_float(snapshot.get("asking_price"))
+    projected_monthly_cashflow = _safe_float(snapshot.get("projected_monthly_cashflow"))
+    dscr = _safe_float(snapshot.get("dscr"))
+    risk_score = _safe_float(snapshot.get("risk_score"))
+    market_rent_estimate = _safe_float(snapshot.get("market_rent_estimate"))
+    rent_used = _safe_float(snapshot.get("rent_used"))
+
+    rent_gap = None
+    if market_rent_estimate is not None and asking_price is not None:
+        # for now: rent gap = market rent - break-even proxy not available everywhere,
+        # so we use market rent minus conservative financing pressure proxy.
+        # Better later when break_even_rent is persisted directly.
+        rent_gap = market_rent_estimate - max((asking_price * 0.01), 0.0)
+
+    score_parts = compute_risk_adjusted_score(
+        projected_monthly_cashflow=projected_monthly_cashflow,
+        dscr=dscr,
+        rent_gap=rent_gap,
+        risk_score=risk_score,
+    )
+
+    return {
+        "market_rent_estimate": market_rent_estimate,
+        "rent_used": rent_used,
+        "rent_gap": round(rent_gap, 2) if rent_gap is not None else None,
+        **score_parts,
+    }
 
 def _data_quality_score(snapshot: dict[str, Any]) -> int:
     score = 0
@@ -520,6 +584,26 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
         "current_workflow_stage_label": state_payload.get("current_stage_label"),
         "next_actions": state_payload.get("next_actions") or [],
         "workflow_state": state_payload,
+        "listing_status": meta.get("listing_status"),
+        "listing_hidden": bool(meta.get("listing_hidden") or False),
+        "listing_hidden_reason": meta.get("listing_hidden_reason"),
+        "listing_last_seen_at": meta.get("listing_last_seen_at"),
+        "listing_removed_at": meta.get("listing_removed_at"),
+        "listing_listed_at": meta.get("listing_listed_at"),
+        "listing_created_at": meta.get("listing_created_at"),
+        "listing_days_on_market": meta.get("listing_days_on_market"),
+        "listing_price": meta.get("listing_price"),
+        "listing_mls_name": meta.get("listing_mls_name"),
+        "listing_mls_number": meta.get("listing_mls_number"),
+        "listing_type": meta.get("listing_type"),
+        "listing_zillow_url": meta.get("listing_zillow_url"),
+        "listing_agent_name": meta.get("listing_agent_name"),
+        "listing_agent_phone": meta.get("listing_agent_phone"),
+        "listing_agent_email": meta.get("listing_agent_email"),
+        "listing_agent_website": meta.get("listing_agent_website"),
+        "listing_office_name": meta.get("listing_office_name"),
+        "listing_office_phone": meta.get("listing_office_phone"),
+        "listing_office_email": meta.get("listing_office_email"),
         "tags": tags,
         "source_updated_at": getattr(prop, "source_updated_at", None),
         "updated_at": getattr(prop, "updated_at", None),
@@ -543,8 +627,37 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
         },
     }
 
+    ranking = _ranking_metrics(snapshot)
+    snapshot.update(ranking)
+
     snapshot["completeness"] = infer_snapshot_completeness(snapshot)
     snapshot["is_fully_enriched"] = snapshot["completeness"] == "COMPLETE"
+    
+        # final relevance/rank composition
+    freshness_score = compute_freshness_score(snapshot)
+    text_match_score = _text_match_score(snapshot, search_context.get("q"))
+    market_match_score = _market_match_score(
+        snapshot,
+        state=search_context.get("state"),
+        county=search_context.get("county"),
+        city=search_context.get("city"),
+    )
+    buy_box_score = _buy_box_score(snapshot, search_context)
+
+    rank_score = (
+        _safe_float(snapshot.get("risk_adjusted_score"), 0.0) +
+        freshness_score +
+        text_match_score +
+        market_match_score +
+        buy_box_score
+    )
+
+    snapshot["freshness_score"] = freshness_score
+    snapshot["text_match_score"] = text_match_score
+    snapshot["market_match_score"] = market_match_score
+    snapshot["buy_box_score"] = buy_box_score
+    snapshot["rank_score"] = round(rank_score, 2)
+    
     snapshot = apply_freshness_policy(snapshot)
 
     duration_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -563,6 +676,7 @@ def build_inventory_snapshots_for_scope(
     q: Optional[str] = None,
     assigned_user_id: Optional[int] = None,
     limit: int = 100,
+    include_hidden: bool = False,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
 
@@ -574,6 +688,7 @@ def build_inventory_snapshots_for_scope(
         city=city,
         q=q,
         assigned_user_id=assigned_user_id,
+        include_hidden=include_hidden,
     )
 
     query_t0 = time.perf_counter()
@@ -605,6 +720,8 @@ def build_inventory_snapshots_for_scope(
                 org_id=org_id,
                 property_id=int(prop.id),
             )
+            if not include_hidden and bool(snapshot.get("listing_hidden")):
+                continue
             snapshot["relevance_score"] = compute_inventory_relevance(snapshot, search_context)
             rows.append(snapshot)
         except Exception:
@@ -615,11 +732,13 @@ def build_inventory_snapshots_for_scope(
             )
 
     rows.sort(
-        key=lambda item: (
-            -float(item.get("relevance_score") or 0.0),
-            -float(item.get("freshness_score") or 0.0),
-            -int(item.get("id") or 0),
-        )
+        key=lambda row: (
+            _safe_float(row.get("rank_score"), -10**12),
+            _safe_float(row.get("projected_monthly_cashflow"), -10**12),
+            _safe_float(row.get("dscr"), -10**12),
+            str(row.get("updated_at") or ""),
+        ),
+        reverse=True,
     )
     rows = rows[: max(1, int(limit))]
 
