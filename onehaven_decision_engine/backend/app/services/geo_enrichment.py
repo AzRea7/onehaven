@@ -266,16 +266,42 @@ def _apply_risk_fields(prop: Property) -> dict[str, Any]:
         is_red_zone=is_red_zone,
     )
 
-    if hasattr(prop, "crime_density"):
-        prop.crime_density = risk.get("crime_density")
-    if hasattr(prop, "crime_score"):
-        prop.crime_score = risk.get("crime_score")
-    if hasattr(prop, "offender_count"):
-        prop.offender_count = risk.get("offender_count")
-    if hasattr(prop, "risk_score"):
-        prop.risk_score = risk.get("risk_score")
-    if hasattr(prop, "risk_band"):
-        prop.risk_band = risk.get("risk_band")
+    for field in [
+        "crime_density",
+        "crime_score",
+        "crime_band",
+        "crime_source",
+        "crime_method",
+        "crime_radius_miles",
+        "crime_area_sq_miles",
+        "crime_area_type",
+        "crime_incident_count",
+        "crime_weighted_incident_count",
+        "crime_nearest_incident_miles",
+        "crime_dataset_version",
+        "crime_confidence",
+        "investment_area_band",
+        "offender_count",
+        "offender_band",
+        "offender_source",
+        "offender_radius_miles",
+        "nearest_offender_miles",
+        "risk_score",
+        "risk_band",
+        "risk_summary",
+        "risk_confidence",
+    ]:
+        if hasattr(prop, field):
+            setattr(prop, field, risk.get(field))
+
+    if hasattr(prop, "risk_last_computed_at"):
+        raw = risk.get("risk_last_computed_at")
+        if raw:
+            try:
+                prop.risk_last_computed_at = datetime.fromisoformat(str(raw))
+            except Exception:
+                prop.risk_last_computed_at = _utcnow()
+
     return risk
 
 
@@ -293,9 +319,25 @@ def _geo_snapshot(prop: Property) -> dict[str, Any]:
         "geocode_confidence": _to_float(getattr(prop, "geocode_confidence", None)),
         "crime_density": _to_float(getattr(prop, "crime_density", None)),
         "crime_score": _to_float(getattr(prop, "crime_score", None)),
+        "crime_band": _nonblank(getattr(prop, "crime_band", None)),
+        "crime_source": _nonblank(getattr(prop, "crime_source", None)),
+        "crime_method": _nonblank(getattr(prop, "crime_method", None)),
+        "crime_radius_miles": _to_float(getattr(prop, "crime_radius_miles", None)),
+        "crime_area_sq_miles": _to_float(getattr(prop, "crime_area_sq_miles", None)),
+        "crime_incident_count": getattr(prop, "crime_incident_count", None),
+        "crime_weighted_incident_count": _to_float(getattr(prop, "crime_weighted_incident_count", None)),
+        "crime_nearest_incident_miles": _to_float(getattr(prop, "crime_nearest_incident_miles", None)),
+        "crime_confidence": _to_float(getattr(prop, "crime_confidence", None)),
+        "investment_area_band": _nonblank(getattr(prop, "investment_area_band", None)),
         "offender_count": getattr(prop, "offender_count", None),
+        "offender_band": _nonblank(getattr(prop, "offender_band", None)),
+        "offender_source": _nonblank(getattr(prop, "offender_source", None)),
+        "offender_radius_miles": _to_float(getattr(prop, "offender_radius_miles", None)),
+        "nearest_offender_miles": _to_float(getattr(prop, "nearest_offender_miles", None)),
         "risk_score": _to_float(getattr(prop, "risk_score", None)),
         "risk_band": _nonblank(getattr(prop, "risk_band", None)),
+        "risk_summary": _nonblank(getattr(prop, "risk_summary", None)),
+        "risk_confidence": _to_float(getattr(prop, "risk_confidence", None)),
         "is_red_zone": bool(getattr(prop, "is_red_zone", False)),
         "geocode_last_refreshed": getattr(prop, "geocode_last_refreshed", None),
     }

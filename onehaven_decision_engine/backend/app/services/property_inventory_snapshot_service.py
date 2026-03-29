@@ -168,6 +168,10 @@ def _load_property_meta(db: Session, *, org_id: int, property_id: int) -> dict[s
                    listing_zillow_url,
                    listing_agent_name, listing_agent_phone, listing_agent_email, listing_agent_website,
                    listing_office_name, listing_office_phone, listing_office_email,
+                   crime_band, crime_source, crime_radius_miles, crime_incident_count,
+                   crime_confidence, investment_area_band,
+                   offender_band, offender_source,
+                   risk_score, risk_band, risk_confidence,
                    acquisition_metadata_json
             FROM properties
             WHERE org_id = :org_id AND id = :property_id
@@ -539,7 +543,7 @@ def apply_freshness_policy(snapshot: dict[str, Any]) -> dict[str, Any]:
     return snapshot
 
 
-def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: int, search_context: dict | None = None) -> dict[str, Any]:
     t0 = time.perf_counter()
     prop = db.scalar(select(Property).where(Property.org_id == org_id, Property.id == property_id))
     if prop is None:
@@ -576,7 +580,18 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
         "projected_monthly_cashflow": getattr(uw, "cash_flow", None) if uw is not None else None,
         "dscr": getattr(uw, "dscr", None) if uw is not None else None,
         "crime_score": getattr(prop, "crime_score", None),
+        "crime_band": getattr(prop, "crime_band", None) or meta.get("crime_band"),
+        "crime_source": getattr(prop, "crime_source", None) or meta.get("crime_source"),
+        "crime_radius_miles": getattr(prop, "crime_radius_miles", None) or meta.get("crime_radius_miles"),
+        "crime_incident_count": getattr(prop, "crime_incident_count", None) or meta.get("crime_incident_count"),
+        "crime_confidence": getattr(prop, "crime_confidence", None) or meta.get("crime_confidence"),
+        "investment_area_band": getattr(prop, "investment_area_band", None) or meta.get("investment_area_band"),
         "offender_count": getattr(prop, "offender_count", None),
+        "offender_band": getattr(prop, "offender_band", None) or meta.get("offender_band"),
+        "offender_source": getattr(prop, "offender_source", None) or meta.get("offender_source"),
+        "risk_score": getattr(prop, "risk_score", None) or meta.get("risk_score"),
+        "risk_band": getattr(prop, "risk_band", None) or meta.get("risk_band"),
+        "risk_confidence": getattr(prop, "risk_confidence", None) or meta.get("risk_confidence"),
         "is_red_zone": getattr(prop, "is_red_zone", None),
         "normalized_decision": state_payload.get("normalized_decision"),
         "pane": state_payload.get("primary_pane"),
@@ -635,7 +650,7 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
     
         # final relevance/rank composition
     freshness_score = compute_freshness_score(snapshot)
-    text_match_score = _text_match_score(snapshot, search_context.get("q"))
+    text_match_score = _text_match_score(snapshot, (search_context or {}).get("q"))
     market_match_score = _market_match_score(
         snapshot,
         state=search_context.get("state"),
@@ -719,6 +734,7 @@ def build_inventory_snapshots_for_scope(
                 db,
                 org_id=org_id,
                 property_id=int(prop.id),
+                search_context=search_context,
             )
             if not include_hidden and bool(snapshot.get("listing_hidden")):
                 continue

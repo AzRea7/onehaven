@@ -2,321 +2,317 @@ import React from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  GitCompareArrows,
-  Loader2,
-  RotateCcw,
-  XCircle,
+  ClipboardList,
+  FileText,
+  RefreshCcw,
+  ShieldAlert,
 } from "lucide-react";
-import { api } from "../lib/api";
+import EmptyState from "./EmptyState";
+import Surface from "./Surface";
 
 export type FieldValueRow = {
-  id?: number;
-  field_name?: string;
+  id?: number | string;
+  field_name?: string | null;
+  label?: string | null;
+
   value_text?: string | null;
   value_number?: number | null;
-  review_state?: string | null;
+  value_date?: string | null;
+
   confidence?: number | null;
+  conflict?: boolean | null;
+
+  review_state?: string | null;
   extraction_version?: string | null;
   manually_overridden?: boolean | null;
-  source_document_id?: number | null;
+
+  document_id?: number | string | null;
+  document_name?: string | null;
+
+  source_document_id?: number | string | null;
   source_document_name?: string | null;
+};
+
+export type ReviewDocumentRow = {
+  id?: number | string;
+  name?: string | null;
+  kind?: string | null;
+  parse_status?: string | null;
+  scan_status?: string | null;
+  preview_text?: string | null;
+};
+
+export type MissingDocumentGroup = {
+  kind: string;
+  label: string;
 };
 
 type Props = {
   propertyId: number;
-  values?: FieldValueRow[];
-  onChanged?: () => void;
+  items?: FieldValueRow[];
+  documents?: ReviewDocumentRow[];
+  missingDocumentGroups?: MissingDocumentGroup[];
+  nextRequiredDocument?: string | null;
+  estimatedCloseReadiness?: number;
+  onAction?: () => void | Promise<void>;
 };
 
-function displayValue(v: FieldValueRow) {
-  if (v.value_text != null && v.value_text !== "") return String(v.value_text);
-  if (v.value_number != null && Number.isFinite(Number(v.value_number))) {
-    return String(v.value_number);
+function displayValue(row: FieldValueRow) {
+  if (row.value_text != null && row.value_text !== "")
+    return String(row.value_text);
+  if (row.value_number != null && Number.isFinite(Number(row.value_number))) {
+    return String(row.value_number);
   }
+  if (row.value_date) return row.value_date;
   return "—";
 }
 
-function normalizedDisplayValue(v: FieldValueRow) {
-  return displayValue(v).trim().toLowerCase();
-}
-
-function groupByField(values: FieldValueRow[]) {
-  return values.reduce<Record<string, FieldValueRow[]>>((acc, row) => {
-    const key = String(row.field_name || "unknown");
-    acc[key] = acc[key] || [];
-    acc[key].push(row);
-    return acc;
-  }, {});
-}
-
-function stateClass(state: string) {
-  if (state === "accepted") return "oh-pill oh-pill-good";
-  if (state === "rejected") return "oh-pill oh-pill-bad";
-  if (state === "superseded") return "oh-pill";
-  return "oh-pill oh-pill-warn";
-}
-
-function formatError(e: any) {
-  const status = e?.response?.status;
-  const detail =
-    e?.response?.data?.detail || e?.response?.data?.message || e?.message;
-  if (status && detail) return `(${status}) ${String(detail)}`;
-  if (detail) return String(detail);
-  return "Failed to update field review.";
-}
-
-function confidenceLabel(value?: number | null) {
+function readinessTone(value?: number) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
-  return n.toFixed(2);
+  if (!Number.isFinite(n)) return "text-app-0";
+  if (n >= 75) return "text-emerald-300";
+  if (n >= 45) return "text-amber-300";
+  return "text-red-300";
 }
 
-function sortRows(rows: FieldValueRow[]) {
-  return [...rows].sort((a, b) => {
-    const stateA = String(a.review_state || "suggested").toLowerCase();
-    const stateB = String(b.review_state || "suggested").toLowerCase();
+function parseTone(value?: string | null) {
+  const v = String(value || "")
+    .trim()
+    .toLowerCase();
 
-    const stateRank = (state: string) => {
-      if (state === "accepted") return 0;
-      if (state === "suggested") return 1;
-      if (state === "superseded") return 2;
-      if (state === "rejected") return 3;
-      return 4;
-    };
-
-    const stateDiff = stateRank(stateA) - stateRank(stateB);
-    if (stateDiff !== 0) return stateDiff;
-
-    const confA = Number(a.confidence);
-    const confB = Number(b.confidence);
-    const validA = Number.isFinite(confA) ? confA : -1;
-    const validB = Number.isFinite(confB) ? confB : -1;
-
-    if (validA !== validB) return validB - validA;
-
-    return displayValue(a).localeCompare(displayValue(b));
-  });
+  if (v === "done" || v === "parsed" || v === "completed") {
+    return "oh-pill oh-pill-good";
+  }
+  if (v === "failed" || v === "error") return "oh-pill oh-pill-bad";
+  if (v === "pending" || v === "queued" || v === "processing") {
+    return "oh-pill oh-pill-warn";
+  }
+  return "oh-pill";
 }
 
 export default function DocumentFieldReviewPanel({
   propertyId,
-  values = [],
-  onChanged,
+  items = [],
+  documents = [],
+  missingDocumentGroups = [],
+  nextRequiredDocument,
+  estimatedCloseReadiness,
+  onAction,
 }: Props) {
-  const [pendingId, setPendingId] = React.useState<number | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeDocuments = Array.isArray(documents) ? documents : [];
+  const safeMissing = Array.isArray(missingDocumentGroups)
+    ? missingDocumentGroups
+    : [];
 
-  const grouped = React.useMemo(() => groupByField(values), [values]);
+  const grouped = safeItems.reduce<Record<string, FieldValueRow[]>>(
+    (acc, row) => {
+      const key = String(row.field_name || row.label || "unknown");
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(row);
+      return acc;
+    },
+    {},
+  );
 
-  const mutate = async (
-    valueId: number | undefined,
-    action: "accept" | "reject" | "supersede",
-  ) => {
-    if (!valueId || pendingId != null) return;
+  const groupedEntries = Object.entries(grouped).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
 
-    setPendingId(valueId);
-    setError(null);
-
-    try {
-      await api.post(
-        `/acquisition/properties/${propertyId}/field-values/${valueId}/${action}`,
-        {},
-      );
-      onChanged?.();
-    } catch (e: any) {
-      setError(formatError(e));
-    } finally {
-      setPendingId(null);
-    }
-  };
-
-  const groups = Object.entries(grouped)
-    .map(([field, rows]) => [field, sortRows(rows)] as const)
-    .sort((a, b) => a[0].localeCompare(b[0]));
-
-  const conflictCount = groups.filter(
-    ([, rows]) => new Set(rows.map(normalizedDisplayValue)).size > 1,
-  ).length;
-
-  const suggestedCount = values.filter(
-    (row) =>
-      String(row.review_state || "suggested").toLowerCase() === "suggested",
-  ).length;
-
-  const acceptedCount = values.filter(
-    (row) => String(row.review_state || "").toLowerCase() === "accepted",
-  ).length;
+  const conflictCount = groupedEntries.filter(([, rows]) => {
+    const normalized = rows
+      .map((r) => displayValue(r).trim().toLowerCase())
+      .filter(Boolean);
+    return new Set(normalized).size > 1;
+  }).length;
 
   return (
-    <div className="rounded-3xl border border-app bg-app-panel p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-            Parsed field review
-          </div>
-          <div className="mt-1 text-sm text-app-3">
-            Review extracted values, resolve document disagreements, and promote
-            canonical values before trusting close readiness.
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <span
-            className={
-              conflictCount ? "oh-pill oh-pill-warn" : "oh-pill oh-pill-good"
-            }
-          >
-            <GitCompareArrows className="mr-1 h-3.5 w-3.5" />
-            {conflictCount} disagreement group{conflictCount === 1 ? "" : "s"}
+    <Surface
+      title="Document field review"
+      subtitle="Parsed values, missing document groups, and close-readiness signals."
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="oh-pill">Property #{propertyId}</span>
+          <span className="oh-pill oh-pill-accent">
+            <ShieldAlert className="h-3.5 w-3.5" />
+            {safeMissing.length} missing groups
           </span>
-          <span className="oh-pill">{acceptedCount} accepted</span>
-          <span className="oh-pill">{suggestedCount} pending</span>
+          <span className="oh-pill oh-pill-warn">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {conflictCount} conflicts
+          </span>
+          <span
+            className={`text-sm font-semibold ${readinessTone(estimatedCloseReadiness)}`}
+          >
+            Readiness{" "}
+            {Number.isFinite(Number(estimatedCloseReadiness))
+              ? `${Math.round(Number(estimatedCloseReadiness))}%`
+              : "—"}
+          </span>
+          {onAction ? (
+            <button
+              type="button"
+              className="oh-btn oh-btn-secondary oh-btn-sm"
+              onClick={() => void onAction()}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              Refresh
+            </button>
+          ) : null}
         </div>
-      </div>
-
-      {error ? <div className="mt-3 text-xs text-red-300">{error}</div> : null}
-
-      {!groups.length ? (
-        <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-4">
-          No parser suggestions available yet.
+      }
+    >
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+            <ClipboardList className="h-4 w-4" />
+            Next required document
+          </div>
+          <div className="mt-2 text-sm text-app-3">
+            {nextRequiredDocument || "No missing required documents"}
+          </div>
         </div>
-      ) : (
-        <div className="mt-4 space-y-4">
-          {groups.map(([field, rows]) => {
-            const disagreement =
-              new Set(rows.map(normalizedDisplayValue)).size > 1;
 
-            const acceptedRow = rows.find(
-              (row) =>
-                String(row.review_state || "").toLowerCase() === "accepted",
-            );
+        {safeMissing.length ? (
+          <div>
+            <div className="mb-3 text-sm font-semibold text-app-1">
+              Missing document groups
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {safeMissing.map((row, idx) => (
+                <span
+                  key={`${row.kind}-${idx}`}
+                  className="oh-pill oh-pill-warn"
+                >
+                  {row.label || row.kind}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
-            return (
-              <div
-                key={field}
-                className={`rounded-2xl border p-4 ${
-                  disagreement
-                    ? "border-amber-500/25 bg-amber-500/5"
-                    : "border-app bg-app-muted"
-                }`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-app-0">
-                      {field.replace(/_/g, " ")}
+        <div>
+          <div className="mb-3 text-sm font-semibold text-app-1">Documents</div>
+
+          {!safeDocuments.length ? (
+            <EmptyState
+              icon={FileText}
+              title="No documents uploaded"
+              description="Upload acquisition documents to start parsing fields and conflict review."
+            />
+          ) : (
+            <div className="space-y-3">
+              {safeDocuments.map((doc, idx) => (
+                <div
+                  key={String(doc.id ?? idx)}
+                  className="rounded-2xl border border-app bg-app-panel px-4 py-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-app-0">
+                        {doc.name || "Document"}
+                      </div>
+                      <div className="mt-1 text-xs text-app-4">
+                        {doc.kind || "unknown kind"}
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-app-4">
-                      {rows.length} extracted value
-                      {rows.length === 1 ? "" : "s"}
-                    </div>
-                  </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    {disagreement ? (
-                      <span className="oh-pill oh-pill-warn">disagreement</span>
-                    ) : (
-                      <span className="oh-pill">single value</span>
-                    )}
-                    {acceptedRow ? (
-                      <span className="oh-pill oh-pill-good">
-                        canonical chosen
+                    <div className="flex flex-wrap gap-2">
+                      <span className={parseTone(doc.parse_status)}>
+                        parse: {doc.parse_status || "unknown"}
                       </span>
-                    ) : null}
+                      <span className={parseTone(doc.scan_status)}>
+                        scan: {doc.scan_status || "unknown"}
+                      </span>
+                    </div>
                   </div>
+
+                  {doc.preview_text ? (
+                    <div className="mt-3 line-clamp-4 text-sm text-app-3">
+                      {doc.preview_text}
+                    </div>
+                  ) : null}
                 </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-                <div className="mt-3 space-y-3">
-                  {rows.map((row, idx) => {
-                    const state = String(
-                      row.review_state || "suggested",
-                    ).toLowerCase();
-                    const isPending = pendingId === row.id;
+        <div>
+          <div className="mb-3 text-sm font-semibold text-app-1">
+            Parsed field values
+          </div>
 
-                    return (
-                      <div
-                        key={row.id || `${field}-${idx}`}
-                        className="rounded-2xl border border-app bg-app-panel p-4"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-medium text-app-0">
+          {!groupedEntries.length ? (
+            <EmptyState
+              icon={CheckCircle2}
+              title="No parsed fields yet"
+              description="Once documents are parsed, extracted values will show here by field."
+            />
+          ) : (
+            <div className="space-y-4">
+              {groupedEntries.map(([field, rows]) => {
+                const normalized = rows
+                  .map((r) => displayValue(r).trim().toLowerCase())
+                  .filter(Boolean);
+                const hasConflict = new Set(normalized).size > 1;
+
+                return (
+                  <div
+                    key={field}
+                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-app-0">
+                        {field}
+                      </div>
+                      {hasConflict ? (
+                        <span className="oh-pill oh-pill-bad">
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          conflict
+                        </span>
+                      ) : (
+                        <span className="oh-pill oh-pill-good">aligned</span>
+                      )}
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {rows.map((row, idx) => (
+                        <div
+                          key={String(row.id ?? `${field}-${idx}`)}
+                          className="rounded-xl border border-app/70 bg-app px-3 py-3 text-sm"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-medium text-app-0">
                               {displayValue(row)}
                             </div>
-                            <div className="mt-1 text-xs text-app-4">
-                              confidence {confidenceLabel(row.confidence)}
-                              {row.extraction_version
-                                ? ` · ${row.extraction_version}`
-                                : ""}
-                              {row.source_document_name
-                                ? ` · ${row.source_document_name}`
-                                : row.source_document_id
-                                  ? ` · doc #${row.source_document_id}`
-                                  : ""}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
-                            <span className={stateClass(state)}>{state}</span>
-                            {row.manually_overridden ? (
-                              <span className="oh-pill oh-pill-accent">
-                                manual override
-                              </span>
+                            {row.confidence != null ? (
+                              <div className="text-xs text-app-4">
+                                confidence{" "}
+                                {Math.round(Number(row.confidence) * 100)}%
+                              </div>
                             ) : null}
                           </div>
+
+                          <div className="mt-1 text-xs text-app-4">
+                            {row.source_document_name ||
+                              row.document_name ||
+                              (row.source_document_id != null
+                                ? `Document #${row.source_document_id}`
+                                : row.document_id != null
+                                  ? `Document #${row.document_id}`
+                                  : "Unknown source")}
+                          </div>
                         </div>
-
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={isPending || pendingId != null || !row.id}
-                            onClick={() => mutate(row.id, "accept")}
-                            className="oh-btn oh-btn-secondary"
-                          >
-                            {isPending ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="h-4 w-4" />
-                            )}
-                            Accept
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={isPending || pendingId != null || !row.id}
-                            onClick={() => mutate(row.id, "reject")}
-                            className="oh-btn oh-btn-secondary"
-                          >
-                            <XCircle className="h-4 w-4" />
-                            Reject
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={isPending || pendingId != null || !row.id}
-                            onClick={() => mutate(row.id, "supersede")}
-                            className="oh-btn oh-btn-secondary"
-                          >
-                            <RotateCcw className="h-4 w-4" />
-                            Supersede
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {disagreement ? (
-                  <div className="mt-3 inline-flex items-center gap-2 text-xs text-amber-200">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    Multiple documents disagree on this field. Resolve this
-                    before trusting estimated close readiness.
+                      ))}
+                    </div>
                   </div>
-                ) : null}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+    </Surface>
   );
 }

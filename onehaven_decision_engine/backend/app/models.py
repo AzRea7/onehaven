@@ -196,6 +196,32 @@ class Property(Base):
 
     offender_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+
+    crime_band: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    crime_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    crime_method: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    crime_radius_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crime_area_sq_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crime_area_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    crime_incident_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    crime_weighted_incident_count: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crime_nearest_incident_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crime_dataset_version: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    crime_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    investment_area_band: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    offender_band: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    offender_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    offender_radius_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    nearest_offender_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    risk_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    risk_band: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    risk_summary: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    risk_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    risk_last_computed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -265,6 +291,32 @@ class PropertyInventorySnapshot(Base):
 
     crime_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     offender_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+    crime_band: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    crime_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    crime_method: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    crime_radius_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crime_area_sq_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crime_area_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    crime_incident_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    crime_weighted_incident_count: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crime_nearest_incident_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crime_dataset_version: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    crime_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    investment_area_band: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    offender_band: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    offender_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    offender_radius_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    nearest_offender_miles: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    risk_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    risk_band: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    risk_summary: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    risk_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    risk_last_computed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     is_red_zone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     property_type: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)

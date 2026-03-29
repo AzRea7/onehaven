@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -9,21 +10,32 @@ from ..models import Property
 from .crime_index import compute_crime_metrics
 from .offender_index import compute_offender_metrics
 
+DEFAULT_OFFENDER_RADIUS_MILES = 0.75
+
 
 def _clamp(v: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, v))
 
 
 def composite_risk_band(score: float) -> str:
-    if score >= 80:
-        return "very_high"
-    if score >= 60:
-        return "high"
-    if score >= 35:
-        return "moderate"
-    if score >= 15:
-        return "low"
-    return "very_low"
+    if score >= 85:
+        return "avoid"
+    if score >= 65:
+        return "caution"
+    if score >= 45:
+        return "watch"
+    if score >= 25:
+        return "stable"
+    return "preferred"
+
+
+def _risk_confidence(*, crime_confidence: float | None, offender_source: str | None, missing_coordinates: bool) -> float:
+    if missing_coordinates:
+        return 0.0
+    confidence = float(crime_confidence or 0.45)
+    if str(offender_source or "").strip().lower() == "local_dataset":
+        confidence += 0.10
+    return round(_clamp(confidence, 0.0, 1.0), 2)
 
 
 def compute_property_risk(
@@ -39,12 +51,28 @@ def compute_property_risk(
             "crime_density": None,
             "crime_score": None,
             "crime_band": "unknown",
+            "crime_source": None,
+            "crime_method": None,
+            "crime_radius_miles": None,
+            "crime_area_sq_miles": None,
+            "crime_area_type": None,
+            "crime_incident_count": None,
+            "crime_weighted_incident_count": None,
+            "crime_nearest_incident_miles": None,
+            "crime_dataset_version": None,
+            "crime_confidence": 0.0,
+            "investment_area_band": "unknown",
             "offender_count": None,
             "offender_band": "unknown",
+            "offender_source": None,
+            "offender_radius_miles": None,
+            "nearest_offender_miles": None,
             "risk_score": None,
             "risk_band": "unknown",
             "risk_summary": "missing_coordinates",
             "risk_factors": ["missing_coordinates"],
+            "risk_confidence": 0.0,
+            "risk_last_computed_at": datetime.utcnow().isoformat(),
         }
 
     crime = compute_crime_metrics(
@@ -59,31 +87,41 @@ def compute_property_risk(
         lng=float(lng),
         city=city,
         county=county,
-        radius_miles=1.0,
+        radius_miles=DEFAULT_OFFENDER_RADIUS_MILES,
     )
 
     crime_score = float(crime["crime_score"])
     offender_count = int(offenders["offender_count"])
-    offender_component = min(offender_count * 8.0, 35.0)
-    red_zone_component = 25.0 if is_red_zone else 0.0
+    offender_pressure = min(28.0, offender_count * 4.5)
+    red_zone_penalty = 14.0 if is_red_zone else 0.0
 
-    raw = (crime_score * 0.70) + offender_component + red_zone_component
-    risk_score = round(_clamp(raw), 2)
+    # Investing-focused risk composition:
+    # local violent/property crime is dominant, offenders are secondary, red-zone a strong tie-breaker.
+    risk_score = round(_clamp((crime_score * 0.72) + offender_pressure + red_zone_penalty), 2)
 
     factors: list[str] = []
     if is_red_zone:
         factors.append("red_zone")
-    if crime_score >= 60:
-        factors.append("high_crime_score")
-    elif crime_score >= 35:
-        factors.append("moderate_crime_score")
-    if offender_count >= 6:
+    if crime_score >= 85:
+        factors.append("extreme_crime")
+    elif crime_score >= 65:
+        factors.append("high_crime")
+    elif crime_score >= 45:
+        factors.append("watch_crime")
+    else:
+        factors.append("crime_within_buy_box")
+
+    if offender_count >= 10:
+        factors.append("very_high_offender_count")
+    elif offender_count >= 6:
         factors.append("high_offender_count")
     elif offender_count >= 3:
         factors.append("moderate_offender_count")
 
-    if not factors:
-        factors.append("low_detected_risk")
+    if crime.get("crime_source") != "local_dataset":
+        factors.append("crime_heuristic_fallback")
+    if offenders.get("offender_source") != "local_dataset":
+        factors.append("offender_heuristic_fallback")
 
     return {
         **crime,
@@ -92,6 +130,12 @@ def compute_property_risk(
         "risk_band": composite_risk_band(risk_score),
         "risk_summary": ",".join(factors),
         "risk_factors": factors,
+        "risk_confidence": _risk_confidence(
+            crime_confidence=float(crime.get("crime_confidence") or 0.0),
+            offender_source=offenders.get("offender_source"),
+            missing_coordinates=False,
+        ),
+        "risk_last_computed_at": datetime.utcnow().isoformat(),
     }
 
 
@@ -103,14 +147,6 @@ def classify_deal_candidate(
     dscr: float | None,
     listing_hidden: bool = False,
 ) -> dict[str, Any]:
-    """
-    Decide whether a property should show up in the investor pane as a deal candidate.
-
-    Status meanings:
-    - candidate: worthy of showing in main investor list
-    - suppressed: stays in inventory/history but hidden from the main deals-first list
-    - hidden: already hidden for stronger reasons (inactive listing, etc.)
-    """
     if listing_hidden:
         return {
             "deal_filter_status": "hidden",
@@ -151,9 +187,11 @@ def classify_deal_candidate(
         suppress_reasons.append("missing_dscr")
 
     if risk is not None:
-        if risk >= 80:
+        if risk >= 65:
             suppress_reasons.append("bad_risk")
-        elif risk <= 35:
+        elif risk <= 25:
+            candidate_reasons.append("preferred_area")
+        elif risk <= 45:
             candidate_reasons.append("acceptable_risk")
     else:
         suppress_reasons.append("missing_risk")
@@ -165,7 +203,7 @@ def classify_deal_candidate(
         and dscr_value is not None
         and dscr_value >= 1.0
         and risk is not None
-        and risk < 80
+        and risk < 65
     )
 
     if is_candidate:
@@ -197,6 +235,7 @@ def classify_deal_candidate(
         "suppress_reasons": suppress_reasons,
     }
 
+
 def compute_risk_adjusted_score(
     *,
     projected_monthly_cashflow: float | None,
@@ -211,7 +250,6 @@ def compute_risk_adjusted_score(
 
     cashflow_score = 0.0
     if cashflow is not None:
-        # saturates around +500/mo
         cashflow_score = max(-25.0, min(35.0, cashflow / 15.0))
 
     dscr_score = 0.0
@@ -227,13 +265,21 @@ def compute_risk_adjusted_score(
 
     rent_gap_score = 0.0
     if gap is not None:
-        # positive gap is good, but cap the effect
         rent_gap_score = max(-15.0, min(20.0, gap / 20.0))
 
     risk_penalty = 0.0
     if risk is not None:
-        # higher risk should reduce score
-        risk_penalty = max(0.0, min(45.0, risk * 0.45))
+        # harsher penalty for investment use-cases where neighborhood quality can kill cashflow stability.
+        if risk >= 85:
+            risk_penalty = 55.0
+        elif risk >= 65:
+            risk_penalty = 42.0
+        elif risk >= 45:
+            risk_penalty = 25.0
+        elif risk >= 25:
+            risk_penalty = 12.0
+        else:
+            risk_penalty = max(0.0, risk * 0.20)
 
     rank_score = round(cashflow_score + dscr_score + rent_gap_score - risk_penalty, 2)
 
@@ -245,6 +291,7 @@ def compute_risk_adjusted_score(
         "risk_adjusted_score": rank_score,
         "rank_score": rank_score,
     }
+
 
 def refresh_property_risk(
     db: Session,
@@ -279,35 +326,45 @@ def refresh_property_risk(
         is_red_zone=bool(getattr(prop, "is_red_zone", False)),
     )
 
-    if hasattr(prop, "crime_density"):
-        prop.crime_density = risk.get("crime_density")
-    if hasattr(prop, "crime_score"):
-        prop.crime_score = risk.get("crime_score")
-    if hasattr(prop, "offender_count"):
-        prop.offender_count = risk.get("offender_count")
-    if hasattr(prop, "risk_score"):
-        prop.risk_score = risk.get("risk_score")
-    if hasattr(prop, "risk_band"):
-        prop.risk_band = risk.get("risk_band")
+    for field in [
+        "crime_density",
+        "crime_score",
+        "crime_band",
+        "crime_source",
+        "crime_method",
+        "crime_radius_miles",
+        "crime_area_sq_miles",
+        "crime_area_type",
+        "crime_incident_count",
+        "crime_weighted_incident_count",
+        "crime_nearest_incident_miles",
+        "crime_dataset_version",
+        "crime_confidence",
+        "investment_area_band",
+        "offender_count",
+        "offender_band",
+        "offender_source",
+        "offender_radius_miles",
+        "nearest_offender_miles",
+        "risk_score",
+        "risk_band",
+        "risk_summary",
+        "risk_confidence",
+    ]:
+        if hasattr(prop, field):
+            setattr(prop, field, risk.get(field))
+
+    if hasattr(prop, "risk_last_computed_at"):
+        raw = risk.get("risk_last_computed_at")
+        try:
+            prop.risk_last_computed_at = datetime.fromisoformat(str(raw))
+        except Exception:
+            prop.risk_last_computed_at = datetime.utcnow()
 
     db.add(prop)
     db.commit()
     db.refresh(prop)
 
-    return {
-        "ok": True,
-        "property_id": int(prop.id),
-        "crime_density": getattr(prop, "crime_density", None),
-        "crime_score": getattr(prop, "crime_score", None),
-        "offender_count": getattr(prop, "offender_count", None),
-        "crime_band": risk.get("crime_band"),
-        "crime_source": risk.get("crime_source"),
-        "offender_band": risk.get("offender_band"),
-        "offender_source": risk.get("offender_source"),
-        "offender_radius_miles": risk.get("offender_radius_miles"),
-        "nearest_offender_miles": risk.get("nearest_offender_miles"),
-        "risk_score": risk.get("risk_score"),
-        "risk_band": risk.get("risk_band"),
-        "risk_summary": risk.get("risk_summary"),
-        "risk_factors": risk.get("risk_factors"),
-    }
+    out = {"ok": True, "property_id": int(prop.id)}
+    out.update(risk)
+    return out

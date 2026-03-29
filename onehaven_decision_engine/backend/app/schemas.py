@@ -280,6 +280,27 @@ class PropertyCreate(BaseModel):
     crime_density: Optional[float] = None
     crime_score: Optional[float] = None
     offender_count: Optional[int] = None
+    crime_band: Optional[str] = None
+    crime_source: Optional[str] = None
+    crime_method: Optional[str] = None
+    crime_radius_miles: Optional[float] = None
+    crime_area_sq_miles: Optional[float] = None
+    crime_area_type: Optional[str] = None
+    crime_incident_count: Optional[int] = None
+    crime_weighted_incident_count: Optional[float] = None
+    crime_nearest_incident_miles: Optional[float] = None
+    crime_dataset_version: Optional[str] = None
+    crime_confidence: Optional[float] = None
+    investment_area_band: Optional[str] = None
+    offender_band: Optional[str] = None
+    offender_source: Optional[str] = None
+    offender_radius_miles: Optional[float] = None
+    nearest_offender_miles: Optional[float] = None
+    risk_score: Optional[float] = None
+    risk_band: Optional[str] = None
+    risk_summary: Optional[str] = None
+    risk_confidence: Optional[float] = None
+    risk_last_computed_at: Optional[datetime] = None
 
 
 class DealCreate(BaseModel):
