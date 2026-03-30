@@ -265,6 +265,7 @@ def compute_risk_adjusted_score(
 
     rent_gap_score = 0.0
     if gap is not None:
+        # Unknown gap stays neutral. Only real negative values reduce the score.
         rent_gap_score = max(-15.0, min(20.0, gap / 20.0))
 
     risk_penalty = 0.0

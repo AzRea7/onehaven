@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from statistics import median, mean
+from statistics import mean, median
 from typing import Optional, Sequence
 
 from sqlalchemy import select
@@ -10,6 +10,11 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Property, RentAssumption, RentCalibration, RentComp, RentObservation
+from .underwriting import (
+    RentCapReason,
+    compute_effective_rent_used,
+    describe_rent_cap_reason,
+)
 
 
 @dataclass(frozen=True)
@@ -42,32 +47,51 @@ def get_or_create_rent_assumption(db: Session, property_id: int) -> RentAssumpti
     return ra
 
 
-def compute_approved_ceiling(
+def _to_pos_float(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        out = float(value)
+        return out if out > 0 else None
+    except Exception:
+        return None
+
+
+def _to_nonneg_int(value: object, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return max(int(float(value)), 0)
+    except Exception:
+        return default
+
+
+def _is_multifamily(property_row: Property) -> bool:
+    ptype = str(getattr(property_row, "property_type", "") or "").strip().lower()
+    units = _to_nonneg_int(getattr(property_row, "units", None), 0)
+    return "multi" in ptype and units > 1
+
+
+def _normalized_units(property_row: Property) -> int:
+    return max(_to_nonneg_int(getattr(property_row, "units", None), 1), 1)
+
+
+def _approved_fmr_ceiling(
     *,
     section8_fmr: Optional[float],
-    rent_reasonableness_comp: Optional[float],
     payment_standard_pct: float,
     approved_override: Optional[float] = None,
 ) -> Optional[float]:
-    """
-    Operating truth:
-      approved_rent_ceiling = min(FMR * payment_standard_pct, median_local_comp)
+    override = _to_pos_float(approved_override)
+    if override is not None:
+        return override
 
-    If one side is missing, ceiling falls back to the side that exists.
-    If approved_override is provided, it wins (manual override).
-    """
-    if approved_override is not None:
-        return float(approved_override)
-
-    candidates: list[float] = []
-    if section8_fmr is not None:
-        candidates.append(float(section8_fmr) * float(payment_standard_pct))
-    if rent_reasonableness_comp is not None:
-        candidates.append(float(rent_reasonableness_comp))
-
-    if not candidates:
+    fmr = _to_pos_float(section8_fmr)
+    if fmr is None:
         return None
-    return float(min(candidates))
+
+    pct = float(payment_standard_pct or 1.0)
+    return round(float(fmr) * pct, 2)
 
 
 def get_calibration_multiplier(db: Session, *, zip_code: str, bedrooms: int, strategy: str) -> float:
@@ -87,7 +111,7 @@ def get_calibration_multiplier(db: Session, *, zip_code: str, bedrooms: int, str
 def apply_calibration(raw_market_rent: Optional[float], multiplier: float) -> Optional[float]:
     if raw_market_rent is None:
         return None
-    return float(raw_market_rent) * float(multiplier)
+    return round(float(raw_market_rent) * float(multiplier), 2)
 
 
 def update_calibration_from_observation(
@@ -128,7 +152,10 @@ def update_calibration_from_observation(
         alpha = float(settings.rent_calibration_alpha)
         new_mult = (1 - alpha) * float(cal.multiplier) + alpha * float(ratio)
 
-        new_mult = max(float(settings.rent_calibration_min_mult), min(float(settings.rent_calibration_max_mult), new_mult))
+        new_mult = max(
+            float(settings.rent_calibration_min_mult),
+            min(float(settings.rent_calibration_max_mult), new_mult),
+        )
 
         abs_pe = abs(float(achieved_rent) - float(predicted_market_rent)) / float(predicted_market_rent)
         if cal.mape is None:
@@ -152,10 +179,14 @@ def recompute_rent_fields(
     payment_standard_pct: Optional[float] = None,
 ) -> dict:
     """
-    Computes:
-      - approved_rent_ceiling (policy ceiling)
-      - calibrated_market_rent (market estimate after calibration)
-      - rent_used (what underwriting consumes)
+    Shared rent truth used by rent.py, rent_enrich.py, and property snapshots.
+
+    For single-family:
+      rent_used = min(calibrated_market_rent, approved_rent_ceiling) when both exist.
+
+    For multifamily:
+      derive a per-unit market rent and a per-unit FMR ceiling, cap per unit,
+      then multiply by the unit count.
     """
     prop = db.get(Property, property_id)
     if not prop:
@@ -163,35 +194,66 @@ def recompute_rent_fields(
 
     ra = get_or_create_rent_assumption(db, property_id)
 
-    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
-
-    approved = compute_approved_ceiling(
-        section8_fmr=ra.section8_fmr,
-        rent_reasonableness_comp=ra.rent_reasonableness_comp,
-        payment_standard_pct=pct,
-        approved_override=ra.approved_rent_ceiling,
+    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(
+        getattr(settings, "default_payment_standard_pct", 1.0) or 1.0
     )
 
-    mult = get_calibration_multiplier(db, zip_code=prop.zip, bedrooms=prop.bedrooms, strategy=strategy)
-    calibrated_market = apply_calibration(ra.market_rent_estimate, mult)
+    mult = get_calibration_multiplier(
+        db,
+        zip_code=getattr(prop, "zip", "") or "",
+        bedrooms=int(getattr(prop, "bedrooms", 0) or 0),
+        strategy=strategy,
+    )
+    calibrated_market = apply_calibration(_to_pos_float(getattr(ra, "market_rent_estimate", None)), mult)
 
-    s = (strategy or "section8").strip().lower()
-    rent_used: Optional[float] = None
+    approved = _approved_fmr_ceiling(
+        section8_fmr=_to_pos_float(getattr(ra, "section8_fmr", None)),
+        payment_standard_pct=pct,
+        approved_override=_to_pos_float(getattr(ra, "approved_rent_ceiling", None)),
+    )
 
-    if s == "market":
-        rent_used = calibrated_market
-    else:
-        candidates: list[float] = []
+    mode = str(strategy or "section8").strip().lower()
+    if mode == "market":
+        return {
+            "approved_rent_ceiling": approved,
+            "calibrated_market_rent": calibrated_market,
+            "rent_used": calibrated_market,
+            "rent_cap_reason": "rentcast_under_fmr" if calibrated_market is not None else "missing_rent_inputs",
+            "multiplier": mult,
+            "payment_standard_pct": pct,
+            "explanation": describe_rent_cap_reason(
+                "rentcast_under_fmr" if calibrated_market is not None else "missing_rent_inputs",
+                strategy=mode,
+            ),
+        }
+
+    units = _normalized_units(prop)
+    is_multi = _is_multifamily(prop)
+
+    unit_market: float | None = None
+    unit_fmr: float | None = None
+    if is_multi and units > 1:
         if calibrated_market is not None:
-            candidates.append(float(calibrated_market))
+            unit_market = round(float(calibrated_market) / float(units), 2)
         if approved is not None:
-            candidates.append(float(approved))
-        rent_used = float(min(candidates)) if candidates else None
+            unit_fmr = round(float(approved) / float(units), 2)
+
+    rent_used, rent_cap_reason = compute_effective_rent_used(
+        property_type=getattr(prop, "property_type", None),
+        bedrooms=_to_nonneg_int(getattr(prop, "bedrooms", None), 0),
+        units=units,
+        rentcast_rent=calibrated_market,
+        fmr_rent=approved,
+        unit_rentcast_rent=unit_market,
+        unit_fmr_rent=unit_fmr,
+    )
 
     return {
         "approved_rent_ceiling": approved,
         "calibrated_market_rent": calibrated_market,
         "rent_used": rent_used,
+        "rent_cap_reason": rent_cap_reason,
         "multiplier": mult,
         "payment_standard_pct": pct,
+        "explanation": describe_rent_cap_reason(rent_cap_reason, strategy=mode),
     }

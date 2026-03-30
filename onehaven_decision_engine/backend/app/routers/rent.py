@@ -40,6 +40,7 @@ from ..domain.rent_learning import (
     summarize_comps,
     update_calibration_from_observation,
 )
+from ..domain.underwriting import describe_rent_cap_reason
 
 router = APIRouter(prefix="/rent", tags=["rent"])
 
@@ -343,14 +344,18 @@ def recompute(
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
 
-    override = _to_pos_float(ra.approved_rent_ceiling)
     computed_ceiling = _to_pos_float(computed.get("approved_rent_ceiling"))
     computed_rent_used = computed.get("rent_used", None)
+    computed_cap_reason = str(computed.get("rent_cap_reason") or "missing_rent_inputs")
 
-    if override is None and computed_ceiling is not None:
+    if computed_ceiling is not None:
         ra.approved_rent_ceiling = float(computed_ceiling)
+    else:
+        ra.approved_rent_ceiling = None
 
     ra.rent_used = float(computed_rent_used) if computed_rent_used is not None else None
+    if hasattr(ra, "rent_cap_reason"):
+        setattr(ra, "rent_cap_reason", computed_cap_reason)
 
     db.add(ra)
     db.commit()
@@ -443,55 +448,26 @@ def explain_rent(
     strategy = _norm_strategy(strategy)
     pct = float(payment_standard_pct) if payment_standard_pct is not None else float(settings.default_payment_standard_pct)
 
+    computed = recompute_rent_fields(
+        db,
+        property_id=property_id,
+        strategy=strategy,
+        payment_standard_pct=pct,
+    )
+
+    fmr_adjusted = _to_pos_float(computed.get("approved_rent_ceiling"))
+    market = _to_pos_float(computed.get("calibrated_market_rent") or ra.market_rent_estimate)
+    approved = _to_pos_float(computed.get("approved_rent_ceiling"))
+    rent_used = computed.get("rent_used", None)
+    cap_reason = str(computed.get("rent_cap_reason") or "missing_rent_inputs")
+    explanation = str(computed.get("explanation") or describe_rent_cap_reason(cap_reason, strategy=strategy))
+
     ceiling_candidates: list[dict] = []
-    caps: list[float] = []
-
-    fmr = _to_pos_float(ra.section8_fmr)
-    fmr_adjusted: Optional[float] = None
-    if fmr is not None:
-        fmr_adjusted = float(fmr) * float(pct)
-        caps.append(float(fmr_adjusted))
-        ceiling_candidates.append({"type": "payment_standard", "value": float(fmr_adjusted)})
-
+    if approved is not None:
+        ceiling_candidates.append({"type": "approved_fmr_ceiling", "value": float(approved)})
     rr = _to_pos_float(ra.rent_reasonableness_comp)
     if rr is not None:
-        caps.append(float(rr))
-        ceiling_candidates.append({"type": "rent_reasonableness", "value": float(rr)})
-
-    computed_ceiling = min(caps) if caps else None
-
-    manual = _to_pos_float(ra.approved_rent_ceiling)
-    approved = manual if manual is not None else computed_ceiling
-
-    market = _to_pos_float(ra.market_rent_estimate)
-
-    rent_used: Optional[float]
-    explanation: str
-    cap_reason: str = "none"
-
-    if strategy == "market":
-        if market is None:
-            rent_used = None
-            explanation = "Market strategy: market_rent_estimate is missing, so rent_used cannot be computed."
-        else:
-            rent_used = float(market)
-            explanation = "Market strategy uses market_rent_estimate (no Section 8 ceiling cap applied)."
-    else:
-        if market is None and approved is None:
-            rent_used = None
-            explanation = "Section 8 strategy: both market_rent_estimate and ceiling inputs are missing; cannot compute rent_used."
-        elif market is None:
-            rent_used = float(approved)  # type: ignore[arg-type]
-            cap_reason = "ceiling_only"
-            explanation = "Section 8 strategy: market_rent_estimate missing; using approved ceiling only."
-        elif approved is None:
-            rent_used = float(market)
-            cap_reason = "market_only"
-            explanation = "Section 8 strategy: ceiling missing; using market_rent_estimate only."
-        else:
-            rent_used = float(min(float(market), float(approved)))
-            cap_reason = "capped" if float(market) > float(approved) else "uncapped"
-            explanation = "Section 8 strategy caps rent by the strictest limit (approved ceiling vs market estimate)."
+        ceiling_candidates.append({"type": "rent_reasonableness_comp", "value": float(rr)})
 
     explain_payload = {
         "property_id": property_id,
@@ -519,8 +495,9 @@ def explain_rent(
 
     if persist:
         ra.rent_used = float(rent_used) if rent_used is not None else None
-        if manual is None and approved is not None:
-            ra.approved_rent_ceiling = float(approved)
+        ra.approved_rent_ceiling = float(approved) if approved is not None else None
+        if hasattr(ra, "rent_cap_reason"):
+            setattr(ra, "rent_cap_reason", cap_reason)
         db.add(ra)
 
     emit_workflow_event(
@@ -543,7 +520,7 @@ def explain_rent(
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
         approved_rent_ceiling=approved,
-        calibrated_market_rent=None,
+        calibrated_market_rent=computed.get("calibrated_market_rent"),
         rent_used=rent_used,
         ceiling_candidates=ceiling_candidates,
         cap_reason=cap_reason,

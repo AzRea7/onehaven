@@ -14,6 +14,7 @@ from ..services.property_state_machine import get_state_payload
 from ..services.runtime_metrics import METRICS
 from .acquisition_tag_service import list_tags_for_properties
 from ..services.risk_scoring import compute_risk_adjusted_score
+from ..domain.underwriting import compute_monthly_housing_costs
 
 log = logging.getLogger("onehaven.inventory_snapshot")
 
@@ -86,6 +87,148 @@ def _latest_uw(db: Session, *, org_id: int, property_id: int) -> UnderwritingRes
         .limit(1)
     )
 
+def _attr_float(obj: Any, *names: str) -> float | None:
+    if obj is None:
+        return None
+    for name in names:
+        if hasattr(obj, name):
+            value = getattr(obj, name, None)
+            parsed = _safe_float(value, None)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _attr_int(obj: Any, *names: str) -> int | None:
+    if obj is None:
+        return None
+    for name in names:
+        if hasattr(obj, name):
+            value = getattr(obj, name, None)
+            parsed = _safe_int(value, None)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _settings_interest_rate() -> float:
+    return float(
+        getattr(settings, "dscr_interest_rate", None)
+        or getattr(settings, "interest_rate", None)
+        or 0.07
+    )
+
+
+def _settings_term_years() -> int:
+    return int(
+        getattr(settings, "dscr_term_years", None)
+        or getattr(settings, "term_years", None)
+        or 30
+    )
+
+
+def _settings_down_payment_pct() -> float:
+    return float(
+        getattr(settings, "down_payment_pct", None)
+        or getattr(settings, "dscr_down_payment_pct", None)
+        or 0.20
+    )
+
+
+def _resolve_tax_rate_annual(
+    *,
+    prop: Property,
+    deal: Deal | None,
+    uw: UnderwritingResult | None,
+    asking_price: float | None,
+) -> float | None:
+    direct = (
+        _attr_float(uw, "tax_rate_annual", "property_tax_rate_annual")
+        or _attr_float(deal, "tax_rate_annual", "property_tax_rate_annual")
+        or _attr_float(prop, "tax_rate_annual", "property_tax_rate_annual")
+    )
+    if direct is not None:
+        return direct
+
+    taxes_monthly = (
+        _attr_float(uw, "monthly_taxes", "taxes_monthly")
+        or _attr_float(deal, "monthly_taxes", "taxes_monthly")
+        or _attr_float(prop, "monthly_taxes", "taxes_monthly")
+        or _safe_float(getattr(settings, "taxes_monthly_default", None), None)
+    )
+    if taxes_monthly is None or asking_price is None or asking_price <= 0:
+        return None
+    return float(taxes_monthly) * 12.0 / float(asking_price)
+
+
+def _resolve_insurance_annual(
+    *,
+    prop: Property,
+    deal: Deal | None,
+    uw: UnderwritingResult | None,
+) -> float | None:
+    direct = (
+        _attr_float(uw, "insurance_annual", "annual_insurance")
+        or _attr_float(deal, "insurance_annual", "annual_insurance")
+        or _attr_float(prop, "insurance_annual", "annual_insurance")
+    )
+    if direct is not None:
+        return direct
+
+    monthly_insurance = (
+        _attr_float(uw, "monthly_insurance", "insurance_monthly")
+        or _attr_float(deal, "monthly_insurance", "insurance_monthly")
+        or _attr_float(prop, "monthly_insurance", "insurance_monthly")
+        or _safe_float(getattr(settings, "insurance_monthly_default", None), None)
+    )
+    if monthly_insurance is None:
+        return None
+    return float(monthly_insurance) * 12.0
+
+
+def _compute_housing_cost_bundle(
+    *,
+    prop: Property,
+    deal: Deal | None,
+    uw: UnderwritingResult | None,
+    asking_price: float | None,
+) -> dict[str, float | None]:
+    interest_rate = (
+        _attr_float(uw, "interest_rate", "annual_interest_rate", "loan_interest_rate")
+        or _attr_float(deal, "interest_rate", "annual_interest_rate", "loan_interest_rate")
+        or _settings_interest_rate()
+    )
+    term_years = (
+        _attr_int(uw, "term_years", "loan_term_years")
+        or _attr_int(deal, "term_years", "loan_term_years")
+        or _settings_term_years()
+    )
+    down_payment_pct = (
+        _attr_float(uw, "down_payment_pct")
+        or _attr_float(deal, "down_payment_pct")
+        or _settings_down_payment_pct()
+    )
+
+    tax_rate_annual = _resolve_tax_rate_annual(
+        prop=prop,
+        deal=deal,
+        uw=uw,
+        asking_price=asking_price,
+    )
+    insurance_annual = _resolve_insurance_annual(
+        prop=prop,
+        deal=deal,
+        uw=uw,
+    )
+
+    return compute_monthly_housing_costs(
+        asking_price=asking_price,
+        interest_rate=float(interest_rate),
+        term_years=int(term_years),
+        down_payment_pct=float(down_payment_pct),
+        tax_rate_annual=tax_rate_annual,
+        insurance_annual=insurance_annual,
+    )
 
 def _normalized_query_stmt(
     *,
@@ -384,6 +527,7 @@ def _buy_box_score(snapshot: dict[str, Any], search_context: dict[str, Any]) -> 
 
     return score
 
+
 def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     asking_price = _safe_float(snapshot.get("asking_price"))
     projected_monthly_cashflow = _safe_float(snapshot.get("projected_monthly_cashflow"))
@@ -391,8 +535,17 @@ def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     risk_score = _safe_float(snapshot.get("risk_score"))
     market_rent_estimate = _safe_float(snapshot.get("market_rent_estimate"))
     rent_used = _safe_float(snapshot.get("rent_used"))
+    approved_rent_ceiling = _safe_float(snapshot.get("approved_rent_ceiling"))
+    section8_fmr = _safe_float(snapshot.get("section8_fmr"))
+    monthly_debt_service = _safe_float(
+        snapshot.get("monthly_debt_service"),
+        _safe_float(snapshot.get("mortgage_payment")),
+    )
 
-    rent_gap = None
+    rent_gap = _compute_rent_gap(
+        market_rent_estimate=market_rent_estimate,
+        monthly_debt_service=monthly_debt_service,
+    )
     if market_rent_estimate is not None and asking_price is not None:
         # for now: rent gap = market rent - break-even proxy not available everywhere,
         # so we use market rent minus conservative financing pressure proxy.
@@ -409,7 +562,12 @@ def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     return {
         "market_rent_estimate": market_rent_estimate,
         "rent_used": rent_used,
-        "rent_gap": round(rent_gap, 2) if rent_gap is not None else None,
+        "loan_amount": _safe_float(snapshot.get("loan_amount")),
+        "monthly_debt_service": monthly_debt_service,
+        "monthly_taxes": _safe_float(snapshot.get("monthly_taxes")),
+        "monthly_insurance": _safe_float(snapshot.get("monthly_insurance")),
+        "monthly_housing_cost": _safe_float(snapshot.get("monthly_housing_cost")),
+        "rent_gap": rent_gap,
         **score_parts,
     }
 
@@ -557,6 +715,13 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
     if isinstance(rent_row, list):
         rent_row = rent_row[0] if rent_row else None
 
+    asking_price = _asking_price(prop, deal)
+    housing_costs = _compute_housing_cost_bundle(
+    prop=prop,
+    deal=deal,
+    uw=uw,
+    asking_price=asking_price,
+)
     meta = _load_property_meta(db, org_id=org_id, property_id=int(prop.id))
     tags = list_tags_for_properties(db, org_id=org_id, property_ids=[int(prop.id)]).get(int(prop.id), [])
 
@@ -575,11 +740,19 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
         "units": getattr(prop, "units", None),
         "bedrooms": getattr(prop, "bedrooms", None),
         "bathrooms": getattr(prop, "bathrooms", None),
-        "asking_price": _asking_price(prop, deal),
-        "market_rent_estimate": getattr(rent_row, "market_rent_estimate", None) if rent_row is not None else None,
+        "asking_price": asking_price,
+        "market_rent_estimate": _market_rent_estimate_from_rent_row(rent_row),
+        "rent_used": _rent_used_from_rent_row(rent_row),
+        "loan_amount": housing_costs.get("loan_amount"),
+        "monthly_debt_service": housing_costs.get("monthly_debt_service"),
+        "monthly_taxes": housing_costs.get("monthly_taxes"),
+        "monthly_insurance": housing_costs.get("monthly_insurance"),
+        "monthly_housing_cost": housing_costs.get("monthly_housing_cost"),
+        "projected_monthly_cashflow": _safe_float(getattr(uw, "cash_flow", None), None),
+        "dscr": _safe_float(getattr(uw, "dscr", None), None),
+        "section8_fmr": getattr(rent_row, "section8_fmr", None) if rent_row is not None else None,
         "approved_rent_ceiling": getattr(rent_row, "approved_rent_ceiling", None) if rent_row is not None else None,
-        "projected_monthly_cashflow": getattr(uw, "cash_flow", None) if uw is not None else None,
-        "dscr": getattr(uw, "dscr", None) if uw is not None else None,
+        "rent_cap_reason": getattr(rent_row, "rent_cap_reason", None) if rent_row is not None and hasattr(rent_row, "rent_cap_reason") else None,
         "crime_score": getattr(prop, "crime_score", None),
         "crime_band": getattr(prop, "crime_band", None) or meta.get("crime_band"),
         "crime_source": getattr(prop, "crime_source", None) or meta.get("crime_source"),

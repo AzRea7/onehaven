@@ -18,6 +18,8 @@ from ..domain.workflow.panes import (
 from ..models import Deal, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
 from ..services.risk_scoring import classify_deal_candidate, compute_risk_adjusted_score
+from ..domain.underwriting import compute_monthly_housing_costs
+
 
 log = logging.getLogger("onehaven.panes")
 
@@ -41,6 +43,148 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
     except Exception:
         return default
 
+def _attr_float(obj: Any, *names: str) -> float | None:
+    if obj is None:
+        return None
+    for name in names:
+        if hasattr(obj, name):
+            value = getattr(obj, name, None)
+            parsed = _safe_float(value, None)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _attr_int(obj: Any, *names: str) -> int | None:
+    if obj is None:
+        return None
+    for name in names:
+        if hasattr(obj, name):
+            value = getattr(obj, name, None)
+            parsed = _safe_int(value, None)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _settings_interest_rate() -> float:
+    return float(
+        getattr(settings, "dscr_interest_rate", None)
+        or getattr(settings, "interest_rate", None)
+        or 0.07
+    )
+
+
+def _settings_term_years() -> int:
+    return int(
+        getattr(settings, "dscr_term_years", None)
+        or getattr(settings, "term_years", None)
+        or 30
+    )
+
+
+def _settings_down_payment_pct() -> float:
+    return float(
+        getattr(settings, "down_payment_pct", None)
+        or getattr(settings, "dscr_down_payment_pct", None)
+        or 0.20
+    )
+
+
+def _resolve_tax_rate_annual(
+    *,
+    prop: Property,
+    deal: Deal | None,
+    uw: UnderwritingResult | None,
+    asking_price: float | None,
+) -> float | None:
+    direct = (
+        _attr_float(uw, "tax_rate_annual", "property_tax_rate_annual")
+        or _attr_float(deal, "tax_rate_annual", "property_tax_rate_annual")
+        or _attr_float(prop, "tax_rate_annual", "property_tax_rate_annual")
+    )
+    if direct is not None:
+        return direct
+
+    taxes_monthly = (
+        _attr_float(uw, "monthly_taxes", "taxes_monthly")
+        or _attr_float(deal, "monthly_taxes", "taxes_monthly")
+        or _attr_float(prop, "monthly_taxes", "taxes_monthly")
+        or _safe_float(getattr(settings, "taxes_monthly_default", None), None)
+    )
+    if taxes_monthly is None or asking_price is None or asking_price <= 0:
+        return None
+    return float(taxes_monthly) * 12.0 / float(asking_price)
+
+
+def _resolve_insurance_annual(
+    *,
+    prop: Property,
+    deal: Deal | None,
+    uw: UnderwritingResult | None,
+) -> float | None:
+    direct = (
+        _attr_float(uw, "insurance_annual", "annual_insurance")
+        or _attr_float(deal, "insurance_annual", "annual_insurance")
+        or _attr_float(prop, "insurance_annual", "annual_insurance")
+    )
+    if direct is not None:
+        return direct
+
+    monthly_insurance = (
+        _attr_float(uw, "monthly_insurance", "insurance_monthly")
+        or _attr_float(deal, "monthly_insurance", "insurance_monthly")
+        or _attr_float(prop, "monthly_insurance", "insurance_monthly")
+        or _safe_float(getattr(settings, "insurance_monthly_default", None), None)
+    )
+    if monthly_insurance is None:
+        return None
+    return float(monthly_insurance) * 12.0
+
+
+def _compute_housing_cost_bundle(
+    *,
+    prop: Property,
+    deal: Deal | None,
+    uw: UnderwritingResult | None,
+    asking_price: float | None,
+) -> dict[str, float | None]:
+    interest_rate = (
+        _attr_float(uw, "interest_rate", "annual_interest_rate", "loan_interest_rate")
+        or _attr_float(deal, "interest_rate", "annual_interest_rate", "loan_interest_rate")
+        or _settings_interest_rate()
+    )
+    term_years = (
+        _attr_int(uw, "term_years", "loan_term_years")
+        or _attr_int(deal, "term_years", "loan_term_years")
+        or _settings_term_years()
+    )
+    down_payment_pct = (
+        _attr_float(uw, "down_payment_pct")
+        or _attr_float(deal, "down_payment_pct")
+        or _settings_down_payment_pct()
+    )
+
+    tax_rate_annual = _resolve_tax_rate_annual(
+        prop=prop,
+        deal=deal,
+        uw=uw,
+        asking_price=asking_price,
+    )
+    insurance_annual = _resolve_insurance_annual(
+        prop=prop,
+        deal=deal,
+        uw=uw,
+    )
+
+    return compute_monthly_housing_costs(
+        asking_price=asking_price,
+        interest_rate=float(interest_rate),
+        term_years=int(term_years),
+        down_payment_pct=float(down_payment_pct),
+        tax_rate_annual=tax_rate_annual,
+        insurance_annual=insurance_annual,
+    )
 
 def _safe_int(v: Any, default: int = 0) -> int:
     try:
@@ -144,6 +288,43 @@ def _asking_price(prop: Property, deal: Optional[Deal]) -> Optional[float]:
         if getattr(prop, attr, None) is not None:
             return _safe_float(getattr(prop, attr, None), 0.0)
     return None
+
+
+def _persisted_market_rent_estimate(prop: Property) -> Optional[float]:
+    rent_row = getattr(prop, "rent_assumption", None)
+    if isinstance(rent_row, list):
+        rent_row = rent_row[0] if rent_row else None
+    if rent_row is None:
+        return None
+    return _safe_float(getattr(rent_row, "market_rent_estimate", None), None)
+
+
+
+def _persisted_rent_used(prop: Property) -> Optional[float]:
+    rent_row = getattr(prop, "rent_assumption", None)
+    if isinstance(rent_row, list):
+        rent_row = rent_row[0] if rent_row else None
+    if rent_row is None:
+        return None
+    return _safe_float(getattr(rent_row, "rent_used", None), None)
+
+
+
+def _persisted_monthly_debt_service(uw_row: Optional[UnderwritingResult]) -> Optional[float]:
+    if uw_row is None:
+        return None
+    return _safe_float(getattr(uw_row, "monthly_debt_service", None), None)
+
+
+
+def _compute_rent_gap(
+    *,
+    market_rent_estimate: Optional[float],
+    monthly_debt_service: Optional[float],
+) -> Optional[float]:
+    if market_rent_estimate is None or monthly_debt_service is None:
+        return None
+    return round(float(market_rent_estimate) - float(monthly_debt_service), 2)
 
 
 def _derive_urgency(
@@ -310,27 +491,27 @@ def _build_row(
         listing_hidden=bool(getattr(prop, "listing_hidden", False)),
     )
 
-    market_rent_estimate = None
-    if isinstance(constraints.get("cash"), dict):
-        market_rent_estimate = _safe_float(
-            (constraints.get("cash") or {}).get("expected_rent"),
-            None,
-        )
-
+    market_rent_estimate = _persisted_market_rent_estimate(prop)
+    rent_used = _persisted_rent_used(prop)
     asking_price = _asking_price(prop, deal_row)
 
-    monthly_debt_service = None
-    if uw_row is not None:
-        monthly_debt_service = _safe_float(
-            getattr(uw_row, "monthly_debt_service", None),
-            None,
-        )
+    housing_costs = _compute_housing_cost_bundle(
+        prop=prop,
+        deal=deal_row,
+        uw=uw_row,
+        asking_price=asking_price,
+    )
 
-    rent_gap = None
-    if market_rent_estimate is not None and monthly_debt_service is not None:
-        rent_gap = market_rent_estimate - monthly_debt_service
-    elif market_rent_estimate is not None and projected_monthly_cashflow is not None:
-        rent_gap = projected_monthly_cashflow
+    monthly_debt_service = housing_costs.get("monthly_debt_service")
+    monthly_taxes = housing_costs.get("monthly_taxes")
+    monthly_insurance = housing_costs.get("monthly_insurance")
+    monthly_housing_cost = housing_costs.get("monthly_housing_cost")
+    loan_amount = housing_costs.get("loan_amount")
+
+    rent_gap = _compute_rent_gap(
+        market_rent_estimate=market_rent_estimate,
+        monthly_debt_service=monthly_debt_service,
+    )
 
     ranking = compute_risk_adjusted_score(
         projected_monthly_cashflow=projected_monthly_cashflow,
@@ -357,10 +538,17 @@ def _build_row(
         "asking_price": asking_price,
         "projected_monthly_cashflow": projected_monthly_cashflow,
         "dscr": dscr,
+        "loan_amount": loan_amount,
+        "monthly_debt_service": monthly_debt_service,
+        "monthly_taxes": monthly_taxes,
+        "monthly_insurance": monthly_insurance,
+        "monthly_housing_cost": monthly_housing_cost,
+        "monthly_debt_service": monthly_debt_service,
         "next_actions": state_payload.get("next_actions") or [],
         "blockers": blockers,
         "market_rent_estimate": market_rent_estimate,
-        "rent_gap": round(rent_gap, 2) if rent_gap is not None else None,
+        "rent_used": rent_used,
+        "rent_gap": rent_gap,
         "cashflow_score": ranking.get("cashflow_score"),
         "dscr_score": ranking.get("dscr_score"),
         "rent_gap_score": ranking.get("rent_gap_score"),

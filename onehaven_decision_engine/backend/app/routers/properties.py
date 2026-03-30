@@ -61,6 +61,7 @@ from ..services.property_inventory_snapshot_service import (
     build_property_inventory_snapshot,
     build_inventory_snapshots_for_scope,
 )
+from ..domain.rent_learning import recompute_rent_fields
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 log = logging.getLogger("onehaven.properties")
@@ -260,32 +261,25 @@ def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strate
     if not ra:
         raise HTTPException(status_code=404, detail="rent assumption not found")
 
-    ps = float(settings.payment_standard_pct)
-
-    fmr_adjusted = (
-        float(ra.section8_fmr) * ps
-        if (ra.section8_fmr is not None and float(ra.section8_fmr) > 0)
-        else None
+    ps = float(getattr(settings, "default_payment_standard_pct", getattr(settings, "payment_standard_pct", 1.0)) or 1.0)
+    computed = recompute_rent_fields(
+        db,
+        property_id=property_id,
+        strategy=strategy,
+        payment_standard_pct=ps,
     )
 
-    cap_reason = "none"
+    approved = computed.get("approved_rent_ceiling")
+    calibrated_market_rent = computed.get("calibrated_market_rent")
+    rent_used = computed.get("rent_used")
+    cap_reason = str(computed.get("rent_cap_reason") or "missing_rent_inputs")
+    explanation = computed.get("explanation")
+
     ceiling_candidates: list[CeilingCandidate] = []
-
-    if fmr_adjusted is not None:
-        ceiling_candidates.append(CeilingCandidate(type="payment_standard", value=float(fmr_adjusted)))
+    if approved is not None:
+        ceiling_candidates.append(CeilingCandidate(type="approved_fmr_ceiling", value=float(approved)))
     if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-        ceiling_candidates.append(CeilingCandidate(type="rent_reasonableness", value=float(ra.rent_reasonableness_comp)))
-
-    if ra.approved_rent_ceiling is not None and float(ra.approved_rent_ceiling) > 0:
-        cap_reason = "override"
-    else:
-        cands: list[tuple[str, float]] = []
-        if fmr_adjusted is not None:
-            cands.append(("fmr", float(fmr_adjusted)))
-        if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-            cands.append(("comps", float(ra.rent_reasonableness_comp)))
-        if cands:
-            cap_reason = min(cands, key=lambda x: x[1])[0]
+        ceiling_candidates.append(CeilingCandidate(type="rent_reasonableness_comp", value=float(ra.rent_reasonableness_comp)))
 
     return RentExplainOut(
         property_id=property_id,
@@ -294,13 +288,13 @@ def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strate
         market_rent_estimate=ra.market_rent_estimate,
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
-        approved_rent_ceiling=ra.approved_rent_ceiling,
-        calibrated_market_rent=None,
-        rent_used=ra.rent_used,
+        approved_rent_ceiling=approved,
+        calibrated_market_rent=calibrated_market_rent,
+        rent_used=rent_used,
         ceiling_candidates=ceiling_candidates,
         cap_reason=cap_reason,
-        explanation=None,
-        fmr_adjusted=fmr_adjusted,
+        explanation=explanation,
+        fmr_adjusted=approved,
         run_id=None,
         created_at=None,
     )

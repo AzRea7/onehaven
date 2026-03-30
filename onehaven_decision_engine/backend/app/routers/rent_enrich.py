@@ -19,12 +19,8 @@ from ..services.rentcast_service import (
     RentCastClient,
     persist_rentcast_comps_and_get_median,
 )
-from ..domain.section8.rent_rules import (
-    CeilingCandidate,
-    RentDecision,
-    compute_approved_ceiling,
-    compute_rent_used,
-)
+from ..domain.rent_learning import recompute_rent_fields
+from ..domain.underwriting import describe_rent_cap_reason
 
 # Optional trust wiring (no hard dependency)
 try:
@@ -57,6 +53,7 @@ class RentEnrichOut(BaseModel):
 
     approved_rent_ceiling: Optional[float] = None
     rent_used: Optional[float] = None
+    rent_cap_reason: str = "missing_rent_inputs"
 
     cap_reason: str = "none"
     explanation: str = ""
@@ -204,11 +201,14 @@ def _emit_rent_trust_signals(
         pass
 
 
-def _candidates_to_dicts(cands: list[CeilingCandidate]) -> list[dict[str, Any]]:
+def _candidates_to_dicts(cands: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for c in cands or []:
         try:
-            out.append({"type": str(c.type), "value": float(c.value)})
+            ctype = str(c.get("type") or "").strip()
+            cvalue = float(c.get("value"))
+            if ctype:
+                out.append({"type": ctype, "value": cvalue})
         except Exception:
             continue
     return out
@@ -366,13 +366,36 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
             raise RuntimeError("Could not derive HUD entityid from RentCast comparables.")
 
         fmr_data = hud.fmr_for_entityid(entityid)
-        fmr_value = hud.pick_bedroom_fmr(fmr_data, int(prop.bedrooms or 0))
+
+        units = max(int(getattr(prop, "units", 0) or 0), 0)
+        total_bedrooms = max(int(getattr(prop, "bedrooms", 0) or 0), 0)
+        is_multifamily = ("multi" in str(getattr(prop, "property_type", "") or "").lower()) and units > 1
+
+        if is_multifamily:
+            per_unit_bedrooms = max(int(round(total_bedrooms / float(units))) if units > 0 else 0, 1)
+            per_unit_fmr = hud.pick_bedroom_fmr(fmr_data, per_unit_bedrooms)
+            fmr_value = round(float(per_unit_fmr) * float(units), 2) if per_unit_fmr is not None else None
+            hud_pick_payload = {
+                "bedrooms_mode": "average_per_unit",
+                "total_bedrooms": total_bedrooms,
+                "units": units,
+                "picked_per_unit_bedrooms": per_unit_bedrooms,
+                "picked_per_unit_fmr": per_unit_fmr,
+                "picked_total_fmr": fmr_value,
+            }
+        else:
+            bedroom_pick = max(total_bedrooms, 0)
+            fmr_value = hud.pick_bedroom_fmr(fmr_data, bedroom_pick)
+            hud_pick_payload = {
+                "bedrooms_mode": "whole_property",
+                "picked_bedrooms": bedroom_pick,
+                "picked_total_fmr": fmr_value,
+            }
 
         hud_ok = True
         hud_debug = {
             "entityid": entityid,
-            "bedrooms": int(prop.bedrooms or 0),
-            "picked_value": fmr_value,
+            **hud_pick_payload,
             "raw": fmr_data,
         }
 
@@ -385,27 +408,40 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         hud_ok = False
         hud_debug = {"error": str(e)}
 
-    approved, candidates = compute_approved_ceiling(
-        section8_fmr=ra.section8_fmr,
-        payment_standard_pct=_payment_standard_setting(),
-        rent_reasonableness_comp=ra.rent_reasonableness_comp,
-        manual_override=ra.approved_rent_ceiling,
-    )
-
-    decision: RentDecision = compute_rent_used(
+    computed = recompute_rent_fields(
+        db,
+        property_id=property_id,
         strategy=strategy,
-        market=ra.market_rent_estimate,
-        approved=approved,
-        candidates=candidates,
+        payment_standard_pct=_payment_standard_setting(),
     )
 
-    if ra.approved_rent_ceiling is None and approved is not None:
-        ra.approved_rent_ceiling = float(approved)
+    approved = computed.get("approved_rent_ceiling")
+    rent_used = computed.get("rent_used")
+    rent_cap_reason = str(computed.get("rent_cap_reason") or "missing_rent_inputs")
+    explanation = str(computed.get("explanation") or describe_rent_cap_reason(rent_cap_reason, strategy=strategy))
+
+    ceiling_candidates = []
+    if approved is not None:
+        ceiling_candidates.append({"type": "approved_fmr_ceiling", "value": float(approved)})
+    if ra.rent_reasonableness_comp is not None:
+        try:
+            ceiling_candidates.append({"type": "rent_reasonableness_comp", "value": float(ra.rent_reasonableness_comp)})
+        except Exception:
+            pass
+
+    if ra.approved_rent_ceiling != approved:
+        ra.approved_rent_ceiling = float(approved) if approved is not None else None
         updated_fields.append("approved_rent_ceiling")
 
-    if getattr(ra, "rent_used", None) != decision.rent_used:
-        ra.rent_used = decision.rent_used
+    if getattr(ra, "rent_used", None) != rent_used:
+        ra.rent_used = float(rent_used) if rent_used is not None else None
         updated_fields.append("rent_used")
+
+    if hasattr(ra, "rent_cap_reason"):
+        current_reason = getattr(ra, "rent_cap_reason", None)
+        if current_reason != rent_cap_reason:
+            setattr(ra, "rent_cap_reason", rent_cap_reason)
+            updated_fields.append("rent_cap_reason")
 
     db.commit()
     db.refresh(ra)
@@ -429,10 +465,11 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
         approved_rent_ceiling=approved,
-        rent_used=decision.rent_used,
-        cap_reason=decision.cap_reason,
-        explanation=decision.explanation,
-        ceiling_candidates=_candidates_to_dicts(candidates),
+        rent_used=rent_used,
+        rent_cap_reason=rent_cap_reason,
+        cap_reason=rent_cap_reason,
+        explanation=explanation,
+        ceiling_candidates=_candidates_to_dicts(ceiling_candidates),
         external_budget=budget_debug,
         hud=hud_debug,
         rentcast=rentcast_debug,

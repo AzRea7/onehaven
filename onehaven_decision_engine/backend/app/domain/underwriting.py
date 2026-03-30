@@ -3,9 +3,19 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
 from ..config import settings
+
+
+RentCapReason = Literal[
+    "rentcast_under_fmr",
+    "fmr_cap_applied",
+    "fmr_fallback",
+    "multifamily_fmr_times_units",
+    "multifamily_bedroom_mix",
+    "missing_rent_inputs",
+]
 
 
 @dataclass(frozen=True)
@@ -40,6 +50,62 @@ class UnderwritingOutputs:
     min_rent_for_target_roi: float
 
 
+def compute_monthly_housing_costs(
+    *,
+    asking_price: float | None,
+    interest_rate: float,
+    term_years: int,
+    down_payment_pct: float,
+    tax_rate_annual: float | None,
+    insurance_annual: float | None,
+) -> dict[str, float | None]:
+    if asking_price is None or asking_price <= 0:
+        return {
+            "loan_amount": None,
+            "monthly_debt_service": None,
+            "monthly_taxes": None,
+            "monthly_insurance": None,
+            "monthly_housing_cost": None,
+        }
+
+    price = float(asking_price)
+    down_payment = price * float(down_payment_pct)
+    loan_amount = max(price - down_payment, 0.0)
+
+    monthly_rate = float(interest_rate) / 12.0
+    num_payments = int(term_years) * 12
+
+    if loan_amount <= 0:
+        monthly_pi = 0.0
+    elif monthly_rate <= 0:
+        monthly_pi = loan_amount / num_payments
+    else:
+        factor = pow(1.0 + monthly_rate, num_payments)
+        monthly_pi = loan_amount * (monthly_rate * factor) / (factor - 1.0)
+
+    monthly_taxes = None
+    if tax_rate_annual is not None:
+        monthly_taxes = (price * float(tax_rate_annual)) / 12.0
+
+    monthly_insurance = None
+    if insurance_annual is not None:
+        monthly_insurance = float(insurance_annual) / 12.0
+
+    total = monthly_pi
+    if monthly_taxes is not None:
+        total += monthly_taxes
+    if monthly_insurance is not None:
+        total += monthly_insurance
+
+    return {
+        "loan_amount": round(loan_amount, 2),
+        "monthly_debt_service": round(monthly_pi, 2),
+        "monthly_taxes": round(monthly_taxes, 2) if monthly_taxes is not None else None,
+        "monthly_insurance": round(monthly_insurance, 2) if monthly_insurance is not None else None,
+        "monthly_housing_cost": round(total, 2),
+    }
+
+
 def _monthly_mortgage_payment(principal: float, annual_rate: float, term_years: int) -> float:
     if principal <= 0 or term_years <= 0:
         return 0.0
@@ -56,6 +122,101 @@ def _finite(x: float, *, fallback: float) -> float:
     if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
         return fallback
     return float(x)
+
+
+def _finite(x: float, *, fallback: float) -> float:
+    if x is None:
+        return fallback
+    if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
+        return fallback
+    return float(x)
+
+
+def _to_pos_float(value: float | int | str | None) -> float | None:
+    try:
+        if value is None:
+            return None
+        out = float(value)
+        return out if out > 0 else None
+    except Exception:
+        return None
+
+
+def _round_money(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 2)
+
+
+def _is_multifamily(property_type: str | None, units: int | None) -> bool:
+    ptype = (property_type or "").strip().lower()
+    return ("multi" in ptype) and max(int(units or 0), 0) > 1
+
+
+def compute_effective_rent_used(
+    *,
+    property_type: str | None,
+    bedrooms: int | None,
+    units: int | None,
+    rentcast_rent: float | None,
+    fmr_rent: float | None,
+    unit_rentcast_rent: float | None = None,
+    unit_fmr_rent: float | None = None,
+) -> tuple[float | None, RentCapReason]:
+    ptype = (property_type or "").strip().lower()
+    beds = max(int(bedrooms or 0), 0)
+    unit_count = max(int(units or 0), 0)
+
+    total_rentcast = _to_pos_float(rentcast_rent)
+    total_fmr = _to_pos_float(fmr_rent)
+    per_unit_rentcast = _to_pos_float(unit_rentcast_rent)
+    per_unit_fmr = _to_pos_float(unit_fmr_rent)
+
+    if "multi" in ptype and unit_count > 1:
+        if per_unit_rentcast is None and total_rentcast is not None:
+            per_unit_rentcast = total_rentcast / float(unit_count)
+        if per_unit_fmr is None and total_fmr is not None:
+            per_unit_fmr = total_fmr / float(unit_count)
+
+        if per_unit_rentcast is not None and per_unit_fmr is not None:
+            per_unit = min(float(per_unit_rentcast), float(per_unit_fmr))
+            return round(per_unit * unit_count, 2), "multifamily_fmr_times_units"
+        if per_unit_fmr is not None:
+            return round(float(per_unit_fmr) * unit_count, 2), "multifamily_fmr_times_units"
+        if per_unit_rentcast is not None:
+            return round(float(per_unit_rentcast) * unit_count, 2), "multifamily_fmr_times_units"
+        return None, "missing_rent_inputs"
+
+    if total_rentcast is not None and total_fmr is not None:
+        if float(total_rentcast) <= float(total_fmr):
+            return round(float(total_rentcast), 2), "rentcast_under_fmr"
+        return round(float(total_fmr), 2), "fmr_cap_applied"
+
+    if total_fmr is not None:
+        return round(float(total_fmr), 2), "fmr_fallback"
+
+    if total_rentcast is not None:
+        return round(float(total_rentcast), 2), "rentcast_under_fmr"
+
+    return None, "missing_rent_inputs"
+
+
+def describe_rent_cap_reason(reason: str, *, strategy: str = "section8") -> str:
+    normalized = str(reason or "missing_rent_inputs").strip().lower()
+    mode = str(strategy or "section8").strip().lower()
+
+    if mode == "market":
+        return "Market strategy uses the calibrated market rent estimate without a Section 8 cap."
+
+    mapping = {
+        "rentcast_under_fmr": "RentCast market rent is below the Section 8 ceiling, so the lower market-supported rent is used.",
+        "fmr_cap_applied": "RentCast market rent is above the Section 8 ceiling, so the FMR-based ceiling is applied.",
+        "fmr_fallback": "Market rent is missing, so the FMR-based ceiling is used as the fallback rent assumption.",
+        "multifamily_fmr_times_units": "Multifamily rent is computed from a per-unit capped rent and multiplied by the property unit count.",
+        "multifamily_bedroom_mix": "Multifamily rent is computed from the stored bedroom mix and capped per unit before summing.",
+        "missing_rent_inputs": "Neither usable market rent nor usable FMR inputs were available, so rent_used could not be computed.",
+    }
+    return mapping.get(normalized, "Rent assumption was computed from the shared underwriting rent rules.")
 
 
 def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> UnderwritingOutputs:
