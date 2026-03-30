@@ -48,6 +48,7 @@ class RentEnrichOut(BaseModel):
     strategy: str = "section8"
 
     market_rent_estimate: Optional[float] = None
+    market_reference_rent: Optional[float] = None
     section8_fmr: Optional[float] = None
     rent_reasonableness_comp: Optional[float] = None
 
@@ -416,6 +417,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
     )
 
     approved = computed.get("approved_rent_ceiling")
+    market_reference_rent = computed.get("market_reference_rent")
     rent_used = computed.get("rent_used")
     rent_cap_reason = str(computed.get("rent_cap_reason") or "missing_rent_inputs")
     explanation = str(computed.get("explanation") or describe_rent_cap_reason(rent_cap_reason, strategy=strategy))
@@ -462,6 +464,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         property_id=property_id,
         strategy=strategy,
         market_rent_estimate=ra.market_rent_estimate,
+        market_reference_rent=market_reference_rent,
         section8_fmr=ra.section8_fmr,
         rent_reasonableness_comp=ra.rent_reasonableness_comp,
         approved_rent_ceiling=approved,

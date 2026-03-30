@@ -574,20 +574,171 @@ function inferPropertyTypeLabel(raw?: string | null) {
     .join(" ");
 }
 
+function firstFiniteNumber(
+  ...values: Array<number | string | null | undefined>
+) {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function firstText(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return null;
+}
+
+function mergePropertyPayloadSources(
+  base: PropertyPayload,
+  view?: PropertyViewResponse | null,
+  bundle?: BundleResponse | null,
+): PropertyPayload {
+  const property = view?.property || bundle?.view?.property || {};
+  const inventorySnapshot =
+    view?.inventory_snapshot ||
+    bundle?.inventory_snapshot ||
+    property?.inventory_snapshot ||
+    null;
+  const deal = view?.deal || bundle?.view?.deal || null;
+  const merged: PropertyPayload = {
+    ...base,
+    inventory_snapshot: inventorySnapshot,
+    rent_explain:
+      view?.rent_explain ||
+      bundle?.view?.rent_explain ||
+      base.rent_explain ||
+      null,
+    last_underwriting_result:
+      view?.last_underwriting_result ||
+      bundle?.view?.last_underwriting_result ||
+      base.last_underwriting_result ||
+      null,
+  };
+
+  merged.asking_price = firstFiniteNumber(
+    base.asking_price,
+    property?.asking_price,
+    deal?.asking_price,
+    inventorySnapshot?.asking_price,
+    property?.listing_price,
+    inventorySnapshot?.listing_price,
+  );
+  merged.listing_price = firstFiniteNumber(
+    property?.listing_price,
+    inventorySnapshot?.listing_price,
+    base.listing_price,
+    deal?.asking_price,
+    base.asking_price,
+  );
+  merged.listing_status = firstText(
+    property?.listing_status,
+    inventorySnapshot?.listing_status,
+    base.listing_status,
+  );
+  merged.listing_listed_at = firstText(
+    property?.listing_listed_at,
+    inventorySnapshot?.listing_listed_at,
+    base.listing_listed_at,
+  );
+  merged.listing_last_seen_at = firstText(
+    property?.listing_last_seen_at,
+    inventorySnapshot?.listing_last_seen_at,
+    base.listing_last_seen_at,
+  );
+  merged.listing_removed_at = firstText(
+    property?.listing_removed_at,
+    inventorySnapshot?.listing_removed_at,
+    base.listing_removed_at,
+  );
+  merged.listing_created_at = firstText(
+    property?.listing_created_at,
+    inventorySnapshot?.listing_created_at,
+    base.listing_created_at,
+  );
+  merged.listing_days_on_market = firstFiniteNumber(
+    property?.listing_days_on_market,
+    inventorySnapshot?.listing_days_on_market,
+    base.listing_days_on_market,
+  );
+  merged.listing_type = firstText(
+    property?.listing_type,
+    inventorySnapshot?.listing_type,
+    base.listing_type,
+  );
+  merged.listing_mls_name = firstText(
+    property?.listing_mls_name,
+    inventorySnapshot?.listing_mls_name,
+    base.listing_mls_name,
+  );
+  merged.listing_mls_number = firstText(
+    property?.listing_mls_number,
+    inventorySnapshot?.listing_mls_number,
+    base.listing_mls_number,
+  );
+  merged.listing_zillow_url = firstText(
+    property?.listing_zillow_url,
+    inventorySnapshot?.listing_zillow_url,
+    base.listing_zillow_url,
+  );
+  merged.listing_agent_name = firstText(
+    property?.listing_agent_name,
+    inventorySnapshot?.listing_agent_name,
+    base.listing_agent_name,
+  );
+  merged.listing_agent_phone = firstText(
+    property?.listing_agent_phone,
+    inventorySnapshot?.listing_agent_phone,
+    base.listing_agent_phone,
+  );
+  merged.listing_agent_email = firstText(
+    property?.listing_agent_email,
+    inventorySnapshot?.listing_agent_email,
+    base.listing_agent_email,
+  );
+  merged.listing_agent_website = firstText(
+    property?.listing_agent_website,
+    inventorySnapshot?.listing_agent_website,
+    base.listing_agent_website,
+  );
+  merged.listing_office_name = firstText(
+    property?.listing_office_name,
+    inventorySnapshot?.listing_office_name,
+    base.listing_office_name,
+  );
+  merged.listing_office_phone = firstText(
+    property?.listing_office_phone,
+    inventorySnapshot?.listing_office_phone,
+    base.listing_office_phone,
+  );
+  merged.listing_office_email = firstText(
+    property?.listing_office_email,
+    inventorySnapshot?.listing_office_email,
+    base.listing_office_email,
+  );
+  return merged;
+}
+
 function normalizePropertyPayloadFromView(
   view: PropertyViewResponse,
 ): PropertyPayload {
   const property = view?.property || {};
-  return {
-    ...property,
-    rent_explain: view?.rent_explain || property?.rent_explain || null,
-    last_underwriting_result:
-      view?.last_underwriting_result ||
-      property?.last_underwriting_result ||
-      null,
-    inventory_snapshot:
-      view?.inventory_snapshot || property?.inventory_snapshot || null,
-  };
+  return mergePropertyPayloadSources(
+    {
+      ...property,
+      rent_explain: view?.rent_explain || property?.rent_explain || null,
+      last_underwriting_result:
+        view?.last_underwriting_result ||
+        property?.last_underwriting_result ||
+        null,
+      inventory_snapshot:
+        view?.inventory_snapshot || property?.inventory_snapshot || null,
+    },
+    view,
+    null,
+  );
 }
 
 function normalizePropertyPayloadFromBundle(
@@ -596,11 +747,15 @@ function normalizePropertyPayloadFromBundle(
   const view = bundle?.view;
   if (!view) return null;
   const normalized = normalizePropertyPayloadFromView(view);
-  return {
-    ...normalized,
-    inventory_snapshot:
-      bundle?.inventory_snapshot || normalized.inventory_snapshot || null,
-  };
+  return mergePropertyPayloadSources(
+    {
+      ...normalized,
+      inventory_snapshot:
+        bundle?.inventory_snapshot || normalized.inventory_snapshot || null,
+    },
+    view,
+    bundle,
+  );
 }
 
 function KpiCard({
@@ -902,10 +1057,19 @@ export default function Property() {
               <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
                 <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
                   <Home className="h-4 w-4" />
-                  Asking price
+                  Asking / listing price
                 </div>
                 <div className="mt-3 text-xl font-semibold text-app-0">
                   {money(data.asking_price ?? data.listing_price)}
+                </div>
+                <div className="mt-1 text-xs text-app-4">
+                  {data.asking_price != null && data.listing_price != null
+                    ? `Deal ${money(data.asking_price)} • Listing ${money(data.listing_price)}`
+                    : data.listing_price != null
+                      ? `Listing ${money(data.listing_price)}`
+                      : data.asking_price != null
+                        ? `Deal ${money(data.asking_price)}`
+                        : "No price available"}
                 </div>
               </div>
 
@@ -1034,6 +1198,18 @@ export default function Property() {
                     <span>Status</span>
                     <span className="font-medium text-app-0">
                       {data.listing_status || "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span>Listing price</span>
+                    <span className="font-medium text-app-0">
+                      {money(data.listing_price)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span>Fallback asking price</span>
+                    <span className="font-medium text-app-0">
+                      {money(data.asking_price)}
                     </span>
                   </div>
                   <div className="flex justify-between gap-3">

@@ -556,11 +556,67 @@ class PropertyListingMetadataOut(BaseModel):
 class PropertyOut(PropertyCreate, PropertyListingMetadataOut):
     id: int
     org_id: Optional[int] = None
+
+    asking_price: Optional[float] = None
+
+    market_rent_estimate: Optional[float] = None
+    rent_reasonableness_comp: Optional[float] = None
+    market_reference_rent: Optional[float] = None
+    section8_fmr: Optional[float] = None
+    approved_rent_ceiling: Optional[float] = None
+    rent_used: Optional[float] = None
+    rent_cap_reason: Optional[str] = None
+
+    loan_amount: Optional[float] = None
+    monthly_debt_service: Optional[float] = None
+    monthly_taxes: Optional[float] = None
+    monthly_insurance: Optional[float] = None
+    monthly_housing_cost: Optional[float] = None
+    projected_monthly_cashflow: Optional[float] = None
+    rent_gap: Optional[float] = None
+    dscr: Optional[float] = None
+
+    normalized_decision: Optional[str] = None
+    current_workflow_stage: Optional[str] = None
+    current_workflow_stage_label: Optional[str] = None
+    gate_status: Optional[str] = None
+
+    crime_label: Optional[str] = None
+    crime_score: Optional[float] = None
+    crime_band: Optional[str] = None
+    crime_source: Optional[str] = None
+    crime_method: Optional[str] = None
+    crime_radius_miles: Optional[float] = None
+    crime_area_sq_miles: Optional[float] = None
+    crime_area_type: Optional[str] = None
+    crime_incident_count: Optional[int] = None
+    crime_weighted_incident_count: Optional[float] = None
+    crime_nearest_incident_miles: Optional[float] = None
+    crime_dataset_version: Optional[str] = None
+    crime_confidence: Optional[float] = None
+    investment_area_band: Optional[str] = None
+    offender_count: Optional[int] = None
+    offender_band: Optional[str] = None
+    offender_source: Optional[str] = None
+    offender_radius_miles: Optional[float] = None
+    nearest_offender_miles: Optional[float] = None
+    risk_score: Optional[float] = None
+    risk_band: Optional[str] = None
+    risk_summary: Optional[str] = None
+    risk_confidence: Optional[float] = None
+    risk_last_computed_at: Optional[datetime] = None
+    is_red_zone: Optional[bool] = None
+
+    next_actions: List[Any] = Field(default_factory=list)
+    blockers: List[Any] = Field(default_factory=list)
+
     rent_assumption: Optional[RentAssumptionOut] = None
     rent_comps: List[RentCompOut] = Field(default_factory=list)
+
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    model_config = ConfigDict(from_attributes=True)
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
 
 class PropertyListQuery(BaseModel):
     q: Optional[str] = None
@@ -739,14 +795,13 @@ class ChecklistItemUpdateIn(BaseModel):
 # --------------------
 class PropertyViewOut(BaseModel):
     property: PropertyOut
-    deal: DealOut
-    rent_explain: RentExplainOut
+    deal: Optional[DealOut] = None
+    rent_explain: Optional[RentExplainOut] = None
     jurisdiction_rule: Optional[JurisdictionRuleOut] = None
     jurisdiction_friction: dict
     last_underwriting_result: Optional[UnderwritingResultOut] = None
     checklist: Optional[ChecklistOut] = None
     inventory_snapshot: Optional[Dict[str, Any]] = None
-
 # --------------------
 # Jurisdiction Profiles (policy playbooks / overrides)
 # --------------------

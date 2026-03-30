@@ -179,6 +179,14 @@ def _asking_price(prop: Property, deal: Deal | None) -> float | None:
     return None
 
 
+def _coalesced_price(*values: Any) -> float | None:
+    for value in values:
+        parsed = _safe_float(value, None)
+        if parsed is not None and parsed > 0:
+            return parsed
+    return None
+
+
 def _norm_city(s: str) -> str:
     return (s or "").strip().title()
 
@@ -250,6 +258,21 @@ def _latest_underwriting(db: Session, *, org_id: int, property_id: int) -> Under
         .limit(1)
     )
 
+def _latest_rent_assumption(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> RentAssumption | None:
+    return db.scalar(
+        select(RentAssumption)
+        .where(
+            RentAssumption.org_id == org_id,
+            RentAssumption.property_id == property_id,
+        )
+        .order_by(desc(RentAssumption.created_at), desc(RentAssumption.id))
+        .limit(1)
+    )
 
 def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strategy: str) -> RentExplainOut:
     ra = db.scalar(
@@ -271,16 +294,17 @@ def _rent_explain_for_view(db: Session, *, org_id: int, property_id: int, strate
 
     approved = computed.get("approved_rent_ceiling")
     calibrated_market_rent = computed.get("calibrated_market_rent")
+    market_reference_rent = computed.get("market_reference_rent")
     rent_used = computed.get("rent_used")
     cap_reason = str(computed.get("rent_cap_reason") or "missing_rent_inputs")
     explanation = computed.get("explanation")
 
     ceiling_candidates: list[CeilingCandidate] = []
     if approved is not None:
-        ceiling_candidates.append(CeilingCandidate(type="approved_fmr_ceiling", value=float(approved)))
+        ceiling_candidates.append(CeilingCandidate(type="fmr", value=float(approved)))
     if ra.rent_reasonableness_comp is not None and float(ra.rent_reasonableness_comp) > 0:
-        ceiling_candidates.append(CeilingCandidate(type="rent_reasonableness_comp", value=float(ra.rent_reasonableness_comp)))
-
+        ceiling_candidates.append(CeilingCandidate(type="rent_reasonableness", value=float(ra.rent_reasonableness_comp)))
+        
     return RentExplainOut(
         property_id=property_id,
         strategy=strategy,
@@ -451,16 +475,58 @@ def _snapshot_backed_property_payload(
         property_id=int(prop.id),
     )
 
+    rent_row = _latest_rent_assumption(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+    )
+
+    resolved_market_rent_estimate = snapshot.get("market_rent_estimate")
+    if resolved_market_rent_estimate is None and rent_row is not None:
+        resolved_market_rent_estimate = rent_row.market_rent_estimate
+
+    resolved_rent_reasonableness_comp = snapshot.get("rent_reasonableness_comp")
+    if resolved_rent_reasonableness_comp is None and rent_row is not None:
+        resolved_rent_reasonableness_comp = rent_row.rent_reasonableness_comp
+
+    resolved_section8_fmr = snapshot.get("section8_fmr")
+    if resolved_section8_fmr is None and rent_row is not None:
+        resolved_section8_fmr = rent_row.section8_fmr
+
+    resolved_approved_rent_ceiling = snapshot.get("approved_rent_ceiling")
+    if resolved_approved_rent_ceiling is None and rent_row is not None:
+        resolved_approved_rent_ceiling = rent_row.approved_rent_ceiling
+
+    resolved_rent_used = snapshot.get("rent_used")
+    if resolved_rent_used is None and rent_row is not None:
+        resolved_rent_used = rent_row.rent_used
+
+    resolved_rent_cap_reason = snapshot.get("rent_cap_reason")
+    if resolved_rent_cap_reason is None and rent_row is not None:
+        resolved_rent_cap_reason = getattr(rent_row, "rent_cap_reason", None)
+
     prop_payload = PropertyOut.model_validate(prop, from_attributes=True).model_dump()
 
     acquisition_meta = _property_acquisition_meta(db, org_id=org_id, property_id=int(prop.id))
     acquisition_tags = [row.get("tag") for row in list_property_tags(db, org_id=org_id, property_id=int(prop.id))]
 
+    resolved_asking_price = _coalesced_price(
+        snapshot.get("asking_price"),
+        _asking_price(prop, deal),
+        acquisition_meta.get("listing_price"),
+    )
+    resolved_listing_price = _coalesced_price(
+        acquisition_meta.get("listing_price"),
+        snapshot.get("listing_price"),
+    )
+
     prop_payload.update(
         {
-            "asking_price": snapshot.get("asking_price"),
-            "market_rent_estimate": snapshot.get("market_rent_estimate"),
-            "rent_used": snapshot.get("rent_used"),
+            "asking_price": resolved_asking_price,
+            "market_rent_estimate": resolved_market_rent_estimate,
+            "rent_reasonableness_comp": resolved_rent_reasonableness_comp,
+            "market_reference_rent": snapshot.get("market_reference_rent"),
+            "rent_used": resolved_rent_used,
             "loan_amount": snapshot.get("loan_amount"),
             "monthly_debt_service": snapshot.get("monthly_debt_service"),
             "monthly_taxes": snapshot.get("monthly_taxes"),
@@ -469,9 +535,9 @@ def _snapshot_backed_property_payload(
             "projected_monthly_cashflow": snapshot.get("projected_monthly_cashflow"),
             "rent_gap": snapshot.get("rent_gap"),
             "dscr": snapshot.get("dscr"),
-            "section8_fmr": snapshot.get("section8_fmr"),
-            "approved_rent_ceiling": snapshot.get("approved_rent_ceiling"),
-            "rent_cap_reason": snapshot.get("rent_cap_reason"),
+            "section8_fmr": resolved_section8_fmr,
+            "approved_rent_ceiling": resolved_approved_rent_ceiling,
+            "rent_cap_reason": resolved_rent_cap_reason,
             "crime_score": getattr(prop, "crime_score", None),
             "crime_label": _crime_label(getattr(prop, "crime_score", None)),
             "crime_band": getattr(prop, "crime_band", None),
@@ -529,7 +595,7 @@ def _snapshot_backed_property_payload(
             "listing_listed_at": acquisition_meta.get("listing_listed_at"),
             "listing_created_at": acquisition_meta.get("listing_created_at"),
             "listing_days_on_market": acquisition_meta.get("listing_days_on_market"),
-            "listing_price": acquisition_meta.get("listing_price"),
+            "listing_price": resolved_listing_price,
             "listing_mls_name": acquisition_meta.get("listing_mls_name"),
             "listing_mls_number": acquisition_meta.get("listing_mls_number"),
             "listing_type": acquisition_meta.get("listing_type"),
@@ -899,8 +965,6 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
         raise HTTPException(status_code=404, detail="Property not found")
 
     deal = _latest_deal(db, org_id=p.org_id, property_id=int(prop.id))
-    if not deal:
-        raise HTTPException(status_code=404, detail="No deal found for property")
 
     jr = _pick_jurisdiction_rule(db, org_id=p.org_id, city=prop.city, state=prop.state)
     friction = compute_friction(jr)
@@ -930,11 +994,12 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
             items=items,
         )
 
+    strategy = str(getattr(deal, "strategy", None) or "section8")
     rent_explain = _rent_explain_for_view(
         db,
         org_id=p.org_id,
         property_id=prop.id,
-        strategy=deal.strategy,
+        strategy=strategy,
     )
     property_payload = _snapshot_backed_property_payload(
         db,
@@ -945,7 +1010,7 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
 
     return PropertyViewOut(
         property=PropertyOut.model_validate(property_payload),
-        deal=DealOut.model_validate(deal, from_attributes=True),
+        deal=DealOut.model_validate(deal, from_attributes=True) if deal else None,
         rent_explain=rent_explain,
         jurisdiction_rule=JurisdictionRuleOut.model_validate(jr, from_attributes=True) if jr else None,
         jurisdiction_friction={

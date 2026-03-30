@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..domain.underwriting import compute_monthly_housing_costs
-from ..models import Deal, Property, UnderwritingResult
+from ..models import Deal, RentAssumption, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
 from ..services.risk_scoring import compute_risk_adjusted_score
 from ..services.runtime_metrics import METRICS
@@ -63,6 +63,16 @@ def _rent_used_from_rent_row(rent_row: Any) -> float | None:
     if rent_row is None:
         return None
     return _safe_float(getattr(rent_row, "rent_used", None))
+
+
+def _rent_reasonableness_comp_from_rent_row(rent_row: Any) -> float | None:
+    if rent_row is None:
+        return None
+    return _safe_float(getattr(rent_row, "rent_reasonableness_comp", None))
+
+
+def _market_reference_rent_from_snapshot(snapshot: dict[str, Any]) -> float | None:
+    return _safe_float(snapshot.get("market_reference_rent"))
 
 
 def _monthly_debt_service_from_uw(uw: Any) -> float | None:
@@ -123,6 +133,21 @@ def _latest_uw(db: Session, *, org_id: int, property_id: int) -> UnderwritingRes
         .limit(1)
     )
 
+def _latest_rent_assumption(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> RentAssumption | None:
+    return db.scalar(
+        select(RentAssumption)
+        .where(
+            RentAssumption.org_id == org_id,
+            RentAssumption.property_id == property_id,
+        )
+        .order_by(desc(RentAssumption.created_at), desc(RentAssumption.id))
+        .limit(1)
+    )
 
 def _attr_float(obj: Any, *names: str) -> float | None:
     if obj is None:
@@ -573,6 +598,8 @@ def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     dscr = _safe_float(snapshot.get("dscr"))
     risk_score = _safe_float(snapshot.get("risk_score"))
     market_rent_estimate = _safe_float(snapshot.get("market_rent_estimate"))
+    rent_reasonableness_comp = _safe_float(snapshot.get("rent_reasonableness_comp"))
+    market_reference_rent = _safe_float(snapshot.get("market_reference_rent"), rent_reasonableness_comp)
     rent_used = _safe_float(snapshot.get("rent_used"))
     monthly_debt_service = _safe_float(snapshot.get("monthly_debt_service"))
 
@@ -590,6 +617,8 @@ def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "market_rent_estimate": market_rent_estimate,
+        "rent_reasonableness_comp": rent_reasonableness_comp,
+        "market_reference_rent": market_reference_rent,
         "rent_used": rent_used,
         "loan_amount": _safe_float(snapshot.get("loan_amount")),
         "monthly_debt_service": monthly_debt_service,
@@ -749,9 +778,18 @@ def build_property_inventory_snapshot(
     uw = _latest_uw(db, org_id=org_id, property_id=int(prop.id))
     state_payload = get_state_payload(db, org_id=org_id, property_id=int(prop.id), recompute=False)
 
-    rent_row = getattr(prop, "rent_assumption", None)
-    if isinstance(rent_row, list):
-        rent_row = rent_row[0] if rent_row else None
+    rent_row = _latest_rent_assumption(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+    )
+
+    if rent_row is None:
+        rel_value = getattr(prop, "rent_assumption", None)
+        if isinstance(rel_value, list):
+            rent_row = rel_value[0] if rel_value else None
+        elif rel_value is not None:
+            rent_row = rel_value
 
     asking_price = _asking_price(prop, deal)
     housing_costs = _compute_housing_cost_bundle(
@@ -762,6 +800,8 @@ def build_property_inventory_snapshot(
     )
 
     market_rent_estimate = _market_rent_estimate_from_rent_row(rent_row)
+    rent_reasonableness_comp = _rent_reasonableness_comp_from_rent_row(rent_row)
+    market_reference_rent = rent_reasonableness_comp if rent_reasonableness_comp is not None else market_rent_estimate
     rent_used = _rent_used_from_rent_row(rent_row)
     monthly_debt_service = _monthly_debt_service_from_uw(uw)
     rent_gap = _canonical_rent_gap(
@@ -789,6 +829,8 @@ def build_property_inventory_snapshot(
         "bathrooms": getattr(prop, "bathrooms", None),
         "asking_price": asking_price,
         "market_rent_estimate": market_rent_estimate,
+        "rent_reasonableness_comp": rent_reasonableness_comp,
+        "market_reference_rent": market_reference_rent,
         "rent_used": rent_used,
         "monthly_debt_service": monthly_debt_service,
         "projected_monthly_cashflow": _safe_float(getattr(uw, "cash_flow", None)) if uw else None,

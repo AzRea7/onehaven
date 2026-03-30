@@ -700,7 +700,7 @@ function TopDealCard({
   const monthlyHousingCost = inferMonthlyHousingCost(row);
 
   return (
-    <div className="overflow-hidden rounded-3xl border border-app bg-app-panel">
+    <div className="overflow-visible rounded-3xl border border-app bg-app-panel">
       <div className="h-44 bg-app-muted">
         <Photo url={photoUrl} alt={property?.address || "Property"} />
       </div>
@@ -1378,7 +1378,7 @@ export default function InvestorPane() {
                           propertyId ||
                           `${property?.address || "property"}-${absoluteRank}`
                         }
-                        className="overflow-hidden rounded-3xl border border-app bg-app-panel"
+                        className="overflow-visible rounded-3xl border border-app bg-app-panel"
                       >
                         <div className="grid gap-0 xl:grid-cols-[260px_minmax(0,1fr)]">
                           <div className="h-[220px] bg-app-muted xl:h-full">

@@ -1,68 +1,79 @@
-# backend/tests/test_section8_cap_integration.py
-from __future__ import annotations
+from types import SimpleNamespace
 
-import pytest
-from fastapi.testclient import TestClient
-
-from app.main import app
-from app.db import SessionLocal
-from app.models import Organization, AppUser, OrgMembership, Property, RentAssumption
+from app.domain import rent_learning
 
 
-@pytest.mark.usefixtures("db_session")
-def test_section8_enrich_caps_rent_used_below_approved_ceiling():
-    """
-    End-to-end constitution test:
-      /rent/enrich/{id}?strategy=section8 => rent_used <= approved_rent_ceiling (when both present)
-    """
-    c = TestClient(app)
+class DummyDB:
+    def __init__(self, prop):
+        self._prop = prop
 
-    # Create org/user/property directly (fast + deterministic)
-    db = SessionLocal()
-    try:
-        org = Organization(slug="cap-org", name="cap-org")
-        user = AppUser(email="cap@t.local", display_name="cap")
-        db.add(org); db.add(user); db.commit()
-        db.refresh(org); db.refresh(user)
-        db.add(OrgMembership(org_id=org.id, user_id=user.id, role="owner"))
-        db.commit()
+    def get(self, model, property_id):
+        return self._prop
 
-        prop = Property(
-            org_id=org.id,
-            address="1 Cap St",
-            city="Detroit",
-            state="MI",
-            zip="48201",
-            bedrooms=3,
-            bathrooms=1.0,
-            square_feet=1100,
-        )
-        db.add(prop); db.commit(); db.refresh(prop)
 
-        # Seed rent assumption values so enrich doesn't depend on external APIs in test
-        ra = RentAssumption(
-            org_id=org.id,
-            property_id=prop.id,
-            market_rent_estimate=1800.0,
-            section8_fmr=1500.0,
-            rent_reasonableness_comp=1600.0,
-            approved_rent_ceiling=None,  # computed = min(1650, 1600) => 1600
-        )
-        db.add(ra); db.commit()
 
-        headers = {
-            "X-Org-Slug": org.slug,
-            "X-User-Email": user.email,
-            "X-User-Role": "owner",
-        }
+def test_recompute_rent_fields_uses_comp_reference_and_caps_to_fmr(monkeypatch):
+    prop = SimpleNamespace(
+        id=16,
+        zip="48201",
+        bedrooms=3,
+        units=1,
+        property_type="single_family",
+    )
+    ra = SimpleNamespace(
+        market_rent_estimate=1750.0,
+        rent_reasonableness_comp=1490.0,
+        section8_fmr=1600.0,
+        approved_rent_ceiling=None,
+    )
+    db = DummyDB(prop)
 
-        r = c.post(f"/rent/enrich/{prop.id}?strategy=section8", headers=headers)
-        assert r.status_code in (200, 201), r.text
-        data = r.json()
+    monkeypatch.setattr(rent_learning, "get_or_create_rent_assumption", lambda db, property_id: ra)
+    monkeypatch.setattr(rent_learning, "get_calibration_multiplier", lambda *args, **kwargs: 1.0)
 
-        assert data.get("approved_rent_ceiling") is not None
-        assert data.get("rent_used") is not None
-        assert float(data["rent_used"]) <= float(data["approved_rent_ceiling"])
-        assert data.get("cap_reason") in ("capped", "uncapped")
-    finally:
-        db.close()
+    out = rent_learning.recompute_rent_fields(
+        db,
+        property_id=16,
+        strategy="section8",
+        payment_standard_pct=1.0,
+    )
+
+    assert out["market_rent_estimate"] == 1750.0
+    assert out["rent_reasonableness_comp"] == 1490.0
+    assert out["market_reference_rent"] == 1490.0
+    assert out["approved_rent_ceiling"] == 1600.0
+    assert out["rent_used"] == 1490.0
+    assert out["rent_cap_reason"] == "rentcast_under_fmr"
+
+
+
+def test_recompute_rent_fields_multifamily_caps_per_unit(monkeypatch):
+    prop = SimpleNamespace(
+        id=17,
+        zip="48201",
+        bedrooms=4,
+        units=2,
+        property_type="multi_family",
+    )
+    ra = SimpleNamespace(
+        market_rent_estimate=3300.0,
+        rent_reasonableness_comp=3000.0,
+        section8_fmr=2800.0,
+        approved_rent_ceiling=None,
+    )
+    db = DummyDB(prop)
+
+    monkeypatch.setattr(rent_learning, "get_or_create_rent_assumption", lambda db, property_id: ra)
+    monkeypatch.setattr(rent_learning, "get_calibration_multiplier", lambda *args, **kwargs: 1.0)
+
+    out = rent_learning.recompute_rent_fields(
+        db,
+        property_id=17,
+        strategy="section8",
+        payment_standard_pct=1.0,
+    )
+
+    assert out["market_reference_rent"] == 3000.0
+    assert out["approved_rent_ceiling"] == 2800.0
+    assert out["rent_used"] == 2800.0
+    assert out["rent_cap_reason"] == "multifamily_fmr_times_units"

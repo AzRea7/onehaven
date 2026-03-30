@@ -184,6 +184,8 @@ body {
 .oh-select-popover {
   position: relative;
   width: 100%;
+  isolation: isolate;
+  overflow: visible;
 }
 
 .oh-select-trigger {
@@ -220,12 +222,11 @@ body {
 }
 
 .oh-select-menu {
-  position: absolute;
-  top: calc(100% + 0.4rem);
-  left: 0;
-  right: 0;
-  z-index: 70;
-  overflow: hidden;
+  position: fixed;
+  z-index: 9999;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: min(320px, calc(100vh - 16px));
   border-radius: 16px;
   border: 1px solid var(--border-strong);
   background: color-mix(in srgb, var(--bg-panel-strong) 98%, transparent);
@@ -1022,4 +1023,15 @@ html {
   .oh-sidebar-inner {
     height: auto;
   }
+}
+
+.oh-select-menu::-webkit-scrollbar {
+  width: 10px;
+}
+
+.oh-select-menu::-webkit-scrollbar-thumb {
+  background: rgba(127, 135, 153, 0.35);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
 }

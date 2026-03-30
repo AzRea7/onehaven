@@ -14,6 +14,7 @@ from .underwriting import (
     RentCapReason,
     compute_effective_rent_used,
     describe_rent_cap_reason,
+    select_market_rent_reference,
 )
 
 
@@ -83,15 +84,16 @@ def _approved_fmr_ceiling(
     approved_override: Optional[float] = None,
 ) -> Optional[float]:
     override = _to_pos_float(approved_override)
-    if override is not None:
+    fmr = _to_pos_float(section8_fmr)
+
+    if fmr is None:
         return override
 
-    fmr = _to_pos_float(section8_fmr)
-    if fmr is None:
-        return None
-
     pct = float(payment_standard_pct or 1.0)
-    return round(float(fmr) * pct, 2)
+    base_ceiling = round(float(fmr) * pct, 2)
+    if override is None:
+        return base_ceiling
+    return round(min(float(override), float(base_ceiling)), 2)
 
 
 def get_calibration_multiplier(db: Session, *, zip_code: str, bedrooms: int, strategy: str) -> float:
@@ -198,33 +200,43 @@ def recompute_rent_fields(
         getattr(settings, "default_payment_standard_pct", 1.0) or 1.0
     )
 
+    raw_market_rent = _to_pos_float(getattr(ra, "market_rent_estimate", None))
+    rent_reasonableness_comp = _to_pos_float(getattr(ra, "rent_reasonableness_comp", None))
+    section8_fmr = _to_pos_float(getattr(ra, "section8_fmr", None))
+
     mult = get_calibration_multiplier(
         db,
         zip_code=getattr(prop, "zip", "") or "",
         bedrooms=int(getattr(prop, "bedrooms", 0) or 0),
         strategy=strategy,
     )
-    calibrated_market = apply_calibration(_to_pos_float(getattr(ra, "market_rent_estimate", None)), mult)
+    market_reference_rent = select_market_rent_reference(
+        market_rent_estimate=raw_market_rent,
+        rent_reasonableness_comp=rent_reasonableness_comp,
+    )
+    calibrated_market = apply_calibration(market_reference_rent, mult)
 
     approved = _approved_fmr_ceiling(
-        section8_fmr=_to_pos_float(getattr(ra, "section8_fmr", None)),
+        section8_fmr=section8_fmr,
         payment_standard_pct=pct,
         approved_override=_to_pos_float(getattr(ra, "approved_rent_ceiling", None)),
     )
 
     mode = str(strategy or "section8").strip().lower()
     if mode == "market":
+        market_reason = "rentcast_under_fmr" if calibrated_market is not None else "missing_rent_inputs"
         return {
+            "market_rent_estimate": raw_market_rent,
+            "rent_reasonableness_comp": rent_reasonableness_comp,
+            "market_reference_rent": market_reference_rent,
+            "section8_fmr": section8_fmr,
             "approved_rent_ceiling": approved,
             "calibrated_market_rent": calibrated_market,
             "rent_used": calibrated_market,
-            "rent_cap_reason": "rentcast_under_fmr" if calibrated_market is not None else "missing_rent_inputs",
+            "rent_cap_reason": market_reason,
             "multiplier": mult,
             "payment_standard_pct": pct,
-            "explanation": describe_rent_cap_reason(
-                "rentcast_under_fmr" if calibrated_market is not None else "missing_rent_inputs",
-                strategy=mode,
-            ),
+            "explanation": describe_rent_cap_reason(market_reason, strategy=mode),
         }
 
     units = _normalized_units(prop)
@@ -249,6 +261,10 @@ def recompute_rent_fields(
     )
 
     return {
+        "market_rent_estimate": raw_market_rent,
+        "rent_reasonableness_comp": rent_reasonableness_comp,
+        "market_reference_rent": market_reference_rent,
+        "section8_fmr": section8_fmr,
         "approved_rent_ceiling": approved,
         "calibrated_market_rent": calibrated_market,
         "rent_used": rent_used,

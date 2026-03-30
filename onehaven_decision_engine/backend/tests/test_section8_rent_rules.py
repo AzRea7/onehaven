@@ -1,65 +1,40 @@
-# backend/tests/test_section8_rent_rules.py
-from __future__ import annotations
+from types import SimpleNamespace
 
-from app.domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used
+from app.domain.underwriting import compute_effective_rent_used, select_market_rent_reference
 
 
-def test_ceiling_candidates_min_logic():
-    # FMR 1500 with 110% payment standard => 1650
-    # RR comp 1600 => stricter cap should be 1600
-    approved, cands = compute_approved_ceiling(
-        section8_fmr=1500,
-        payment_standard_pct=110,
-        rent_reasonableness_comp=1600,
-        manual_override=None,
+def test_select_market_rent_reference_prefers_conservative_comp_value():
+    assert select_market_rent_reference(
+        market_rent_estimate=1650.0,
+        rent_reasonableness_comp=1485.0,
+    ) == 1485.0
+
+
+
+def test_compute_effective_rent_used_caps_single_family_at_fmr():
+    rent_used, reason = compute_effective_rent_used(
+        property_type="single_family",
+        bedrooms=3,
+        units=1,
+        rentcast_rent=1750.0,
+        fmr_rent=1600.0,
     )
-    assert approved == 1600
-    assert len(cands) == 2
-    assert any(c.type == "fmr_adjusted" and abs(c.value - 1650) < 1e-6 for c in cands)
-    assert any(c.type == "rent_reasonableness" and abs(c.value - 1600) < 1e-6 for c in cands)
+
+    assert rent_used == 1600.0
+    assert reason == "fmr_cap_applied"
 
 
-def test_manual_override_wins():
-    approved, _cands = compute_approved_ceiling(
-        section8_fmr=1500,
-        payment_standard_pct=110,
-        rent_reasonableness_comp=1200,
-        manual_override=2000,
+
+def test_compute_effective_rent_used_multifamily_caps_per_unit_then_multiplies():
+    rent_used, reason = compute_effective_rent_used(
+        property_type="multi_family",
+        bedrooms=4,
+        units=2,
+        rentcast_rent=3200.0,
+        fmr_rent=3000.0,
+        unit_rentcast_rent=1600.0,
+        unit_fmr_rent=1500.0,
     )
-    assert approved == 2000
 
-
-def test_section8_rent_used_is_min_of_market_and_ceiling():
-    approved, cands = compute_approved_ceiling(
-        section8_fmr=1500,
-        payment_standard_pct=110,   # 1650
-        rent_reasonableness_comp=1600,
-        manual_override=None,
-    )
-    d = compute_rent_used(strategy="section8", market=1750, approved=approved, candidates=cands)
-    assert d.rent_used == 1600
-    assert d.cap_reason == "capped"
-
-
-def test_section8_uncapped_when_market_below_ceiling():
-    approved, cands = compute_approved_ceiling(
-        section8_fmr=1500,
-        payment_standard_pct=110,   # 1650
-        rent_reasonableness_comp=None,
-        manual_override=None,
-    )
-    d = compute_rent_used(strategy="section8", market=1400, approved=approved, candidates=cands)
-    assert d.rent_used == 1400
-    assert d.cap_reason == "uncapped"
-
-
-def test_market_strategy_ignores_ceiling():
-    approved, cands = compute_approved_ceiling(
-        section8_fmr=1500,
-        payment_standard_pct=110,
-        rent_reasonableness_comp=1200,
-        manual_override=None,
-    )
-    d = compute_rent_used(strategy="market", market=1750, approved=approved, candidates=cands)
-    assert d.rent_used == 1750
-    assert d.cap_reason == "none"
+    assert rent_used == 3000.0
+    assert reason == "multifamily_fmr_times_units"

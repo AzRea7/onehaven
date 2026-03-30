@@ -140,6 +140,30 @@ def _round_money(value: float | None) -> float | None:
     return round(float(value), 2)
 
 
+def select_market_rent_reference(
+    *,
+    market_rent_estimate: float | None,
+    rent_reasonableness_comp: float | None,
+) -> float | None:
+    """
+    Conservative market-rent selector used by Section 8 underwriting.
+
+    When both the RentCast estimated rent and the nearby-comps median exist,
+    prefer the lower of the two so the underwritten rent stays grounded in the
+    surrounding comp set and does not drift above what the local market supports.
+    """
+    estimate = _to_pos_float(market_rent_estimate)
+    comp = _to_pos_float(rent_reasonableness_comp)
+
+    if estimate is not None and comp is not None:
+        return _round_money(min(float(estimate), float(comp)))
+    if comp is not None:
+        return _round_money(comp)
+    if estimate is not None:
+        return _round_money(estimate)
+    return None
+
+
 def _is_multifamily(property_type: str | None, units: int | None) -> bool:
     ptype = (property_type or "").strip().lower()
     return ("multi" in ptype) and max(int(units or 0), 0) > 1
