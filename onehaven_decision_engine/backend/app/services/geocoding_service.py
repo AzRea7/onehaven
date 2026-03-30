@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -12,18 +12,7 @@ from .geocode_cache_service import (
     GeocodeCacheService,
     build_geocode_cache_payload,
 )
-from ..clients.google_geocode import GoogleGeocodeClient
-from ..clients.nominatim import NominatimClient
 from .rentcast_service import RentCastClient, RentCastSaleListingResult
-
-
-class GeocodeProvider(Protocol):
-    source: str
-
-    @property
-    def is_enabled(self) -> bool: ...
-
-    def geocode(self, address: str) -> Any | None: ...
 
 
 @dataclass(frozen=True)
@@ -61,7 +50,9 @@ class GeocodingResult:
             source=self.source,
             confidence=self.confidence,
             formatted_address=self.formatted_address,
-            provider_response_json=self.raw_json if isinstance(self.raw_json, dict) else {"results": self.raw_json},
+            provider_response_json=(
+                self.raw_json if isinstance(self.raw_json, dict) else {"results": self.raw_json}
+            ),
         )
 
 
@@ -71,26 +62,13 @@ class GeocodingService:
         db: Session,
         *,
         cache_service: GeocodeCacheService | None = None,
-        google_client: GoogleGeocodeClient | None = None,
-        nominatim_client: NominatimClient | None = None,
         rentcast_client: RentCastClient | None = None,
         provider_order: list[str] | None = None,
     ) -> None:
         self.db = db
         self.cache_service = cache_service or GeocodeCacheService(db)
-        self.google_client = google_client or GoogleGeocodeClient()
-        self.nominatim_client = nominatim_client or NominatimClient()
         self.rentcast_client = rentcast_client or self._build_rentcast_client()
-
-        default_order = ["google", "nominatim", "rentcast"]
-
-        try:
-            cfg = getattr(settings, "geocode_provider_order_list", default_order)
-            if isinstance(cfg, str):
-                cfg = [p.strip() for p in cfg.split(",") if p.strip()]
-            self.provider_order = provider_order or list(cfg)
-        except Exception:
-            self.provider_order = provider_order or default_order
+        self.provider_order = ["rentcast"]
 
     def _build_rentcast_client(self) -> RentCastClient | None:
         api_key = (
@@ -123,17 +101,7 @@ class GeocodingService:
 
         raw_input_address = normalized.full_address
 
-        allow_fallback = getattr(settings, "geocode_allow_fallback_providers", True)
-        confidence_threshold = float(getattr(settings, "geocode_min_confidence", 0.0))
-
-        if allow_fallback_providers is not None:
-            allow_fallback = bool(allow_fallback_providers)
-
-        if min_confidence is not None:
-            confidence_threshold = float(min_confidence)
-
         cache_entry = self.cache_service.get_by_normalized_address(normalized.full_address)
-
         if not force_refresh and cache_entry is not None and not self.cache_service.is_expired(cache_entry):
             self.cache_service.touch_hit(cache_entry)
             return GeocodingResult(
@@ -154,82 +122,23 @@ class GeocodingService:
                 raw_json=cache_entry.provider_response_json,
             )
 
-        provider_names = self._resolve_provider_names()
-        best_result: GeocodingResult | None = None
+        mapped = self._try_rentcast_lookup(
+            normalized_address=normalized.full_address,
+            raw_input_address=raw_input_address,
+            address=normalized.address_line1,
+            city=normalized.city or city,
+            state=normalized.state or state,
+            postal_code=normalized.postal_code or postal_code,
+        )
 
-        for provider_name in provider_names:
-            mapped: GeocodingResult | None = None
+        if not mapped or not mapped.is_success:
+            return None
 
-            if provider_name == "rentcast":
-                mapped = self._try_rentcast_lookup(
-                    normalized_address=normalized.full_address,
-                    raw_input_address=raw_input_address,
-                    address=normalized.address_line1,
-                    city=normalized.city or city,
-                    state=normalized.state or state,
-                    postal_code=normalized.postal_code or postal_code,
-                )
-            else:
-                provider = self._get_provider(provider_name)
-                if provider is None or not provider.is_enabled:
-                    continue
-
-                try:
-                    provider_result = provider.geocode(normalized.full_address)
-                except Exception:
-                    if getattr(settings, "geocode_fail_open", True):
-                        continue
-                    raise
-
-                mapped = self._map_provider_result(
-                    normalized_address=normalized.full_address,
-                    raw_input_address=raw_input_address,
-                    provider_result=provider_result,
-                )
-
-            if not mapped:
-                continue
-
-            if mapped.is_success:
-                self.cache_service.upsert(mapped.to_cache_payload())
-
-                if mapped.source == "rentcast":
-                    return mapped
-
-                if (mapped.confidence or 0.0) >= confidence_threshold:
-                    return mapped
-
-                best_result = self._prefer_result(best_result, mapped)
-
-                if not allow_fallback:
-                    return mapped
-
-        return best_result
+        self.cache_service.upsert(mapped.to_cache_payload())
+        return mapped
 
     def _resolve_provider_names(self) -> list[str]:
-        ordered: list[str] = []
-        for name in self.provider_order:
-            n = (name or "").strip().lower()
-            if n and n not in ordered:
-                ordered.append(n)
-
-        if "google" not in ordered:
-            ordered.insert(0, "google")
-        if "nominatim" not in ordered:
-            ordered.append("nominatim")
-        if self.rentcast_client is not None and "rentcast" not in ordered:
-            ordered.append("rentcast")
-
-        return ordered or ["google", "nominatim", "rentcast"]
-
-    def _get_provider(self, provider_name: str) -> GeocodeProvider | None:
-        if provider_name == "google":
-            self.google_client.source = "google"
-            return self.google_client
-        if provider_name == "nominatim":
-            self.nominatim_client.source = "nominatim"
-            return self.nominatim_client
-        return None
+        return ["rentcast"]
 
     def _try_rentcast_lookup(
         self,
@@ -346,5 +255,7 @@ def build_cache_payload_from_geocoding_result(result: GeocodingResult) -> Geocod
         source=result.source,
         confidence=result.confidence,
         formatted_address=result.formatted_address,
-        provider_response_json=result.raw_json if isinstance(result.raw_json, dict) else {"results": result.raw_json},
+        provider_response_json=(
+            result.raw_json if isinstance(result.raw_json, dict) else {"results": result.raw_json}
+        ),
     )

@@ -123,15 +123,6 @@ class Settings(BaseSettings):
     daily_sync_lock_ttl_seconds: int = 60 * 60 * 2
     dispatch_dedupe_ttl_seconds: int = 60 * 60 * 36
 
-    # ---- Google Geocoding ----
-    google_geocode_api_key: str | None = None
-    google_geocode_base_url: str = "https://maps.googleapis.com/maps/api/geocode/json"
-
-    # ---- Nominatim ----
-    nominatim_base_url: str = "https://nominatim.openstreetmap.org"
-    nominatim_user_agent: str = "onehaven-location-automation/1.0"
-    nominatim_email: str | None = None
-
     # ---- OpenCage ----
     opencage_api_key: str | None = None
     opencage_base_url: str = "https://api.opencagedata.com/geocode/v1/json"

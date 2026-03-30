@@ -607,6 +607,13 @@ class PropertyOut(PropertyCreate, PropertyListingMetadataOut):
     gate_status: Optional[str] = None
 
     crime_label: Optional[str] = None
+    normalized_address: str | None = None
+    geocode_source: str | None = None
+    geocode_confidence: float | None = None
+    geocode_last_refreshed: datetime | None = None
+    lat: float | None = None
+    lng: float | None = None
+    county: str | None = None
     crime_score: Optional[float] = None
     crime_band: Optional[str] = None
     crime_source: Optional[str] = None

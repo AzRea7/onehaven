@@ -199,20 +199,22 @@ def _norm_state(s: str) -> str:
     return (s or "MI").strip().upper()
 
 
-def _maybe_geo_enrich_property(db: Session, *, org_id: int, property_id: int, force: bool = False) -> dict[str, Any]:
+def _maybe_geo_enrich_property(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    force: bool = False,
+) -> dict[str, Any]:
     key = os.getenv("GOOGLE_MAPS_API_KEY")
     try:
-        return asyncio.run(
-            enrich_property_geo(
-                db,
-                org_id=org_id,
-                property_id=property_id,
-                google_api_key=key,
-                force=force,
-            )
+        return enrich_property_geo(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            google_api_key=key,
+            force=force,
         )
-    except RuntimeError:
-        return {"ok": False, "error": "geo_enrichment_runtime_error"}
     except Exception as e:
         log.exception(
             "property_geo_enrich_failed",
@@ -560,6 +562,13 @@ def _snapshot_backed_property_payload(
             "offender_source": getattr(prop, "offender_source", None),
             "offender_radius_miles": getattr(prop, "offender_radius_miles", None),
             "nearest_offender_miles": getattr(prop, "nearest_offender_miles", None),
+            "normalized_address": getattr(prop, "normalized_address", None),
+            "geocode_source": getattr(prop, "geocode_source", None),
+            "geocode_confidence": getattr(prop, "geocode_confidence", None),
+            "geocode_last_refreshed": getattr(prop, "geocode_last_refreshed", None),
+            "lat": getattr(prop, "lat", None),
+            "lng": getattr(prop, "lng", None),
+            "county": getattr(prop, "county", None),
             "risk_score": getattr(prop, "risk_score", None),
             "risk_band": getattr(prop, "risk_band", None),
             "risk_summary": getattr(prop, "risk_summary", None),
