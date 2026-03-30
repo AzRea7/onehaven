@@ -1,4 +1,3 @@
-# backend/app/domain/underwriting.py
 from __future__ import annotations
 
 import math
@@ -179,8 +178,12 @@ def compute_effective_rent_used(
     unit_rentcast_rent: float | None = None,
     unit_fmr_rent: float | None = None,
 ) -> tuple[float | None, RentCapReason]:
+    """
+    Final rent rule:
+    - single-family: use the lower of conservative market rent and strict FMR cap
+    - multifamily: compute per-unit cap then multiply back by units
+    """
     ptype = (property_type or "").strip().lower()
-    beds = max(int(bedrooms or 0), 0)
     unit_count = max(int(units or 0), 0)
 
     total_rentcast = _to_pos_float(rentcast_rent)
@@ -188,10 +191,10 @@ def compute_effective_rent_used(
     per_unit_rentcast = _to_pos_float(unit_rentcast_rent)
     per_unit_fmr = _to_pos_float(unit_fmr_rent)
 
-    if "multi" in ptype and unit_count > 1:
-        if per_unit_rentcast is None and total_rentcast is not None:
+    if _is_multifamily(ptype, unit_count):
+        if per_unit_rentcast is None and total_rentcast is not None and unit_count > 0:
             per_unit_rentcast = total_rentcast / float(unit_count)
-        if per_unit_fmr is None and total_fmr is not None:
+        if per_unit_fmr is None and total_fmr is not None and unit_count > 0:
             per_unit_fmr = total_fmr / float(unit_count)
 
         if per_unit_rentcast is not None and per_unit_fmr is not None:
@@ -225,18 +228,17 @@ def describe_rent_cap_reason(reason: str, *, strategy: str = "section8") -> str:
         return "Market strategy uses the calibrated market rent estimate without a Section 8 cap."
 
     mapping = {
-        "rentcast_under_fmr": "RentCast market rent is below the Section 8 ceiling, so the lower market-supported rent is used.",
-        "fmr_cap_applied": "RentCast market rent is above the Section 8 ceiling, so the FMR-based ceiling is applied.",
-        "fmr_fallback": "Market rent is missing, so the FMR-based ceiling is used as the fallback rent assumption.",
-        "multifamily_fmr_times_units": "Multifamily rent is computed from a per-unit capped rent and multiplied by the property unit count.",
+        "rentcast_under_fmr": "The conservative market-supported rent is below raw HUD FMR, so the lower market rent is used.",
+        "fmr_cap_applied": "The conservative market-supported rent is above raw HUD FMR, so the raw HUD FMR cap is applied.",
+        "fmr_fallback": "Market rent is missing, so raw HUD FMR is used as the fallback rent assumption.",
+        "multifamily_fmr_times_units": "Multifamily rent is capped per unit using HUD FMR and then multiplied by the property unit count.",
         "multifamily_bedroom_mix": "Multifamily rent is computed from the stored bedroom mix and capped per unit before summing.",
-        "missing_rent_inputs": "Neither usable market rent nor usable FMR inputs were available, so rent_used could not be computed.",
+        "missing_rent_inputs": "Neither usable market rent nor usable HUD FMR inputs were available, so rent_used could not be computed.",
     }
     return mapping.get(normalized, "Rent assumption was computed from the shared underwriting rent rules.")
 
 
 def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> UnderwritingOutputs:
-    # down payment based on ALL-IN cost (purchase + rehab)
     all_in_cost = float(inp.purchase_price) + float(inp.rehab)
     down_payment = all_in_cost * float(inp.down_payment_pct)
     loan_amount = max(all_in_cost - down_payment, 0.0)
@@ -261,8 +263,6 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
     annual_cash_flow = cash_flow * 12.0
     cash_on_cash = annual_cash_flow / cash_invested if cash_invested > 1e-6 else 999.0
 
-    # break-even rent:
-    # cash_flow = rent * a - b
     a = (1.0 - float(inp.vacancy_rate)) - (
         float(inp.maintenance_rate) + float(inp.management_rate) + float(inp.capex_rate)
     )
@@ -295,9 +295,7 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
 
 def underwrite(
     *,
-    # New callers should pass purchase_price
     purchase_price: Optional[float] = None,
-    # Back-compat old name
     asking_price: Optional[float] = None,
     down_payment_pct: float,
     interest_rate: float,
@@ -308,12 +306,6 @@ def underwrite(
     insurance_monthly: Optional[float] = None,
     utilities_monthly: Optional[float] = None,
 ) -> UnderwritingOutputs:
-    """
-    Backward compatible wrapper.
-
-    - New callers: purchase_price=...
-    - Old callers: asking_price=...
-    """
     vacancy_rate = float(getattr(settings, "vacancy_rate", 0.05))
     maintenance_rate = float(getattr(settings, "maintenance_rate", 0.10))
     management_rate = float(getattr(settings, "management_rate", 0.08))

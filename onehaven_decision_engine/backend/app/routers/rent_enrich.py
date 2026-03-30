@@ -1,7 +1,7 @@
-# backend/app/routers/rent_enrich.py
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -22,7 +22,6 @@ from ..services.rentcast_service import (
 from ..domain.rent_learning import recompute_rent_fields
 from ..domain.underwriting import describe_rent_cap_reason
 
-# Optional trust wiring (no hard dependency)
 try:
     from ..services.trust_service import (
         record_signal,
@@ -86,12 +85,34 @@ class RentEnrichBatchOut(BaseModel):
     failed_property_ids: list[int] = Field(default_factory=list)
 
 
-def _payment_standard_setting() -> float:
+def _norm_strategy(strategy: Optional[str]) -> str:
+    s = str(strategy or "section8").strip().lower()
+    return s if s in {"section8", "market"} else "section8"
+
+
+def _payment_standard_setting(strategy: Optional[str]) -> float:
+    mode = _norm_strategy(strategy)
+    if mode == "section8":
+        return 1.0
+
     try:
         v = getattr(settings, "default_payment_standard_pct", None)
-        return float(v) if v is not None else 1.10
+        return float(v) if v is not None else 1.0
     except Exception:
-        return 1.10
+        return 1.0
+
+
+def _hud_fmr_year() -> int:
+    for attr in ("hud_fmr_year", "default_hud_fmr_year", "fmr_year"):
+        try:
+            v = getattr(settings, attr, None)
+            if v is not None:
+                year = int(v)
+                if year >= 2000:
+                    return year
+        except Exception:
+            continue
+    return int(datetime.utcnow().year)
 
 
 def _get_or_create_rent_assumption(db: Session, property_id: int, org_id: int) -> RentAssumption:
@@ -215,13 +236,232 @@ def _candidates_to_dicts(cands: list[dict[str, Any]] | None) -> list[dict[str, A
     return out
 
 
-def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "section8") -> RentEnrichOut:
-    """
-    Admin/backfill helper only.
+def _resolve_rentcast_endpoint(rc: Any) -> str:
+    candidates = [
+        getattr(rc, "base_url", None),
+        getattr(type(rc), "BASE_URL", None),
+        getattr(type(rc), "BASE", None),
+        getattr(type(rc), "API_BASE", None),
+    ]
+    for value in candidates:
+        if value:
+            return str(value)
+    return "rentcast"
 
-    Normal ingestion should reach rent enrichment through the property-first
-    ingestion pipeline, not through manual button flows.
+
+def _try_pick_from_fmr_data(
+    *,
+    hud: HudUserClient,
+    fmr_data: dict[str, Any],
+    zip_code: str,
+    total_bedrooms: int,
+    units: int,
+    is_multifamily: bool,
+    source_kind: str,
+    source_value: str,
+) -> tuple[Optional[float], dict[str, Any], bool]:
+    if is_multifamily:
+        per_unit_bedrooms = max(int(round(total_bedrooms / float(units))) if units > 0 else 0, 1)
+        per_unit_fmr, pick_meta = hud.pick_bedroom_fmr(
+            fmr_data,
+            per_unit_bedrooms,
+            zip_code=zip_code or None,
+        )
+        total_fmr = round(float(per_unit_fmr) * float(units), 2) if per_unit_fmr is not None else None
+        accepted = hud.is_zip_match_good(pick_meta, zip_code)
+        debug = {
+            "source_kind": source_kind,
+            "source_value": source_value,
+            "zip_code": zip_code or None,
+            "bedrooms_mode": "average_per_unit",
+            "total_bedrooms": total_bedrooms,
+            "units": units,
+            "picked_per_unit_bedrooms": per_unit_bedrooms,
+            "picked_per_unit_fmr": per_unit_fmr,
+            "picked_total_fmr": total_fmr,
+            "picked_row_scope": pick_meta.get("row_scope"),
+            "picked_row_zip_code": pick_meta.get("zip_code"),
+            "accepted": accepted,
+            "raw": fmr_data,
+        }
+        return total_fmr, debug, accepted
+
+    total_fmr, pick_meta = hud.pick_bedroom_fmr(
+        fmr_data,
+        total_bedrooms,
+        zip_code=zip_code or None,
+    )
+    accepted = hud.is_zip_match_good(pick_meta, zip_code)
+    debug = {
+        "source_kind": source_kind,
+        "source_value": source_value,
+        "zip_code": zip_code or None,
+        "bedrooms_mode": "whole_property",
+        "picked_bedrooms": total_bedrooms,
+        "picked_total_fmr": total_fmr,
+        "picked_row_scope": pick_meta.get("row_scope"),
+        "picked_row_zip_code": pick_meta.get("zip_code"),
+        "accepted": accepted,
+        "raw": fmr_data,
+    }
+    return total_fmr, debug, accepted
+
+
+def _pick_hud_fmr_for_property(
+    *,
+    hud: HudUserClient,
+    prop: Property,
+    rc_payload: Optional[dict[str, Any]],
+) -> tuple[Optional[float], dict[str, Any]]:
     """
+    ZIP-first/property-first HUD lookup.
+
+    Attempt order:
+    1) stored property HUD entityid
+    2) property ZIP as area_name
+    3) property county as area_name
+    4) property city as area_name
+    5) comp-derived HUD entityid
+
+    Accept the first result whose selected HUD row actually matches the property ZIP,
+    or is a sensible single-row fallback.
+    """
+    year = _hud_fmr_year()
+    total_bedrooms = max(int(getattr(prop, "bedrooms", 0) or 0), 0)
+    units = max(int(getattr(prop, "units", 0) or 0), 0)
+    zip_code = str(getattr(prop, "zip", "") or "").strip()
+    state = str(getattr(prop, "state", "") or "").strip()
+    city = str(getattr(prop, "city", "") or "").strip()
+    county = str(getattr(prop, "county", "") or "").strip()
+    is_multifamily = ("multi" in str(getattr(prop, "property_type", "") or "").lower()) and units > 1
+
+    attempts: list[dict[str, Any]] = []
+
+    prop_entityid = (
+        getattr(prop, "hud_entityid", None)
+        or getattr(prop, "hud_area_id", None)
+        or getattr(prop, "hud_area_code", None)
+        or getattr(prop, "fmr_area_id", None)
+    )
+    if prop_entityid:
+        try:
+            fmr_data = hud.fmr_for_entityid(str(prop_entityid).strip(), year=year)
+            total_fmr, debug, accepted = _try_pick_from_fmr_data(
+                hud=hud,
+                fmr_data=fmr_data,
+                zip_code=zip_code,
+                total_bedrooms=total_bedrooms,
+                units=units,
+                is_multifamily=is_multifamily,
+                source_kind="property_entityid",
+                source_value=str(prop_entityid).strip(),
+            )
+            attempts.append(debug)
+            if accepted and total_fmr is not None:
+                return total_fmr, {
+                    "lookup_year": year,
+                    "selected_source_kind": "property_entityid",
+                    "selected_source_value": str(prop_entityid).strip(),
+                    "attempts": attempts,
+                    **debug,
+                }
+        except Exception as e:
+            attempts.append(
+                {
+                    "source_kind": "property_entityid",
+                    "source_value": str(prop_entityid).strip(),
+                    "error": str(e),
+                }
+            )
+
+    area_candidates: list[tuple[str, str]] = []
+    if zip_code and state:
+        area_candidates.append(("property_zip", zip_code))
+    if county and state:
+        area_candidates.append(("property_county", county))
+        area_candidates.append(("property_county_county_suffix", f"{county} County"))
+    if city and state:
+        area_candidates.append(("property_city", city))
+
+    seen_area_keys: set[tuple[str, str, str]] = set()
+    for source_kind, area_name in area_candidates:
+        key = (source_kind, state.lower(), area_name.strip().lower())
+        if key in seen_area_keys:
+            continue
+        seen_area_keys.add(key)
+
+        try:
+            fmr_data = hud.fmr_for_area(state=state, area_name=area_name, year=year)
+            total_fmr, debug, accepted = _try_pick_from_fmr_data(
+                hud=hud,
+                fmr_data=fmr_data,
+                zip_code=zip_code,
+                total_bedrooms=total_bedrooms,
+                units=units,
+                is_multifamily=is_multifamily,
+                source_kind=source_kind,
+                source_value=area_name,
+            )
+            attempts.append(debug)
+            if accepted and total_fmr is not None:
+                return total_fmr, {
+                    "lookup_year": year,
+                    "selected_source_kind": source_kind,
+                    "selected_source_value": area_name,
+                    "attempts": attempts,
+                    **debug,
+                }
+        except Exception as e:
+            attempts.append(
+                {
+                    "source_kind": source_kind,
+                    "source_value": area_name,
+                    "error": str(e),
+                }
+            )
+
+    if isinstance(rc_payload, dict):
+        try:
+            entityid = RentCastClient.derive_hud_entityid_from_comps(rc_payload)
+            if entityid:
+                fmr_data = hud.fmr_for_entityid(str(entityid).strip(), year=year)
+                total_fmr, debug, accepted = _try_pick_from_fmr_data(
+                    hud=hud,
+                    fmr_data=fmr_data,
+                    zip_code=zip_code,
+                    total_bedrooms=total_bedrooms,
+                    units=units,
+                    is_multifamily=is_multifamily,
+                    source_kind="rentcast_comps_entityid",
+                    source_value=str(entityid).strip(),
+                )
+                attempts.append(debug)
+                if accepted and total_fmr is not None:
+                    return total_fmr, {
+                        "lookup_year": year,
+                        "selected_source_kind": "rentcast_comps_entityid",
+                        "selected_source_value": str(entityid).strip(),
+                        "attempts": attempts,
+                        **debug,
+                    }
+        except Exception as e:
+            attempts.append(
+                {
+                    "source_kind": "rentcast_comps_entityid",
+                    "source_value": "derived",
+                    "error": str(e),
+                }
+            )
+
+    raise RuntimeError(
+        f"Could not resolve a HUD FMR dataset that matched property ZIP {zip_code or '<missing>'}. "
+        f"Attempts={attempts}"
+    )
+
+
+def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "section8") -> RentEnrichOut:
+    strategy = _norm_strategy(strategy)
+
     prop = db.get(Property, property_id)
     if not prop or prop.org_id != org_id:
         raise HTTPException(status_code=404, detail="Property not found")
@@ -275,7 +515,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         rentcast_ok = True
 
         rentcast_debug = {
-            "endpoint": RentCastClient.BASE,
+            "endpoint": _resolve_rentcast_endpoint(rc),
             "request": {
                 "address": prop.address,
                 "city": prop.city,
@@ -358,47 +598,18 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         rentcast_debug = {"error": str(e)}
 
     try:
-        hud = HudUserClient(getattr(settings, "hud_user_token", "") or "")
-        if not isinstance(rc_payload, dict):
-            raise RuntimeError("HUD FMR requires RentCast payload to derive county FIPS.")
+        hud = HudUserClient(
+            token=getattr(settings, "hud_user_token", "") or "",
+            base_url=getattr(settings, "hud_base_url", None),
+        )
 
-        entityid = RentCastClient.derive_hud_entityid_from_comps(rc_payload)
-        if not entityid:
-            raise RuntimeError("Could not derive HUD entityid from RentCast comparables.")
-
-        fmr_data = hud.fmr_for_entityid(entityid)
-
-        units = max(int(getattr(prop, "units", 0) or 0), 0)
-        total_bedrooms = max(int(getattr(prop, "bedrooms", 0) or 0), 0)
-        is_multifamily = ("multi" in str(getattr(prop, "property_type", "") or "").lower()) and units > 1
-
-        if is_multifamily:
-            per_unit_bedrooms = max(int(round(total_bedrooms / float(units))) if units > 0 else 0, 1)
-            per_unit_fmr = hud.pick_bedroom_fmr(fmr_data, per_unit_bedrooms)
-            fmr_value = round(float(per_unit_fmr) * float(units), 2) if per_unit_fmr is not None else None
-            hud_pick_payload = {
-                "bedrooms_mode": "average_per_unit",
-                "total_bedrooms": total_bedrooms,
-                "units": units,
-                "picked_per_unit_bedrooms": per_unit_bedrooms,
-                "picked_per_unit_fmr": per_unit_fmr,
-                "picked_total_fmr": fmr_value,
-            }
-        else:
-            bedroom_pick = max(total_bedrooms, 0)
-            fmr_value = hud.pick_bedroom_fmr(fmr_data, bedroom_pick)
-            hud_pick_payload = {
-                "bedrooms_mode": "whole_property",
-                "picked_bedrooms": bedroom_pick,
-                "picked_total_fmr": fmr_value,
-            }
+        fmr_value, hud_debug = _pick_hud_fmr_for_property(
+            hud=hud,
+            prop=prop,
+            rc_payload=rc_payload,
+        )
 
         hud_ok = True
-        hud_debug = {
-            "entityid": entityid,
-            **hud_pick_payload,
-            "raw": fmr_data,
-        }
 
         if fmr_value is not None and fmr_value > 0:
             if ra.section8_fmr != float(fmr_value):
@@ -413,7 +624,7 @@ def _enrich_one(db: Session, property_id: int, org_id: int, strategy: str = "sec
         db,
         property_id=property_id,
         strategy=strategy,
-        payment_standard_pct=_payment_standard_setting(),
+        payment_standard_pct=_payment_standard_setting(strategy),
     )
 
     approved = computed.get("approved_rent_ceiling")
@@ -508,10 +719,6 @@ def enrich_rent_batch(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Admin/backfill endpoint only.
-    Normal ingestion should enrich rent inside the ingestion pipeline.
-    """
     seen: set[int] = set()
     property_ids: list[int] = []
     for pid in payload.property_ids:
@@ -590,8 +797,4 @@ def enrich_rent(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    """
-    Admin/backfill endpoint only.
-    Normal ingestion should enrich rent automatically.
-    """
     return _enrich_one(db, property_id, org_id=p.org_id, strategy=strategy)

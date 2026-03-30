@@ -38,16 +38,6 @@ def summarize_comps(rents: Sequence[float]) -> CompsSummary:
     )
 
 
-def get_or_create_rent_assumption(db: Session, property_id: int) -> RentAssumption:
-    ra = db.execute(select(RentAssumption).where(RentAssumption.property_id == property_id)).scalar_one_or_none()
-    if ra:
-        return ra
-    ra = RentAssumption(property_id=property_id)
-    db.add(ra)
-    db.flush()
-    return ra
-
-
 def _to_pos_float(value: object) -> float | None:
     try:
         if value is None:
@@ -67,6 +57,11 @@ def _to_nonneg_int(value: object, default: int = 0) -> int:
         return default
 
 
+def _norm_strategy(strategy: Optional[str]) -> str:
+    s = str(strategy or "section8").strip().lower()
+    return s if s in {"section8", "market"} else "section8"
+
+
 def _is_multifamily(property_row: Property) -> bool:
     ptype = str(getattr(property_row, "property_type", "") or "").strip().lower()
     units = _to_nonneg_int(getattr(property_row, "units", None), 0)
@@ -77,22 +72,59 @@ def _normalized_units(property_row: Property) -> int:
     return max(_to_nonneg_int(getattr(property_row, "units", None), 1), 1)
 
 
+def get_or_create_rent_assumption(
+    db: Session,
+    property_id: int,
+    *,
+    org_id: int | None = None,
+) -> RentAssumption:
+    stmt = select(RentAssumption).where(RentAssumption.property_id == property_id)
+    if org_id is not None and hasattr(RentAssumption, "org_id"):
+        stmt = stmt.where(RentAssumption.org_id == org_id)
+
+    ra = db.execute(stmt).scalar_one_or_none()
+    if ra:
+        return ra
+
+    init_kwargs: dict[str, object] = {"property_id": property_id}
+    if org_id is not None and hasattr(RentAssumption, "org_id"):
+        init_kwargs["org_id"] = org_id
+
+    ra = RentAssumption(**init_kwargs)
+    db.add(ra)
+    db.flush()
+    return ra
+
+
 def _approved_fmr_ceiling(
     *,
     section8_fmr: Optional[float],
-    payment_standard_pct: float,
+    strategy: str,
+    payment_standard_pct: float | None,
     approved_override: Optional[float] = None,
 ) -> Optional[float]:
+    """
+    Critical fix:
+    Section 8 underwriting uses strict raw HUD FMR as the ceiling.
+
+    We only allow payment_standard_pct to influence non-section8 modes.
+    """
     override = _to_pos_float(approved_override)
     fmr = _to_pos_float(section8_fmr)
+    mode = _norm_strategy(strategy)
 
     if fmr is None:
         return override
 
-    pct = float(payment_standard_pct or 1.0)
-    base_ceiling = round(float(fmr) * pct, 2)
+    if mode == "section8":
+        base_ceiling = round(float(fmr), 2)
+    else:
+        pct = float(payment_standard_pct or 1.0)
+        base_ceiling = round(float(fmr) * pct, 2)
+
     if override is None:
         return base_ceiling
+
     return round(min(float(override), float(base_ceiling)), 2)
 
 
@@ -183,26 +215,29 @@ def recompute_rent_fields(
     """
     Shared rent truth used by rent.py, rent_enrich.py, and property snapshots.
 
-    For single-family:
-      rent_used = min(calibrated_market_rent, approved_rent_ceiling) when both exist.
-
-    For multifamily:
-      derive a per-unit market rent and a per-unit FMR ceiling, cap per unit,
-      then multiply by the unit count.
+    Final logic:
+    - pick a conservative market reference using min(RentCast estimate, nearby comp median)
+    - calibrate that market reference
+    - for Section 8, use strict raw HUD FMR as the ceiling
+    - rent_used = min(calibrated_market_reference, raw_fmr_ceiling)
+    - if market is missing, fall back to FMR
+    - for multifamily, apply the cap per unit then multiply back out
     """
     prop = db.get(Property, property_id)
     if not prop:
         raise ValueError(f"Property {property_id} not found")
 
-    ra = get_or_create_rent_assumption(db, property_id)
-
-    pct = float(payment_standard_pct) if payment_standard_pct is not None else float(
-        getattr(settings, "default_payment_standard_pct", 1.0) or 1.0
-    )
+    strategy = _norm_strategy(strategy)
+    ra = get_or_create_rent_assumption(db, property_id, org_id=getattr(prop, "org_id", None))
 
     raw_market_rent = _to_pos_float(getattr(ra, "market_rent_estimate", None))
     rent_reasonableness_comp = _to_pos_float(getattr(ra, "rent_reasonableness_comp", None))
     section8_fmr = _to_pos_float(getattr(ra, "section8_fmr", None))
+
+    pct = float(payment_standard_pct) if payment_standard_pct is not None else (
+        1.0 if strategy == "section8"
+        else float(getattr(settings, "default_payment_standard_pct", 1.0) or 1.0)
+    )
 
     mult = get_calibration_multiplier(
         db,
@@ -210,6 +245,7 @@ def recompute_rent_fields(
         bedrooms=int(getattr(prop, "bedrooms", 0) or 0),
         strategy=strategy,
     )
+
     market_reference_rent = select_market_rent_reference(
         market_rent_estimate=raw_market_rent,
         rent_reasonableness_comp=rent_reasonableness_comp,
@@ -218,13 +254,13 @@ def recompute_rent_fields(
 
     approved = _approved_fmr_ceiling(
         section8_fmr=section8_fmr,
+        strategy=strategy,
         payment_standard_pct=pct,
         approved_override=_to_pos_float(getattr(ra, "approved_rent_ceiling", None)),
     )
 
-    mode = str(strategy or "section8").strip().lower()
-    if mode == "market":
-        market_reason = "rentcast_under_fmr" if calibrated_market is not None else "missing_rent_inputs"
+    if strategy == "market":
+        market_reason: RentCapReason = "rentcast_under_fmr" if calibrated_market is not None else "missing_rent_inputs"
         return {
             "market_rent_estimate": raw_market_rent,
             "rent_reasonableness_comp": rent_reasonableness_comp,
@@ -236,7 +272,7 @@ def recompute_rent_fields(
             "rent_cap_reason": market_reason,
             "multiplier": mult,
             "payment_standard_pct": pct,
-            "explanation": describe_rent_cap_reason(market_reason, strategy=mode),
+            "explanation": describe_rent_cap_reason(market_reason, strategy=strategy),
         }
 
     units = _normalized_units(prop)
@@ -271,5 +307,5 @@ def recompute_rent_fields(
         "rent_cap_reason": rent_cap_reason,
         "multiplier": mult,
         "payment_standard_pct": pct,
-        "explanation": describe_rent_cap_reason(rent_cap_reason, strategy=mode),
+        "explanation": describe_rent_cap_reason(rent_cap_reason, strategy=strategy),
     }
