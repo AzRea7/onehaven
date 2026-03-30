@@ -48,8 +48,12 @@ from ..schemas import (
     TransactionOut,
     UnderwritingResultOut,
     ValuationOut,
+    FinancialEnrichmentBatchIn,
+    FinancialEnrichmentOut,
 )
 from ..services.geo_enrichment import enrich_property_geo
+from ..services.property_tax_enrichment_service import enrich_property_tax
+from ..services.property_insurance_enrichment_service import enrich_property_insurance
 from ..services.property_state_machine import (
     compute_and_persist_stage,
     get_state_payload,
@@ -1095,3 +1099,47 @@ def update_property_tags(
         tags=payload.tags,
     )
     return {"ok": True, "property_id": property_id, "tags": tags}
+
+
+@router.post("/{property_id}/enrich/tax", response_model=FinancialEnrichmentOut)
+def enrich_property_tax_route(
+    property_id: int,
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    payload = enrich_property_tax(db, org_id=int(principal.org_id), property_id=int(property_id), force=bool(force))
+    db.commit()
+    return FinancialEnrichmentOut(**payload)
+
+
+@router.post("/{property_id}/enrich/insurance", response_model=FinancialEnrichmentOut)
+def enrich_property_insurance_route(
+    property_id: int,
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    payload = enrich_property_insurance(db, org_id=int(principal.org_id), property_id=int(property_id), force=bool(force))
+    db.commit()
+    return FinancialEnrichmentOut(**payload)
+
+
+@router.post("/enrich/financial/batch", response_model=dict)
+def enrich_property_financial_batch(
+    payload: FinancialEnrichmentBatchIn,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    org_id = int(principal.org_id)
+    rows: list[dict[str, Any]] = []
+    for property_id in payload.property_ids:
+        tax = enrich_property_tax(db, org_id=org_id, property_id=int(property_id), force=bool(payload.force))
+        insurance = enrich_property_insurance(db, org_id=org_id, property_id=int(property_id), force=bool(payload.force))
+        rows.append({
+            "property_id": int(property_id),
+            "tax": tax,
+            "insurance": insurance,
+        })
+    db.commit()
+    return {"ok": True, "count": len(rows), "rows": rows}

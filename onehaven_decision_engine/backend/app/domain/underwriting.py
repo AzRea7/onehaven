@@ -49,14 +49,58 @@ class UnderwritingOutputs:
     min_rent_for_target_roi: float
 
 
+
+
+@dataclass(frozen=True)
+class PropertyTaxProfile:
+    annual_amount: float | None
+    annual_rate: float | None
+    source: str | None = None
+    confidence: float | None = None
+    year: int | None = None
+
+
+@dataclass(frozen=True)
+class PropertyInsuranceProfile:
+    annual_amount: float | None
+    source: str | None = None
+    confidence: float | None = None
+
+
+def normalize_tax_profile(*, annual_amount: float | None = None, annual_rate: float | None = None, asking_price: float | None = None, source: str | None = None, confidence: float | None = None, year: int | None = None) -> PropertyTaxProfile:
+    annual = _to_pos_float(annual_amount)
+    rate = _to_pos_float(annual_rate)
+    price = _to_pos_float(asking_price)
+    if annual is None and rate is not None and price is not None:
+        annual = rate * price
+    if rate is None and annual is not None and price is not None and price > 0:
+        rate = annual / price
+    return PropertyTaxProfile(
+        annual_amount=_round_money(annual),
+        annual_rate=round(float(rate), 6) if rate is not None else None,
+        source=(str(source).strip() or None) if source is not None else None,
+        confidence=round(float(confidence), 3) if confidence is not None else None,
+        year=int(year) if year is not None else None,
+    )
+
+
+def normalize_insurance_profile(*, annual_amount: float | None = None, source: str | None = None, confidence: float | None = None) -> PropertyInsuranceProfile:
+    annual = _to_pos_float(annual_amount)
+    return PropertyInsuranceProfile(
+        annual_amount=_round_money(annual),
+        source=(str(source).strip() or None) if source is not None else None,
+        confidence=round(float(confidence), 3) if confidence is not None else None,
+    )
+
 def compute_monthly_housing_costs(
     *,
     asking_price: float | None,
     interest_rate: float,
     term_years: int,
     down_payment_pct: float,
-    tax_rate_annual: float | None,
-    insurance_annual: float | None,
+    tax_rate_annual: float | None = None,
+    taxes_annual: float | None = None,
+    insurance_annual: float | None = None,
 ) -> dict[str, float | None]:
     if asking_price is None or asking_price <= 0:
         return {
@@ -83,7 +127,9 @@ def compute_monthly_housing_costs(
         monthly_pi = loan_amount * (monthly_rate * factor) / (factor - 1.0)
 
     monthly_taxes = None
-    if tax_rate_annual is not None:
+    if taxes_annual is not None:
+        monthly_taxes = float(taxes_annual) / 12.0
+    elif tax_rate_annual is not None:
         monthly_taxes = (price * float(tax_rate_annual)) / 12.0
 
     monthly_insurance = None

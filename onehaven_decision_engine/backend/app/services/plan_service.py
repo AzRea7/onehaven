@@ -24,7 +24,7 @@ DEFAULT_PLANS: dict[str, dict[str, Any]] = {
             "max_properties": 3,
             "properties_max": 3,
             "agent_runs_per_day": 20,
-            "external_calls_per_day": 50,
+            "external_calls_per_day": 10000,
             "automation_runs_per_day": 10,
             "ingestion_runs_per_month": 30,
             "max_concurrent_runs": 2,

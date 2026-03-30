@@ -20,6 +20,8 @@ from ..models import Deal, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
 from ..services.risk_scoring import classify_deal_candidate, compute_risk_adjusted_score
 from ..domain.underwriting import compute_monthly_housing_costs
+from .property_tax_enrichment_service import get_property_tax_context
+from .property_insurance_enrichment_service import get_property_insurance_context
 
 
 log = logging.getLogger("onehaven.panes")
@@ -145,6 +147,7 @@ def _resolve_insurance_annual(
 
 def _compute_housing_cost_bundle(
     *,
+    db: Session,
     prop: Property,
     deal: Deal | None,
     uw: UnderwritingResult | None,
@@ -166,26 +169,42 @@ def _compute_housing_cost_bundle(
         or _settings_down_payment_pct()
     )
 
-    tax_rate_annual = _resolve_tax_rate_annual(
+    tax_ctx = get_property_tax_context(db, org_id=int(getattr(prop, "org_id")), property_id=int(getattr(prop, "id")))
+    insurance_ctx = get_property_insurance_context(db, org_id=int(getattr(prop, "org_id")), property_id=int(getattr(prop, "id")))
+
+    tax_rate_annual = tax_ctx.get("property_tax_rate_annual") or _resolve_tax_rate_annual(
         prop=prop,
         deal=deal,
         uw=uw,
         asking_price=asking_price,
     )
-    insurance_annual = _resolve_insurance_annual(
+    taxes_annual = tax_ctx.get("property_tax_annual")
+    insurance_annual = insurance_ctx.get("insurance_annual") or _resolve_insurance_annual(
         prop=prop,
         deal=deal,
         uw=uw,
     )
 
-    return compute_monthly_housing_costs(
+    bundle = compute_monthly_housing_costs(
         asking_price=asking_price,
         interest_rate=float(interest_rate),
         term_years=int(term_years),
         down_payment_pct=float(down_payment_pct),
         tax_rate_annual=tax_rate_annual,
+        taxes_annual=taxes_annual,
         insurance_annual=insurance_annual,
     )
+    return {
+        **bundle,
+        "property_tax_annual": taxes_annual if taxes_annual is not None else (bundle.get("monthly_taxes") * 12.0 if bundle.get("monthly_taxes") is not None else None),
+        "property_tax_rate_annual": tax_rate_annual,
+        "property_tax_source": tax_ctx.get("property_tax_source"),
+        "property_tax_confidence": tax_ctx.get("property_tax_confidence"),
+        "property_tax_year": tax_ctx.get("property_tax_year"),
+        "insurance_annual": insurance_annual,
+        "insurance_source": insurance_ctx.get("insurance_source"),
+        "insurance_confidence": insurance_ctx.get("insurance_confidence"),
+    }
 
 def _safe_int(v: Any, default: int = 0) -> int:
     try:
@@ -497,6 +516,7 @@ def _build_row(
     asking_price = _asking_price(prop, deal_row)
 
     housing_costs = _compute_housing_cost_bundle(
+        db=db,
         prop=prop,
         deal=deal_row,
         uw=uw_row,
@@ -544,6 +564,14 @@ def _build_row(
         "monthly_taxes": monthly_taxes,
         "monthly_insurance": monthly_insurance,
         "monthly_housing_cost": monthly_housing_cost,
+        "property_tax_annual": housing_costs.get("property_tax_annual"),
+        "property_tax_rate_annual": housing_costs.get("property_tax_rate_annual"),
+        "property_tax_source": housing_costs.get("property_tax_source"),
+        "property_tax_confidence": housing_costs.get("property_tax_confidence"),
+        "property_tax_year": housing_costs.get("property_tax_year"),
+        "insurance_annual": housing_costs.get("insurance_annual"),
+        "insurance_source": housing_costs.get("insurance_source"),
+        "insurance_confidence": housing_costs.get("insurance_confidence"),
         "monthly_debt_service": monthly_debt_service,
         "next_actions": state_payload.get("next_actions") or [],
         "blockers": blockers,

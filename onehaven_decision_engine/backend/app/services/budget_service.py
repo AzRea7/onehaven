@@ -50,20 +50,41 @@ def _reset_at_iso(day: date) -> str:
 
 def _plan_limit_for_metric(plan_limits: dict[str, Any], metric_key: str) -> int:
     """
-    plan_limits_json is a dict. We expect keys like:
-      - external_calls_per_day
-      - agent_runs_per_day
-      - properties
+    Supports both shapes:
+
+    1) flat:
+       {"external_calls_per_day": 50}
+
+    2) nested:
+       {
+         "features": {...},
+         "limits": {
+           "external_calls_per_day": 50
+         },
+         "soft_limits": {...}
+       }
     """
-    v = plan_limits.get(metric_key)
-    if v is None:
-        # sensible default if missing
-        return int(getattr(settings, "default_external_calls_per_day", 50) or 50)
-    try:
-        return int(v)
-    except Exception:
+    if not isinstance(plan_limits, dict):
         return int(getattr(settings, "default_external_calls_per_day", 50) or 50)
 
+    value = None
+
+    # preferred: nested limits object
+    nested_limits = plan_limits.get("limits")
+    if isinstance(nested_limits, dict):
+        value = nested_limits.get(metric_key)
+
+    # fallback: flat shape
+    if value is None:
+        value = plan_limits.get(metric_key)
+
+    if value is None:
+        return int(getattr(settings, "default_external_calls_per_day", 50) or 50)
+
+    try:
+        return int(value)
+    except Exception:
+        return int(getattr(settings, "default_external_calls_per_day", 50) or 50)
 
 def _get_org_plan_limits(db: Session, *, org_id: int) -> dict[str, Any]:
     sub = db.scalar(select(OrgSubscription).where(OrgSubscription.org_id == int(org_id)))

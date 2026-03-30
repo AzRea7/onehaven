@@ -154,6 +154,7 @@ function inferAskingPrice(r: any) {
 function inferMarketRent(r: any) {
   return (
     numberOrNull(r?.market_rent_estimate) ??
+    numberOrNull(r?.inventory_snapshot?.market_rent_estimate) ??
     numberOrNull(r?.rent_assumption?.market_rent_estimate) ??
     numberOrNull(r?.monthly_rent_estimate) ??
     numberOrNull(r?.estimated_rent) ??
@@ -162,9 +163,19 @@ function inferMarketRent(r: any) {
   );
 }
 
+function inferRentUsed(r: any) {
+  return (
+    numberOrNull(r?.rent_used) ??
+    numberOrNull(r?.inventory_snapshot?.rent_used) ??
+    numberOrNull(r?.rent_assumption?.rent_used) ??
+    null
+  );
+}
+
 function inferMortgage(r: any) {
   return (
     numberOrNull(r?.monthly_debt_service) ??
+    numberOrNull(r?.inventory_snapshot?.monthly_debt_service) ??
     numberOrNull(r?.last_underwriting_result?.monthly_debt_service) ??
     numberOrNull(r?.last_underwriting_result?.mortgage_payment) ??
     numberOrNull(r?.estimated_mortgage) ??
@@ -177,19 +188,47 @@ function inferMortgage(r: any) {
 function inferMonthlyTaxes(r: any) {
   return (
     numberOrNull(r?.monthly_taxes) ??
+    numberOrNull(r?.inventory_snapshot?.monthly_taxes) ??
     numberOrNull(r?.last_underwriting_result?.monthly_taxes) ??
     numberOrNull(r?.monthly_tax_estimate) ??
     null
   );
 }
 
+function inferTaxAnnual(r: any) {
+  return (
+    numberOrNull(r?.property_tax_annual) ??
+    numberOrNull(r?.inventory_snapshot?.property_tax_annual) ??
+    null
+  );
+}
+
+function inferTaxSource(r: any) {
+  return (
+    r?.property_tax_source || r?.inventory_snapshot?.property_tax_source || null
+  );
+}
+
 function inferMonthlyInsurance(r: any) {
   return (
     numberOrNull(r?.monthly_insurance) ??
+    numberOrNull(r?.inventory_snapshot?.monthly_insurance) ??
     numberOrNull(r?.last_underwriting_result?.monthly_insurance) ??
     numberOrNull(r?.monthly_insurance_estimate) ??
     null
   );
+}
+
+function inferInsuranceAnnual(r: any) {
+  return (
+    numberOrNull(r?.insurance_annual) ??
+    numberOrNull(r?.inventory_snapshot?.insurance_annual) ??
+    null
+  );
+}
+
+function inferInsuranceSource(r: any) {
+  return r?.insurance_source || r?.inventory_snapshot?.insurance_source || null;
 }
 
 function inferMonthlyHousingCost(r: any) {

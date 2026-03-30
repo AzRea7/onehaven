@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
 from ..db import get_db
-from ..models import IngestionRun
+from ..models import IngestionRun, Property
 from ..schemas import (
     IngestionOverviewOut,
     IngestionRunListItem,
@@ -47,6 +47,8 @@ from ..tasks.ingestion_tasks import (
     sync_due_sources_task,
     sync_source_task,
 )
+from ..services.property_tax_enrichment_service import enrich_property_tax
+from ..services.property_insurance_enrichment_service import enrich_property_insurance
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
@@ -749,3 +751,31 @@ def ensure_supported_sources(
         "touched": len(result.get("touched", [])),
         "sources": [str(s.slug) for s in result.get("touched", [])],
     }
+
+
+class ReEnrichFinancialsIn(BaseModel):
+    property_ids: list[int] = Field(default_factory=list)
+    force: bool = True
+
+
+@router.post("/re-enrich/financials", response_model=dict)
+def re_enrich_financials(
+    payload: ReEnrichFinancialsIn | None = None,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    request = payload or ReEnrichFinancialsIn()
+    property_ids = [int(x) for x in request.property_ids]
+    if not property_ids:
+        property_ids = list(db.scalars(select(Property.id).where(Property.org_id == int(p.org_id)).order_by(Property.id)).all())
+
+    rows: list[dict[str, Any]] = []
+    for property_id in property_ids:
+        rows.append({
+            "property_id": property_id,
+            "tax": enrich_property_tax(db, org_id=int(p.org_id), property_id=property_id, force=bool(request.force)),
+            "insurance": enrich_property_insurance(db, org_id=int(p.org_id), property_id=property_id, force=bool(request.force)),
+        })
+    db.commit()
+    return {"ok": True, "count": len(rows), "rows": rows}

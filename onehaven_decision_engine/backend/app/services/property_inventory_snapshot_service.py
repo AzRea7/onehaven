@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..domain.underwriting import compute_monthly_housing_costs
+from .property_tax_enrichment_service import get_property_tax_context
+from .property_insurance_enrichment_service import get_property_insurance_context
 from ..models import Deal, RentAssumption, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
 from ..services.risk_scoring import compute_risk_adjusted_score
@@ -250,6 +252,7 @@ def _resolve_insurance_annual(
 
 def _compute_housing_cost_bundle(
     *,
+    db: Session,
     prop: Property,
     deal: Deal | None,
     uw: UnderwritingResult | None,
@@ -271,26 +274,42 @@ def _compute_housing_cost_bundle(
         or _settings_down_payment_pct()
     )
 
-    tax_rate_annual = _resolve_tax_rate_annual(
+    tax_ctx = get_property_tax_context(db, org_id=int(getattr(prop, "org_id")), property_id=int(getattr(prop, "id")))
+    insurance_ctx = get_property_insurance_context(db, org_id=int(getattr(prop, "org_id")), property_id=int(getattr(prop, "id")))
+
+    tax_rate_annual = tax_ctx.get("property_tax_rate_annual") or _resolve_tax_rate_annual(
         prop=prop,
         deal=deal,
         uw=uw,
         asking_price=asking_price,
     )
-    insurance_annual = _resolve_insurance_annual(
+    taxes_annual = tax_ctx.get("property_tax_annual")
+    insurance_annual = insurance_ctx.get("insurance_annual") or _resolve_insurance_annual(
         prop=prop,
         deal=deal,
         uw=uw,
     )
 
-    return compute_monthly_housing_costs(
+    bundle = compute_monthly_housing_costs(
         asking_price=asking_price,
         interest_rate=float(interest_rate),
         term_years=int(term_years),
         down_payment_pct=float(down_payment_pct),
         tax_rate_annual=tax_rate_annual,
+        taxes_annual=taxes_annual,
         insurance_annual=insurance_annual,
     )
+    return {
+        **bundle,
+        "property_tax_annual": taxes_annual if taxes_annual is not None else (bundle.get("monthly_taxes") * 12.0 if bundle.get("monthly_taxes") is not None else None),
+        "property_tax_rate_annual": tax_rate_annual,
+        "property_tax_source": tax_ctx.get("property_tax_source"),
+        "property_tax_confidence": tax_ctx.get("property_tax_confidence"),
+        "property_tax_year": tax_ctx.get("property_tax_year"),
+        "insurance_annual": insurance_annual,
+        "insurance_source": insurance_ctx.get("insurance_source"),
+        "insurance_confidence": insurance_ctx.get("insurance_confidence"),
+    }
 
 
 def _normalized_query_stmt(
@@ -793,6 +812,7 @@ def build_property_inventory_snapshot(
 
     asking_price = _asking_price(prop, deal)
     housing_costs = _compute_housing_cost_bundle(
+        db=db,
         prop=prop,
         deal=deal,
         uw=uw,
@@ -803,7 +823,7 @@ def build_property_inventory_snapshot(
     rent_reasonableness_comp = _rent_reasonableness_comp_from_rent_row(rent_row)
     market_reference_rent = rent_reasonableness_comp if rent_reasonableness_comp is not None else market_rent_estimate
     rent_used = _rent_used_from_rent_row(rent_row)
-    monthly_debt_service = _monthly_debt_service_from_uw(uw)
+    monthly_debt_service = housing_costs.get("monthly_debt_service") or _monthly_debt_service_from_uw(uw)
     rent_gap = _canonical_rent_gap(
         market_rent_estimate=market_rent_estimate,
         monthly_debt_service=monthly_debt_service,
@@ -839,6 +859,14 @@ def build_property_inventory_snapshot(
         "monthly_taxes": housing_costs.get("monthly_taxes"),
         "monthly_insurance": housing_costs.get("monthly_insurance"),
         "monthly_housing_cost": housing_costs.get("monthly_housing_cost"),
+        "property_tax_annual": housing_costs.get("property_tax_annual"),
+        "property_tax_rate_annual": housing_costs.get("property_tax_rate_annual"),
+        "property_tax_source": housing_costs.get("property_tax_source"),
+        "property_tax_confidence": housing_costs.get("property_tax_confidence"),
+        "property_tax_year": housing_costs.get("property_tax_year"),
+        "insurance_annual": housing_costs.get("insurance_annual"),
+        "insurance_source": housing_costs.get("insurance_source"),
+        "insurance_confidence": housing_costs.get("insurance_confidence"),
         "dscr": _safe_float(getattr(uw, "dscr", None), None),
         "section8_fmr": getattr(rent_row, "section8_fmr", None) if rent_row is not None else None,
         "approved_rent_ceiling": getattr(rent_row, "approved_rent_ceiling", None) if rent_row is not None else None,

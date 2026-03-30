@@ -68,6 +68,19 @@ type PropertyPayload = {
   asking_price?: number | null;
   projected_monthly_cashflow?: number | null;
   dscr?: number | null;
+  loan_amount?: number | null;
+  monthly_debt_service?: number | null;
+  monthly_taxes?: number | null;
+  monthly_insurance?: number | null;
+  monthly_housing_cost?: number | null;
+  property_tax_annual?: number | null;
+  property_tax_rate_annual?: number | null;
+  property_tax_source?: string | null;
+  property_tax_confidence?: number | null;
+  property_tax_year?: number | null;
+  insurance_annual?: number | null;
+  insurance_source?: string | null;
+  insurance_confidence?: number | null;
 
   blockers?: string[];
   next_actions?: string[];
@@ -554,7 +567,57 @@ function inferMarketRent(property: PropertyPayload | null) {
 function inferCashflow(property: PropertyPayload | null) {
   return (
     property?.projected_monthly_cashflow ??
+    property?.inventory_snapshot?.projected_monthly_cashflow ??
     property?.last_underwriting_result?.cash_flow ??
+    null
+  );
+}
+
+function inferMortgage(property: PropertyPayload | null) {
+  return (
+    property?.monthly_debt_service ??
+    property?.inventory_snapshot?.monthly_debt_service ??
+    property?.last_underwriting_result?.mortgage_payment ??
+    null
+  );
+}
+
+function inferMonthlyTaxes(property: PropertyPayload | null) {
+  return (
+    property?.monthly_taxes ??
+    property?.inventory_snapshot?.monthly_taxes ??
+    null
+  );
+}
+
+function inferMonthlyInsurance(property: PropertyPayload | null) {
+  return (
+    property?.monthly_insurance ??
+    property?.inventory_snapshot?.monthly_insurance ??
+    null
+  );
+}
+
+function inferMonthlyHousingCost(property: PropertyPayload | null) {
+  return (
+    property?.monthly_housing_cost ??
+    property?.inventory_snapshot?.monthly_housing_cost ??
+    null
+  );
+}
+
+function inferTaxAnnual(property: PropertyPayload | null) {
+  return (
+    property?.property_tax_annual ??
+    property?.inventory_snapshot?.property_tax_annual ??
+    null
+  );
+}
+
+function inferInsuranceAnnual(property: PropertyPayload | null) {
+  return (
+    property?.insurance_annual ??
+    property?.inventory_snapshot?.insurance_annual ??
     null
   );
 }
@@ -963,6 +1026,12 @@ export default function Property() {
 
   const cashflow = inferCashflow(data);
   const dscr = inferDscr(data);
+  const mortgage = inferMortgage(data);
+  const monthlyTaxes = inferMonthlyTaxes(data);
+  const monthlyInsurance = inferMonthlyInsurance(data);
+  const monthlyHousingCost = inferMonthlyHousingCost(data);
+  const taxAnnual = inferTaxAnnual(data);
+  const insuranceAnnual = inferInsuranceAnnual(data);
   const section8Rent = inferSection8Rent(data);
   const marketRent = inferMarketRent(data);
 

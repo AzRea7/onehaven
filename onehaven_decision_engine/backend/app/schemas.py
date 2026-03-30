@@ -388,6 +388,23 @@ class RentAssumptionOut(RentAssumptionUpsert):
     model_config = ConfigDict(from_attributes=True)
 
 
+
+
+class FinancialEnrichmentOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    annual_amount: Optional[float] = None
+    annual_rate: Optional[float] = None
+    source: Optional[str] = None
+    confidence: Optional[float] = None
+    year: Optional[int] = None
+    cached: bool = False
+
+
+class FinancialEnrichmentBatchIn(BaseModel):
+    property_ids: List[int] = Field(default_factory=list)
+    force: bool = False
+
 class JurisdictionRuleUpsert(BaseModel):
     city: str
     state: str = "MI"
@@ -572,6 +589,14 @@ class PropertyOut(PropertyCreate, PropertyListingMetadataOut):
     monthly_taxes: Optional[float] = None
     monthly_insurance: Optional[float] = None
     monthly_housing_cost: Optional[float] = None
+    property_tax_annual: Optional[float] = None
+    property_tax_rate_annual: Optional[float] = None
+    property_tax_source: Optional[str] = None
+    property_tax_confidence: Optional[float] = None
+    property_tax_year: Optional[int] = None
+    insurance_annual: Optional[float] = None
+    insurance_source: Optional[str] = None
+    insurance_confidence: Optional[float] = None
     projected_monthly_cashflow: Optional[float] = None
     rent_gap: Optional[float] = None
     dscr: Optional[float] = None
