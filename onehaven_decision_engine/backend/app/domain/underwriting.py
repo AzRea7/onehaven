@@ -124,14 +124,6 @@ def _finite(x: float, *, fallback: float) -> float:
     return float(x)
 
 
-def _finite(x: float, *, fallback: float) -> float:
-    if x is None:
-        return fallback
-    if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
-        return fallback
-    return float(x)
-
-
 def _to_pos_float(value: float | int | str | None) -> float | None:
     try:
         if value is None:

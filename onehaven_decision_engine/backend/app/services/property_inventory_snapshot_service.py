@@ -9,12 +9,12 @@ from sqlalchemy import desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..domain.underwriting import compute_monthly_housing_costs
 from ..models import Deal, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
+from ..services.risk_scoring import compute_risk_adjusted_score
 from ..services.runtime_metrics import METRICS
 from .acquisition_tag_service import list_tags_for_properties
-from ..services.risk_scoring import compute_risk_adjusted_score
-from ..domain.underwriting import compute_monthly_housing_costs
 
 log = logging.getLogger("onehaven.inventory_snapshot")
 
@@ -52,22 +52,58 @@ def _asking_price(prop: Property, deal: Deal | None) -> float | None:
             return _safe_float(getattr(prop, attr, None))
     return None
 
+
+def _market_rent_estimate_from_rent_row(rent_row: Any) -> float | None:
+    if rent_row is None:
+        return None
+    return _safe_float(getattr(rent_row, "market_rent_estimate", None))
+
+
+def _rent_used_from_rent_row(rent_row: Any) -> float | None:
+    if rent_row is None:
+        return None
+    return _safe_float(getattr(rent_row, "rent_used", None))
+
+
+def _monthly_debt_service_from_uw(uw: Any) -> float | None:
+    if uw is None:
+        return None
+    return _safe_float(getattr(uw, "monthly_debt_service", None))
+
+
+def _canonical_rent_gap(
+    *,
+    market_rent_estimate: float | None,
+    monthly_debt_service: float | None,
+) -> float | None:
+    if market_rent_estimate is None or monthly_debt_service is None:
+        return None
+    return round(float(market_rent_estimate) - float(monthly_debt_service), 2)
+
+
 def _market_rent_estimate_from_snapshot(snapshot: dict[str, Any]) -> float | None:
-    return _safe_float(
-        snapshot.get("market_rent_estimate")
-        or snapshot.get("rent_assumption", {}).get("market_rent_estimate")
-        if isinstance(snapshot.get("rent_assumption"), dict) else snapshot.get("market_rent_estimate")
-    )
+    rent_assumption = snapshot.get("rent_assumption")
+    if isinstance(rent_assumption, dict):
+        return _safe_float(
+            snapshot.get("market_rent_estimate"),
+            _safe_float(rent_assumption.get("market_rent_estimate")),
+        )
+    return _safe_float(snapshot.get("market_rent_estimate"))
 
 
 def _section8_rent_used_from_snapshot(snapshot: dict[str, Any]) -> float | None:
     acquisition_meta = snapshot.get("acquisition_metadata") or {}
     return _safe_float(
-        snapshot.get("rent_used")
-        or snapshot.get("approved_rent_ceiling")
-        or acquisition_meta.get("rent_used")
-        or acquisition_meta.get("listing_price")
+        snapshot.get("rent_used"),
+        _safe_float(
+            snapshot.get("approved_rent_ceiling"),
+            _safe_float(
+                acquisition_meta.get("rent_used"),
+                _safe_float(acquisition_meta.get("listing_price")),
+            ),
+        ),
     )
+
 
 def _latest_deal(db: Session, *, org_id: int, property_id: int) -> Deal | None:
     return db.scalar(
@@ -86,6 +122,7 @@ def _latest_uw(db: Session, *, org_id: int, property_id: int) -> UnderwritingRes
         .order_by(desc(UnderwritingResult.created_at), desc(UnderwritingResult.id))
         .limit(1)
     )
+
 
 def _attr_float(obj: Any, *names: str) -> float | None:
     if obj is None:
@@ -230,6 +267,7 @@ def _compute_housing_cost_bundle(
         insurance_annual=insurance_annual,
     )
 
+
 def _normalized_query_stmt(
     *,
     org_id: int,
@@ -246,19 +284,20 @@ def _normalized_query_stmt(
         if hasattr(Property, "listing_hidden"):
             stmt = stmt.where(Property.listing_hidden.is_(False))
         else:
-            # fallback for pre-migration safety
             stmt = stmt.where(
                 or_(
                     Property.acquisition_metadata_json.is_(None),
-                    text("COALESCE(acquisition_metadata_json->>'listing_hidden', 'false') <> 'true'")
+                    text("COALESCE(acquisition_metadata_json->>'listing_hidden', 'false') <> 'true'"),
                 )
             )
+
     if state:
         stmt = stmt.where(Property.state == state)
     if county:
         stmt = stmt.where(func.lower(Property.county) == county.lower())
     if city:
         stmt = stmt.where(func.lower(Property.city) == city.lower())
+
     if q:
         like = f"%{q.strip().lower()}%"
         stmt = stmt.where(
@@ -432,6 +471,7 @@ def compute_freshness_score(snapshot: dict[str, Any]) -> int:
 def _text_match_score(snapshot: dict[str, Any], q: str | None) -> int:
     if not q:
         return 0
+
     wanted = q.strip().lower()
     if not wanted:
         return 0
@@ -529,28 +569,17 @@ def _buy_box_score(snapshot: dict[str, Any], search_context: dict[str, Any]) -> 
 
 
 def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
-    asking_price = _safe_float(snapshot.get("asking_price"))
     projected_monthly_cashflow = _safe_float(snapshot.get("projected_monthly_cashflow"))
     dscr = _safe_float(snapshot.get("dscr"))
     risk_score = _safe_float(snapshot.get("risk_score"))
     market_rent_estimate = _safe_float(snapshot.get("market_rent_estimate"))
     rent_used = _safe_float(snapshot.get("rent_used"))
-    approved_rent_ceiling = _safe_float(snapshot.get("approved_rent_ceiling"))
-    section8_fmr = _safe_float(snapshot.get("section8_fmr"))
-    monthly_debt_service = _safe_float(
-        snapshot.get("monthly_debt_service"),
-        _safe_float(snapshot.get("mortgage_payment")),
-    )
+    monthly_debt_service = _safe_float(snapshot.get("monthly_debt_service"))
 
-    rent_gap = _compute_rent_gap(
+    rent_gap = _canonical_rent_gap(
         market_rent_estimate=market_rent_estimate,
         monthly_debt_service=monthly_debt_service,
     )
-    if market_rent_estimate is not None and asking_price is not None:
-        # for now: rent gap = market rent - break-even proxy not available everywhere,
-        # so we use market rent minus conservative financing pressure proxy.
-        # Better later when break_even_rent is persisted directly.
-        rent_gap = market_rent_estimate - max((asking_price * 0.01), 0.0)
 
     score_parts = compute_risk_adjusted_score(
         projected_monthly_cashflow=projected_monthly_cashflow,
@@ -567,9 +596,11 @@ def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
         "monthly_taxes": _safe_float(snapshot.get("monthly_taxes")),
         "monthly_insurance": _safe_float(snapshot.get("monthly_insurance")),
         "monthly_housing_cost": _safe_float(snapshot.get("monthly_housing_cost")),
+        "projected_monthly_cashflow": projected_monthly_cashflow,
         "rent_gap": rent_gap,
         **score_parts,
     }
+
 
 def _data_quality_score(snapshot: dict[str, Any]) -> int:
     score = 0
@@ -692,7 +723,6 @@ def apply_freshness_policy(snapshot: dict[str, Any]) -> dict[str, Any]:
     snapshot["freshness_bucket"] = bucket
     snapshot["freshness_score"] = compute_freshness_score(snapshot)
     snapshot["freshness_thresholds"] = thresholds
-
     snapshot["is_new_this_sync"] = bool(age_days is not None and age_days <= thresholds["new_days"])
     snapshot["is_recently_refreshed"] = bool(age_days is not None and age_days <= thresholds["fresh_days"])
     snapshot["is_stale"] = bool(age_days is not None and age_days > thresholds["stale_days"])
@@ -701,9 +731,16 @@ def apply_freshness_policy(snapshot: dict[str, Any]) -> dict[str, Any]:
     return snapshot
 
 
-def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: int, search_context: dict | None = None) -> dict[str, Any]:
-    search_context = search_context or {}
+def build_property_inventory_snapshot(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    search_context: dict | None = None,
+) -> dict[str, Any]:
+    search_context = dict(search_context or {})
     t0 = time.perf_counter()
+
     prop = db.scalar(select(Property).where(Property.org_id == org_id, Property.id == property_id))
     if prop is None:
         raise ValueError("property not found")
@@ -711,17 +748,27 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
     deal = _latest_deal(db, org_id=org_id, property_id=int(prop.id))
     uw = _latest_uw(db, org_id=org_id, property_id=int(prop.id))
     state_payload = get_state_payload(db, org_id=org_id, property_id=int(prop.id), recompute=False)
+
     rent_row = getattr(prop, "rent_assumption", None)
     if isinstance(rent_row, list):
         rent_row = rent_row[0] if rent_row else None
 
     asking_price = _asking_price(prop, deal)
     housing_costs = _compute_housing_cost_bundle(
-    prop=prop,
-    deal=deal,
-    uw=uw,
-    asking_price=asking_price,
-)
+        prop=prop,
+        deal=deal,
+        uw=uw,
+        asking_price=asking_price,
+    )
+
+    market_rent_estimate = _market_rent_estimate_from_rent_row(rent_row)
+    rent_used = _rent_used_from_rent_row(rent_row)
+    monthly_debt_service = _monthly_debt_service_from_uw(uw)
+    rent_gap = _canonical_rent_gap(
+        market_rent_estimate=market_rent_estimate,
+        monthly_debt_service=monthly_debt_service,
+    )
+
     meta = _load_property_meta(db, org_id=org_id, property_id=int(prop.id))
     tags = list_tags_for_properties(db, org_id=org_id, property_ids=[int(prop.id)]).get(int(prop.id), [])
 
@@ -741,14 +788,15 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
         "bedrooms": getattr(prop, "bedrooms", None),
         "bathrooms": getattr(prop, "bathrooms", None),
         "asking_price": asking_price,
-        "market_rent_estimate": _market_rent_estimate_from_rent_row(rent_row),
-        "rent_used": _rent_used_from_rent_row(rent_row),
+        "market_rent_estimate": market_rent_estimate,
+        "rent_used": rent_used,
+        "monthly_debt_service": monthly_debt_service,
+        "projected_monthly_cashflow": _safe_float(getattr(uw, "cash_flow", None)) if uw else None,
+        "rent_gap": rent_gap,
         "loan_amount": housing_costs.get("loan_amount"),
-        "monthly_debt_service": housing_costs.get("monthly_debt_service"),
         "monthly_taxes": housing_costs.get("monthly_taxes"),
         "monthly_insurance": housing_costs.get("monthly_insurance"),
         "monthly_housing_cost": housing_costs.get("monthly_housing_cost"),
-        "projected_monthly_cashflow": _safe_float(getattr(uw, "cash_flow", None), None),
         "dscr": _safe_float(getattr(uw, "dscr", None), None),
         "section8_fmr": getattr(rent_row, "section8_fmr", None) if rent_row is not None else None,
         "approved_rent_ceiling": getattr(rent_row, "approved_rent_ceiling", None) if rent_row is not None else None,
@@ -768,7 +816,7 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
         "risk_confidence": getattr(prop, "risk_confidence", None) or meta.get("risk_confidence"),
         "is_red_zone": getattr(prop, "is_red_zone", None),
         "normalized_decision": state_payload.get("normalized_decision"),
-        "pane": state_payload.get("primary_pane"),
+        "pane": state_payload.get("primary_pane") or state_payload.get("current_pane"),
         "current_workflow_stage": state_payload.get("current_stage"),
         "current_workflow_stage_label": state_payload.get("current_stage_label"),
         "next_actions": state_payload.get("next_actions") or [],
@@ -821,10 +869,9 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
 
     snapshot["completeness"] = infer_snapshot_completeness(snapshot)
     snapshot["is_fully_enriched"] = snapshot["completeness"] == "COMPLETE"
-    
-        # final relevance/rank composition
+
     freshness_score = compute_freshness_score(snapshot)
-    text_match_score = _text_match_score(snapshot, (search_context or {}).get("q"))
+    text_match_score = _text_match_score(snapshot, search_context.get("q"))
     market_match_score = _market_match_score(
         snapshot,
         state=search_context.get("state"),
@@ -834,11 +881,11 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
     buy_box_score = _buy_box_score(snapshot, search_context)
 
     rank_score = (
-        _safe_float(snapshot.get("risk_adjusted_score"), 0.0) +
-        freshness_score +
-        text_match_score +
-        market_match_score +
-        buy_box_score
+        _safe_float(snapshot.get("risk_adjusted_score"), 0.0)
+        + freshness_score
+        + text_match_score
+        + market_match_score
+        + buy_box_score
     )
 
     snapshot["freshness_score"] = freshness_score
@@ -846,12 +893,13 @@ def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: 
     snapshot["market_match_score"] = market_match_score
     snapshot["buy_box_score"] = buy_box_score
     snapshot["rank_score"] = round(rank_score, 2)
-    
+
     snapshot = apply_freshness_policy(snapshot)
 
     duration_ms = round((time.perf_counter() - t0) * 1000, 2)
     METRICS.observe_ms("inventory_snapshot_build_ms", duration_ms, labels={"org_id": org_id})
     METRICS.inc("inventory_snapshot_build_count", labels={"org_id": org_id})
+
     return snapshot
 
 

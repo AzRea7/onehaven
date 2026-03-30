@@ -423,7 +423,7 @@ def _photo_gallery_for_property(db: Session, *, org_id: int, property_id: int) -
     }
 
 
-def _build_property_list_item(
+def _snapshot_backed_property_payload(
     db: Session,
     *,
     org_id: int,
@@ -445,6 +445,12 @@ def _build_property_list_item(
         recompute=False,
     )
 
+    snapshot = build_property_inventory_snapshot(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+    )
+
     prop_payload = PropertyOut.model_validate(prop, from_attributes=True).model_dump()
 
     acquisition_meta = _property_acquisition_meta(db, org_id=org_id, property_id=int(prop.id))
@@ -452,9 +458,20 @@ def _build_property_list_item(
 
     prop_payload.update(
         {
-            "asking_price": _asking_price(prop, deal),
-            "projected_monthly_cashflow": _safe_float(getattr(uw, "cash_flow", None), 0.0) if uw else None,
-            "dscr": _safe_float(getattr(uw, "dscr", None), 0.0) if uw else None,
+            "asking_price": snapshot.get("asking_price"),
+            "market_rent_estimate": snapshot.get("market_rent_estimate"),
+            "rent_used": snapshot.get("rent_used"),
+            "loan_amount": snapshot.get("loan_amount"),
+            "monthly_debt_service": snapshot.get("monthly_debt_service"),
+            "monthly_taxes": snapshot.get("monthly_taxes"),
+            "monthly_insurance": snapshot.get("monthly_insurance"),
+            "monthly_housing_cost": snapshot.get("monthly_housing_cost"),
+            "projected_monthly_cashflow": snapshot.get("projected_monthly_cashflow"),
+            "rent_gap": snapshot.get("rent_gap"),
+            "dscr": snapshot.get("dscr"),
+            "section8_fmr": snapshot.get("section8_fmr"),
+            "approved_rent_ceiling": snapshot.get("approved_rent_ceiling"),
+            "rent_cap_reason": snapshot.get("rent_cap_reason"),
             "crime_score": getattr(prop, "crime_score", None),
             "crime_label": _crime_label(getattr(prop, "crime_score", None)),
             "crime_band": getattr(prop, "crime_band", None),
@@ -504,6 +521,25 @@ def _build_property_list_item(
                 "jurisdiction": acquisition_meta.get("completeness_jurisdiction_status") or "missing",
                 "cashflow": acquisition_meta.get("completeness_cashflow_status") or "missing",
             },
+            "listing_status": acquisition_meta.get("listing_status"),
+            "listing_hidden": bool(acquisition_meta.get("listing_hidden") or False),
+            "listing_hidden_reason": acquisition_meta.get("listing_hidden_reason"),
+            "listing_last_seen_at": acquisition_meta.get("listing_last_seen_at"),
+            "listing_removed_at": acquisition_meta.get("listing_removed_at"),
+            "listing_listed_at": acquisition_meta.get("listing_listed_at"),
+            "listing_created_at": acquisition_meta.get("listing_created_at"),
+            "listing_days_on_market": acquisition_meta.get("listing_days_on_market"),
+            "listing_price": acquisition_meta.get("listing_price"),
+            "listing_mls_name": acquisition_meta.get("listing_mls_name"),
+            "listing_mls_number": acquisition_meta.get("listing_mls_number"),
+            "listing_type": acquisition_meta.get("listing_type"),
+            "listing_agent_name": acquisition_meta.get("listing_agent_name"),
+            "listing_agent_phone": acquisition_meta.get("listing_agent_phone"),
+            "listing_agent_email": acquisition_meta.get("listing_agent_email"),
+            "listing_agent_website": acquisition_meta.get("listing_agent_website"),
+            "listing_office_name": acquisition_meta.get("listing_office_name"),
+            "listing_office_phone": acquisition_meta.get("listing_office_phone"),
+            "listing_office_email": acquisition_meta.get("listing_office_email"),
             "listing_zillow_url": _resolved_zillow_listing_url(
                 stored_url=acquisition_meta.get("listing_zillow_url"),
                 address=getattr(prop, "address", None),
@@ -514,6 +550,21 @@ def _build_property_list_item(
         }
     )
     return prop_payload
+
+
+def _build_property_list_item(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+    recompute_state: bool = False,
+) -> dict[str, Any]:
+    return _snapshot_backed_property_payload(
+        db,
+        org_id=org_id,
+        prop=prop,
+        recompute_state=recompute_state,
+    )
 
 
 def _sort_inventory_rows(rows: list[dict[str, Any]], wanted_sort: str) -> list[dict[str, Any]]:
@@ -807,37 +858,11 @@ def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_
     if not row:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    meta = _property_acquisition_meta(db, org_id=p.org_id, property_id=int(row.id))
-    payload = PropertyOut.model_validate(row, from_attributes=True).model_dump()
-    payload.update(
-        {
-            "listing_status": meta.get("listing_status"),
-            "listing_hidden": bool(meta.get("listing_hidden") or False),
-            "listing_hidden_reason": meta.get("listing_hidden_reason"),
-            "listing_last_seen_at": meta.get("listing_last_seen_at"),
-            "listing_removed_at": meta.get("listing_removed_at"),
-            "listing_listed_at": meta.get("listing_listed_at"),
-            "listing_created_at": meta.get("listing_created_at"),
-            "listing_days_on_market": meta.get("listing_days_on_market"),
-            "listing_price": meta.get("listing_price"),
-            "listing_mls_name": meta.get("listing_mls_name"),
-            "listing_mls_number": meta.get("listing_mls_number"),
-            "listing_type": meta.get("listing_type"),
-            "listing_zillow_url": _resolved_zillow_listing_url(
-                stored_url=meta.get("listing_zillow_url"),
-                address=getattr(row, "address", None),
-                city=getattr(row, "city", None),
-                state=getattr(row, "state", None),
-                zip_code=getattr(row, "zip", None),
-            ),
-            "listing_agent_name": meta.get("listing_agent_name"),
-            "listing_agent_phone": meta.get("listing_agent_phone"),
-            "listing_agent_email": meta.get("listing_agent_email"),
-            "listing_agent_website": meta.get("listing_agent_website"),
-            "listing_office_name": meta.get("listing_office_name"),
-            "listing_office_phone": meta.get("listing_office_phone"),
-            "listing_office_email": meta.get("listing_office_email"),
-        }
+    payload = _snapshot_backed_property_payload(
+        db,
+        org_id=p.org_id,
+        prop=row,
+        recompute_state=False,
     )
     return PropertyOut.model_validate(payload)
 
@@ -880,7 +905,6 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
     jr = _pick_jurisdiction_rule(db, org_id=p.org_id, city=prop.city, state=prop.state)
     friction = compute_friction(jr)
     uw = _latest_underwriting(db, org_id=p.org_id, property_id=int(prop.id))
-    meta = _property_acquisition_meta(db, org_id=p.org_id, property_id=int(prop.id))
     snapshot = build_property_inventory_snapshot(db, org_id=p.org_id, property_id=int(prop.id))
 
     checklist_row = db.scalar(
@@ -912,38 +936,11 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
         property_id=prop.id,
         strategy=deal.strategy,
     )
-
-    property_payload = PropertyOut.model_validate(prop, from_attributes=True).model_dump()
-
-    property_payload.update(
-        {
-            "listing_status": meta.get("listing_status"),
-            "listing_hidden": bool(meta.get("listing_hidden") or False),
-            "listing_hidden_reason": meta.get("listing_hidden_reason"),
-            "listing_last_seen_at": meta.get("listing_last_seen_at"),
-            "listing_removed_at": meta.get("listing_removed_at"),
-            "listing_listed_at": meta.get("listing_listed_at"),
-            "listing_created_at": meta.get("listing_created_at"),
-            "listing_days_on_market": meta.get("listing_days_on_market"),
-            "listing_price": meta.get("listing_price"),
-            "listing_mls_name": meta.get("listing_mls_name"),
-            "listing_mls_number": meta.get("listing_mls_number"),
-            "listing_type": meta.get("listing_type"),
-            "listing_zillow_url": _resolved_zillow_listing_url(
-                stored_url=meta.get("listing_zillow_url"),
-                address=getattr(prop, "address", None),
-                city=getattr(prop, "city", None),
-                state=getattr(prop, "state", None),
-                zip_code=getattr(prop, "zip", None),
-            ),
-            "listing_agent_name": meta.get("listing_agent_name"),
-            "listing_agent_phone": meta.get("listing_agent_phone"),
-            "listing_agent_email": meta.get("listing_agent_email"),
-            "listing_agent_website": meta.get("listing_agent_website"),
-            "listing_office_name": meta.get("listing_office_name"),
-            "listing_office_phone": meta.get("listing_office_phone"),
-            "listing_office_email": meta.get("listing_office_email"),
-        }
+    property_payload = _snapshot_backed_property_payload(
+        db,
+        org_id=p.org_id,
+        prop=prop,
+        recompute_state=False,
     )
 
     return PropertyViewOut(

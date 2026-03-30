@@ -164,34 +164,68 @@ function inferMarketRent(r: any) {
 
 function inferMortgage(r: any) {
   return (
+    numberOrNull(r?.monthly_debt_service) ??
+    numberOrNull(r?.last_underwriting_result?.monthly_debt_service) ??
+    numberOrNull(r?.last_underwriting_result?.mortgage_payment) ??
     numberOrNull(r?.estimated_mortgage) ??
     numberOrNull(r?.mortgage_estimate) ??
     numberOrNull(r?.monthly_mortgage_payment) ??
-    numberOrNull(r?.last_underwriting_result?.monthly_debt_service) ??
-    numberOrNull(r?.last_underwriting_result?.mortgage_payment) ??
     null
+  );
+}
+
+function inferMonthlyTaxes(r: any) {
+  return (
+    numberOrNull(r?.monthly_taxes) ??
+    numberOrNull(r?.last_underwriting_result?.monthly_taxes) ??
+    numberOrNull(r?.monthly_tax_estimate) ??
+    null
+  );
+}
+
+function inferMonthlyInsurance(r: any) {
+  return (
+    numberOrNull(r?.monthly_insurance) ??
+    numberOrNull(r?.last_underwriting_result?.monthly_insurance) ??
+    numberOrNull(r?.monthly_insurance_estimate) ??
+    null
+  );
+}
+
+function inferMonthlyHousingCost(r: any) {
+  return (
+    numberOrNull(r?.monthly_housing_cost) ??
+    (() => {
+      const mortgage = inferMortgage(r);
+      const taxes = inferMonthlyTaxes(r);
+      const insurance = inferMonthlyInsurance(r);
+
+      if (mortgage == null && taxes == null && insurance == null) return null;
+      return (mortgage ?? 0) + (taxes ?? 0) + (insurance ?? 0);
+    })()
   );
 }
 
 function inferCashflow(r: any) {
   const direct =
-    r?.cashflow_estimate ??
-    r?.projected_monthly_cashflow ??
-    r?.last_underwriting_result?.cash_flow ??
-    r?.last_underwriting_result?.cashflow ??
-    r?.property_net_cash_window ??
-    r?.metrics?.cashflow_estimate;
+    numberOrNull(r?.projected_monthly_cashflow) ??
+    numberOrNull(r?.cashflow_estimate) ??
+    numberOrNull(r?.last_underwriting_result?.cash_flow) ??
+    numberOrNull(r?.last_underwriting_result?.cashflow) ??
+    numberOrNull(r?.property_net_cash_window) ??
+    numberOrNull(r?.metrics?.cashflow_estimate);
 
-  const n = numberOrNull(direct);
-  if (n != null) return n;
+  if (direct != null) return direct;
 
-  const rent = inferMarketRent(r) ?? 0;
-  const mortgage = inferMortgage(r) ?? 0;
-  const taxes = numberOrNull(r?.monthly_tax_estimate) ?? 0;
-  const insurance = numberOrNull(r?.monthly_insurance_estimate) ?? 0;
+  const rent = inferMarketRent(r);
+  const housing = inferMonthlyHousingCost(r);
 
-  if (rent > 0) return rent - mortgage - taxes - insurance;
-  return null;
+  if (rent == null || housing == null) return null;
+  return rent - housing;
+}
+
+function inferRentGap(r: any) {
+  return numberOrNull(r?.rent_gap) ?? null;
 }
 
 function inferDscr(r: any) {
@@ -199,18 +233,6 @@ function inferDscr(r: any) {
     numberOrNull(r?.dscr) ??
     numberOrNull(r?.last_underwriting_result?.dscr) ??
     null
-  );
-}
-
-function inferRentGap(r: any) {
-  return (
-    numberOrNull(r?.rent_gap) ??
-    (() => {
-      const rent = inferMarketRent(r);
-      const mortgage = inferMortgage(r);
-      if (rent == null && mortgage == null) return null;
-      return (rent ?? 0) - (mortgage ?? 0);
-    })()
   );
 }
 
@@ -418,6 +440,10 @@ function inferTags(r: any): string[] {
   const crime = inferCrime(r);
   const risk = inferRiskScore(r);
   const isCandidate = inferIsDealCandidate(r);
+  const mortgage = inferMortgage(r);
+  const monthlyTaxes = inferMonthlyTaxes(r);
+  const monthlyInsurance = inferMonthlyInsurance(r);
+  const monthlyHousingCost = inferMonthlyHousingCost(r);
 
   if (isCandidate) tags.add("Deal candidate");
   else tags.add("Not deal");
@@ -668,6 +694,10 @@ function TopDealCard({
   const risk = inferRiskScore(row);
   const photoUrl = inferPhotoUrl(row);
   const reasons = rankingReason(row, sort, index + 1);
+  const mortgage = inferMortgage(row);
+  const monthlyTaxes = inferMonthlyTaxes(row);
+  const monthlyInsurance = inferMonthlyInsurance(row);
+  const monthlyHousingCost = inferMonthlyHousingCost(row);
 
   return (
     <div className="overflow-hidden rounded-3xl border border-app bg-app-panel">
@@ -727,6 +757,24 @@ function TopDealCard({
                   : "bad"
             }
           />
+          <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
+            <StatPill label="Mortgage" value={money(mortgage)} tone="neutral" />
+            <StatPill
+              label="Taxes"
+              value={money(monthlyTaxes)}
+              tone="neutral"
+            />
+            <StatPill
+              label="Insurance"
+              value={money(monthlyInsurance)}
+              tone="neutral"
+            />
+            <StatPill
+              label="Housing total"
+              value={money(monthlyHousingCost)}
+              tone="neutral"
+            />
+          </div>
         </div>
 
         <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
@@ -962,6 +1010,11 @@ export default function InvestorPane() {
         const dscr = inferDscr(row);
         const rentGap = inferRentGap(row);
         const risk = inferRiskScore(row);
+
+        const mortgage = inferMortgage(row);
+        const monthlyTaxes = inferMonthlyTaxes(row);
+        const monthlyInsurance = inferMonthlyInsurance(row);
+        const monthlyHousingCost = inferMonthlyHousingCost(row);
 
         if (cashflow != null) {
           acc.cashflowSum += cashflow;
@@ -1310,6 +1363,10 @@ export default function InvestorPane() {
                     const photoUrl = inferPhotoUrl(row);
                     const tags = inferTags(row);
                     const updatedAt = inferUpdatedAt(row);
+                    const mortgage = inferMortgage(row);
+                    const monthlyTaxes = inferMonthlyTaxes(row);
+                    const monthlyInsurance = inferMonthlyInsurance(row);
+                    const monthlyHousingCost = inferMonthlyHousingCost(row);
                     const absoluteRank =
                       (safeCurrentPage - 1) * PAGE_SIZE + index + 1;
                     const reasons = rankingReason(row, sort, absoluteRank);
@@ -1443,6 +1500,28 @@ export default function InvestorPane() {
                                       : "bad"
                                 }
                               />
+                              <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
+                                <StatPill
+                                  label="Mortgage"
+                                  value={money(mortgage)}
+                                  tone="neutral"
+                                />
+                                <StatPill
+                                  label="Taxes"
+                                  value={money(monthlyTaxes)}
+                                  tone="neutral"
+                                />
+                                <StatPill
+                                  label="Insurance"
+                                  value={money(monthlyInsurance)}
+                                  tone="neutral"
+                                />
+                                <StatPill
+                                  label="Housing total"
+                                  value={money(monthlyHousingCost)}
+                                  tone="neutral"
+                                />
+                              </div>
                             </div>
 
                             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

@@ -270,7 +270,6 @@ def compute_risk_adjusted_score(
 
     risk_penalty = 0.0
     if risk is not None:
-        # harsher penalty for investment use-cases where neighborhood quality can kill cashflow stability.
         if risk >= 85:
             risk_penalty = 55.0
         elif risk >= 65:

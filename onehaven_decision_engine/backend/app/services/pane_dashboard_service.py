@@ -8,6 +8,7 @@ from typing import Any, Optional
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..domain.workflow.panes import (
     PANES,
     allowed_panes_for_principal,
