@@ -670,7 +670,7 @@ export default function Property() {
       } catch {
         try {
           propertyPayload = await api.get<PropertyPayload>(
-            `/dashboard/property/${id}`,
+            `/dashboard/properties/${id}`,
           );
         } catch {
           const view = await api.get<PropertyViewResponse>(

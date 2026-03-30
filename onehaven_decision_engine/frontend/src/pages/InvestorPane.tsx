@@ -37,6 +37,7 @@ import StatPill from "../components/StatPill";
 import Surface from "../components/Surface";
 import { api } from "../lib/api";
 import type { SupportedMarket } from "../lib/ingestionClient";
+import AppSelect from "../components/AppSelect";
 
 type Row = any;
 type MarketRow = SupportedMarket;
@@ -54,7 +55,7 @@ type SortKey =
   | "LOWEST_PRICE"
   | "HIGHEST_PRICE";
 
-const INITIAL_LIMIT = 500;
+const INITIAL_LIMIT = 250;
 const PAGE_SIZE = 25;
 
 function money(v: any) {
@@ -96,7 +97,7 @@ function normalizeDecision(raw?: string) {
 function decisionLabel(raw?: string) {
   const normalized = normalizeDecision(raw);
   if (normalized === "GOOD_DEAL") return "Good deal";
-  if (normalized === "REJECT") return "Reject";
+  if (normalized === "REJECT") return "Not a deal";
   return "Review";
 }
 
@@ -202,33 +203,14 @@ function inferDscr(r: any) {
 }
 
 function inferRentGap(r: any) {
-  const rent = inferMarketRent(r);
-  const mortgage = inferMortgage(r);
-  if (rent == null && mortgage == null) return null;
-  return (rent ?? 0) - (mortgage ?? 0);
-}
-
-function inferRiskScore(r: any) {
-  const explicit =
-    numberOrNull(r?.risk_score) ??
-    numberOrNull(r?.last_underwriting_result?.risk_score) ??
-    numberOrNull(r?.metrics?.risk_score);
-
-  if (explicit != null) return explicit;
-
-  const crime = inferCrime(r) ?? 0;
-  const offenders = inferOffenderCount(r) ?? 0;
-  const redZonePenalty = inferIsRedZone(r) ? 25 : 0;
-  const completenessPenalty =
-    inferCompleteness(r) === "MISSING"
-      ? 15
-      : inferCompleteness(r) === "PARTIAL"
-        ? 7
-        : 0;
-
-  return Math.min(
-    100,
-    crime + offenders * 8 + redZonePenalty + completenessPenalty,
+  return (
+    numberOrNull(r?.rent_gap) ??
+    (() => {
+      const rent = inferMarketRent(r);
+      const mortgage = inferMortgage(r);
+      if (rent == null && mortgage == null) return null;
+      return (rent ?? 0) - (mortgage ?? 0);
+    })()
   );
 }
 
@@ -280,6 +262,30 @@ function inferIsRedZone(r: any) {
   return Boolean(r?.is_red_zone ?? r?.property?.is_red_zone);
 }
 
+function inferRiskScore(r: any) {
+  const explicit =
+    numberOrNull(r?.risk_score) ??
+    numberOrNull(r?.last_underwriting_result?.risk_score) ??
+    numberOrNull(r?.metrics?.risk_score);
+
+  if (explicit != null) return explicit;
+
+  const crime = inferCrime(r) ?? 0;
+  const offenders = inferOffenderCount(r) ?? 0;
+  const redZonePenalty = inferIsRedZone(r) ? 25 : 0;
+  const completenessPenalty =
+    inferCompleteness(r) === "MISSING"
+      ? 15
+      : inferCompleteness(r) === "PARTIAL"
+        ? 7
+        : 0;
+
+  return Math.min(
+    100,
+    crime + offenders * 8 + redZonePenalty + completenessPenalty,
+  );
+}
+
 function getFinancingType(price?: number | null) {
   if (price == null || !Number.isFinite(Number(price))) return "UNKNOWN";
   if (Number(price) < 75000) return "CASH";
@@ -300,16 +306,19 @@ function inferIsDealCandidate(r: any) {
 
 function inferHiddenReason(r: any) {
   return (
-    String(r?.hidden_reason || "")
+    String(r?.hidden_reason || r?.listing_hidden_reason || "")
       .trim()
       .toLowerCase() || null
   );
 }
 
 function inferCompleteness(r: any): "COMPLETE" | "PARTIAL" | "MISSING" {
-  const explicit = String(r?.completeness || "")
+  const explicit = String(
+    r?.completeness || r?.snapshot_completeness || r?.inventory_status || "",
+  )
     .trim()
     .toUpperCase();
+
   if (["COMPLETE", "PARTIAL", "MISSING"].includes(explicit)) {
     return explicit as "COMPLETE" | "PARTIAL" | "MISSING";
   }
@@ -411,6 +420,8 @@ function inferTags(r: any): string[] {
   const isCandidate = inferIsDealCandidate(r);
 
   if (isCandidate) tags.add("Deal candidate");
+  else tags.add("Not deal");
+
   if (
     normalizeDecision(r?.normalized_decision || r?.classification) ===
     "GOOD_DEAL"
@@ -766,6 +777,8 @@ export default function InvestorPane() {
     React.useState<CompletenessFilter>("ALL");
   const [sort, setSort] = React.useState<SortKey>("RELEVANCE");
   const [currentPage, setCurrentPage] = React.useState(1);
+  const [dealsOnly, setDealsOnly] = React.useState(false);
+  const [includeSuppressed, setIncludeSuppressed] = React.useState(false);
 
   const [activeRunId, setActiveRunId] = React.useState<number | null>(null);
   const [runsOpen, setRunsOpen] = React.useState(false);
@@ -782,9 +795,8 @@ export default function InvestorPane() {
     try {
       const params: Record<string, any> = {
         limit: INITIAL_LIMIT,
-        deals_only: "true",
-        include_suppressed: undefined,
-        sort: sortToApiValue(sort),
+        deals_only: dealsOnly ? "true" : "false",
+        include_suppressed: includeSuppressed ? "true" : "false",
       };
 
       if (selectedMarket?.state) params.state = selectedMarket.state;
@@ -792,10 +804,11 @@ export default function InvestorPane() {
       if (selectedMarket?.city) params.city = selectedMarket.city;
       if (deferredQ.trim()) params.q = deferredQ.trim();
 
-      const propertiesRes = await api.get<any>("/properties", { params });
-      const propertyItems =
-        propertiesRes?.items || propertiesRes?.rows || propertiesRes || [];
-      const normalized = Array.isArray(propertyItems) ? propertyItems : [];
+      const paneRes = await api.get<any>("/dashboard/panes/investor", {
+        params,
+      });
+      const paneRows = paneRes?.rows || [];
+      const normalized = Array.isArray(paneRows) ? paneRows : [];
       setRows(normalized);
     } catch (e: any) {
       setInventoryErr(formatApiError(e, "Failed to load investor inventory."));
@@ -803,7 +816,7 @@ export default function InvestorPane() {
     } finally {
       setInventoryLoading(false);
     }
-  }, [deferredQ, selectedMarket, sort]);
+  }, [deferredQ, selectedMarket, sort, dealsOnly, includeSuppressed]);
 
   const loadMarkets = React.useCallback(async () => {
     setMarketsLoading(true);
@@ -880,8 +893,12 @@ export default function InvestorPane() {
         const status = inferDealFilterStatus(row);
 
         if (hiddenReason === "inactive_listing") return false;
-        if (!inferIsDealCandidate(row)) return false;
-        if (status === "suppressed" || status === "hidden") return false;
+        if (
+          !includeSuppressed &&
+          (status === "suppressed" || status === "hidden")
+        ) {
+          return false;
+        }
 
         const normalizedDecision = normalizeDecision(
           row?.normalized_decision || row?.classification,
@@ -895,6 +912,8 @@ export default function InvestorPane() {
         if (completeness !== "ALL" && completenessValue !== completeness) {
           return false;
         }
+
+        if (dealsOnly && !inferIsDealCandidate(row)) return false;
 
         if (deferredQ.trim()) {
           const haystack = [
@@ -920,10 +939,19 @@ export default function InvestorPane() {
         return true;
       })
       .sort((a, b) => compareRows(a, b, sort));
-  }, [rows, decision, financing, completeness, deferredQ, sort]);
+  }, [
+    rows,
+    decision,
+    financing,
+    completeness,
+    deferredQ,
+    sort,
+    dealsOnly,
+    includeSuppressed,
+  ]);
 
   const topDeals = React.useMemo(
-    () => filteredRows.slice(0, 3),
+    () => filteredRows.filter((row) => inferIsDealCandidate(row)).slice(0, 3),
     [filteredRows],
   );
 
@@ -951,6 +979,9 @@ export default function InvestorPane() {
           acc.riskSum += risk;
           acc.riskCount += 1;
         }
+        if (inferIsDealCandidate(row)) acc.dealCount += 1;
+        else acc.notDealCount += 1;
+
         return acc;
       },
       {
@@ -962,11 +993,15 @@ export default function InvestorPane() {
         rentGapCount: 0,
         riskSum: 0,
         riskCount: 0,
+        dealCount: 0,
+        notDealCount: 0,
       },
     );
 
     return {
       visible: filteredRows.length,
+      dealCount: totals.dealCount,
+      notDealCount: totals.notDealCount,
       avgCashflow:
         totals.cashflowCount > 0
           ? totals.cashflowSum / totals.cashflowCount
@@ -996,6 +1031,8 @@ export default function InvestorPane() {
     completeness,
     sort,
     selectedMarket?.slug,
+    dealsOnly,
+    includeSuppressed,
   ]);
 
   const pagination = buildPagination(safeCurrentPage, totalPages);
@@ -1019,18 +1056,11 @@ export default function InvestorPane() {
 
   return (
     <PageShell>
-      <PageHero
-        eyebrow="Investor pane"
-        title="Ranked deal inventory"
-        subtitle="This view stays deal-focused. Inactive and suppressed inventory are kept out, top candidates are surfaced first, and every row shows why it ranks where it does."
-        right={<PaneSwitcher activePane="investor" />}
-      />
-
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
           <Surface
             title="Ranking controls"
-            subtitle="Search one supported market at a time, then sort by the deal signal you care about."
+            subtitle="Search one supported market at a time, then sort and filter the list view."
           >
             <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr_auto]">
               <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
@@ -1038,22 +1068,26 @@ export default function InvestorPane() {
                   <BriefcaseBusiness className="h-4 w-4" />
                   Market
                 </div>
+                <div className="mt-2">
+                  <AppSelect
+                    value={selectedMarket?.slug || ""}
+                    onChange={(value) =>
+                      setSelectedMarket(
+                        markets.find((m) => m.slug === value) || null,
+                      )
+                    }
+                    options={markets.map((market) => ({
+                      value: market.slug,
+                      label: marketDisplayName(market),
+                    }))}
+                  />
+                </div>
 
-                <select
-                  value={selectedMarket?.slug || ""}
-                  onChange={(e) =>
-                    setSelectedMarket(
-                      markets.find((m) => m.slug === e.target.value) || null,
-                    )
-                  }
-                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
-                >
-                  {markets.map((market) => (
-                    <option key={market.slug} value={market.slug}>
-                      {marketDisplayName(market)}
-                    </option>
-                  ))}
-                </select>
+                {selectedMarket ? (
+                  <div className="mt-2 text-xs text-app-4">
+                    {marketSubLabel(selectedMarket)}
+                  </div>
+                ) : null}
 
                 {selectedMarket ? (
                   <div className="mt-2 text-xs text-app-4">
@@ -1090,24 +1124,25 @@ export default function InvestorPane() {
               </button>
             </div>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
               <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
                 <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
                   <GitBranch className="h-4 w-4" />
                   Decision
                 </div>
-                <select
-                  value={decision}
-                  onChange={(e) =>
-                    setDecision(e.target.value as DecisionFilter)
-                  }
-                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
-                >
-                  <option value="ALL">All</option>
-                  <option value="GOOD_DEAL">Good deal</option>
-                  <option value="REVIEW">Review</option>
-                  <option value="REJECT">Reject</option>
-                </select>
+
+                <div className="mt-2">
+                  <AppSelect
+                    value={decision}
+                    onChange={(value) => setDecision(value as DecisionFilter)}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "GOOD_DEAL", label: "Good deal" },
+                      { value: "REVIEW", label: "Review" },
+                      { value: "REJECT", label: "Reject" },
+                    ]}
+                  />
+                </div>
               </div>
 
               <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
@@ -1115,18 +1150,18 @@ export default function InvestorPane() {
                   <Landmark className="h-4 w-4" />
                   Financing
                 </div>
-                <select
-                  value={financing}
-                  onChange={(e) =>
-                    setFinancing(e.target.value as FinancingFilter)
-                  }
-                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
-                >
-                  <option value="ALL">All</option>
-                  <option value="CASH">Cash</option>
-                  <option value="DSCR">DSCR</option>
-                  <option value="UNKNOWN">Unknown</option>
-                </select>
+                <div className="mt-2">
+                  <AppSelect
+                    value={financing}
+                    onChange={(value) => setFinancing(value as FinancingFilter)}
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "CASH", label: "Cash" },
+                      { value: "DSCR", label: "DSCR" },
+                      { value: "UNKNOWN", label: "Unknown" },
+                    ]}
+                  />
+                </div>
               </div>
 
               <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
@@ -1134,39 +1169,75 @@ export default function InvestorPane() {
                   <CheckCircle2 className="h-4 w-4" />
                   Completeness
                 </div>
-                <select
-                  value={completeness}
-                  onChange={(e) =>
-                    setCompleteness(e.target.value as CompletenessFilter)
-                  }
-                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
-                >
-                  <option value="ALL">All</option>
-                  <option value="COMPLETE">Complete</option>
-                  <option value="PARTIAL">Partial</option>
-                  <option value="MISSING">Missing</option>
-                </select>
+                <div className=" mt-2">
+                  <AppSelect
+                    value={completeness}
+                    onChange={(value) =>
+                      setCompleteness(value as CompletenessFilter)
+                    }
+                    options={[
+                      { value: "ALL", label: "All" },
+                      { value: "COMPLETE", label: "Complete" },
+                      { value: "PARTIAL", label: "Partial" },
+                      { value: "MISSING", label: "Missing" },
+                    ]}
+                  />
+                </div>
               </div>
 
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3 md:col-span-2">
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <Wallet className="h-4 w-4" />
+                  Deals only
+                </div>
+                <label className="oh-toggle mt-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={dealsOnly}
+                    onChange={(e) => setDealsOnly(e.target.checked)}
+                  />
+                  <span>
+                    {dealsOnly ? "Showing only deals" : "Showing all rows"}
+                  </span>
+                </label>
+              </div>
+
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                  <ShieldAlert className="h-4 w-4" />
+                  Suppressed
+                </div>
+                <label className="oh-toggle mt-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={includeSuppressed}
+                    onChange={(e) => setIncludeSuppressed(e.target.checked)}
+                  />
+                  <span>{includeSuppressed ? "Included" : "Hidden"}</span>
+                </label>
+              </div>
+
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
                 <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
                   <Settings2 className="h-4 w-4" />
-                  Sort ranked deals by
+                  Sort
                 </div>
-                <select
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value as SortKey)}
-                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
-                >
-                  <option value="RELEVANCE">Relevance</option>
-                  <option value="BEST_CASHFLOW">Best cashflow</option>
-                  <option value="BEST_DSCR">Best DSCR</option>
-                  <option value="BEST_RENT_GAP">Best rent gap</option>
-                  <option value="LOWEST_RISK">Lowest risk</option>
-                  <option value="NEWEST">Newest</option>
-                  <option value="LOWEST_PRICE">Lowest price</option>
-                  <option value="HIGHEST_PRICE">Highest price</option>
-                </select>
+                <div className="mt-2">
+                  <AppSelect
+                    value={sort}
+                    onChange={(value) => setSort(value as SortKey)}
+                    options={[
+                      { value: "RELEVANCE", label: "Relevance" },
+                      { value: "BEST_CASHFLOW", label: "Best cashflow" },
+                      { value: "BEST_DSCR", label: "Best DSCR" },
+                      { value: "BEST_RENT_GAP", label: "Best rent gap" },
+                      { value: "LOWEST_RISK", label: "Lowest risk" },
+                      { value: "NEWEST", label: "Newest" },
+                      { value: "LOWEST_PRICE", label: "Lowest price" },
+                      { value: "HIGHEST_PRICE", label: "Highest price" },
+                    ]}
+                  />
+                </div>
               </div>
             </div>
 
@@ -1183,44 +1254,9 @@ export default function InvestorPane() {
             ) : null}
           </Surface>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <Surface
-              title="Visible deals"
-              subtitle="Filtered active ranked deals only"
-            >
-              <div className="text-3xl font-semibold text-app-0">
-                {stats.visible}
-              </div>
-            </Surface>
-
-            <Surface title="Average cashflow">
-              <div
-                className={`text-3xl font-semibold ${metricTone(stats.avgCashflow)}`}
-              >
-                {money(stats.avgCashflow)}
-              </div>
-            </Surface>
-
-            <Surface title="Average DSCR">
-              <div
-                className={`text-3xl font-semibold ${metricTone(stats.avgDscr)}`}
-              >
-                {decimal(stats.avgDscr, 2)}
-              </div>
-            </Surface>
-
-            <Surface title="Average risk">
-              <div
-                className={`text-3xl font-semibold ${metricTone(stats.avgRisk, { inverse: true })}`}
-              >
-                {decimal(stats.avgRisk, 0)}
-              </div>
-            </Surface>
-          </div>
-
           <Surface
             title="Top ranked deals"
-            subtitle="The three strongest candidates in the current filtered view."
+            subtitle="The strongest deal candidates in the current filtered view."
           >
             {inventoryLoading || marketsLoading ? (
               <div className="flex items-center justify-center py-16 text-app-4">
@@ -1229,7 +1265,7 @@ export default function InvestorPane() {
             ) : !topDeals.length ? (
               <EmptyState
                 title="No ranked deals yet"
-                description="Try a different supported market or relax one of the filters."
+                description="Turn Deals only off or relax one of the filters."
               />
             ) : (
               <div className="grid gap-4 xl:grid-cols-3">
@@ -1246,8 +1282,8 @@ export default function InvestorPane() {
           </Surface>
 
           <Surface
-            title="Ranked deal list"
-            subtitle="Every row shows the main financial signals and the reason the property is floating to the top."
+            title="House list view"
+            subtitle="This list shows whether each property is a deal or not a deal. Use Deals only when you want to narrow it down."
           >
             {inventoryLoading || marketsLoading ? (
               <div className="flex items-center justify-center py-16 text-app-4">
@@ -1256,7 +1292,7 @@ export default function InvestorPane() {
             ) : !pageRows.length ? (
               <EmptyState
                 title="No properties match the current filters"
-                description="Try a different market, search term, or ranking sort."
+                description="Try a different market, search term, or turn Deals only off."
               />
             ) : (
               <>
@@ -1277,6 +1313,7 @@ export default function InvestorPane() {
                     const absoluteRank =
                       (safeCurrentPage - 1) * PAGE_SIZE + index + 1;
                     const reasons = rankingReason(row, sort, absoluteRank);
+                    const isDeal = inferIsDealCandidate(row);
 
                     return (
                       <div
@@ -1320,8 +1357,14 @@ export default function InvestorPane() {
                                   >
                                     {completenessLabel(completenessValue)}
                                   </span>
-                                  <span className="oh-pill oh-pill-good">
-                                    Active deal
+                                  <span
+                                    className={
+                                      isDeal
+                                        ? "oh-pill oh-pill-good"
+                                        : "oh-pill oh-pill-warn"
+                                    }
+                                  >
+                                    {isDeal ? "Deal" : "Not deal / review"}
                                   </span>
                                 </div>
 
@@ -1460,7 +1503,7 @@ export default function InvestorPane() {
 
                             <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
                               <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                Why this deal is ranking highly
+                                Why this row ranks here
                               </div>
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {reasons.map((reason) => (
@@ -1722,4 +1765,3 @@ export default function InvestorPane() {
     </PageShell>
   );
 }
-

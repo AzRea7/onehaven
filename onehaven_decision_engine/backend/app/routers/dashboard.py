@@ -30,6 +30,11 @@ STANDARD_FILTERS = {
     "status": True,
     "stage": True,
     "urgency": True,
+    "deals_only": True,
+    "include_suppressed": True,
+    "include_hidden": True,
+    "q": True,
+    "state": True,
 }
 
 
@@ -45,6 +50,7 @@ def dashboard_catalog():
             "next_actions",
             "stale_items",
             "queue_counts",
+            "rows",
         ],
     }
 
@@ -63,7 +69,7 @@ def pane_dashboard_overview(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
     include_hidden: bool = Query(default=False),
-    deals_only: bool = Query(default=True),
+    deals_only: bool = Query(default=False),
     include_suppressed: bool = Query(default=False),
 ):
     t0 = time.perf_counter()
@@ -98,6 +104,9 @@ def pane_dashboard_overview(
             "stage": stage,
             "urgency": urgency,
             "limit": limit,
+            "include_hidden": include_hidden,
+            "deals_only": deals_only,
+            "include_suppressed": include_suppressed,
             "total_ms": total_ms,
         },
     )
@@ -119,8 +128,8 @@ def pane_dashboard(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
     include_hidden: bool = Query(default=False),
-    deals_only: bool = Query(default=True),
-    include_suppressed: bool = Query(default=False),    
+    deals_only: bool = Query(default=False),
+    include_suppressed: bool = Query(default=False),
 ):
     pane_name = ensure_pane_access(principal=p, pane=clamp_pane(pane))
     t0 = time.perf_counter()
@@ -157,6 +166,9 @@ def pane_dashboard(
             "stage": stage,
             "urgency": urgency,
             "limit": limit,
+            "include_hidden": include_hidden,
+            "deals_only": deals_only,
+            "include_suppressed": include_suppressed,
             "total_ms": total_ms,
         },
     )
@@ -192,7 +204,6 @@ def portfolio_rollup(
         assigned_user=assigned_user,
         limit=limit,
         include_hidden=include_hidden,
-
     )
 
     total_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -207,6 +218,7 @@ def portfolio_rollup(
             "stage": stage,
             "urgency": urgency,
             "limit": limit,
+            "include_hidden": include_hidden,
             "total_ms": total_ms,
         },
     )
@@ -229,7 +241,7 @@ def dashboard_rollups(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
     include_hidden: bool = Query(default=False),
-    deals_only: bool = Query(default=True),
+    deals_only: bool = Query(default=False),
     include_suppressed: bool = Query(default=False),
 ):
     t0 = time.perf_counter()
@@ -270,6 +282,9 @@ def dashboard_rollups(
             "urgency": urgency,
             "pane": pane_value,
             "limit": limit,
+            "include_hidden": include_hidden,
+            "deals_only": deals_only,
+            "include_suppressed": include_suppressed,
             "total_ms": total_ms,
         },
     )

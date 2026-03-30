@@ -544,6 +544,7 @@ def apply_freshness_policy(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_property_inventory_snapshot(db: Session, *, org_id: int, property_id: int, search_context: dict | None = None) -> dict[str, Any]:
+    search_context = search_context or {}
     t0 = time.perf_counter()
     prop = db.scalar(select(Property).where(Property.org_id == org_id, Property.id == property_id))
     if prop is None:

@@ -80,6 +80,200 @@ body {
   background: transparent;
 }
 
+.oh-select-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.oh-select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
+  color: var(--text-1);
+  padding: 0.82rem 2.75rem 0.82rem 0.95rem;
+  font-size: 0.95rem;
+  line-height: 1.2;
+  outline: none;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.oh-select:hover,
+.oh-select:focus {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--bg-panel-strong) 98%, transparent);
+}
+
+.oh-select:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.oh-select-sm {
+  padding-top: 0.68rem;
+  padding-bottom: 0.68rem;
+  font-size: 0.88rem;
+}
+
+.oh-select-icon {
+  pointer-events: none;
+  position: absolute;
+  right: 0.95rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-4);
+}
+
+/* This helps a little, but native option popups are browser/OS controlled. */
+.oh-select option {
+  background: var(--bg-panel-strong);
+  color: var(--text-1);
+}
+
+:root[data-theme="light"] .oh-select option {
+  background: #ffffff;
+  color: var(--text-1);
+}
+
+.oh-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 44px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
+  color: var(--text-1);
+  padding: 0.82rem 0.95rem;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.oh-toggle-row:hover,
+.oh-toggle-row:focus-within {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--bg-panel-strong) 98%, transparent);
+}
+
+.oh-select-icon {
+  pointer-events: none;
+  position: absolute;
+  right: 0.95rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.oh-select-popover {
+  position: relative;
+  width: 100%;
+}
+
+.oh-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
+  color: var(--text-1);
+  padding: 0.82rem 0.95rem;
+  font-size: 0.95rem;
+  line-height: 1.2;
+  outline: none;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.oh-select-trigger:hover,
+.oh-select-trigger:focus-visible {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--bg-panel-strong) 98%, transparent);
+}
+
+.oh-select-trigger:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.oh-select-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  right: 0;
+  z-index: 70;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--bg-panel-strong) 98%, transparent);
+  box-shadow: var(--shadow-soft-lg);
+  backdrop-filter: blur(14px);
+  padding: 0.35rem;
+}
+
+:root[data-theme="light"] .oh-select-menu {
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.oh-select-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-1);
+  border-radius: 12px;
+  padding: 0.72rem 0.8rem;
+  font-size: 0.92rem;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.oh-select-option:hover {
+  background: var(--bg-muted);
+  border-color: var(--border);
+}
+
+.oh-select-option-active {
+  background: rgba(124, 92, 255, 0.14);
+  border-color: rgba(124, 92, 255, 0.28);
+  color: var(--text-0);
+}
+
+:root[data-theme="light"] .oh-select-option-active {
+  background: rgba(124, 92, 255, 0.1);
+  color: #4b32b8;
+}
+
 :root[data-theme="light"] .oh-root,
 :root[data-theme="light"] .oh-main,
 :root[data-theme="light"] .oh-main-auth,

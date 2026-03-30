@@ -89,6 +89,8 @@ def _standard_filters(
 
 
 def _infer_plan_name(principal: Any) -> str:
+    if principal is None:
+        return "basic"
     for attr in ("plan", "plan_name", "subscription_plan", "tier"):
         value = getattr(principal, attr, None)
         if value:
@@ -295,29 +297,47 @@ def _build_row(
     )
 
     risk_score = getattr(prop, "risk_score", None)
+    projected_monthly_cashflow = (
+        _safe_float(getattr(uw_row, "cash_flow", None), 0.0) if uw_row else None
+    )
+    dscr = _safe_float(getattr(uw_row, "dscr", None), 0.0) if uw_row else None
+
     deal_filter = classify_deal_candidate(
         normalized_decision=state_payload.get("normalized_decision"),
         risk_score=_safe_float(risk_score, 0.0) if risk_score is not None else None,
-        projected_monthly_cashflow=_safe_float(getattr(uw_row, "cash_flow", None), 0.0) if uw_row else None,
-        dscr=_safe_float(getattr(uw_row, "dscr", None), 0.0) if uw_row else None,
+        projected_monthly_cashflow=projected_monthly_cashflow,
+        dscr=dscr,
         listing_hidden=bool(getattr(prop, "listing_hidden", False)),
     )
 
     market_rent_estimate = None
     if isinstance(constraints.get("cash"), dict):
-        market_rent_estimate = _safe_float((constraints.get("cash") or {}).get("expected_rent"), 0.0)
+        market_rent_estimate = _safe_float(
+            (constraints.get("cash") or {}).get("expected_rent"),
+            None,
+        )
+
+    asking_price = _asking_price(prop, deal_row)
+
+    monthly_debt_service = None
+    if uw_row is not None:
+        monthly_debt_service = _safe_float(
+            getattr(uw_row, "monthly_debt_service", None),
+            None,
+        )
 
     rent_gap = None
-    asking_price = _asking_price(prop, deal_row)
-    if market_rent_estimate is not None and asking_price is not None:
-        rent_gap = market_rent_estimate - max((asking_price * 0.01), 0.0)
+    if market_rent_estimate is not None and monthly_debt_service is not None:
+        rent_gap = market_rent_estimate - monthly_debt_service
+    elif market_rent_estimate is not None and projected_monthly_cashflow is not None:
+        rent_gap = projected_monthly_cashflow
 
     ranking = compute_risk_adjusted_score(
-        projected_monthly_cashflow=_safe_float(getattr(uw_row, "cash_flow", None), 0.0) if uw_row else None,
-        dscr=_safe_float(getattr(uw_row, "dscr", None), 0.0) if uw_row else None,
+        projected_monthly_cashflow=projected_monthly_cashflow,
+        dscr=dscr,
         rent_gap=rent_gap,
         risk_score=_safe_float(risk_score, 0.0) if risk_score is not None else None,
-    )
+    ) or {}
 
     return {
         "property_id": int(prop.id),
@@ -334,9 +354,9 @@ def _build_row(
         "route_reason": state_payload.get("route_reason"),
         "normalized_decision": state_payload.get("normalized_decision"),
         "gate_status": state_payload.get("gate_status"),
-        "asking_price": _asking_price(prop, deal_row),
-        "projected_monthly_cashflow": _safe_float(getattr(uw_row, "cash_flow", None), 0.0) if uw_row else None,
-        "dscr": _safe_float(getattr(uw_row, "dscr", None), 0.0) if uw_row else None,
+        "asking_price": asking_price,
+        "projected_monthly_cashflow": projected_monthly_cashflow,
+        "dscr": dscr,
         "next_actions": state_payload.get("next_actions") or [],
         "blockers": blockers,
         "market_rent_estimate": market_rent_estimate,
@@ -549,6 +569,8 @@ def _build_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
     stale_count = sum(1 for row in rows if row.get("is_stale"))
     critical_count = sum(1 for row in rows if row.get("urgency") == "critical")
     high_count = sum(1 for row in rows if row.get("urgency") == "high")
+    deal_count = sum(1 for row in rows if bool(row.get("is_deal_candidate")))
+    suppressed_count = sum(1 for row in rows if bool(row.get("suppress_from_investor")))
 
     total_asking = 0.0
     total_cashflow = 0.0
@@ -574,6 +596,8 @@ def _build_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "total_properties": total,
+        "deal_candidates": deal_count,
+        "suppressed_from_investor": suppressed_count,
         "with_blockers": with_blockers,
         "with_next_actions": with_next_actions,
         "stale_items": stale_count,
@@ -607,10 +631,11 @@ def _filter_rows_for_pane(
             continue
         if not _property_matches_urgency(row, urgency=urgency):
             continue
-        if deals_only and pane == "investor":
-            if include_suppressed:
-                pass
-            elif not bool(row.get("is_deal_candidate")):
+
+        if pane == "investor":
+            if not include_suppressed and bool(row.get("suppress_from_investor")):
+                continue
+            if deals_only and not bool(row.get("is_deal_candidate")):
                 continue
 
         out.append(row)
@@ -861,6 +886,8 @@ def build_pane_dashboard(
             "urgency": urgency,
             "assigned_user": assigned_user,
             "q": q,
+            "deals_only": deals_only,
+            "include_suppressed": include_suppressed,
             "scope_query_rows": scope_meta["query_rows"],
             "scope_returned_rows": scope_meta["returned_rows"],
             "scope_skipped_errors": scope_meta["skipped_errors"],
@@ -954,6 +981,8 @@ def build_all_pane_summaries(
             "urgency": urgency,
             "assigned_user": assigned_user,
             "q": q,
+            "deals_only": deals_only,
+            "include_suppressed": include_suppressed,
             "scope_query_rows": scope_meta["query_rows"],
             "scope_returned_rows": scope_meta["returned_rows"],
             "scope_skipped_errors": scope_meta["skipped_errors"],
@@ -1006,8 +1035,6 @@ def build_portfolio_rollup_with_panes(
         assigned_user=assigned_user,
         max_scan=max(int(limit), 500),
         include_hidden=include_hidden,
-        deals_only=deals_only,
-        include_suppressed=include_suppressed,
     )
 
     filtered_rows = [
@@ -1016,6 +1043,16 @@ def build_portfolio_rollup_with_panes(
         if _property_matches_status(row, status=status)
         and _property_matches_stage(row, stage=stage)
         and _property_matches_urgency(row, urgency=urgency)
+        and (
+            row.get("suppress_from_investor") is False
+            or include_suppressed
+            or clamp_pane(row.get("current_pane")) != "investor"
+        )
+        and (
+            not deals_only
+            or clamp_pane(row.get("current_pane")) != "investor"
+            or bool(row.get("is_deal_candidate"))
+        )
     ]
 
     pane_counts: dict[str, int] = defaultdict(int)

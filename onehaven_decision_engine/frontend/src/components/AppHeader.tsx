@@ -102,21 +102,11 @@ export default function AppHeader({
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
                 <Sparkles className="h-3.5 w-3.5" />
-                Pane-driven workflow
-              </div>
-              <div className="mt-2 text-lg font-semibold text-app-0">
-                {context.label}
+                {context.stage}
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <span className="oh-pill">{context.stage}</span>
-              <span className="oh-pill oh-pill-accent">
-                next {context.nextStage}
-              </span>
-              <span className="oh-pill oh-pill-warn">
-                blocker {context.blocker}
-              </span>
 
               {onToggleTheme ? (
                 <button

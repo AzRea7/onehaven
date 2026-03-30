@@ -14,9 +14,11 @@ export type Filters = {
 
   deals_only?: string; // "true" | "false"
   include_suppressed?: string; // "true" | "false"
+  include_hidden?: string; // "true" | "false"
   hidden_reason?: string; // inactive_listing | low_score | bad_risk | weak_cashflow
 
   sort?: string;
+  page?: string;
 };
 
 export const FILTER_KEYS: (keyof Filters)[] = [
@@ -33,8 +35,10 @@ export const FILTER_KEYS: (keyof Filters)[] = [
   "offender_min",
   "deals_only",
   "include_suppressed",
+  "include_hidden",
   "hidden_reason",
   "sort",
+  "page",
 ];
 
 export function readFilters(params: URLSearchParams): Filters {
@@ -75,6 +79,7 @@ export function toQueryString(filters: Filters): string {
 
 export function filtersToApiParams(filters: Filters): Record<string, any> {
   const redZone = filters.red_zone;
+
   const out: Record<string, any> = {
     q: filters.search || undefined,
     state: filters.state || undefined,
@@ -88,12 +93,26 @@ export function filtersToApiParams(filters: Filters): Record<string, any> {
     max_offender_count: filters.offender_max || undefined,
     deals_only: filters.deals_only || undefined,
     include_suppressed: filters.include_suppressed || undefined,
+    include_hidden: filters.include_hidden || undefined,
     hidden_reason: filters.hidden_reason || undefined,
     sort: filters.sort || undefined,
+    page: filters.page || undefined,
   };
 
   if (redZone === "true") out.only_red_zone = "true";
   if (redZone === "false") out.exclude_red_zone = "true";
 
   return out;
+}
+
+export function isDealsOnly(filters: Filters): boolean {
+  return filters.deals_only === "true";
+}
+
+export function includesSuppressed(filters: Filters): boolean {
+  return filters.include_suppressed === "true";
+}
+
+export function includesHidden(filters: Filters): boolean {
+  return filters.include_hidden === "true";
 }
