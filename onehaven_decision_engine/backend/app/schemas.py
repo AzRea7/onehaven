@@ -391,14 +391,22 @@ class RentAssumptionOut(RentAssumptionUpsert):
 
 
 class FinancialEnrichmentOut(BaseModel):
-    ok: bool = True
+    ok: bool
     property_id: int
-    annual_amount: Optional[float] = None
-    annual_rate: Optional[float] = None
-    source: Optional[str] = None
-    confidence: Optional[float] = None
-    year: Optional[int] = None
+    annual_amount: float | None = None
+    annual_rate: float | None = None
+    source: str | None = None
+    confidence: float | None = None
+    year: int | None = None
     cached: bool = False
+
+    resolved_price: float | None = None
+    monthly_taxes: float | None = None
+    reason: str | None = None
+
+    lookup_url: str | None = None
+    parcel_id: str | None = None
+    jurisdiction: str | None = None
 
 
 class FinancialEnrichmentBatchIn(BaseModel):
