@@ -1145,55 +1145,9 @@ export default function InvestorPane() {
   return (
     <PageShell>
       <div className="space-y-6">
-        <PaneSwitcher activePane="investor" />
-
         <PageHero
           eyebrow="Investor"
-          title="Investor deal inventory"
-          subtitle="Trustworthy ranking metrics from enriched rent, tax, insurance, and housing-cost data."
-          right={
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-3xl border border-app bg-app-panel px-4 py-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                  Visible properties
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-app-0">
-                  {stats.visible}
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-app bg-app-panel px-4 py-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                  Deal candidates
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-app-0">
-                  {stats.dealCount}
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-app bg-app-panel px-4 py-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                  Avg cashflow
-                </div>
-                <div
-                  className={`mt-2 text-2xl font-semibold ${metricTone(stats.avgCashflow)}`}
-                >
-                  {money(stats.avgCashflow)}
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-app bg-app-panel px-4 py-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                  Avg DSCR
-                </div>
-                <div
-                  className={`mt-2 text-2xl font-semibold ${metricTone(stats.avgDscr)}`}
-                >
-                  {decimal(stats.avgDscr, 2)}
-                </div>
-              </div>
-            </div>
-          }
+          title=""          
         />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
