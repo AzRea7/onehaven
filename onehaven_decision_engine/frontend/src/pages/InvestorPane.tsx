@@ -153,7 +153,9 @@ function inferAskingPrice(r: any) {
 
 function inferMarketRent(r: any) {
   return (
+    numberOrNull(r?.market_reference_rent) ??
     numberOrNull(r?.market_rent_estimate) ??
+    numberOrNull(r?.inventory_snapshot?.market_reference_rent) ??
     numberOrNull(r?.inventory_snapshot?.market_rent_estimate) ??
     numberOrNull(r?.rent_assumption?.market_rent_estimate) ??
     numberOrNull(r?.monthly_rent_estimate) ??
@@ -234,6 +236,7 @@ function inferInsuranceSource(r: any) {
 function inferMonthlyHousingCost(r: any) {
   return (
     numberOrNull(r?.monthly_housing_cost) ??
+    numberOrNull(r?.inventory_snapshot?.monthly_housing_cost) ??
     (() => {
       const mortgage = inferMortgage(r);
       const taxes = inferMonthlyTaxes(r);
@@ -248,6 +251,7 @@ function inferMonthlyHousingCost(r: any) {
 function inferCashflow(r: any) {
   const direct =
     numberOrNull(r?.projected_monthly_cashflow) ??
+    numberOrNull(r?.inventory_snapshot?.projected_monthly_cashflow) ??
     numberOrNull(r?.cashflow_estimate) ??
     numberOrNull(r?.last_underwriting_result?.cash_flow) ??
     numberOrNull(r?.last_underwriting_result?.cashflow) ??
@@ -256,7 +260,7 @@ function inferCashflow(r: any) {
 
   if (direct != null) return direct;
 
-  const rent = inferMarketRent(r);
+  const rent = inferRentUsed(r) ?? inferMarketRent(r);
   const housing = inferMonthlyHousingCost(r);
 
   if (rent == null || housing == null) return null;
@@ -264,12 +268,22 @@ function inferCashflow(r: any) {
 }
 
 function inferRentGap(r: any) {
-  return numberOrNull(r?.rent_gap) ?? null;
+  return (
+    numberOrNull(r?.rent_gap) ??
+    numberOrNull(r?.inventory_snapshot?.rent_gap) ??
+    (() => {
+      const rent = inferMarketRent(r);
+      const housing = inferMonthlyHousingCost(r);
+      if (rent == null || housing == null) return null;
+      return rent - housing;
+    })()
+  );
 }
 
 function inferDscr(r: any) {
   return (
     numberOrNull(r?.dscr) ??
+    numberOrNull(r?.inventory_snapshot?.dscr) ??
     numberOrNull(r?.last_underwriting_result?.dscr) ??
     null
   );
@@ -385,7 +399,7 @@ function inferCompleteness(r: any): "COMPLETE" | "PARTIAL" | "MISSING" {
   }
 
   const price = inferAskingPrice(r);
-  const rent = inferMarketRent(r);
+  const rent = inferRentUsed(r) ?? inferMarketRent(r);
   const lat = inferLat(r);
   const lng = inferLng(r);
 
@@ -479,10 +493,6 @@ function inferTags(r: any): string[] {
   const crime = inferCrime(r);
   const risk = inferRiskScore(r);
   const isCandidate = inferIsDealCandidate(r);
-  const mortgage = inferMortgage(r);
-  const monthlyTaxes = inferMonthlyTaxes(r);
-  const monthlyInsurance = inferMonthlyInsurance(r);
-  const monthlyHousingCost = inferMonthlyHousingCost(r);
 
   if (isCandidate) tags.add("Deal candidate");
   else tags.add("Not deal");
@@ -625,17 +635,6 @@ function marketSubLabel(market: any) {
     .join(" • ");
 }
 
-function sortToApiValue(sort: SortKey) {
-  if (sort === "BEST_CASHFLOW") return "best_cashflow";
-  if (sort === "BEST_DSCR") return "best_dscr";
-  if (sort === "BEST_RENT_GAP") return "best_rent_gap";
-  if (sort === "LOWEST_RISK") return "lowest_risk";
-  if (sort === "LOWEST_PRICE") return "lowest_price";
-  if (sort === "HIGHEST_PRICE") return "highest_price";
-  if (sort === "NEWEST") return "newest";
-  return "relevance";
-}
-
 function compareRows(a: any, b: any, sort: SortKey) {
   const aCashflow = inferCashflow(a);
   const bCashflow = inferCashflow(b);
@@ -738,8 +737,8 @@ function TopDealCard({
   const monthlyInsurance = inferMonthlyInsurance(row);
   const monthlyHousingCost = inferMonthlyHousingCost(row);
 
-  return (
-    <div className="overflow-visible rounded-3xl border border-app bg-app-panel">
+  const content = (
+    <div className="overflow-visible rounded-3xl border border-app bg-app-panel transition hover:border-app-strong hover:bg-app-muted/30">
       <div className="h-44 bg-app-muted">
         <Photo url={photoUrl} alt={property?.address || "Property"} />
       </div>
@@ -796,24 +795,21 @@ function TopDealCard({
                   : "bad"
             }
           />
-          <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
-            <StatPill label="Mortgage" value={money(mortgage)} tone="neutral" />
-            <StatPill
-              label="Taxes"
-              value={money(monthlyTaxes)}
-              tone="neutral"
-            />
-            <StatPill
-              label="Insurance"
-              value={money(monthlyInsurance)}
-              tone="neutral"
-            />
-            <StatPill
-              label="Housing total"
-              value={money(monthlyHousingCost)}
-              tone="neutral"
-            />
-          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
+          <StatPill label="Mortgage" value={money(mortgage)} tone="neutral" />
+          <StatPill label="Taxes" value={money(monthlyTaxes)} tone="neutral" />
+          <StatPill
+            label="Insurance"
+            value={money(monthlyInsurance)}
+            tone="neutral"
+          />
+          <StatPill
+            label="Housing total"
+            value={money(monthlyHousingCost)}
+            tone="neutral"
+          />
         </div>
 
         <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
@@ -831,16 +827,21 @@ function TopDealCard({
         </div>
 
         {propertyId ? (
-          <Link
-            to={`/properties/${propertyId}`}
-            className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-app-1 hover:text-app-0"
-          >
+          <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-app-1">
             Open property
             <ArrowUpRight className="h-4 w-4" />
-          </Link>
+          </div>
         ) : null}
       </div>
     </div>
+  );
+
+  if (!propertyId) return content;
+
+  return (
+    <Link to={`/properties/${propertyId}`} className="block">
+      {content}
+    </Link>
   );
 }
 
@@ -903,7 +904,7 @@ export default function InvestorPane() {
     } finally {
       setInventoryLoading(false);
     }
-  }, [deferredQ, selectedMarket, sort, dealsOnly, includeSuppressed]);
+  }, [deferredQ, selectedMarket, dealsOnly, includeSuppressed]);
 
   const loadMarkets = React.useCallback(async () => {
     setMarketsLoading(true);
@@ -972,6 +973,19 @@ export default function InvestorPane() {
   React.useEffect(() => {
     loadInventory();
   }, [loadInventory, marketRefreshNonce]);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    deferredQ,
+    decision,
+    financing,
+    completeness,
+    sort,
+    selectedMarket?.slug,
+    dealsOnly,
+    includeSuppressed,
+  ]);
 
   const filteredRows = React.useMemo(() => {
     return rows
@@ -1050,11 +1064,6 @@ export default function InvestorPane() {
         const rentGap = inferRentGap(row);
         const risk = inferRiskScore(row);
 
-        const mortgage = inferMortgage(row);
-        const monthlyTaxes = inferMonthlyTaxes(row);
-        const monthlyInsurance = inferMonthlyInsurance(row);
-        const monthlyHousingCost = inferMonthlyHousingCost(row);
-
         if (cashflow != null) {
           acc.cashflowSum += cashflow;
           acc.cashflowCount += 1;
@@ -1114,19 +1123,6 @@ export default function InvestorPane() {
     return filteredRows.slice(start, start + PAGE_SIZE);
   }, [filteredRows, safeCurrentPage]);
 
-  React.useEffect(() => {
-    setCurrentPage(1);
-  }, [
-    deferredQ,
-    decision,
-    financing,
-    completeness,
-    sort,
-    selectedMarket?.slug,
-    dealsOnly,
-    includeSuppressed,
-  ]);
-
   const pagination = buildPagination(safeCurrentPage, totalPages);
 
   async function refreshSelectedMarket() {
@@ -1148,397 +1144,451 @@ export default function InvestorPane() {
 
   return (
     <PageShell>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-6">
-          <Surface
-            title="Ranking controls"
-            subtitle="Search one supported market at a time, then sort and filter the list view."
-          >
-            <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr_auto]">
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <BriefcaseBusiness className="h-4 w-4" />
-                  Market
+      <div className="space-y-6">
+        <PaneSwitcher activePane="investor" />
+
+        <PageHero
+          eyebrow="Investor"
+          title="Investor deal inventory"
+          subtitle="Trustworthy ranking metrics from enriched rent, tax, insurance, and housing-cost data."
+          right={
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-3xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Visible properties
                 </div>
-                <div className="mt-2">
-                  <AppSelect
-                    value={selectedMarket?.slug || ""}
-                    onChange={(value) =>
-                      setSelectedMarket(
-                        markets.find((m) => m.slug === value) || null,
-                      )
-                    }
-                    options={markets.map((market) => ({
-                      value: market.slug,
-                      label: marketDisplayName(market),
-                    }))}
+                <div className="mt-2 text-2xl font-semibold text-app-0">
+                  {stats.visible}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Deal candidates
+                </div>
+                <div className="mt-2 text-2xl font-semibold text-app-0">
+                  {stats.dealCount}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Avg cashflow
+                </div>
+                <div
+                  className={`mt-2 text-2xl font-semibold ${metricTone(stats.avgCashflow)}`}
+                >
+                  {money(stats.avgCashflow)}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Avg DSCR
+                </div>
+                <div
+                  className={`mt-2 text-2xl font-semibold ${metricTone(stats.avgDscr)}`}
+                >
+                  {decimal(stats.avgDscr, 2)}
+                </div>
+              </div>
+            </div>
+          }
+        />
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-6">
+            <Surface
+              title="Ranking controls"
+              subtitle="Search one supported market at a time, then sort and filter the list view."
+            >
+              <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr_auto]">
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                    <BriefcaseBusiness className="h-4 w-4" />
+                    Market
+                  </div>
+                  <div className="mt-2">
+                    <AppSelect
+                      value={selectedMarket?.slug || ""}
+                      onChange={(value) =>
+                        setSelectedMarket(
+                          markets.find((m) => m.slug === value) || null,
+                        )
+                      }
+                      options={markets.map((market) => ({
+                        value: market.slug,
+                        label: marketDisplayName(market),
+                      }))}
+                    />
+                  </div>
+
+                  {selectedMarket ? (
+                    <div className="mt-2 text-xs text-app-4">
+                      {marketSubLabel(selectedMarket)}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                    <Search className="h-4 w-4" />
+                    Search
+                  </div>
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Address, city, zip, county"
+                    className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
                   />
                 </div>
 
-                {selectedMarket ? (
-                  <div className="mt-2 text-xs text-app-4">
-                    {marketSubLabel(selectedMarket)}
-                  </div>
-                ) : null}
-
-                {selectedMarket ? (
-                  <div className="mt-2 text-xs text-app-4">
-                    {marketSubLabel(selectedMarket)}
-                  </div>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={refreshSelectedMarket}
+                  disabled={refreshing || !selectedMarket?.slug}
+                  className="inline-flex h-full min-h-[88px] items-center justify-center gap-2 rounded-2xl border border-app bg-app-panel px-5 py-3 text-sm font-medium text-app-0 transition hover:bg-app-muted disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {refreshing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="h-4 w-4" />
+                  )}
+                  Sync now
+                </button>
               </div>
 
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <Search className="h-4 w-4" />
-                  Search
+              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                    <GitBranch className="h-4 w-4" />
+                    Decision
+                  </div>
+
+                  <div className="mt-2">
+                    <AppSelect
+                      value={decision}
+                      onChange={(value) => setDecision(value as DecisionFilter)}
+                      options={[
+                        { value: "ALL", label: "All" },
+                        { value: "GOOD_DEAL", label: "Good deal" },
+                        { value: "REVIEW", label: "Review" },
+                        { value: "REJECT", label: "Reject" },
+                      ]}
+                    />
+                  </div>
                 </div>
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Address, city, zip, county"
-                  className="mt-2 w-full rounded-xl border border-app bg-app-muted px-3 py-2 text-sm text-app-0 outline-none"
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                    <Landmark className="h-4 w-4" />
+                    Financing
+                  </div>
+                  <div className="mt-2">
+                    <AppSelect
+                      value={financing}
+                      onChange={(value) =>
+                        setFinancing(value as FinancingFilter)
+                      }
+                      options={[
+                        { value: "ALL", label: "All" },
+                        { value: "CASH", label: "Cash" },
+                        { value: "DSCR", label: "DSCR" },
+                        { value: "UNKNOWN", label: "Unknown" },
+                      ]}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Completeness
+                  </div>
+                  <div className="mt-2">
+                    <AppSelect
+                      value={completeness}
+                      onChange={(value) =>
+                        setCompleteness(value as CompletenessFilter)
+                      }
+                      options={[
+                        { value: "ALL", label: "All" },
+                        { value: "COMPLETE", label: "Complete" },
+                        { value: "PARTIAL", label: "Partial" },
+                        { value: "MISSING", label: "Missing" },
+                      ]}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                    <Wallet className="h-4 w-4" />
+                    Deals only
+                  </div>
+                  <label className="oh-toggle mt-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={dealsOnly}
+                      onChange={(e) => setDealsOnly(e.target.checked)}
+                    />
+                    <span>
+                      {dealsOnly ? "Showing only deals" : "Showing all rows"}
+                    </span>
+                  </label>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                    <ShieldAlert className="h-4 w-4" />
+                    Suppressed
+                  </div>
+                  <label className="oh-toggle mt-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={includeSuppressed}
+                      onChange={(e) => setIncludeSuppressed(e.target.checked)}
+                    />
+                    <span>{includeSuppressed ? "Included" : "Hidden"}</span>
+                  </label>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                    <Settings2 className="h-4 w-4" />
+                    Sort
+                  </div>
+                  <div className="mt-2">
+                    <AppSelect
+                      value={sort}
+                      onChange={(value) => setSort(value as SortKey)}
+                      options={[
+                        { value: "RELEVANCE", label: "Relevance" },
+                        { value: "BEST_CASHFLOW", label: "Best cashflow" },
+                        { value: "BEST_DSCR", label: "Best DSCR" },
+                        { value: "BEST_RENT_GAP", label: "Best rent gap" },
+                        { value: "LOWEST_RISK", label: "Lowest risk" },
+                        { value: "NEWEST", label: "Newest" },
+                        { value: "LOWEST_PRICE", label: "Lowest price" },
+                        { value: "HIGHEST_PRICE", label: "Highest price" },
+                      ]}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {inventoryErr ? (
+                <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                  {inventoryErr}
+                </div>
+              ) : null}
+
+              {marketsErr ? (
+                <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                  {marketsErr}
+                </div>
+              ) : null}
+            </Surface>
+
+            <Surface
+              title="Top ranked deals"
+              subtitle="The strongest deal candidates in the current filtered view."
+            >
+              {inventoryLoading || marketsLoading ? (
+                <div className="flex items-center justify-center py-16 text-app-4">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </div>
+              ) : !topDeals.length ? (
+                <EmptyState
+                  title="No ranked deals yet"
+                  description="Turn Deals only off or relax one of the filters."
                 />
-              </div>
-
-              <button
-                type="button"
-                onClick={refreshSelectedMarket}
-                disabled={refreshing || !selectedMarket?.slug}
-                className="inline-flex h-full min-h-[88px] items-center justify-center gap-2 rounded-2xl border border-app bg-app-panel px-5 py-3 text-sm font-medium text-app-0 transition hover:bg-app-muted disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {refreshing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="h-4 w-4" />
-                )}
-                Sync now
-              </button>
-            </div>
-
-            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <GitBranch className="h-4 w-4" />
-                  Decision
+              ) : (
+                <div className="grid gap-4 xl:grid-cols-3">
+                  {topDeals.map((row, index) => (
+                    <TopDealCard
+                      key={`${resolvePropertyId(row) || index}-${index}`}
+                      row={row}
+                      index={index}
+                      sort={sort}
+                    />
+                  ))}
                 </div>
+              )}
+            </Surface>
 
-                <div className="mt-2">
-                  <AppSelect
-                    value={decision}
-                    onChange={(value) => setDecision(value as DecisionFilter)}
-                    options={[
-                      { value: "ALL", label: "All" },
-                      { value: "GOOD_DEAL", label: "Good deal" },
-                      { value: "REVIEW", label: "Review" },
-                      { value: "REJECT", label: "Reject" },
-                    ]}
-                  />
+            <Surface
+              title="House list view"
+              subtitle="This list shows whether each property is a deal or not a deal. Click anywhere on a card to open the property page."
+            >
+              {inventoryLoading || marketsLoading ? (
+                <div className="flex items-center justify-center py-16 text-app-4">
+                  <Loader2 className="h-5 w-5 animate-spin" />
                 </div>
-              </div>
+              ) : !pageRows.length ? (
+                <EmptyState
+                  title="No properties match the current filters"
+                  description="Try a different market, search term, or turn Deals only off."
+                />
+              ) : (
+                <>
+                  <div className="grid gap-4">
+                    {pageRows.map((row, index) => {
+                      const property = inferProperty(row);
+                      const propertyId = resolvePropertyId(row);
+                      const askingPrice = inferAskingPrice(row);
+                      const marketRent = inferMarketRent(row);
+                      const rentUsed = inferRentUsed(row);
+                      const cashflow = inferCashflow(row);
+                      const dscr = inferDscr(row);
+                      const rentGap = inferRentGap(row);
+                      const risk = inferRiskScore(row);
+                      const completenessValue = inferCompleteness(row);
+                      const photoUrl = inferPhotoUrl(row);
+                      const tags = inferTags(row);
+                      const updatedAt = inferUpdatedAt(row);
+                      const mortgage = inferMortgage(row);
+                      const monthlyTaxes = inferMonthlyTaxes(row);
+                      const monthlyInsurance = inferMonthlyInsurance(row);
+                      const monthlyHousingCost = inferMonthlyHousingCost(row);
+                      const taxAnnual = inferTaxAnnual(row);
+                      const taxSource = inferTaxSource(row);
+                      const insuranceAnnual = inferInsuranceAnnual(row);
+                      const insuranceSource = inferInsuranceSource(row);
+                      const absoluteRank =
+                        (safeCurrentPage - 1) * PAGE_SIZE + index + 1;
+                      const reasons = rankingReason(row, sort, absoluteRank);
+                      const isDeal = inferIsDealCandidate(row);
 
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <Landmark className="h-4 w-4" />
-                  Financing
-                </div>
-                <div className="mt-2">
-                  <AppSelect
-                    value={financing}
-                    onChange={(value) => setFinancing(value as FinancingFilter)}
-                    options={[
-                      { value: "ALL", label: "All" },
-                      { value: "CASH", label: "Cash" },
-                      { value: "DSCR", label: "DSCR" },
-                      { value: "UNKNOWN", label: "Unknown" },
-                    ]}
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <CheckCircle2 className="h-4 w-4" />
-                  Completeness
-                </div>
-                <div className=" mt-2">
-                  <AppSelect
-                    value={completeness}
-                    onChange={(value) =>
-                      setCompleteness(value as CompletenessFilter)
-                    }
-                    options={[
-                      { value: "ALL", label: "All" },
-                      { value: "COMPLETE", label: "Complete" },
-                      { value: "PARTIAL", label: "Partial" },
-                      { value: "MISSING", label: "Missing" },
-                    ]}
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <Wallet className="h-4 w-4" />
-                  Deals only
-                </div>
-                <label className="oh-toggle mt-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={dealsOnly}
-                    onChange={(e) => setDealsOnly(e.target.checked)}
-                  />
-                  <span>
-                    {dealsOnly ? "Showing only deals" : "Showing all rows"}
-                  </span>
-                </label>
-              </div>
-
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <ShieldAlert className="h-4 w-4" />
-                  Suppressed
-                </div>
-                <label className="oh-toggle mt-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={includeSuppressed}
-                    onChange={(e) => setIncludeSuppressed(e.target.checked)}
-                  />
-                  <span>{includeSuppressed ? "Included" : "Hidden"}</span>
-                </label>
-              </div>
-
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                  <Settings2 className="h-4 w-4" />
-                  Sort
-                </div>
-                <div className="mt-2">
-                  <AppSelect
-                    value={sort}
-                    onChange={(value) => setSort(value as SortKey)}
-                    options={[
-                      { value: "RELEVANCE", label: "Relevance" },
-                      { value: "BEST_CASHFLOW", label: "Best cashflow" },
-                      { value: "BEST_DSCR", label: "Best DSCR" },
-                      { value: "BEST_RENT_GAP", label: "Best rent gap" },
-                      { value: "LOWEST_RISK", label: "Lowest risk" },
-                      { value: "NEWEST", label: "Newest" },
-                      { value: "LOWEST_PRICE", label: "Lowest price" },
-                      { value: "HIGHEST_PRICE", label: "Highest price" },
-                    ]}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {inventoryErr ? (
-              <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                {inventoryErr}
-              </div>
-            ) : null}
-
-            {marketsErr ? (
-              <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                {marketsErr}
-              </div>
-            ) : null}
-          </Surface>
-
-          <Surface
-            title="Top ranked deals"
-            subtitle="The strongest deal candidates in the current filtered view."
-          >
-            {inventoryLoading || marketsLoading ? (
-              <div className="flex items-center justify-center py-16 text-app-4">
-                <Loader2 className="h-5 w-5 animate-spin" />
-              </div>
-            ) : !topDeals.length ? (
-              <EmptyState
-                title="No ranked deals yet"
-                description="Turn Deals only off or relax one of the filters."
-              />
-            ) : (
-              <div className="grid gap-4 xl:grid-cols-3">
-                {topDeals.map((row, index) => (
-                  <TopDealCard
-                    key={`${resolvePropertyId(row) || index}-${index}`}
-                    row={row}
-                    index={index}
-                    sort={sort}
-                  />
-                ))}
-              </div>
-            )}
-          </Surface>
-
-          <Surface
-            title="House list view"
-            subtitle="This list shows whether each property is a deal or not a deal. Use Deals only when you want to narrow it down."
-          >
-            {inventoryLoading || marketsLoading ? (
-              <div className="flex items-center justify-center py-16 text-app-4">
-                <Loader2 className="h-5 w-5 animate-spin" />
-              </div>
-            ) : !pageRows.length ? (
-              <EmptyState
-                title="No properties match the current filters"
-                description="Try a different market, search term, or turn Deals only off."
-              />
-            ) : (
-              <>
-                <div className="grid gap-4">
-                  {pageRows.map((row, index) => {
-                    const property = inferProperty(row);
-                    const propertyId = resolvePropertyId(row);
-                    const askingPrice = inferAskingPrice(row);
-                    const marketRent = inferMarketRent(row);
-                    const cashflow = inferCashflow(row);
-                    const dscr = inferDscr(row);
-                    const rentGap = inferRentGap(row);
-                    const risk = inferRiskScore(row);
-                    const completenessValue = inferCompleteness(row);
-                    const photoUrl = inferPhotoUrl(row);
-                    const tags = inferTags(row);
-                    const updatedAt = inferUpdatedAt(row);
-                    const mortgage = inferMortgage(row);
-                    const monthlyTaxes = inferMonthlyTaxes(row);
-                    const monthlyInsurance = inferMonthlyInsurance(row);
-                    const monthlyHousingCost = inferMonthlyHousingCost(row);
-                    const absoluteRank =
-                      (safeCurrentPage - 1) * PAGE_SIZE + index + 1;
-                    const reasons = rankingReason(row, sort, absoluteRank);
-                    const isDeal = inferIsDealCandidate(row);
-
-                    return (
-                      <div
-                        key={
-                          propertyId ||
-                          `${property?.address || "property"}-${absoluteRank}`
-                        }
-                        className="overflow-visible rounded-3xl border border-app bg-app-panel"
-                      >
-                        <div className="grid gap-0 xl:grid-cols-[260px_minmax(0,1fr)]">
-                          <div className="h-[220px] bg-app-muted xl:h-full">
-                            <Photo
-                              url={photoUrl}
-                              alt={property?.address || "Property"}
-                            />
-                          </div>
-
-                          <div className="p-5">
-                            <div className="flex flex-wrap items-start justify-between gap-4">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="oh-pill">
-                                    <TrendingUp className="h-3.5 w-3.5" />
-                                    Rank #{absoluteRank}
-                                  </span>
-                                  <span
-                                    className={decisionPillClass(
-                                      row?.normalized_decision ||
-                                        row?.classification,
-                                    )}
-                                  >
-                                    {decisionLabel(
-                                      row?.normalized_decision ||
-                                        row?.classification,
-                                    )}
-                                  </span>
-                                  <span
-                                    className={completenessPillClass(
-                                      completenessValue,
-                                    )}
-                                  >
-                                    {completenessLabel(completenessValue)}
-                                  </span>
-                                  <span
-                                    className={
-                                      isDeal
-                                        ? "oh-pill oh-pill-good"
-                                        : "oh-pill oh-pill-warn"
-                                    }
-                                  >
-                                    {isDeal ? "Deal" : "Not deal / review"}
-                                  </span>
-                                </div>
-
-                                <div className="mt-3 text-xl font-semibold text-app-0">
-                                  {property?.address || "Unknown address"}
-                                </div>
-
-                                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-app-4">
-                                  <span className="inline-flex items-center gap-1">
-                                    <MapPin className="h-4 w-4" />
-                                    {[
-                                      property?.city,
-                                      property?.state,
-                                      property?.zip,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(", ")}
-                                  </span>
-                                  <span>•</span>
-                                  <span>{relativeTime(updatedAt)}</span>
-                                </div>
-                              </div>
-
-                              <div className="text-right">
-                                <div className="text-xs uppercase tracking-[0.18em] text-app-4">
-                                  Asking
-                                </div>
-                                <div className="mt-1 text-2xl font-semibold text-app-0">
-                                  {money(askingPrice)}
-                                </div>
-                              </div>
+                      const content = (
+                        <div className="overflow-visible rounded-3xl border border-app bg-app-panel transition hover:border-app-strong hover:bg-app-muted/30">
+                          <div className="grid gap-0 xl:grid-cols-[260px_minmax(0,1fr)]">
+                            <div className="h-[220px] bg-app-muted xl:h-full">
+                              <Photo
+                                url={photoUrl}
+                                alt={property?.address || "Property"}
+                              />
                             </div>
 
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              <StatPill
-                                label="Cashflow"
-                                value={money(cashflow)}
-                                tone={
-                                  cashflow != null && cashflow > 0
-                                    ? "good"
-                                    : cashflow != null && cashflow < 0
-                                      ? "bad"
-                                      : "neutral"
-                                }
-                              />
-                              <StatPill
-                                label="DSCR"
-                                value={decimal(dscr, 2)}
-                                tone={
-                                  dscr != null && dscr >= 1.2
-                                    ? "good"
-                                    : dscr != null && dscr < 1
-                                      ? "bad"
-                                      : "warn"
-                                }
-                              />
-                              <StatPill
-                                label="Rent gap"
-                                value={money(rentGap)}
-                                tone={
-                                  rentGap != null && rentGap > 0
-                                    ? "good"
-                                    : rentGap != null && rentGap < 0
-                                      ? "bad"
-                                      : "neutral"
-                                }
-                              />
-                              <StatPill
-                                label="Risk"
-                                value={decimal(risk, 0)}
-                                tone={
-                                  risk != null && risk <= 25
-                                    ? "good"
-                                    : risk != null && risk <= 50
-                                      ? "warn"
-                                      : "bad"
-                                }
-                              />
+                            <div className="p-5">
+                              <div className="flex flex-wrap items-start justify-between gap-4">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="oh-pill">
+                                      <TrendingUp className="h-3.5 w-3.5" />
+                                      Rank #{absoluteRank}
+                                    </span>
+                                    <span
+                                      className={decisionPillClass(
+                                        row?.normalized_decision ||
+                                          row?.classification,
+                                      )}
+                                    >
+                                      {decisionLabel(
+                                        row?.normalized_decision ||
+                                          row?.classification,
+                                      )}
+                                    </span>
+                                    <span
+                                      className={completenessPillClass(
+                                        completenessValue,
+                                      )}
+                                    >
+                                      {completenessLabel(completenessValue)}
+                                    </span>
+                                    <span
+                                      className={
+                                        isDeal
+                                          ? "oh-pill oh-pill-good"
+                                          : "oh-pill oh-pill-warn"
+                                      }
+                                    >
+                                      {isDeal ? "Deal" : "Not deal / review"}
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-3 text-xl font-semibold text-app-0">
+                                    {property?.address || "Unknown address"}
+                                  </div>
+
+                                  <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-app-4">
+                                    <span className="inline-flex items-center gap-1">
+                                      <MapPin className="h-4 w-4" />
+                                      {[
+                                        property?.city,
+                                        property?.state,
+                                        property?.zip,
+                                      ]
+                                        .filter(Boolean)
+                                        .join(", ")}
+                                    </span>
+                                    <span>•</span>
+                                    <span>{relativeTime(updatedAt)}</span>
+                                  </div>
+                                </div>
+
+                                <div className="text-right">
+                                  <div className="text-xs uppercase tracking-[0.18em] text-app-4">
+                                    Asking
+                                  </div>
+                                  <div className="mt-1 text-2xl font-semibold text-app-0">
+                                    {money(askingPrice)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 flex flex-wrap gap-2">
+                                <StatPill
+                                  label="Cashflow"
+                                  value={money(cashflow)}
+                                  tone={
+                                    cashflow != null && cashflow > 0
+                                      ? "good"
+                                      : cashflow != null && cashflow < 0
+                                        ? "bad"
+                                        : "neutral"
+                                  }
+                                />
+                                <StatPill
+                                  label="DSCR"
+                                  value={decimal(dscr, 2)}
+                                  tone={
+                                    dscr != null && dscr >= 1.2
+                                      ? "good"
+                                      : dscr != null && dscr < 1
+                                        ? "bad"
+                                        : "warn"
+                                  }
+                                />
+                                <StatPill
+                                  label="Rent gap"
+                                  value={money(rentGap)}
+                                  tone={
+                                    rentGap != null && rentGap > 0
+                                      ? "good"
+                                      : rentGap != null && rentGap < 0
+                                        ? "bad"
+                                        : "neutral"
+                                  }
+                                />
+                                <StatPill
+                                  label="Rent"
+                                  value={money(rentUsed ?? marketRent)}
+                                  tone="neutral"
+                                />
+                                <StatPill
+                                  label="Risk"
+                                  value={decimal(risk, 0)}
+                                  tone={
+                                    risk != null && risk <= 25
+                                      ? "good"
+                                      : risk != null && risk <= 50
+                                        ? "warn"
+                                        : "bad"
+                                  }
+                                />
+                              </div>
+
                               <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
                                 <StatPill
                                   label="Mortgage"
@@ -1561,317 +1611,360 @@ export default function InvestorPane() {
                                   tone="neutral"
                                 />
                               </div>
-                            </div>
 
-                            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                              <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                  <Wallet className="h-4 w-4" />
-                                  Cashflow
-                                </div>
-                                <div
-                                  className={`mt-2 text-lg font-semibold ${metricTone(cashflow)}`}
-                                >
-                                  {money(cashflow)}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                  <Landmark className="h-4 w-4" />
-                                  DSCR
-                                </div>
-                                <div
-                                  className={`mt-2 text-lg font-semibold ${metricTone(dscr)}`}
-                                >
-                                  {decimal(dscr, 2)}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                  <TrendingUp className="h-4 w-4" />
-                                  Rent gap
-                                </div>
-                                <div
-                                  className={`mt-2 text-lg font-semibold ${metricTone(rentGap)}`}
-                                >
-                                  {money(rentGap)}
-                                </div>
-                                <div className="mt-1 text-xs text-app-4">
-                                  Rent {money(marketRent)}
-                                </div>
-                              </div>
-
-                              <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                  <ShieldAlert className="h-4 w-4" />
-                                  Risk
-                                </div>
-                                <div
-                                  className={`mt-2 text-lg font-semibold ${metricTone(risk, { inverse: true })}`}
-                                >
-                                  {decimal(risk, 0)}
-                                </div>
-                                <div className="mt-1 text-xs text-app-4">
-                                  Lower is better
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
-                              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                                Why this row ranks here
-                              </div>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {reasons.map((reason) => (
-                                  <span key={reason} className="oh-pill">
-                                    {reason}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div className="mt-4">
-                              <RiskBadges
-                                compact
-                                county={inferCounty(row)}
-                                isRedZone={inferIsRedZone(row)}
-                                crimeScore={inferCrime(row)}
-                                offenderCount={inferOffenderCount(row)}
-                                lat={inferLat(row)}
-                                lng={inferLng(row)}
-                                normalizedAddress={inferNormalizedAddress(row)}
-                                geocodeSource={inferGeocodeSource(row)}
-                                geocodeConfidence={inferGeocodeConfidence(row)}
-                              />
-                            </div>
-
-                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                              <div className="flex flex-wrap gap-2">
-                                {tags.map((tag) => (
-                                  <span key={tag} className="oh-pill">
-                                    {tag}
-                                  </span>
-                                ))}
-                              </div>
-
-                              <div className="flex items-center gap-3">
-                                <div className="text-xs text-app-4">
-                                  {property?.bedrooms != null ? (
-                                    <span className="inline-flex items-center gap-1">
-                                      <BedDouble className="h-4 w-4" />
-                                      {property.bedrooms} bd
-                                    </span>
-                                  ) : null}
-                                  {property?.bathrooms != null ? (
-                                    <span className="ml-3 inline-flex items-center gap-1">
-                                      <Bath className="h-4 w-4" />
-                                      {property.bathrooms} ba
-                                    </span>
-                                  ) : null}
-                                </div>
-
-                                {propertyId ? (
-                                  <Link
-                                    to={`/properties/${propertyId}`}
-                                    className="inline-flex items-center gap-2 rounded-xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0 transition hover:bg-app-panel"
+                              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                                    <Wallet className="h-4 w-4" />
+                                    Cashflow
+                                  </div>
+                                  <div
+                                    className={`mt-2 text-lg font-semibold ${metricTone(cashflow)}`}
                                   >
-                                    Open
-                                    <ArrowUpRight className="h-4 w-4" />
-                                  </Link>
-                                ) : null}
+                                    {money(cashflow)}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                                    <Landmark className="h-4 w-4" />
+                                    DSCR
+                                  </div>
+                                  <div
+                                    className={`mt-2 text-lg font-semibold ${metricTone(dscr)}`}
+                                  >
+                                    {decimal(dscr, 2)}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                                    <TrendingUp className="h-4 w-4" />
+                                    Rent gap
+                                  </div>
+                                  <div
+                                    className={`mt-2 text-lg font-semibold ${metricTone(rentGap)}`}
+                                  >
+                                    {money(rentGap)}
+                                  </div>
+                                  <div className="mt-1 text-xs text-app-4">
+                                    Rent {money(rentUsed ?? marketRent)}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
+                                    <ShieldAlert className="h-4 w-4" />
+                                    Risk
+                                  </div>
+                                  <div
+                                    className={`mt-2 text-lg font-semibold ${metricTone(risk, { inverse: true })}`}
+                                  >
+                                    {decimal(risk, 0)}
+                                  </div>
+                                  <div className="mt-1 text-xs text-app-4">
+                                    Lower is better
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
+                                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                                  Why this row ranks here
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {reasons.map((reason) => (
+                                    <span key={reason} className="oh-pill">
+                                      {reason}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="mt-4">
+                                <RiskBadges
+                                  compact
+                                  county={inferCounty(row)}
+                                  isRedZone={inferIsRedZone(row)}
+                                  crimeScore={inferCrime(row)}
+                                  offenderCount={inferOffenderCount(row)}
+                                  lat={inferLat(row)}
+                                  lng={inferLng(row)}
+                                  normalizedAddress={inferNormalizedAddress(
+                                    row,
+                                  )}
+                                  geocodeSource={inferGeocodeSource(row)}
+                                  geocodeConfidence={inferGeocodeConfidence(
+                                    row,
+                                  )}
+                                />
+                              </div>
+
+                              {taxAnnual != null || insuranceAnnual != null ? (
+                                <div className="mt-4 text-xs text-app-4">
+                                  {taxAnnual != null ? (
+                                    <div>
+                                      Property tax annual {money(taxAnnual)}
+                                      {taxSource ? ` • ${taxSource}` : ""}
+                                    </div>
+                                  ) : null}
+                                  {insuranceAnnual != null ? (
+                                    <div>
+                                      Insurance annual {money(insuranceAnnual)}
+                                      {insuranceSource
+                                        ? ` • ${insuranceSource}`
+                                        : ""}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+
+                              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex flex-wrap gap-2">
+                                  {tags.map((tag) => (
+                                    <span key={tag} className="oh-pill">
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                  <div className="text-xs text-app-4">
+                                    {property?.bedrooms != null ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <BedDouble className="h-4 w-4" />
+                                        {property.bedrooms} bd
+                                      </span>
+                                    ) : null}
+                                    {property?.bathrooms != null ? (
+                                      <span className="ml-3 inline-flex items-center gap-1">
+                                        <Bath className="h-4 w-4" />
+                                        {property.bathrooms} ba
+                                      </span>
+                                    ) : null}
+                                  </div>
+
+                                  {propertyId ? (
+                                    <div className="inline-flex items-center gap-2 rounded-xl border border-app bg-app-muted px-3 py-2 text-sm font-medium text-app-0">
+                                      Open
+                                      <ArrowUpRight className="h-4 w-4" />
+                                    </div>
+                                  ) : null}
+                                </div>
                               </div>
                             </div>
                           </div>
                         </div>
+                      );
+
+                      if (!propertyId) {
+                        return (
+                          <div
+                            key={
+                              propertyId ||
+                              `${property?.address || "property"}-${absoluteRank}`
+                            }
+                          >
+                            {content}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <Link
+                          key={propertyId}
+                          to={`/properties/${propertyId}`}
+                          className="block"
+                        >
+                          {content}
+                        </Link>
+                      );
+                    })}
+                  </div>
+
+                  {totalPages > 1 ? (
+                    <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-sm text-app-4">
+                        Showing {(safeCurrentPage - 1) * PAGE_SIZE + 1}–
+                        {Math.min(
+                          safeCurrentPage * PAGE_SIZE,
+                          filteredRows.length,
+                        )}{" "}
+                        of {filteredRows.length}
                       </div>
-                    );
-                  })}
-                </div>
 
-                {totalPages > 1 ? (
-                  <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-sm text-app-4">
-                      Showing {(safeCurrentPage - 1) * PAGE_SIZE + 1}–
-                      {Math.min(
-                        safeCurrentPage * PAGE_SIZE,
-                        filteredRows.length,
-                      )}{" "}
-                      of {filteredRows.length}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCurrentPage((p) => Math.max(1, p - 1))
+                          }
+                          disabled={safeCurrentPage <= 1}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-app bg-app-panel text-app-0 disabled:opacity-50"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+
+                        {pagination.map((item, index) =>
+                          typeof item === "string" ? (
+                            <span
+                              key={`${item}-${index}`}
+                              className="px-2 text-app-4"
+                            >
+                              {item}
+                            </span>
+                          ) : (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => setCurrentPage(item)}
+                              className={`inline-flex h-9 min-w-9 items-center justify-center rounded-xl border px-3 text-sm ${
+                                item === safeCurrentPage
+                                  ? "border-app-strong bg-app-muted text-app-0"
+                                  : "border-app bg-app-panel text-app-3"
+                              }`}
+                            >
+                              {item}
+                            </button>
+                          ),
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCurrentPage((p) => Math.min(totalPages, p + 1))
+                          }
+                          disabled={safeCurrentPage >= totalPages}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-app bg-app-panel text-app-0 disabled:opacity-50"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
+                  ) : null}
+                </>
+              )}
+            </Surface>
+          </div>
 
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCurrentPage((p) => Math.max(1, p - 1))
-                        }
-                        disabled={safeCurrentPage <= 1}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-app bg-app-panel text-app-0 disabled:opacity-50"
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </button>
-
-                      {pagination.map((item, index) =>
-                        typeof item === "string" ? (
-                          <span
-                            key={`${item}-${index}`}
-                            className="px-2 text-app-4"
-                          >
-                            {item}
-                          </span>
-                        ) : (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => setCurrentPage(item)}
-                            className={`inline-flex h-9 min-w-9 items-center justify-center rounded-xl border px-3 text-sm ${
-                              item === safeCurrentPage
-                                ? "border-app-strong bg-app-muted text-app-0"
-                                : "border-app bg-app-panel text-app-3"
-                            }`}
-                          >
-                            {item}
-                          </button>
-                        ),
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCurrentPage((p) => Math.min(totalPages, p + 1))
-                        }
-                        disabled={safeCurrentPage >= totalPages}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-app bg-app-panel text-app-0 disabled:opacity-50"
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </Surface>
-        </div>
-
-        <div className="space-y-6">
-          <Surface
-            title="Current market"
-            subtitle="Selected supported market and current ranking mode."
-          >
-            {selectedMarket ? (
-              <div className="space-y-3">
-                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                  <div className="text-sm font-semibold text-app-0">
-                    {marketDisplayName(selectedMarket)}
-                  </div>
-                  <div className="mt-1 text-sm text-app-4">
-                    {marketSubLabel(selectedMarket)}
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                  <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                      Active sort
-                    </div>
-                    <div className="mt-2 text-sm font-medium text-app-0">
-                      {sort === "RELEVANCE"
-                        ? "Relevance"
-                        : sort === "BEST_CASHFLOW"
-                          ? "Best cashflow"
-                          : sort === "BEST_DSCR"
-                            ? "Best DSCR"
-                            : sort === "BEST_RENT_GAP"
-                              ? "Best rent gap"
-                              : sort === "LOWEST_RISK"
-                                ? "Lowest risk"
-                                : sort === "LOWEST_PRICE"
-                                  ? "Lowest price"
-                                  : sort === "HIGHEST_PRICE"
-                                    ? "Highest price"
-                                    : "Newest"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                      Coverage tier
-                    </div>
-                    <div className="mt-2 text-sm font-medium text-app-0">
-                      {selectedMarket.coverage_tier || "—"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                      Price band
-                    </div>
-                    <div className="mt-2 text-sm font-medium text-app-0">
-                      {money(selectedMarket.min_price)} to{" "}
-                      {money(selectedMarket.max_price)}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setSourcePackMarket(selectedMarket)}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm font-medium text-app-0 hover:bg-app-muted"
-                >
-                  <PanelRightOpen className="h-4 w-4" />
-                  View market source pack
-                </button>
-              </div>
-            ) : (
-              <EmptyState title="No supported market selected" />
-            )}
-          </Surface>
-
-          <IngestionLaunchCard
-            market={selectedMarket}
-            onRunQueued={() => {
-              setMarketRefreshNonce((v) => v + 1);
-              setRunsOpen(true);
-            }}
-            onManageSources={() => setSourcePackMarket(selectedMarket)}
-          />
-
-          <Surface
-            title="Recent sync activity"
-            subtitle="Keep sync feedback close to the investor pane."
-          >
-            <button
-              type="button"
-              onClick={() => setRunsOpen((v) => !v)}
-              className="inline-flex w-full items-center justify-between rounded-2xl border border-app bg-app-panel px-4 py-3 text-left text-sm text-app-0 hover:bg-app-muted"
+          <div className="space-y-6">
+            <Surface
+              title="Current market"
+              subtitle="Selected supported market and current ranking mode."
             >
-              <span className="inline-flex items-center gap-2">
-                <Clock3 className="h-4 w-4" />
-                {runsOpen ? "Hide run history" : "Show run history"}
-              </span>
-              <ChevronRight
-                className={`h-4 w-4 transition ${runsOpen ? "rotate-90" : ""}`}
-              />
-            </button>
+              {selectedMarket ? (
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+                    <div className="text-sm font-semibold text-app-0">
+                      {marketDisplayName(selectedMarket)}
+                    </div>
+                    <div className="mt-1 text-sm text-app-4">
+                      {marketSubLabel(selectedMarket)}
+                    </div>
+                  </div>
 
-            {runsOpen ? (
-              <div className="mt-4">
-                <IngestionRunsPanel
-                  open={runsOpen}
-                  refreshKey={marketRefreshNonce}
-                  onClose={() => setRunsOpen(false)}
-                  onSelectRun={(runId) => setActiveRunId(runId)}
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                    <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        Active sort
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-app-0">
+                        {sort === "RELEVANCE"
+                          ? "Relevance"
+                          : sort === "BEST_CASHFLOW"
+                            ? "Best cashflow"
+                            : sort === "BEST_DSCR"
+                              ? "Best DSCR"
+                              : sort === "BEST_RENT_GAP"
+                                ? "Best rent gap"
+                                : sort === "LOWEST_RISK"
+                                  ? "Lowest risk"
+                                  : sort === "LOWEST_PRICE"
+                                    ? "Lowest price"
+                                    : sort === "HIGHEST_PRICE"
+                                      ? "Highest price"
+                                      : "Newest"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        Coverage tier
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-app-0">
+                        {selectedMarket.coverage_tier || "—"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-app bg-app-panel px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        Price band
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-app-0">
+                        {money(selectedMarket.min_price)} to{" "}
+                        {money(selectedMarket.max_price)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSourcePackMarket(selectedMarket)}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm font-medium text-app-0 hover:bg-app-muted"
+                  >
+                    <PanelRightOpen className="h-4 w-4" />
+                    View market source pack
+                  </button>
+                </div>
+              ) : (
+                <EmptyState title="No supported market selected" />
+              )}
+            </Surface>
+
+            <IngestionLaunchCard
+              market={selectedMarket}
+              onRunQueued={() => {
+                setMarketRefreshNonce((v) => v + 1);
+                setRunsOpen(true);
+              }}
+              onManageSources={() => setSourcePackMarket(selectedMarket)}
+            />
+
+            <Surface
+              title="Recent sync activity"
+              subtitle="Keep sync feedback close to the investor pane."
+            >
+              <button
+                type="button"
+                onClick={() => setRunsOpen((v) => !v)}
+                className="inline-flex w-full items-center justify-between rounded-2xl border border-app bg-app-panel px-4 py-3 text-left text-sm text-app-0 hover:bg-app-muted"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Clock3 className="h-4 w-4" />
+                  {runsOpen ? "Hide run history" : "Show run history"}
+                </span>
+                <ChevronRight
+                  className={`h-4 w-4 transition ${runsOpen ? "rotate-90" : ""}`}
                 />
-              </div>
-            ) : null}
-          </Surface>
+              </button>
 
-          <IngestionErrorsDrawer
-            runId={activeRunId}
-            onClose={() => setActiveRunId(null)}
-          />
+              {runsOpen ? (
+                <div className="mt-4">
+                  <IngestionRunsPanel
+                    open={runsOpen}
+                    refreshKey={marketRefreshNonce}
+                    onClose={() => setRunsOpen(false)}
+                    onSelectRun={(runId) => setActiveRunId(runId)}
+                  />
+                </div>
+              ) : null}
+            </Surface>
+
+            <IngestionErrorsDrawer
+              runId={activeRunId}
+              onClose={() => setActiveRunId(null)}
+            />
+          </div>
         </div>
       </div>
 

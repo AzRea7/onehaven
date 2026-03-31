@@ -20,6 +20,7 @@ from ..models import Deal, Property, UnderwritingResult
 from ..services.property_state_machine import get_state_payload
 from ..services.risk_scoring import classify_deal_candidate, compute_risk_adjusted_score
 from ..domain.underwriting import compute_monthly_housing_costs
+from ..services.property_inventory_snapshot_service import build_property_inventory_snapshot
 from .property_tax_enrichment_service import get_property_tax_context
 from .property_insurance_enrichment_service import get_property_insurance_context
 
@@ -475,8 +476,17 @@ def _build_row(
     prop: Property,
     state_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    deal_row = _latest_deal(db, org_id=org_id, property_id=int(prop.id))
-    uw_row = _latest_uw(db, org_id=org_id, property_id=int(prop.id))
+    snapshot = build_property_inventory_snapshot(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+        search_context={
+            "state": getattr(prop, "state", None),
+            "county": getattr(prop, "county", None),
+            "city": getattr(prop, "city", None),
+        },
+    )
+
     constraints = state_payload.get("constraints") or {}
     pane_info = constraints.get("pane") or {}
     jurisdiction = constraints.get("jurisdiction") or {}
@@ -497,57 +507,26 @@ def _build_row(
         blocked_count=blocked_count,
     )
 
-    risk_score = getattr(prop, "risk_score", None)
-    projected_monthly_cashflow = (
-        _safe_float(getattr(uw_row, "cash_flow", None), 0.0) if uw_row else None
-    )
-    dscr = _safe_float(getattr(uw_row, "dscr", None), 0.0) if uw_row else None
+    risk_score = _safe_float(snapshot.get("risk_score"), None)
+    projected_monthly_cashflow = _safe_float(snapshot.get("projected_monthly_cashflow"), None)
+    dscr = _safe_float(snapshot.get("dscr"), None)
 
     deal_filter = classify_deal_candidate(
         normalized_decision=state_payload.get("normalized_decision"),
-        risk_score=_safe_float(risk_score, 0.0) if risk_score is not None else None,
+        risk_score=risk_score,
         projected_monthly_cashflow=projected_monthly_cashflow,
         dscr=dscr,
-        listing_hidden=bool(getattr(prop, "listing_hidden", False)),
+        listing_hidden=bool(snapshot.get("listing_hidden", False)),
     )
-
-    market_rent_estimate = _persisted_market_rent_estimate(prop)
-    rent_used = _persisted_rent_used(prop)
-    asking_price = _asking_price(prop, deal_row)
-
-    housing_costs = _compute_housing_cost_bundle(
-        db=db,
-        prop=prop,
-        deal=deal_row,
-        uw=uw_row,
-        asking_price=asking_price,
-    )
-
-    monthly_debt_service = housing_costs.get("monthly_debt_service")
-    monthly_taxes = housing_costs.get("monthly_taxes")
-    monthly_insurance = housing_costs.get("monthly_insurance")
-    monthly_housing_cost = housing_costs.get("monthly_housing_cost")
-    loan_amount = housing_costs.get("loan_amount")
-
-    rent_gap = _compute_rent_gap(
-        market_rent_estimate=market_rent_estimate,
-        monthly_debt_service=monthly_debt_service,
-    )
-
-    ranking = compute_risk_adjusted_score(
-        projected_monthly_cashflow=projected_monthly_cashflow,
-        dscr=dscr,
-        rent_gap=rent_gap,
-        risk_score=_safe_float(risk_score, 0.0) if risk_score is not None else None,
-    ) or {}
 
     return {
         "property_id": int(prop.id),
-        "address": getattr(prop, "address", None),
-        "city": getattr(prop, "city", None),
-        "state": getattr(prop, "state", None),
-        "county": getattr(prop, "county", None),
-        "zip": getattr(prop, "zip", None),
+        "id": int(prop.id),
+        "address": snapshot.get("address"),
+        "city": snapshot.get("city"),
+        "state": snapshot.get("state"),
+        "county": snapshot.get("county"),
+        "zip": snapshot.get("zip"),
         "current_stage": state_payload.get("current_stage"),
         "current_stage_label": state_payload.get("current_stage_label"),
         "current_pane": state_payload.get("current_pane"),
@@ -556,49 +535,76 @@ def _build_row(
         "route_reason": state_payload.get("route_reason"),
         "normalized_decision": state_payload.get("normalized_decision"),
         "gate_status": state_payload.get("gate_status"),
-        "asking_price": asking_price,
+        "asking_price": snapshot.get("asking_price"),
         "projected_monthly_cashflow": projected_monthly_cashflow,
         "dscr": dscr,
-        "loan_amount": loan_amount,
-        "monthly_debt_service": monthly_debt_service,
-        "monthly_taxes": monthly_taxes,
-        "monthly_insurance": monthly_insurance,
-        "monthly_housing_cost": monthly_housing_cost,
-        "property_tax_annual": housing_costs.get("property_tax_annual"),
-        "property_tax_rate_annual": housing_costs.get("property_tax_rate_annual"),
-        "property_tax_source": housing_costs.get("property_tax_source"),
-        "property_tax_confidence": housing_costs.get("property_tax_confidence"),
-        "property_tax_year": housing_costs.get("property_tax_year"),
-        "insurance_annual": housing_costs.get("insurance_annual"),
-        "insurance_source": housing_costs.get("insurance_source"),
-        "insurance_confidence": housing_costs.get("insurance_confidence"),
-        "monthly_debt_service": monthly_debt_service,
+        "loan_amount": snapshot.get("loan_amount"),
+        "monthly_debt_service": snapshot.get("monthly_debt_service"),
+        "monthly_taxes": snapshot.get("monthly_taxes"),
+        "monthly_insurance": snapshot.get("monthly_insurance"),
+        "monthly_housing_cost": snapshot.get("monthly_housing_cost"),
+        "effective_gross_income": snapshot.get("effective_gross_income"),
+        "variable_operating_expenses": snapshot.get("variable_operating_expenses"),
+        "fixed_operating_expenses": snapshot.get("fixed_operating_expenses"),
+        "operating_expenses": snapshot.get("operating_expenses"),
+        "noi": snapshot.get("noi"),
+        "utilities_monthly": snapshot.get("utilities_monthly"),
+        "property_tax_annual": snapshot.get("property_tax_annual"),
+        "property_tax_rate_annual": snapshot.get("property_tax_rate_annual"),
+        "property_tax_source": snapshot.get("property_tax_source"),
+        "property_tax_confidence": snapshot.get("property_tax_confidence"),
+        "property_tax_year": snapshot.get("property_tax_year"),
+        "insurance_annual": snapshot.get("insurance_annual"),
+        "insurance_source": snapshot.get("insurance_source"),
+        "insurance_confidence": snapshot.get("insurance_confidence"),
         "next_actions": state_payload.get("next_actions") or [],
         "blockers": blockers,
-        "market_rent_estimate": market_rent_estimate,
-        "rent_used": rent_used,
-        "rent_gap": rent_gap,
-        "cashflow_score": ranking.get("cashflow_score"),
-        "dscr_score": ranking.get("dscr_score"),
-        "rent_gap_score": ranking.get("rent_gap_score"),
-        "risk_penalty": ranking.get("risk_penalty"),
-        "risk_adjusted_score": ranking.get("risk_adjusted_score"),
-        "rank_score": ranking.get("rank_score"),
-        "risk_score": getattr(prop, "risk_score", None),
+        "market_rent_estimate": snapshot.get("market_rent_estimate"),
+        "rent_reasonableness_comp": snapshot.get("rent_reasonableness_comp"),
+        "market_reference_rent": snapshot.get("market_reference_rent"),
+        "rent_used": snapshot.get("rent_used"),
+        "rent_gap": snapshot.get("rent_gap"),
+        "cashflow_score": snapshot.get("cashflow_score"),
+        "dscr_score": snapshot.get("dscr_score"),
+        "rent_gap_score": snapshot.get("rent_gap_score"),
+        "risk_penalty": snapshot.get("risk_penalty"),
+        "risk_adjusted_score": snapshot.get("risk_adjusted_score"),
+        "rank_score": snapshot.get("rank_score"),
+        "risk_score": snapshot.get("risk_score"),
         "deal_filter_status": deal_filter.get("deal_filter_status"),
         "is_deal_candidate": bool(deal_filter.get("is_deal_candidate")),
         "suppress_from_investor": bool(deal_filter.get("suppress_from_investor")),
         "hidden_reason": deal_filter.get("hidden_reason"),
         "deal_candidate_reasons": list(deal_filter.get("candidate_reasons") or []),
         "deal_suppress_reasons": list(deal_filter.get("suppress_reasons") or []),
-        "listing_status": getattr(prop, "listing_status", None),
-        "listing_hidden": bool(getattr(prop, "listing_hidden", False)),
-        "listing_hidden_reason": getattr(prop, "listing_hidden_reason", None),
+        "listing_status": snapshot.get("listing_status"),
+        "listing_hidden": bool(snapshot.get("listing_hidden", False)),
+        "listing_hidden_reason": snapshot.get("listing_hidden_reason"),
+        "listing_days_on_market": snapshot.get("listing_days_on_market"),
+        "listing_price": snapshot.get("listing_price"),
         "updated_at": state_payload.get("updated_at"),
         "urgency": urgency,
         "is_stale": jurisdiction_is_stale,
         "failed_count": failed_count,
         "blocked_count": blocked_count,
+        "lat": snapshot.get("lat"),
+        "lng": snapshot.get("lng"),
+        "normalized_address": snapshot.get("normalized_address"),
+        "geocode_source": snapshot.get("geocode_source"),
+        "geocode_confidence": snapshot.get("geocode_confidence"),
+        "crime_score": snapshot.get("crime_score"),
+        "crime_band": snapshot.get("crime_band"),
+        "crime_source": snapshot.get("crime_source"),
+        "crime_radius_miles": snapshot.get("crime_radius_miles"),
+        "crime_incident_count": snapshot.get("crime_incident_count"),
+        "crime_confidence": snapshot.get("crime_confidence"),
+        "investment_area_band": snapshot.get("investment_area_band"),
+        "offender_count": snapshot.get("offender_count"),
+        "offender_band": snapshot.get("offender_band"),
+        "offender_source": snapshot.get("offender_source"),
+        "risk_band": snapshot.get("risk_band"),
+        "risk_confidence": snapshot.get("risk_confidence"),
+        "is_red_zone": snapshot.get("is_red_zone"),
         "jurisdiction": {
             "exists": jurisdiction.get("exists"),
             "gate_ok": jurisdiction.get("gate_ok"),
@@ -619,8 +625,16 @@ def _build_row(
             "blocked": rehab.get("blocked"),
             "is_complete": constraints.get("rehab_complete"),
         },
-        "counts": counts,
-        "pane": pane_info,
+        "pane_constraints": pane_info,
+        "outstanding_task_counts": counts,
+        "freshness_score": snapshot.get("freshness_score"),
+        "text_match_score": snapshot.get("text_match_score"),
+        "market_match_score": snapshot.get("market_match_score"),
+        "buy_box_score": snapshot.get("buy_box_score"),
+        "completeness": snapshot.get("completeness"),
+        "completeness_status": snapshot.get("completeness_status") or {},
+        "source_updated_at": snapshot.get("source_updated_at"),
+        "created_at": snapshot.get("created_at"),
     }
 
 

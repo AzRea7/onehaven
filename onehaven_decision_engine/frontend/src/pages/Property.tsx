@@ -38,7 +38,7 @@ import PageShell from "../components/PageShell";
 import RiskBadges from "../components/RiskBadges";
 import StatPill from "../components/StatPill";
 import Surface from "../components/Surface";
-import { nextPaneKey, paneLabel, paneStep } from "../components/PaneSwitcher";
+import { nextPaneKey, paneLabel } from "../components/PaneSwitcher";
 import { api } from "../lib/api";
 
 type PropertyPayload = {
@@ -82,6 +82,20 @@ type PropertyPayload = {
   insurance_source?: string | null;
   insurance_confidence?: number | null;
 
+  market_rent_estimate?: number | null;
+  market_reference_rent?: number | null;
+  rent_reasonableness_comp?: number | null;
+  rent_used?: number | null;
+  rent_gap?: number | null;
+  effective_gross_income?: number | null;
+  variable_operating_expenses?: number | null;
+  fixed_operating_expenses?: number | null;
+  operating_expenses?: number | null;
+  noi?: number | null;
+  utilities_monthly?: number | null;
+  underwriting_result_cash_flow?: number | null;
+  underwriting_result_dscr?: number | null;
+
   blockers?: string[];
   next_actions?: string[];
 
@@ -93,6 +107,17 @@ type PropertyPayload = {
   crime_score?: number | null;
   offender_count?: number | null;
   is_red_zone?: boolean | null;
+  risk_score?: number | null;
+  risk_band?: string | null;
+  risk_confidence?: number | null;
+  crime_band?: string | null;
+  crime_source?: string | null;
+  crime_radius_miles?: number | null;
+  crime_incident_count?: number | null;
+  crime_confidence?: number | null;
+  investment_area_band?: string | null;
+  offender_band?: string | null;
+  offender_source?: string | null;
 
   listing_status?: string | null;
   listing_hidden?: boolean;
@@ -544,6 +569,7 @@ function deriveZillowUrl(property: PropertyPayload | null) {
 
 function inferSection8Rent(property: PropertyPayload | null) {
   return (
+    property?.rent_used ??
     property?.rent_explain?.rent_used ??
     property?.rent_assumption?.rent_used ??
     property?.rent_explain?.approved_rent_ceiling ??
@@ -557,6 +583,8 @@ function inferSection8Rent(property: PropertyPayload | null) {
 
 function inferMarketRent(property: PropertyPayload | null) {
   return (
+    property?.market_reference_rent ??
+    property?.market_rent_estimate ??
     property?.rent_explain?.market_rent_estimate ??
     property?.rent_assumption?.market_rent_estimate ??
     property?.last_underwriting_result?.gross_rent_used ??
@@ -602,7 +630,13 @@ function inferMonthlyHousingCost(property: PropertyPayload | null) {
   return (
     property?.monthly_housing_cost ??
     property?.inventory_snapshot?.monthly_housing_cost ??
-    null
+    (() => {
+      const mortgage = inferMortgage(property);
+      const taxes = inferMonthlyTaxes(property);
+      const insurance = inferMonthlyInsurance(property);
+      if (mortgage == null && taxes == null && insurance == null) return null;
+      return (mortgage ?? 0) + (taxes ?? 0) + (insurance ?? 0);
+    })()
   );
 }
 
@@ -623,7 +657,12 @@ function inferInsuranceAnnual(property: PropertyPayload | null) {
 }
 
 function inferDscr(property: PropertyPayload | null) {
-  return property?.dscr ?? property?.last_underwriting_result?.dscr ?? null;
+  return (
+    property?.dscr ??
+    property?.inventory_snapshot?.dscr ??
+    property?.last_underwriting_result?.dscr ??
+    null
+  );
 }
 
 function inferPropertyTypeLabel(raw?: string | null) {
@@ -664,19 +703,24 @@ function mergePropertyPayloadSources(
     view?.inventory_snapshot ||
     bundle?.inventory_snapshot ||
     property?.inventory_snapshot ||
+    base.inventory_snapshot ||
     null;
   const deal = view?.deal || bundle?.view?.deal || null;
+
   const merged: PropertyPayload = {
     ...base,
+    ...property,
     inventory_snapshot: inventorySnapshot,
     rent_explain:
       view?.rent_explain ||
       bundle?.view?.rent_explain ||
+      property?.rent_explain ||
       base.rent_explain ||
       null,
     last_underwriting_result:
       view?.last_underwriting_result ||
       bundle?.view?.last_underwriting_result ||
+      property?.last_underwriting_result ||
       base.last_underwriting_result ||
       null,
   };
@@ -781,6 +825,119 @@ function mergePropertyPayloadSources(
     inventorySnapshot?.listing_office_email,
     base.listing_office_email,
   );
+
+  merged.monthly_debt_service = firstFiniteNumber(
+    property?.monthly_debt_service,
+    inventorySnapshot?.monthly_debt_service,
+    base.monthly_debt_service,
+    merged.last_underwriting_result?.mortgage_payment,
+  );
+  merged.monthly_taxes = firstFiniteNumber(
+    property?.monthly_taxes,
+    inventorySnapshot?.monthly_taxes,
+    base.monthly_taxes,
+  );
+  merged.monthly_insurance = firstFiniteNumber(
+    property?.monthly_insurance,
+    inventorySnapshot?.monthly_insurance,
+    base.monthly_insurance,
+  );
+  merged.monthly_housing_cost = firstFiniteNumber(
+    property?.monthly_housing_cost,
+    inventorySnapshot?.monthly_housing_cost,
+    base.monthly_housing_cost,
+  );
+  merged.projected_monthly_cashflow = firstFiniteNumber(
+    property?.projected_monthly_cashflow,
+    inventorySnapshot?.projected_monthly_cashflow,
+    base.projected_monthly_cashflow,
+    merged.last_underwriting_result?.cash_flow,
+  );
+  merged.dscr = firstFiniteNumber(
+    property?.dscr,
+    inventorySnapshot?.dscr,
+    base.dscr,
+    merged.last_underwriting_result?.dscr,
+  );
+  merged.rent_gap = firstFiniteNumber(
+    property?.rent_gap,
+    inventorySnapshot?.rent_gap,
+    base.rent_gap,
+  );
+  merged.rent_used = firstFiniteNumber(
+    property?.rent_used,
+    inventorySnapshot?.rent_used,
+    base.rent_used,
+    merged.rent_explain?.rent_used,
+    property?.rent_assumption?.rent_used,
+  );
+  merged.market_rent_estimate = firstFiniteNumber(
+    property?.market_rent_estimate,
+    inventorySnapshot?.market_rent_estimate,
+    base.market_rent_estimate,
+    merged.rent_explain?.market_rent_estimate,
+    property?.rent_assumption?.market_rent_estimate,
+  );
+  merged.market_reference_rent = firstFiniteNumber(
+    property?.market_reference_rent,
+    inventorySnapshot?.market_reference_rent,
+    base.market_reference_rent,
+    merged.market_rent_estimate,
+  );
+  merged.rent_reasonableness_comp = firstFiniteNumber(
+    property?.rent_reasonableness_comp,
+    inventorySnapshot?.rent_reasonableness_comp,
+    base.rent_reasonableness_comp,
+    merged.rent_explain?.rent_reasonableness_comp,
+  );
+  merged.effective_gross_income = firstFiniteNumber(
+    property?.effective_gross_income,
+    inventorySnapshot?.effective_gross_income,
+    base.effective_gross_income,
+  );
+  merged.variable_operating_expenses = firstFiniteNumber(
+    property?.variable_operating_expenses,
+    inventorySnapshot?.variable_operating_expenses,
+    base.variable_operating_expenses,
+  );
+  merged.fixed_operating_expenses = firstFiniteNumber(
+    property?.fixed_operating_expenses,
+    inventorySnapshot?.fixed_operating_expenses,
+    base.fixed_operating_expenses,
+  );
+  merged.operating_expenses = firstFiniteNumber(
+    property?.operating_expenses,
+    inventorySnapshot?.operating_expenses,
+    base.operating_expenses,
+    merged.last_underwriting_result?.operating_expenses,
+  );
+  merged.noi = firstFiniteNumber(
+    property?.noi,
+    inventorySnapshot?.noi,
+    base.noi,
+    merged.last_underwriting_result?.noi,
+  );
+  merged.property_tax_annual = firstFiniteNumber(
+    property?.property_tax_annual,
+    inventorySnapshot?.property_tax_annual,
+    base.property_tax_annual,
+  );
+  merged.insurance_annual = firstFiniteNumber(
+    property?.insurance_annual,
+    inventorySnapshot?.insurance_annual,
+    base.insurance_annual,
+  );
+  merged.property_tax_source = firstText(
+    property?.property_tax_source,
+    inventorySnapshot?.property_tax_source,
+    base.property_tax_source,
+  );
+  merged.insurance_source = firstText(
+    property?.insurance_source,
+    inventorySnapshot?.insurance_source,
+    base.insurance_source,
+  );
+
   return merged;
 }
 
@@ -887,8 +1044,13 @@ export default function Property() {
         propertyPayload = normalizePropertyPayloadFromBundle(bundle);
       } catch {
         try {
-          propertyPayload = await api.get<PropertyPayload>(
+          const dashboardPayload = await api.get<PropertyPayload>(
             `/dashboard/properties/${id}`,
+          );
+          propertyPayload = mergePropertyPayloadSources(
+            dashboardPayload,
+            null,
+            null,
           );
         } catch {
           const view = await api.get<PropertyViewResponse>(
@@ -1216,6 +1378,107 @@ export default function Property() {
           </Surface>
 
           <Surface
+            title="Trustworthy underwriting"
+            subtitle="These metrics use the same rent, debt, tax, insurance, and housing-cost path as the investor pane."
+          >
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <StatPill
+                label="Cashflow"
+                value={money(cashflow)}
+                tone={cashflow != null && cashflow > 0 ? "good" : "warn"}
+              />
+              <StatPill
+                label="DSCR"
+                value={num(dscr)}
+                tone={dscr != null && dscr >= 1.2 ? "good" : "warn"}
+              />
+              <StatPill
+                label="Rent used"
+                value={money(data.rent_used ?? section8Rent)}
+                tone="neutral"
+              />
+              <StatPill
+                label="Market rent"
+                value={money(marketRent)}
+                tone="neutral"
+              />
+              <StatPill
+                label="Rent gap"
+                value={money(data.rent_gap)}
+                tone={
+                  data.rent_gap != null && data.rent_gap > 0
+                    ? "good"
+                    : data.rent_gap != null && data.rent_gap < 0
+                      ? "bad"
+                      : "neutral"
+                }
+              />
+              <StatPill
+                label="Mortgage"
+                value={money(mortgage)}
+                tone="neutral"
+              />
+              <StatPill
+                label="Taxes"
+                value={money(monthlyTaxes)}
+                tone="neutral"
+              />
+              <StatPill
+                label="Insurance"
+                value={money(monthlyInsurance)}
+                tone="neutral"
+              />
+              <StatPill
+                label="Housing total"
+                value={money(monthlyHousingCost)}
+                tone="neutral"
+              />
+              <StatPill label="NOI" value={money(data.noi)} tone="neutral" />
+              <StatPill
+                label="Operating expenses"
+                value={money(data.operating_expenses)}
+                tone="neutral"
+              />
+              <StatPill
+                label="Gross income"
+                value={money(data.effective_gross_income)}
+                tone="neutral"
+              />
+            </div>
+
+            {taxAnnual != null || insuranceAnnual != null ? (
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    Property tax details
+                  </div>
+                  <div className="mt-3 text-lg font-semibold text-app-0">
+                    {money(taxAnnual)}
+                  </div>
+                  <div className="mt-1 text-xs text-app-4">
+                    {data.property_tax_source || "source unavailable"}
+                    {data.property_tax_year
+                      ? ` • ${data.property_tax_year}`
+                      : ""}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                    Insurance details
+                  </div>
+                  <div className="mt-3 text-lg font-semibold text-app-0">
+                    {money(insuranceAnnual)}
+                  </div>
+                  <div className="mt-1 text-xs text-app-4">
+                    {data.insurance_source || "source unavailable"}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </Surface>
+
+          <Surface
             title="Listing enrichment"
             subtitle="All listing lifecycle and contact details available for this property."
           >
@@ -1341,7 +1604,8 @@ export default function Property() {
                 </div>
                 <div className="mt-3 text-xl font-semibold text-app-0">
                   {money(
-                    data.rent_explain?.rent_used ??
+                    data.rent_used ??
+                      data.rent_explain?.rent_used ??
                       data.rent_assumption?.rent_used,
                   )}
                 </div>
@@ -1452,7 +1716,18 @@ export default function Property() {
               county={data.county}
               isRedZone={data.is_red_zone}
               crimeScore={data.crime_score}
+              crimeBand={data.crime_band}
+              crimeSource={data.crime_source}
+              crimeRadiusMiles={data.crime_radius_miles}
+              crimeIncidentCount={data.crime_incident_count}
+              crimeConfidence={data.crime_confidence}
+              investmentAreaBand={data.investment_area_band}
               offenderCount={data.offender_count}
+              offenderBand={data.offender_band}
+              offenderSource={data.offender_source}
+              riskScore={data.risk_score}
+              riskBand={data.risk_band}
+              riskConfidence={data.risk_confidence}
               lat={data.lat}
               lng={data.lng}
               normalizedAddress={data.normalized_address}

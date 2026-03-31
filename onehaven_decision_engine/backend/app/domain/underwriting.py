@@ -49,8 +49,6 @@ class UnderwritingOutputs:
     min_rent_for_target_roi: float
 
 
-
-
 @dataclass(frozen=True)
 class PropertyTaxProfile:
     annual_amount: float | None
@@ -91,6 +89,7 @@ def normalize_insurance_profile(*, annual_amount: float | None = None, source: s
         source=(str(source).strip() or None) if source is not None else None,
         confidence=round(float(confidence), 3) if confidence is not None else None,
     )
+
 
 def compute_monthly_housing_costs(
     *,
@@ -151,6 +150,119 @@ def compute_monthly_housing_costs(
     }
 
 
+def compute_trustworthy_investment_metrics(
+    *,
+    rent_used: float | None,
+    market_rent_estimate: float | None,
+    rent_reasonableness_comp: float | None,
+    monthly_debt_service: float | None,
+    monthly_taxes: float | None,
+    monthly_insurance: float | None,
+    monthly_housing_cost: float | None = None,
+    utilities_monthly: float | None = None,
+    vacancy_rate: float | None = None,
+    maintenance_rate: float | None = None,
+    management_rate: float | None = None,
+    capex_rate: float | None = None,
+) -> dict[str, float | None]:
+    """
+    Recompute the user-facing Investor / Property metrics from the
+    currently trusted live inputs instead of blindly trusting a stale
+    UnderwritingResult row.
+
+    Rules:
+    - gross_rent_used: final rent_used if present, else conservative market reference
+    - DSCR: NOI / monthly_debt_service (P&I only)
+    - projected_monthly_cashflow: NOI - monthly_debt_service
+    - rent_gap: market reference rent - full monthly housing cost (P&I + tax + insurance)
+    """
+
+    gross_rent_used = _to_pos_float(rent_used)
+    market_reference_rent = select_market_rent_reference(
+        market_rent_estimate=market_rent_estimate,
+        rent_reasonableness_comp=rent_reasonableness_comp,
+    )
+
+    if gross_rent_used is None:
+        gross_rent_used = market_reference_rent
+
+    debt_service = _to_pos_float(monthly_debt_service)
+    taxes = float(monthly_taxes or 0.0)
+    insurance = float(monthly_insurance or 0.0)
+    utilities = float(utilities_monthly or 0.0)
+
+    vacancy = float(vacancy_rate if vacancy_rate is not None else getattr(settings, "vacancy_rate", 0.05))
+    maintenance = float(
+        maintenance_rate if maintenance_rate is not None else getattr(settings, "maintenance_rate", 0.10)
+    )
+    management = float(
+        management_rate if management_rate is not None else getattr(settings, "management_rate", 0.08)
+    )
+    capex = float(capex_rate if capex_rate is not None else getattr(settings, "capex_rate", 0.05))
+
+    full_housing_cost = monthly_housing_cost
+    if full_housing_cost is None:
+        full_housing_cost = (debt_service or 0.0) + taxes + insurance
+
+    if gross_rent_used is None:
+        return {
+            "gross_rent_used": None,
+            "market_reference_rent": _round_money(market_reference_rent),
+            "effective_gross_income": None,
+            "variable_operating_expenses": None,
+            "fixed_operating_expenses": _round_money(taxes + insurance + utilities),
+            "operating_expenses": None,
+            "noi": None,
+            "projected_monthly_cashflow": None,
+            "dscr": None,
+            "rent_gap": _round_money(
+                (market_reference_rent - full_housing_cost)
+                if market_reference_rent is not None and full_housing_cost is not None
+                else None
+            ),
+            "utilities_monthly": _round_money(utilities),
+            "vacancy_rate_used": round(vacancy, 4),
+            "maintenance_rate_used": round(maintenance, 4),
+            "management_rate_used": round(management, 4),
+            "capex_rate_used": round(capex, 4),
+        }
+
+    effective_gross_income = float(gross_rent_used) * (1.0 - vacancy)
+    variable_operating_expenses = float(gross_rent_used) * (maintenance + management + capex)
+    fixed_operating_expenses = taxes + insurance + utilities
+    operating_expenses = variable_operating_expenses + fixed_operating_expenses
+    noi = effective_gross_income - operating_expenses
+
+    projected_monthly_cashflow = None
+    dscr = None
+
+    if debt_service is not None:
+        projected_monthly_cashflow = noi - debt_service
+        dscr = (noi / debt_service) if debt_service > 1e-6 else None
+
+    rent_gap = None
+    if market_reference_rent is not None and full_housing_cost is not None:
+        rent_gap = float(market_reference_rent) - float(full_housing_cost)
+
+    return {
+        "gross_rent_used": _round_money(gross_rent_used),
+        "market_reference_rent": _round_money(market_reference_rent),
+        "effective_gross_income": _round_money(effective_gross_income),
+        "variable_operating_expenses": _round_money(variable_operating_expenses),
+        "fixed_operating_expenses": _round_money(fixed_operating_expenses),
+        "operating_expenses": _round_money(operating_expenses),
+        "noi": _round_money(noi),
+        "projected_monthly_cashflow": _round_money(projected_monthly_cashflow),
+        "dscr": round(float(dscr), 3) if dscr is not None else None,
+        "rent_gap": _round_money(rent_gap),
+        "utilities_monthly": _round_money(utilities),
+        "vacancy_rate_used": round(vacancy, 4),
+        "maintenance_rate_used": round(maintenance, 4),
+        "management_rate_used": round(management, 4),
+        "capex_rate_used": round(capex, 4),
+    }
+
+
 def _monthly_mortgage_payment(principal: float, annual_rate: float, term_years: int) -> float:
     if principal <= 0 or term_years <= 0:
         return 0.0
@@ -190,13 +302,6 @@ def select_market_rent_reference(
     market_rent_estimate: float | None,
     rent_reasonableness_comp: float | None,
 ) -> float | None:
-    """
-    Conservative market-rent selector used by Section 8 underwriting.
-
-    When both the RentCast estimated rent and the nearby-comps median exist,
-    prefer the lower of the two so the underwritten rent stays grounded in the
-    surrounding comp set and does not drift above what the local market supports.
-    """
     estimate = _to_pos_float(market_rent_estimate)
     comp = _to_pos_float(rent_reasonableness_comp)
 
@@ -224,11 +329,6 @@ def compute_effective_rent_used(
     unit_rentcast_rent: float | None = None,
     unit_fmr_rent: float | None = None,
 ) -> tuple[float | None, RentCapReason]:
-    """
-    Final rent rule:
-    - single-family: use the lower of conservative market rent and strict FMR cap
-    - multifamily: compute per-unit cap then multiply back by units
-    """
     ptype = (property_type or "").strip().lower()
     unit_count = max(int(units or 0), 0)
 
@@ -290,7 +390,6 @@ def run_underwriting(inp: UnderwritingInputs, target_roi: float) -> Underwriting
     loan_amount = max(all_in_cost - down_payment, 0.0)
 
     mortgage_payment = _monthly_mortgage_payment(loan_amount, float(inp.interest_rate), int(inp.term_years))
-
     effective_gross = float(inp.gross_rent) * (1.0 - float(inp.vacancy_rate))
 
     var_opex = (

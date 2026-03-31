@@ -9,7 +9,7 @@ from sqlalchemy import desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..domain.underwriting import compute_monthly_housing_costs
+from ..domain.underwriting import compute_trustworthy_investment_metrics, compute_monthly_housing_costs
 from .property_tax_enrichment_service import get_property_tax_context
 from .property_insurance_enrichment_service import get_property_insurance_context
 from ..models import Deal, RentAssumption, Property, UnderwritingResult
@@ -181,6 +181,9 @@ def _settings_interest_rate() -> float:
         or getattr(settings, "interest_rate", None)
         or 0.07
     )
+
+def _settings_utilities_monthly() -> float:
+    return float(getattr(settings, "utilities_monthly_default", 0.0) or 0.0)
 
 
 def _settings_term_years() -> int:
@@ -616,16 +619,7 @@ def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     projected_monthly_cashflow = _safe_float(snapshot.get("projected_monthly_cashflow"))
     dscr = _safe_float(snapshot.get("dscr"))
     risk_score = _safe_float(snapshot.get("risk_score"))
-    market_rent_estimate = _safe_float(snapshot.get("market_rent_estimate"))
-    rent_reasonableness_comp = _safe_float(snapshot.get("rent_reasonableness_comp"))
-    market_reference_rent = _safe_float(snapshot.get("market_reference_rent"), rent_reasonableness_comp)
-    rent_used = _safe_float(snapshot.get("rent_used"))
-    monthly_debt_service = _safe_float(snapshot.get("monthly_debt_service"))
-
-    rent_gap = _canonical_rent_gap(
-        market_rent_estimate=market_rent_estimate,
-        monthly_debt_service=monthly_debt_service,
-    )
+    rent_gap = _safe_float(snapshot.get("rent_gap"))
 
     score_parts = compute_risk_adjusted_score(
         projected_monthly_cashflow=projected_monthly_cashflow,
@@ -635,17 +629,23 @@ def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
     )
 
     return {
-        "market_rent_estimate": market_rent_estimate,
-        "rent_reasonableness_comp": rent_reasonableness_comp,
-        "market_reference_rent": market_reference_rent,
-        "rent_used": rent_used,
+        "market_rent_estimate": _safe_float(snapshot.get("market_rent_estimate")),
+        "rent_reasonableness_comp": _safe_float(snapshot.get("rent_reasonableness_comp")),
+        "market_reference_rent": _safe_float(snapshot.get("market_reference_rent")),
+        "rent_used": _safe_float(snapshot.get("rent_used")),
         "loan_amount": _safe_float(snapshot.get("loan_amount")),
-        "monthly_debt_service": monthly_debt_service,
+        "monthly_debt_service": _safe_float(snapshot.get("monthly_debt_service")),
         "monthly_taxes": _safe_float(snapshot.get("monthly_taxes")),
         "monthly_insurance": _safe_float(snapshot.get("monthly_insurance")),
         "monthly_housing_cost": _safe_float(snapshot.get("monthly_housing_cost")),
+        "effective_gross_income": _safe_float(snapshot.get("effective_gross_income")),
+        "variable_operating_expenses": _safe_float(snapshot.get("variable_operating_expenses")),
+        "fixed_operating_expenses": _safe_float(snapshot.get("fixed_operating_expenses")),
+        "operating_expenses": _safe_float(snapshot.get("operating_expenses")),
+        "noi": _safe_float(snapshot.get("noi")),
         "projected_monthly_cashflow": projected_monthly_cashflow,
         "rent_gap": rent_gap,
+        "dscr": dscr,
         **score_parts,
     }
 
@@ -821,13 +821,23 @@ def build_property_inventory_snapshot(
 
     market_rent_estimate = _market_rent_estimate_from_rent_row(rent_row)
     rent_reasonableness_comp = _rent_reasonableness_comp_from_rent_row(rent_row)
-    market_reference_rent = rent_reasonableness_comp if rent_reasonableness_comp is not None else market_rent_estimate
     rent_used = _rent_used_from_rent_row(rent_row)
+
     monthly_debt_service = housing_costs.get("monthly_debt_service") or _monthly_debt_service_from_uw(uw)
-    rent_gap = _canonical_rent_gap(
+
+    live_metrics = compute_trustworthy_investment_metrics(
+        rent_used=rent_used,
         market_rent_estimate=market_rent_estimate,
+        rent_reasonableness_comp=rent_reasonableness_comp,
         monthly_debt_service=monthly_debt_service,
+        monthly_taxes=housing_costs.get("monthly_taxes"),
+        monthly_insurance=housing_costs.get("monthly_insurance"),
+        monthly_housing_cost=housing_costs.get("monthly_housing_cost"),
+        utilities_monthly=_settings_utilities_monthly(),
     )
+
+    market_reference_rent = live_metrics.get("market_reference_rent")
+    rent_gap = live_metrics.get("rent_gap")
 
     meta = _load_property_meta(db, org_id=org_id, property_id=int(prop.id))
     tags = list_tags_for_properties(db, org_id=org_id, property_ids=[int(prop.id)]).get(int(prop.id), [])
@@ -851,9 +861,19 @@ def build_property_inventory_snapshot(
         "market_rent_estimate": market_rent_estimate,
         "rent_reasonableness_comp": rent_reasonableness_comp,
         "market_reference_rent": market_reference_rent,
-        "rent_used": rent_used,
+        "rent_used": live_metrics.get("gross_rent_used"),
         "monthly_debt_service": monthly_debt_service,
-        "projected_monthly_cashflow": _safe_float(getattr(uw, "cash_flow", None)) if uw else None,
+        "effective_gross_income": live_metrics.get("effective_gross_income"),
+        "variable_operating_expenses": live_metrics.get("variable_operating_expenses"),
+        "fixed_operating_expenses": live_metrics.get("fixed_operating_expenses"),
+        "operating_expenses": live_metrics.get("operating_expenses"),
+        "noi": live_metrics.get("noi"),
+        "utilities_monthly": live_metrics.get("utilities_monthly"),
+        "vacancy_rate_used": live_metrics.get("vacancy_rate_used"),
+        "maintenance_rate_used": live_metrics.get("maintenance_rate_used"),
+        "management_rate_used": live_metrics.get("management_rate_used"),
+        "capex_rate_used": live_metrics.get("capex_rate_used"),
+        "projected_monthly_cashflow": live_metrics.get("projected_monthly_cashflow"),
         "rent_gap": rent_gap,
         "loan_amount": housing_costs.get("loan_amount"),
         "monthly_taxes": housing_costs.get("monthly_taxes"),
@@ -867,7 +887,9 @@ def build_property_inventory_snapshot(
         "insurance_annual": housing_costs.get("insurance_annual"),
         "insurance_source": housing_costs.get("insurance_source"),
         "insurance_confidence": housing_costs.get("insurance_confidence"),
-        "dscr": _safe_float(getattr(uw, "dscr", None), None),
+        "dscr": live_metrics.get("dscr"),
+        "underwriting_result_cash_flow": _safe_float(getattr(uw, "cash_flow", None), None) if uw else None,
+        "underwriting_result_dscr": _safe_float(getattr(uw, "dscr", None), None) if uw else None,
         "section8_fmr": getattr(rent_row, "section8_fmr", None) if rent_row is not None else None,
         "approved_rent_ceiling": getattr(rent_row, "approved_rent_ceiling", None) if rent_row is not None else None,
         "rent_cap_reason": getattr(rent_row, "rent_cap_reason", None) if rent_row is not None and hasattr(rent_row, "rent_cap_reason") else None,
