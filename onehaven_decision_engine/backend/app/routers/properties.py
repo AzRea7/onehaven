@@ -50,6 +50,8 @@ from ..schemas import (
     ValuationOut,
     FinancialEnrichmentBatchIn,
     FinancialEnrichmentOut,
+    PropertyTaxEnrichmentOut,
+    FinancialEnrichmentBatchOut,
 )
 from ..services.geo_enrichment import enrich_property_geo
 from ..services.property_tax_enrichment_service import enrich_property_tax
@@ -65,6 +67,8 @@ from ..services.property_inventory_snapshot_service import (
     build_property_inventory_snapshot,
     build_inventory_snapshots_for_scope,
 )
+from ..services.property_price_resolution_service import resolve_prices_from_sources
+
 from ..domain.rent_learning import recompute_rent_fields
 
 router = APIRouter(prefix="/properties", tags=["properties"])
@@ -172,23 +176,6 @@ def _resolved_zillow_listing_url(
         state=state,
         zip_code=zip_code,
     )
-
-def _asking_price(prop: Property, deal: Deal | None) -> float | None:
-    for attr in ("asking_price", "list_price", "price", "offer_price", "purchase_price"):
-        if deal is not None and getattr(deal, attr, None) is not None:
-            return _safe_float(getattr(deal, attr, None), 0.0)
-    for attr in ("asking_price", "list_price", "price"):
-        if getattr(prop, attr, None) is not None:
-            return _safe_float(getattr(prop, attr, None), 0.0)
-    return None
-
-
-def _coalesced_price(*values: Any) -> float | None:
-    for value in values:
-        parsed = _safe_float(value, None)
-        if parsed is not None and parsed > 0:
-            return parsed
-    return None
 
 
 def _norm_city(s: str) -> str:
@@ -516,15 +503,14 @@ def _snapshot_backed_property_payload(
     acquisition_meta = _property_acquisition_meta(db, org_id=org_id, property_id=int(prop.id))
     acquisition_tags = [row.get("tag") for row in list_property_tags(db, org_id=org_id, property_id=int(prop.id))]
 
-    resolved_asking_price = _coalesced_price(
-        snapshot.get("asking_price"),
-        _asking_price(prop, deal),
-        acquisition_meta.get("listing_price"),
+    resolved_prices = resolve_prices_from_sources(
+        prop=prop,
+        deal=deal,
+        snapshot=snapshot,
+        acquisition_meta=acquisition_meta,
     )
-    resolved_listing_price = _coalesced_price(
-        acquisition_meta.get("listing_price"),
-        snapshot.get("listing_price"),
-    )
+    resolved_asking_price = resolved_prices.get("asking_price")
+    resolved_listing_price = resolved_prices.get("listing_price")
 
     prop_payload.update(
         {
@@ -629,6 +615,7 @@ def _snapshot_backed_property_payload(
         }
     )
     return prop_payload
+
 
 
 def _build_property_list_item(
@@ -924,6 +911,52 @@ def list_properties(
 
     return rows[: max(1, int(limit))]
 
+@router.post("/{property_id}/enrich/tax", response_model=PropertyTaxEnrichmentOut)
+def enrich_tax_for_property(
+    property_id: int,
+    force: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    result = enrich_property_tax(
+        db,
+        org_id=principal.org_id,
+        property_id=property_id,
+        force=force,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result)
+    return result
+
+
+class TaxBatchIn(BaseModel):
+    property_ids: list[int] = Field(default_factory=list)
+    force: bool = False
+
+
+@router.post("/enrich/tax/batch", response_model=FinancialEnrichmentBatchOut)
+def enrich_tax_batch(
+    payload: TaxBatchIn,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    results: list[dict[str, Any]] = []
+    for property_id in payload.property_ids:
+        results.append(
+            enrich_property_tax(
+                db,
+                org_id=principal.org_id,
+                property_id=int(property_id),
+                force=bool(payload.force),
+            )
+        )
+
+    return {
+        "ok": True,
+        "requested": len(payload.property_ids),
+        "processed": len(results),
+        "results": results,
+    }
 
 @router.get("/{property_id}", response_model=PropertyOut)
 def get_property(property_id: int, db: Session = Depends(get_db), p=Depends(get_principal)):
@@ -1108,18 +1141,6 @@ def update_property_tags(
         tags=payload.tags,
     )
     return {"ok": True, "property_id": property_id, "tags": tags}
-
-
-@router.post("/{property_id}/enrich/tax", response_model=FinancialEnrichmentOut)
-def enrich_property_tax_route(
-    property_id: int,
-    force: bool = Query(False),
-    db: Session = Depends(get_db),
-    principal=Depends(get_principal),
-):
-    payload = enrich_property_tax(db, org_id=int(principal.org_id), property_id=int(property_id), force=bool(force))
-    db.commit()
-    return FinancialEnrichmentOut(**payload)
 
 
 @router.post("/{property_id}/enrich/insurance", response_model=FinancialEnrichmentOut)

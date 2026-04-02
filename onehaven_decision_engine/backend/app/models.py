@@ -1533,5 +1533,37 @@ class AgentRunDeadletter(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
+class TaxLookupResult:
+    def __init__(
+        self,
+        *,
+        annual_amount: float | None,
+        annual_rate: float | None,
+        source: str,
+        confidence: float,
+        year: int | None,
+        status: str,
+        provider_key: str,
+        lookup_url: str | None = None,
+        parcel_id: str | None = None,
+        jurisdiction: str | None = None,
+        reason: str | None = None,
+        raw: dict[str, Any] | None = None,
+        cached: bool = False,
+    ) -> None:
+        self.annual_amount = annual_amount
+        self.annual_rate = annual_rate
+        self.source = source
+        self.confidence = confidence
+        self.year = year
+        self.status = status
+        self.provider_key = provider_key
+        self.lookup_url = lookup_url
+        self.parcel_id = parcel_id
+        self.jurisdiction = jurisdiction
+        self.reason = reason
+        self.raw = raw
+        self.cached = cached
 
 from .policy_models import JurisdictionProfile, HqsRule, HqsAddendumRule, HudFmrRecord  # noqa: E402,F401
+

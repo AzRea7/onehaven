@@ -387,7 +387,30 @@ class RentAssumptionOut(RentAssumptionUpsert):
     rent_used: Optional[float] = None
     model_config = ConfigDict(from_attributes=True)
 
+class PropertyTaxEnrichmentOut(BaseModel):
+    ok: bool
+    property_id: int
+    resolved_price: float | None = None
+    monthly_taxes: float | None = None
+    annual_amount: float | None = None
+    annual_rate: float | None = None
+    source: str | None = None
+    confidence: float | None = None
+    year: int | None = None
+    cached: bool = False
+    status: str | None = None
+    provider: str | None = None
+    reason: str | None = None
+    lookup_url: str | None = None
+    parcel_id: str | None = None
+    jurisdiction: str | None = None
 
+
+class FinancialEnrichmentBatchOut(BaseModel):
+    ok: bool
+    requested: int
+    processed: int
+    results: list[PropertyTaxEnrichmentOut]
 
 
 class FinancialEnrichmentOut(BaseModel):
