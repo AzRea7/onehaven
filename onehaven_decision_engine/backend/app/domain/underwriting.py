@@ -166,15 +166,19 @@ def compute_trustworthy_investment_metrics(
     capex_rate: float | None = None,
 ) -> dict[str, float | None]:
     """
-    Recompute the user-facing Investor / Property metrics from the
-    currently trusted live inputs instead of blindly trusting a stale
-    UnderwritingResult row.
+    Compute two layers of investor math from the current trusted inputs.
 
-    Rules:
-    - gross_rent_used: final rent_used if present, else conservative market reference
-    - DSCR: NOI / monthly_debt_service (P&I only)
-    - projected_monthly_cashflow: NOI - monthly_debt_service
-    - rent_gap: market reference rent - full monthly housing cost (P&I + tax + insurance)
+    1) Headline / card cashflow:
+       gross rent - (mortgage + taxes + insurance)
+       This is the number intended for the Investor pane cards.
+
+    2) Detailed property spreadsheet math:
+       include vacancy, maintenance, management, capex, and utilities so the
+       full economics remain visible on the property detail page.
+
+    Utilities remain exposed for transparency, but the primary headline
+    cashflow intentionally excludes them so the model matches the desired
+    hybrid tenant contract structure.
     """
 
     gross_rent_used = _to_pos_float(rent_used)
@@ -200,9 +204,9 @@ def compute_trustworthy_investment_metrics(
     )
     capex = float(capex_rate if capex_rate is not None else getattr(settings, "capex_rate", 0.05))
 
-    full_housing_cost = monthly_housing_cost
-    if full_housing_cost is None:
-        full_housing_cost = (debt_service or 0.0) + taxes + insurance
+    housing_cost = monthly_housing_cost
+    if housing_cost is None:
+        housing_cost = (debt_service or 0.0) + taxes + insurance
 
     if gross_rent_used is None:
         return {
@@ -211,13 +215,17 @@ def compute_trustworthy_investment_metrics(
             "effective_gross_income": None,
             "variable_operating_expenses": None,
             "fixed_operating_expenses": _round_money(taxes + insurance + utilities),
+            "monthly_non_housing_operating_expenses": None,
             "operating_expenses": None,
             "noi": None,
             "projected_monthly_cashflow": None,
+            "housing_only_cashflow": None,
+            "full_cycle_cashflow": None,
+            "spreadsheet_total_monthly_cost": None,
             "dscr": None,
             "rent_gap": _round_money(
-                (market_reference_rent - full_housing_cost)
-                if market_reference_rent is not None and full_housing_cost is not None
+                (market_reference_rent - housing_cost)
+                if market_reference_rent is not None and housing_cost is not None
                 else None
             ),
             "utilities_monthly": _round_money(utilities),
@@ -230,19 +238,27 @@ def compute_trustworthy_investment_metrics(
     effective_gross_income = float(gross_rent_used) * (1.0 - vacancy)
     variable_operating_expenses = float(gross_rent_used) * (maintenance + management + capex)
     fixed_operating_expenses = taxes + insurance + utilities
+    monthly_non_housing_operating_expenses = variable_operating_expenses + utilities
     operating_expenses = variable_operating_expenses + fixed_operating_expenses
     noi = effective_gross_income - operating_expenses
 
-    projected_monthly_cashflow = None
-    dscr = None
+    housing_only_cashflow = None
+    if housing_cost is not None:
+        housing_only_cashflow = float(gross_rent_used) - float(housing_cost)
 
+    full_cycle_cashflow = None
+    dscr = None
     if debt_service is not None:
-        projected_monthly_cashflow = noi - debt_service
+        full_cycle_cashflow = noi - debt_service
         dscr = (noi / debt_service) if debt_service > 1e-6 else None
 
+    spreadsheet_total_monthly_cost = None
+    if housing_cost is not None:
+        spreadsheet_total_monthly_cost = float(housing_cost) + float(variable_operating_expenses) + float(utilities)
+
     rent_gap = None
-    if market_reference_rent is not None and full_housing_cost is not None:
-        rent_gap = float(market_reference_rent) - float(full_housing_cost)
+    if market_reference_rent is not None and housing_cost is not None:
+        rent_gap = float(market_reference_rent) - float(housing_cost)
 
     return {
         "gross_rent_used": _round_money(gross_rent_used),
@@ -250,9 +266,13 @@ def compute_trustworthy_investment_metrics(
         "effective_gross_income": _round_money(effective_gross_income),
         "variable_operating_expenses": _round_money(variable_operating_expenses),
         "fixed_operating_expenses": _round_money(fixed_operating_expenses),
+        "monthly_non_housing_operating_expenses": _round_money(monthly_non_housing_operating_expenses),
         "operating_expenses": _round_money(operating_expenses),
         "noi": _round_money(noi),
-        "projected_monthly_cashflow": _round_money(projected_monthly_cashflow),
+        "projected_monthly_cashflow": _round_money(housing_only_cashflow),
+        "housing_only_cashflow": _round_money(housing_only_cashflow),
+        "full_cycle_cashflow": _round_money(full_cycle_cashflow),
+        "spreadsheet_total_monthly_cost": _round_money(spreadsheet_total_monthly_cost),
         "dscr": round(float(dscr), 3) if dscr is not None else None,
         "rent_gap": _round_money(rent_gap),
         "utilities_monthly": _round_money(utilities),

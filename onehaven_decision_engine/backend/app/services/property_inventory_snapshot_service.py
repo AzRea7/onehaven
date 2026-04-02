@@ -183,7 +183,9 @@ def _settings_interest_rate() -> float:
     )
 
 def _settings_utilities_monthly() -> float:
-    return float(getattr(settings, "utilities_monthly_default", 0.0) or 0.0)
+    # Headline investor math intentionally excludes utilities because the
+    # hybrid tenant contract structure carries them outside the core owner-paid model.
+    return 0.0
 
 
 def _settings_term_years() -> int:
@@ -304,6 +306,7 @@ def _compute_housing_cost_bundle(
     )
     return {
         **bundle,
+        "mortgage_payment": bundle.get("monthly_debt_service"),
         "property_tax_annual": taxes_annual if taxes_annual is not None else (bundle.get("monthly_taxes") * 12.0 if bundle.get("monthly_taxes") is not None else None),
         "property_tax_rate_annual": tax_rate_annual,
         "property_tax_source": tax_ctx.get("property_tax_source"),
@@ -638,6 +641,10 @@ def _ranking_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
         "monthly_taxes": _safe_float(snapshot.get("monthly_taxes")),
         "monthly_insurance": _safe_float(snapshot.get("monthly_insurance")),
         "monthly_housing_cost": _safe_float(snapshot.get("monthly_housing_cost")),
+        "housing_only_cashflow": _safe_float(snapshot.get("housing_only_cashflow")),
+        "full_cycle_cashflow": _safe_float(snapshot.get("full_cycle_cashflow")),
+        "spreadsheet_total_monthly_cost": _safe_float(snapshot.get("spreadsheet_total_monthly_cost")),
+        "monthly_non_housing_operating_expenses": _safe_float(snapshot.get("monthly_non_housing_operating_expenses")),
         "effective_gross_income": _safe_float(snapshot.get("effective_gross_income")),
         "variable_operating_expenses": _safe_float(snapshot.get("variable_operating_expenses")),
         "fixed_operating_expenses": _safe_float(snapshot.get("fixed_operating_expenses")),
@@ -874,10 +881,15 @@ def build_property_inventory_snapshot(
         "management_rate_used": live_metrics.get("management_rate_used"),
         "capex_rate_used": live_metrics.get("capex_rate_used"),
         "projected_monthly_cashflow": live_metrics.get("projected_monthly_cashflow"),
+        "housing_only_cashflow": live_metrics.get("housing_only_cashflow"),
+        "full_cycle_cashflow": live_metrics.get("full_cycle_cashflow"),
+        "spreadsheet_total_monthly_cost": live_metrics.get("spreadsheet_total_monthly_cost"),
+        "monthly_non_housing_operating_expenses": live_metrics.get("monthly_non_housing_operating_expenses"),
         "rent_gap": rent_gap,
         "loan_amount": housing_costs.get("loan_amount"),
         "monthly_taxes": housing_costs.get("monthly_taxes"),
         "monthly_insurance": housing_costs.get("monthly_insurance"),
+        "mortgage_payment": housing_costs.get("mortgage_payment"),
         "monthly_housing_cost": housing_costs.get("monthly_housing_cost"),
         "property_tax_annual": housing_costs.get("property_tax_annual"),
         "property_tax_rate_annual": housing_costs.get("property_tax_rate_annual"),
@@ -1100,6 +1112,7 @@ def build_inventory_snapshots_for_scope(
     )
 
     return {
+        "rows": rows,
         "items": rows,
         "query_rows": len(props),
         "returned_rows": len(rows),

@@ -19,15 +19,15 @@ def _row_to_dict(row: Any | None) -> dict[str, Any] | None:
 def _clean_text(value: Any) -> str | None:
     if value is None:
         return None
-    text = str(value).strip()
-    return text or None
+    text_value = str(value).strip()
+    return text_value or None
 
 
 def _clean_role(role: Any) -> str:
-    text = str(role or "").strip().lower()
-    if not text:
+    text_value = str(role or "").strip().lower()
+    if not text_value:
         raise HTTPException(status_code=422, detail="role is required.")
-    return text
+    return text_value
 
 
 def _normalize_role(role: str) -> str:
@@ -51,19 +51,36 @@ def _normalize_role(role: str) -> str:
     return aliases.get(raw, raw.replace(" ", "_"))
 
 
+def _col_exists(db: Session, table: str, column: str) -> bool:
+    row = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = :table_name
+              AND column_name = :column_name
+            LIMIT 1
+            """
+        ),
+        {"table_name": table, "column_name": column},
+    ).first()
+    return row is not None
+
+
 def _participant_sort_rank(row: dict[str, Any]) -> tuple[int, str, int]:
     role = str(row.get("role") or "")
     primary = bool(row.get("is_primary"))
     waiting = bool(row.get("waiting_on"))
 
     if waiting:
-      rank = 0
+        rank = 0
     elif primary:
-      rank = 1
+        rank = 1
     elif role in {"listing_agent", "listing_office"}:
-      rank = 2
+        rank = 2
     else:
-      rank = 3
+        rank = 3
 
     return (rank, role, int(row.get("id") or 0))
 
@@ -74,17 +91,29 @@ def list_participants(
     org_id: int,
     property_id: int,
 ) -> list[dict[str, Any]]:
+    has_waiting_on = _col_exists(db, "acquisition_contacts", "waiting_on")
+    has_is_primary = _col_exists(db, "acquisition_contacts", "is_primary")
+
+    order_parts: list[str] = []
+    if has_waiting_on:
+        order_parts.append(
+            "case when coalesce(waiting_on, false) then 0 else 1 end asc"
+        )
+    if has_is_primary:
+        order_parts.append(
+            "case when coalesce(is_primary, false) then 0 else 1 end asc"
+        )
+    order_parts.extend(["role asc", "id asc"])
+    order_sql = ",\n                ".join(order_parts)
+
     rows = db.execute(
         text(
-            """
+            f"""
             select *
             from acquisition_contacts
             where org_id = :org_id and property_id = :property_id
             order by
-                case when coalesce(waiting_on, false) then 0 else 1 end asc,
-                case when coalesce(is_primary, false) then 0 else 1 end asc,
-                role asc,
-                id asc
+                {order_sql}
             """
         ),
         {"org_id": int(org_id), "property_id": int(property_id)},
@@ -94,6 +123,38 @@ def list_participants(
     out.sort(key=_participant_sort_rank)
     return out
 
+def delete_participant(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    participant_id: int,
+) -> dict[str, Any]:
+    row = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_contacts
+                where id = :participant_id and org_id = :org_id and property_id = :property_id
+                """
+            ),
+            {
+                "participant_id": int(participant_id),
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+            },
+        ).fetchone()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Participant not found.")
+
+    db.execute(
+        text("delete from acquisition_contacts where id = :participant_id"),
+        {"participant_id": int(participant_id)},
+    )
+    db.commit()
+    return row
 
 def upsert_participant(
     db: Session,
@@ -116,14 +177,18 @@ def upsert_participant(
 ) -> dict[str, Any]:
     normalized_role = _normalize_role(role)
     clean_name = _clean_text(name)
-    if not clean_name:
-        raise HTTPException(status_code=422, detail="name is required.")
-
     clean_email = _clean_text(email)
     clean_phone = _clean_text(phone)
     clean_company = _clean_text(company)
     clean_notes = _clean_text(notes)
     clean_source_type = _clean_text(source_type)
+
+    if not clean_name:
+        raise HTTPException(status_code=422, detail="name is required.")
+
+    has_is_primary = _col_exists(db, "acquisition_contacts", "is_primary")
+    has_waiting_on = _col_exists(db, "acquisition_contacts", "waiting_on")
+    has_source_type = _col_exists(db, "acquisition_contacts", "source_type")
 
     existing = _row_to_dict(
         db.execute(
@@ -131,7 +196,9 @@ def upsert_participant(
                 """
                 select *
                 from acquisition_contacts
-                where org_id = :org_id and property_id = :property_id and role = :role
+                where org_id = :org_id
+                  and property_id = :property_id
+                  and role = :role
                 order by id desc
                 limit 1
                 """
@@ -145,62 +212,75 @@ def upsert_participant(
     )
 
     if existing:
-        merged_name = clean_name or existing.get("name")
-        merged_email = clean_email if clean_email is not None else existing.get("email")
-        merged_phone = clean_phone if clean_phone is not None else existing.get("phone")
-        merged_company = clean_company if clean_company is not None else existing.get("company")
-        merged_notes = clean_notes if clean_notes is not None else existing.get("notes")
-        merged_source_type = (
-            clean_source_type if clean_source_type is not None else existing.get("source_type")
-        )
-        merged_is_primary = (
-            bool(is_primary)
-            if is_primary is not None
-            else bool(existing.get("is_primary"))
-        )
-        merged_waiting_on = (
-            bool(waiting_on)
-            if waiting_on is not None
-            else bool(existing.get("waiting_on"))
-        )
+        merged_name = clean_name or _clean_text(existing.get("name"))
+        merged_email = clean_email or _clean_text(existing.get("email"))
+        merged_phone = clean_phone or _clean_text(existing.get("phone"))
+        merged_company = clean_company or _clean_text(existing.get("company"))
+        merged_notes = clean_notes or _clean_text(existing.get("notes"))
+
+        set_parts = [
+            "name = :name",
+            "email = :email",
+            "phone = :phone",
+            "company = :company",
+            "notes = :notes",
+            "source_document_id = :source_document_id",
+            "confidence = :confidence",
+            "extraction_version = :extraction_version",
+            "manually_overridden = :manually_overridden",
+        ]
+        params: dict[str, Any] = {
+            "id": int(existing["id"]),
+            "name": merged_name,
+            "email": merged_email,
+            "phone": merged_phone,
+            "company": merged_company,
+            "notes": merged_notes,
+            "source_document_id": source_document_id,
+            "confidence": confidence,
+            "extraction_version": extraction_version,
+            "manually_overridden": bool(manually_overridden),
+        }
+
+        if has_is_primary:
+            merged_is_primary = (
+                bool(is_primary)
+                if is_primary is not None
+                else bool(existing.get("is_primary"))
+            )
+            set_parts.append("is_primary = :is_primary")
+            params["is_primary"] = merged_is_primary
+
+        if has_waiting_on:
+            merged_waiting_on = (
+                bool(waiting_on)
+                if waiting_on is not None
+                else bool(existing.get("waiting_on"))
+            )
+            set_parts.append("waiting_on = :waiting_on")
+            params["waiting_on"] = merged_waiting_on
+
+        if has_source_type:
+            merged_source_type = clean_source_type or _clean_text(
+                existing.get("source_type")
+            )
+            set_parts.append("source_type = :source_type")
+            params["source_type"] = merged_source_type
+
+        set_parts.append("updated_at = now()")
 
         db.execute(
             text(
-                """
+                f"""
                 update acquisition_contacts
-                set name = :name,
-                    email = :email,
-                    phone = :phone,
-                    company = :company,
-                    notes = :notes,
-                    source_document_id = :source_document_id,
-                    confidence = :confidence,
-                    extraction_version = :extraction_version,
-                    manually_overridden = :manually_overridden,
-                    is_primary = :is_primary,
-                    waiting_on = :waiting_on,
-                    source_type = :source_type,
-                    updated_at = now()
+                set {", ".join(set_parts)}
                 where id = :id
                 """
             ),
-            {
-                "id": int(existing["id"]),
-                "name": merged_name,
-                "email": merged_email,
-                "phone": merged_phone,
-                "company": merged_company,
-                "notes": merged_notes,
-                "source_document_id": source_document_id,
-                "confidence": confidence,
-                "extraction_version": extraction_version,
-                "manually_overridden": bool(manually_overridden),
-                "is_primary": merged_is_primary,
-                "waiting_on": merged_waiting_on,
-                "source_type": merged_source_type,
-            },
+            params,
         )
         db.commit()
+
         return _row_to_dict(
             db.execute(
                 text("select * from acquisition_contacts where id = :id"),
@@ -208,68 +288,82 @@ def upsert_participant(
             ).fetchone()
         ) or {}
 
+    columns = [
+        "org_id",
+        "property_id",
+        "role",
+        "name",
+        "email",
+        "phone",
+        "company",
+        "notes",
+        "source_document_id",
+        "confidence",
+        "extraction_version",
+        "manually_overridden",
+    ]
+    values = [
+        ":org_id",
+        ":property_id",
+        ":role",
+        ":name",
+        ":email",
+        ":phone",
+        ":company",
+        ":notes",
+        ":source_document_id",
+        ":confidence",
+        ":extraction_version",
+        ":manually_overridden",
+    ]
+    params = {
+        "org_id": int(org_id),
+        "property_id": int(property_id),
+        "role": normalized_role,
+        "name": clean_name,
+        "email": clean_email,
+        "phone": clean_phone,
+        "company": clean_company,
+        "notes": clean_notes,
+        "source_document_id": source_document_id,
+        "confidence": confidence,
+        "extraction_version": extraction_version,
+        "manually_overridden": bool(manually_overridden),
+    }
+
+    if has_is_primary:
+        columns.append("is_primary")
+        values.append(":is_primary")
+        params["is_primary"] = bool(is_primary) if is_primary is not None else False
+
+    if has_waiting_on:
+        columns.append("waiting_on")
+        values.append(":waiting_on")
+        params["waiting_on"] = bool(waiting_on) if waiting_on is not None else False
+
+    if has_source_type:
+        columns.append("source_type")
+        values.append(":source_type")
+        params["source_type"] = clean_source_type
+
+    columns.extend(["created_at", "updated_at"])
+    values.extend(["now()", "now()"])
+
     db.execute(
         text(
-            """
+            f"""
             insert into acquisition_contacts (
-                org_id,
-                property_id,
-                role,
-                name,
-                email,
-                phone,
-                company,
-                notes,
-                source_document_id,
-                confidence,
-                extraction_version,
-                manually_overridden,
-                is_primary,
-                waiting_on,
-                source_type,
-                created_at,
-                updated_at
+                {", ".join(columns)}
             )
             values (
-                :org_id,
-                :property_id,
-                :role,
-                :name,
-                :email,
-                :phone,
-                :company,
-                :notes,
-                :source_document_id,
-                :confidence,
-                :extraction_version,
-                :manually_overridden,
-                :is_primary,
-                :waiting_on,
-                :source_type,
-                now(),
-                now()
+                {", ".join(values)}
             )
             """
         ),
-        {
-            "org_id": int(org_id),
-            "property_id": int(property_id),
-            "role": normalized_role,
-            "name": clean_name,
-            "email": clean_email,
-            "phone": clean_phone,
-            "company": clean_company,
-            "notes": clean_notes,
-            "source_document_id": source_document_id,
-            "confidence": confidence,
-            "extraction_version": extraction_version,
-            "manually_overridden": bool(manually_overridden),
-            "is_primary": bool(is_primary) if is_primary is not None else False,
-            "waiting_on": bool(waiting_on) if waiting_on is not None else False,
-            "source_type": clean_source_type,
-        },
+        params,
     )
     db.commit()
+
     return _row_to_dict(
         db.execute(
             text(
@@ -333,6 +427,7 @@ def seed_listing_contacts_from_property(
         notes_parts = ["Seeded from ingested listing metadata"]
         if agent_website:
             notes_parts.append(f"Website: {agent_website}")
+
         created.append(
             upsert_participant(
                 db,
@@ -376,38 +471,4 @@ def seed_listing_contacts_from_property(
             )
         )
 
-    return list_participants(db, org_id=org_id, property_id=property_id)
-
-
-def delete_participant(
-    db: Session,
-    *,
-    org_id: int,
-    property_id: int,
-    participant_id: int,
-) -> dict[str, Any]:
-    row = _row_to_dict(
-        db.execute(
-            text(
-                """
-                select *
-                from acquisition_contacts
-                where id = :participant_id and org_id = :org_id and property_id = :property_id
-                """
-            ),
-            {
-                "participant_id": int(participant_id),
-                "org_id": int(org_id),
-                "property_id": int(property_id),
-            },
-        ).fetchone()
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="Participant not found.")
-
-    db.execute(
-        text("delete from acquisition_contacts where id = :participant_id"),
-        {"participant_id": int(participant_id)},
-    )
-    db.commit()
-    return row
+    return created

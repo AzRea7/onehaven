@@ -63,6 +63,7 @@ from ..services.property_state_machine import (
 )
 from ..services.workflow_gate_service import build_workflow_summary
 from ..services.acquisition_tag_service import list_property_tags, replace_property_tags
+from ..services.acquisition_participant_service import list_participants
 from ..services.property_inventory_snapshot_service import (
     build_property_inventory_snapshot,
     build_inventory_snapshots_for_scope,
@@ -134,6 +135,40 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
         return float(v)
     except Exception:
         return default
+
+
+def _first_non_empty(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _resolved_listing_contacts(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    acquisition_meta: dict[str, Any],
+) -> dict[str, Any]:
+    participants = list_participants(db, org_id=org_id, property_id=property_id)
+
+    listing_agent = next((row for row in participants if str(row.get("role") or "").strip().lower() == "listing_agent"), None)
+    listing_office = next((row for row in participants if str(row.get("role") or "").strip().lower() == "listing_office"), None)
+
+    return {
+        "listing_agent_name": _first_non_empty(acquisition_meta.get("listing_agent_name"), listing_agent.get("name") if listing_agent else None),
+        "listing_agent_phone": _first_non_empty(acquisition_meta.get("listing_agent_phone"), listing_agent.get("phone") if listing_agent else None),
+        "listing_agent_email": _first_non_empty(acquisition_meta.get("listing_agent_email"), listing_agent.get("email") if listing_agent else None),
+        "listing_agent_website": _first_non_empty(acquisition_meta.get("listing_agent_website")),
+        "listing_office_name": _first_non_empty(acquisition_meta.get("listing_office_name"), listing_office.get("company") if listing_office else None, listing_office.get("name") if listing_office else None),
+        "listing_office_phone": _first_non_empty(acquisition_meta.get("listing_office_phone"), listing_office.get("phone") if listing_office else None),
+        "listing_office_email": _first_non_empty(acquisition_meta.get("listing_office_email"), listing_office.get("email") if listing_office else None),
+        "acquisition_participants": participants,
+    }
 
 
 def _crime_label(score: Any) -> str:
@@ -501,6 +536,12 @@ def _snapshot_backed_property_payload(
     prop_payload = PropertyOut.model_validate(prop, from_attributes=True).model_dump()
 
     acquisition_meta = _property_acquisition_meta(db, org_id=org_id, property_id=int(prop.id))
+    resolved_contacts = _resolved_listing_contacts(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+        acquisition_meta=acquisition_meta,
+    )
     acquisition_tags = [row.get("tag") for row in list_property_tags(db, org_id=org_id, property_id=int(prop.id))]
 
     resolved_prices = resolve_prices_from_sources(
@@ -523,8 +564,13 @@ def _snapshot_backed_property_payload(
             "monthly_debt_service": snapshot.get("monthly_debt_service"),
             "monthly_taxes": snapshot.get("monthly_taxes"),
             "monthly_insurance": snapshot.get("monthly_insurance"),
+            "mortgage_payment": snapshot.get("mortgage_payment") or snapshot.get("monthly_debt_service"),
             "monthly_housing_cost": snapshot.get("monthly_housing_cost"),
             "projected_monthly_cashflow": snapshot.get("projected_monthly_cashflow"),
+            "housing_only_cashflow": snapshot.get("housing_only_cashflow"),
+            "full_cycle_cashflow": snapshot.get("full_cycle_cashflow"),
+            "spreadsheet_total_monthly_cost": snapshot.get("spreadsheet_total_monthly_cost"),
+            "monthly_non_housing_operating_expenses": snapshot.get("monthly_non_housing_operating_expenses"),
             "rent_gap": snapshot.get("rent_gap"),
             "dscr": snapshot.get("dscr"),
             "section8_fmr": resolved_section8_fmr,
@@ -598,13 +644,14 @@ def _snapshot_backed_property_payload(
             "listing_mls_name": acquisition_meta.get("listing_mls_name"),
             "listing_mls_number": acquisition_meta.get("listing_mls_number"),
             "listing_type": acquisition_meta.get("listing_type"),
-            "listing_agent_name": acquisition_meta.get("listing_agent_name"),
-            "listing_agent_phone": acquisition_meta.get("listing_agent_phone"),
-            "listing_agent_email": acquisition_meta.get("listing_agent_email"),
-            "listing_agent_website": acquisition_meta.get("listing_agent_website"),
-            "listing_office_name": acquisition_meta.get("listing_office_name"),
-            "listing_office_phone": acquisition_meta.get("listing_office_phone"),
-            "listing_office_email": acquisition_meta.get("listing_office_email"),
+            "listing_agent_name": resolved_contacts.get("listing_agent_name"),
+            "listing_agent_phone": resolved_contacts.get("listing_agent_phone"),
+            "listing_agent_email": resolved_contacts.get("listing_agent_email"),
+            "listing_agent_website": resolved_contacts.get("listing_agent_website"),
+            "listing_office_name": resolved_contacts.get("listing_office_name"),
+            "listing_office_phone": resolved_contacts.get("listing_office_phone"),
+            "listing_office_email": resolved_contacts.get("listing_office_email"),
+            "acquisition_participants": resolved_contacts.get("acquisition_participants") or [],
             "listing_zillow_url": _resolved_zillow_listing_url(
                 stored_url=acquisition_meta.get("listing_zillow_url"),
                 address=getattr(prop, "address", None),
@@ -800,7 +847,7 @@ def list_properties(
         include_hidden=include_hidden,
     )
 
-    rows = list(scope.get("rows") or [])
+    rows = list(scope.get("rows") or scope.get("items") or [])
     wanted_freshness = str(freshness or "").strip().lower() or None
 
     def keep(row: dict[str, Any]) -> bool:
@@ -1173,3 +1220,5 @@ def enrich_property_financial_batch(
         })
     db.commit()
     return {"ok": True, "count": len(rows), "rows": rows}
+
+

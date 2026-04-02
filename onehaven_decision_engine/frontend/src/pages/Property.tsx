@@ -476,6 +476,23 @@ function participantRows(detail: AcquisitionDetail | null) {
   return contacts;
 }
 
+function findParticipantContact(
+  detail: AcquisitionDetail | null,
+  matchers: string[],
+) {
+  const rows = participantRows(detail);
+  const lowered = matchers.map((x) => x.toLowerCase());
+  return (
+    rows.find((person: any) => {
+      const haystack = [person?.role, person?.name, person?.company]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return lowered.some((needle) => haystack.includes(needle));
+    }) || null
+  );
+}
+
 function extractTags(
   payload: AcquisitionTagsPayload | null | undefined,
 ): string[] {
@@ -592,7 +609,24 @@ function inferMarketRent(property: PropertyPayload | null) {
   );
 }
 
+function inferHousingOnlyCashflow(property: PropertyPayload | null) {
+  const rent =
+    property?.rent_used ??
+    property?.rent_explain?.rent_used ??
+    property?.rent_assumption?.rent_used ??
+    property?.market_reference_rent ??
+    property?.market_rent_estimate ??
+    property?.rent_explain?.market_rent_estimate ??
+    property?.rent_assumption?.market_rent_estimate ??
+    null;
+  const housing = inferMonthlyHousingCost(property);
+  if (rent == null || housing == null) return null;
+  return rent - housing;
+}
+
 function inferCashflow(property: PropertyPayload | null) {
+  const housingOnly = inferHousingOnlyCashflow(property);
+  if (housingOnly != null) return housingOnly;
   return (
     property?.projected_monthly_cashflow ??
     property?.inventory_snapshot?.projected_monthly_cashflow ??
@@ -1196,6 +1230,65 @@ export default function Property() {
   const insuranceAnnual = inferInsuranceAnnual(data);
   const section8Rent = inferSection8Rent(data);
   const marketRent = inferMarketRent(data);
+  const housingOnlyCashflow = inferHousingOnlyCashflow(data);
+  const utilitiesMonthly =
+    data.utilities_monthly ??
+    data.inventory_snapshot?.utilities_monthly ??
+    null;
+  const variableOperatingExpenses =
+    data.variable_operating_expenses ??
+    data.inventory_snapshot?.variable_operating_expenses ??
+    null;
+  const fixedOperatingExpenses =
+    data.fixed_operating_expenses ??
+    data.inventory_snapshot?.fixed_operating_expenses ??
+    null;
+  const fullOperatingExpenses =
+    data.operating_expenses ??
+    data.inventory_snapshot?.operating_expenses ??
+    null;
+  const spreadsheetTotalMonthlyCost =
+    (monthlyHousingCost ?? 0) +
+    (fullOperatingExpenses ?? variableOperatingExpenses ?? 0);
+  const fullCycleCashflow =
+    data.noi != null && mortgage != null
+      ? data.noi - mortgage
+      : (data.underwriting_result_cash_flow ??
+        data.last_underwriting_result?.cash_flow ??
+        data.inventory_snapshot?.underwriting_result_cash_flow ??
+        null);
+
+  const listingAgentFallback = findParticipantContact(acquisition, [
+    "listing agent",
+    "seller agent",
+    "agent",
+    "broker",
+    "realtor",
+  ]);
+  const listingOfficeFallback = findParticipantContact(acquisition, [
+    "brokerage",
+    "office",
+    "listing office",
+    "title",
+  ]);
+
+  const listingAgentName =
+    data.listing_agent_name || listingAgentFallback?.name || "No agent name";
+  const listingAgentPhone =
+    data.listing_agent_phone || listingAgentFallback?.phone || "No phone";
+  const listingAgentEmail =
+    data.listing_agent_email || listingAgentFallback?.email || "No email";
+  const listingAgentWebsite =
+    data.listing_agent_website || listingAgentFallback?.website || null;
+  const listingOfficeName =
+    data.listing_office_name ||
+    listingOfficeFallback?.company ||
+    listingOfficeFallback?.name ||
+    "No office name";
+  const listingOfficePhone =
+    data.listing_office_phone || listingOfficeFallback?.phone || "No phone";
+  const listingOfficeEmail =
+    data.listing_office_email || listingOfficeFallback?.email || "No email";
 
   const zillowUrl = deriveZillowUrl(data);
 
@@ -1376,16 +1469,23 @@ export default function Property() {
               ) : null}
             </div>
           </Surface>
-
           <Surface
-            title="Trustworthy underwriting"
-            subtitle="These metrics use the same rent, debt, tax, insurance, and housing-cost path as the investor pane."
+            title="Investor cashflow spreadsheet"
+            subtitle="Headline investor cashflow only counts rent minus mortgage, taxes, and insurance. Utilities and broader operating expenses are shown separately below."
           >
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <StatPill
-                label="Cashflow"
-                value={money(cashflow)}
-                tone={cashflow != null && cashflow > 0 ? "good" : "warn"}
+                label="Investor cashflow"
+                value={money(housingOnlyCashflow ?? cashflow)}
+                tone={
+                  (housingOnlyCashflow ?? cashflow) != null &&
+                  Number(housingOnlyCashflow ?? cashflow) > 0
+                    ? "good"
+                    : (housingOnlyCashflow ?? cashflow) != null &&
+                        Number(housingOnlyCashflow ?? cashflow) < 0
+                      ? "bad"
+                      : "neutral"
+                }
               />
               <StatPill
                 label="DSCR"
@@ -1398,52 +1498,150 @@ export default function Property() {
                 tone="neutral"
               />
               <StatPill
-                label="Market rent"
-                value={money(marketRent)}
-                tone="neutral"
-              />
-              <StatPill
-                label="Rent gap"
-                value={money(data.rent_gap)}
-                tone={
-                  data.rent_gap != null && data.rent_gap > 0
-                    ? "good"
-                    : data.rent_gap != null && data.rent_gap < 0
-                      ? "bad"
-                      : "neutral"
-                }
-              />
-              <StatPill
-                label="Mortgage"
-                value={money(mortgage)}
-                tone="neutral"
-              />
-              <StatPill
-                label="Taxes"
-                value={money(monthlyTaxes)}
-                tone="neutral"
-              />
-              <StatPill
-                label="Insurance"
-                value={money(monthlyInsurance)}
-                tone="neutral"
-              />
-              <StatPill
                 label="Housing total"
                 value={money(monthlyHousingCost)}
                 tone="neutral"
               />
-              <StatPill label="NOI" value={money(data.noi)} tone="neutral" />
-              <StatPill
-                label="Operating expenses"
-                value={money(data.operating_expenses)}
-                tone="neutral"
-              />
-              <StatPill
-                label="Gross income"
-                value={money(data.effective_gross_income)}
-                tone="neutral"
-              />
+            </div>
+
+            <div className="mt-5 overflow-x-auto rounded-3xl border border-app bg-app-panel">
+              <table className="min-w-full text-left text-sm text-app-2">
+                <thead className="border-b border-app bg-app-muted/60 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Line item</th>
+                    <th className="px-4 py-3 font-medium">Monthly</th>
+                    <th className="px-4 py-3 font-medium">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">
+                      Rent used
+                    </td>
+                    <td className="px-4 py-3">
+                      {money(data.rent_used ?? section8Rent ?? marketRent)}
+                    </td>
+                    <td className="px-4 py-3 text-app-4">
+                      Section 8 / comp-capped rent input used by underwriting.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">
+                      Mortgage
+                    </td>
+                    <td className="px-4 py-3">{money(mortgage)}</td>
+                    <td className="px-4 py-3 text-app-4">
+                      Monthly debt service.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">
+                      Property taxes
+                    </td>
+                    <td className="px-4 py-3">{money(monthlyTaxes)}</td>
+                    <td className="px-4 py-3 text-app-4">
+                      {data.property_tax_source ||
+                        "Property tax enrichment source unavailable."}
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">
+                      Insurance
+                    </td>
+                    <td className="px-4 py-3">{money(monthlyInsurance)}</td>
+                    <td className="px-4 py-3 text-app-4">
+                      {data.insurance_source ||
+                        "Insurance enrichment source unavailable."}
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70 bg-app-muted/30">
+                    <td className="px-4 py-3 font-semibold text-app-0">
+                      Investor cashflow (headline)
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-app-0">
+                      {money(housingOnlyCashflow ?? cashflow)}
+                    </td>
+                    <td className="px-4 py-3 text-app-4">
+                      Strict rent minus mortgage, taxes, and insurance only.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">
+                      Utilities
+                    </td>
+                    <td className="px-4 py-3">{money(utilitiesMonthly)}</td>
+                    <td className="px-4 py-3 text-app-4">
+                      Displayed for visibility but excluded from the headline
+                      investor cashflow because the tenant lease structure
+                      handles utilities.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">
+                      Variable operating expenses
+                    </td>
+                    <td className="px-4 py-3">
+                      {money(variableOperatingExpenses)}
+                    </td>
+                    <td className="px-4 py-3 text-app-4">
+                      Shown separately for full operating visibility.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">
+                      Fixed operating expenses
+                    </td>
+                    <td className="px-4 py-3">
+                      {money(fixedOperatingExpenses)}
+                    </td>
+                    <td className="px-4 py-3 text-app-4">
+                      Shown separately for full operating visibility.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">
+                      Full operating expenses
+                    </td>
+                    <td className="px-4 py-3">
+                      {money(fullOperatingExpenses)}
+                    </td>
+                    <td className="px-4 py-3 text-app-4">
+                      Broader property operating expense bucket from
+                      underwriting snapshot.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">NOI</td>
+                    <td className="px-4 py-3">{money(data.noi)}</td>
+                    <td className="px-4 py-3 text-app-4">
+                      Net operating income before debt service.
+                    </td>
+                  </tr>
+                  <tr className="border-b border-app/70">
+                    <td className="px-4 py-3 font-medium text-app-0">
+                      Spreadsheet total monthly cost
+                    </td>
+                    <td className="px-4 py-3">
+                      {money(spreadsheetTotalMonthlyCost)}
+                    </td>
+                    <td className="px-4 py-3 text-app-4">
+                      Housing cost plus the broader operating bucket for full
+                      view.
+                    </td>
+                  </tr>
+                  <tr className="bg-app-muted/30">
+                    <td className="px-4 py-3 font-semibold text-app-0">
+                      Full-cycle cashflow
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-app-0">
+                      {money(fullCycleCashflow)}
+                    </td>
+                    <td className="px-4 py-3 text-app-4">
+                      Expanded underwriting view after broader operating costs.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
             {taxAnnual != null || insuranceAnnual != null ? (
@@ -1657,22 +1855,22 @@ export default function Property() {
                   Listing agent
                 </div>
                 <div className="mt-3 text-lg font-semibold text-app-0">
-                  {data.listing_agent_name || "No agent name"}
+                  {listingAgentName}
                 </div>
                 <div className="mt-3 space-y-2 text-sm text-app-2">
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-app-4" />
-                    <span>{data.listing_agent_phone || "No phone"}</span>
+                    <span>{listingAgentPhone}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Mail className="h-4 w-4 text-app-4" />
-                    <span>{data.listing_agent_email || "No email"}</span>
+                    <span>{listingAgentEmail}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <ExternalLink className="h-4 w-4 text-app-4" />
-                    {data.listing_agent_website ? (
+                    {listingAgentWebsite ? (
                       <a
-                        href={data.listing_agent_website}
+                        href={listingAgentWebsite}
                         target="_blank"
                         rel="noreferrer"
                         className="text-app-1 hover:text-app-0"
@@ -1692,16 +1890,16 @@ export default function Property() {
                   Brokerage / office
                 </div>
                 <div className="mt-3 text-lg font-semibold text-app-0">
-                  {data.listing_office_name || "No office name"}
+                  {listingOfficeName}
                 </div>
                 <div className="mt-3 space-y-2 text-sm text-app-2">
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-app-4" />
-                    <span>{data.listing_office_phone || "No phone"}</span>
+                    <span>{listingOfficePhone}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Mail className="h-4 w-4 text-app-4" />
-                    <span>{data.listing_office_email || "No email"}</span>
+                    <span>{listingOfficeEmail}</span>
                   </div>
                 </div>
               </div>

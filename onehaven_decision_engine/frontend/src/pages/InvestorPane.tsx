@@ -249,22 +249,22 @@ function inferMonthlyHousingCost(r: any) {
 }
 
 function inferCashflow(r: any) {
-  const direct =
+  const rent = inferRentUsed(r) ?? inferMarketRent(r);
+  const housing = inferMonthlyHousingCost(r);
+
+  if (rent != null && housing != null) {
+    return rent - housing;
+  }
+
+  return (
     numberOrNull(r?.projected_monthly_cashflow) ??
     numberOrNull(r?.inventory_snapshot?.projected_monthly_cashflow) ??
     numberOrNull(r?.cashflow_estimate) ??
     numberOrNull(r?.last_underwriting_result?.cash_flow) ??
     numberOrNull(r?.last_underwriting_result?.cashflow) ??
     numberOrNull(r?.property_net_cash_window) ??
-    numberOrNull(r?.metrics?.cashflow_estimate);
-
-  if (direct != null) return direct;
-
-  const rent = inferRentUsed(r) ?? inferMarketRent(r);
-  const housing = inferMonthlyHousingCost(r);
-
-  if (rent == null || housing == null) return null;
-  return rent - housing;
+    numberOrNull(r?.metrics?.cashflow_estimate)
+  );
 }
 
 function inferRentGap(r: any) {
@@ -732,10 +732,6 @@ function TopDealCard({
   const risk = inferRiskScore(row);
   const photoUrl = inferPhotoUrl(row);
   const reasons = rankingReason(row, sort, index + 1);
-  const mortgage = inferMortgage(row);
-  const monthlyTaxes = inferMonthlyTaxes(row);
-  const monthlyInsurance = inferMonthlyInsurance(row);
-  const monthlyHousingCost = inferMonthlyHousingCost(row);
 
   const content = (
     <div className="overflow-visible rounded-3xl border border-app bg-app-panel transition hover:border-app-strong hover:bg-app-muted/30">
@@ -794,21 +790,6 @@ function TopDealCard({
                   ? "warn"
                   : "bad"
             }
-          />
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
-          <StatPill label="Mortgage" value={money(mortgage)} tone="neutral" />
-          <StatPill label="Taxes" value={money(monthlyTaxes)} tone="neutral" />
-          <StatPill
-            label="Insurance"
-            value={money(monthlyInsurance)}
-            tone="neutral"
-          />
-          <StatPill
-            label="Housing total"
-            value={money(monthlyHousingCost)}
-            tone="neutral"
           />
         </div>
 
@@ -1145,10 +1126,7 @@ export default function InvestorPane() {
   return (
     <PageShell>
       <div className="space-y-6">
-        <PageHero
-          eyebrow="Investor"
-          title=""          
-        />
+        <PageHero eyebrow="Investor" title="" />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-6">
@@ -1401,10 +1379,6 @@ export default function InvestorPane() {
                       const photoUrl = inferPhotoUrl(row);
                       const tags = inferTags(row);
                       const updatedAt = inferUpdatedAt(row);
-                      const mortgage = inferMortgage(row);
-                      const monthlyTaxes = inferMonthlyTaxes(row);
-                      const monthlyInsurance = inferMonthlyInsurance(row);
-                      const monthlyHousingCost = inferMonthlyHousingCost(row);
                       const taxAnnual = inferTaxAnnual(row);
                       const taxSource = inferTaxSource(row);
                       const insuranceAnnual = inferInsuranceAnnual(row);
@@ -1526,11 +1500,6 @@ export default function InvestorPane() {
                                   }
                                 />
                                 <StatPill
-                                  label="Rent"
-                                  value={money(rentUsed ?? marketRent)}
-                                  tone="neutral"
-                                />
-                                <StatPill
                                   label="Risk"
                                   value={decimal(risk, 0)}
                                   tone={
@@ -1541,85 +1510,6 @@ export default function InvestorPane() {
                                         : "bad"
                                   }
                                 />
-                              </div>
-
-                              <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
-                                <StatPill
-                                  label="Mortgage"
-                                  value={money(mortgage)}
-                                  tone="neutral"
-                                />
-                                <StatPill
-                                  label="Taxes"
-                                  value={money(monthlyTaxes)}
-                                  tone="neutral"
-                                />
-                                <StatPill
-                                  label="Insurance"
-                                  value={money(monthlyInsurance)}
-                                  tone="neutral"
-                                />
-                                <StatPill
-                                  label="Housing total"
-                                  value={money(monthlyHousingCost)}
-                                  tone="neutral"
-                                />
-                              </div>
-
-                              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                    <Wallet className="h-4 w-4" />
-                                    Cashflow
-                                  </div>
-                                  <div
-                                    className={`mt-2 text-lg font-semibold ${metricTone(cashflow)}`}
-                                  >
-                                    {money(cashflow)}
-                                  </div>
-                                </div>
-
-                                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                    <Landmark className="h-4 w-4" />
-                                    DSCR
-                                  </div>
-                                  <div
-                                    className={`mt-2 text-lg font-semibold ${metricTone(dscr)}`}
-                                  >
-                                    {decimal(dscr, 2)}
-                                  </div>
-                                </div>
-
-                                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                    <TrendingUp className="h-4 w-4" />
-                                    Rent gap
-                                  </div>
-                                  <div
-                                    className={`mt-2 text-lg font-semibold ${metricTone(rentGap)}`}
-                                  >
-                                    {money(rentGap)}
-                                  </div>
-                                  <div className="mt-1 text-xs text-app-4">
-                                    Rent {money(rentUsed ?? marketRent)}
-                                  </div>
-                                </div>
-
-                                <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-                                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-app-4">
-                                    <ShieldAlert className="h-4 w-4" />
-                                    Risk
-                                  </div>
-                                  <div
-                                    className={`mt-2 text-lg font-semibold ${metricTone(risk, { inverse: true })}`}
-                                  >
-                                    {decimal(risk, 0)}
-                                  </div>
-                                  <div className="mt-1 text-xs text-app-4">
-                                    Lower is better
-                                  </div>
-                                </div>
                               </div>
 
                               <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">

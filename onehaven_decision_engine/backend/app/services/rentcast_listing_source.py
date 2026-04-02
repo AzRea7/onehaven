@@ -515,6 +515,67 @@ class RentCastListingSource:
                 return str(value).strip()
         return None
 
+
+    def _safe_iso_datetime(self, value: Any) -> str | None:
+        raw = self._normalize_optional_text(value)
+        if not raw:
+            return None
+        try:
+            # Normalize trailing Z for fromisoformat compatibility.
+            candidate = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
+            return candidate
+        except Exception:
+            return raw
+
+    def _pick_listing_agent(self, item: dict[str, Any]) -> dict[str, Any]:
+        raw = item.get("listingAgent")
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    def _pick_listing_office(self, item: dict[str, Any]) -> dict[str, Any]:
+        raw = item.get("listingOffice")
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    def _extract_listing_fields(self, item: dict[str, Any]) -> dict[str, Any]:
+        listing_agent = self._pick_listing_agent(item)
+        listing_office = self._pick_listing_office(item)
+
+        listing_status = self._normalize_optional_text(
+            item.get("status") or item.get("statusText")
+        )
+        listing_price = self._safe_float(item.get("price") or item.get("listPrice"), None)
+        listing_type = self._normalize_optional_text(item.get("listingType"))
+        listing_zillow_url = self._pick_external_url(item)
+
+        return {
+            "listing_status": listing_status,
+            "listing_last_seen_at": self._safe_iso_datetime(item.get("lastSeenDate") or item.get("lastSeen")),
+            "listing_removed_at": self._safe_iso_datetime(item.get("removedDate")),
+            "listing_listed_at": self._safe_iso_datetime(item.get("listedDate")),
+            "listing_created_at": self._safe_iso_datetime(item.get("createdDate")),
+            "listing_days_on_market": self._safe_int(item.get("daysOnMarket"), None),
+            "listing_price": listing_price,
+            "listing_mls_name": self._normalize_optional_text(item.get("mlsName")),
+            "listing_mls_number": self._normalize_optional_text(item.get("mlsNumber")),
+            "listing_type": listing_type,
+            "listing_zillow_url": listing_zillow_url,
+            "listing_agent_name": self._normalize_optional_text(listing_agent.get("name")),
+            "listing_agent_phone": self._normalize_optional_text(listing_agent.get("phone")),
+            "listing_agent_email": self._normalize_optional_text(listing_agent.get("email")),
+            "listing_agent_website": self._normalize_optional_text(listing_agent.get("website")),
+            "listing_office_name": self._normalize_optional_text(listing_office.get("name")),
+            "listing_office_phone": self._normalize_optional_text(listing_office.get("phone")),
+            "listing_office_email": self._normalize_optional_text(listing_office.get("email")),
+        }
+
+    def _listing_visibility_fields(self, listing_status: str | None) -> dict[str, Any]:
+        status = str(listing_status or "").strip().lower()
+        active_statuses = {"active", "new", "pending"}
+        is_hidden = bool(status) and status not in active_statuses
+        return {
+            "listing_hidden": is_hidden,
+            "listing_hidden_reason": "inactive_listing" if is_hidden else None,
+        }
+
     def _hash_payload(self, payload: Any) -> str:
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -588,6 +649,16 @@ class RentCastListingSource:
         )
 
         property_type_raw = item.get("propertyType") or item.get("type") or "single_family"
+        listing_fields = self._extract_listing_fields(item)
+        visibility_fields = self._listing_visibility_fields(
+            listing_fields.get("listing_status")
+        )
+
+        asking_price = self._safe_float(item.get("price") or item.get("listPrice"), 0.0) or 0.0
+        estimated_purchase_price = self._safe_float(
+            item.get("price") or item.get("listPrice"),
+            None,
+        )
 
         return {
             "external_record_id": self._pick_external_id(item),
@@ -605,8 +676,9 @@ class RentCastListingSource:
             ),
             "year_built": self._safe_int(item.get("yearBuilt"), None),
             "property_type": self._normalize_property_type(property_type_raw),
-            "asking_price": self._safe_float(item.get("price") or item.get("listPrice"), 0.0) or 0.0,
-            "estimated_purchase_price": self._safe_float(item.get("price") or item.get("listPrice"), None),
+            "asking_price": asking_price,
+            "estimated_purchase_price": estimated_purchase_price,
+            "listing_price": listing_fields.get("listing_price") if listing_fields.get("listing_price") is not None else estimated_purchase_price,
             "rehab_estimate": 0,
             "market_rent_estimate": None,
             "section8_fmr": None,
@@ -614,6 +686,8 @@ class RentCastListingSource:
             "inventory_count": None,
             "photos": photos,
             "source": "rentcast",
+            **listing_fields,
+            **visibility_fields,
             "raw_json": item,
         }
 
