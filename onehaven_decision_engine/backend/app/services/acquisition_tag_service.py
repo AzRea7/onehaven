@@ -7,6 +7,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 VALID_ACQUISITION_TAGS = {"saved", "shortlisted", "review_later", "rejected", "offer_candidate"}
+DEFAULT_INVESTOR_PRESERVE_TAGS = {"saved", "shortlisted"}
+ACQUISITION_POSTURE_TAGS = {"offer_candidate"}
 
 
 def _utcnow() -> datetime:
@@ -18,6 +20,12 @@ def normalize_tag(tag: str) -> str:
     if value not in VALID_ACQUISITION_TAGS:
         raise ValueError(f'invalid acquisition tag: {tag}')
     return value
+
+
+def normalize_preserve_tags(tags: list[str] | None, *, default_to_investor_tags: bool = True) -> list[str]:
+    incoming = tags if tags is not None else (sorted(DEFAULT_INVESTOR_PRESERVE_TAGS) if default_to_investor_tags else [])
+    normalized = sorted({normalize_tag(x) for x in incoming if str(x or '').strip()})
+    return [tag for tag in normalized if tag not in ACQUISITION_POSTURE_TAGS]
 
 
 def list_property_tags(db: Session, *, org_id: int, property_id: int) -> list[dict[str, Any]]:

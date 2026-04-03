@@ -32,12 +32,15 @@ from ..services.acquisition_participant_service import (
     upsert_participant,
 )
 from ..services.acquisition_service import (
+    ACQUISITION_DOCUMENT_KIND_LABELS,
+    ALLOWED_ACQUISITION_DOCUMENT_KINDS,
     add_acquisition_document,
     delete_acquisition_document,
     get_acquisition_detail,
     get_document_file_response,
     list_acquisition_queue,
     promote_property_to_acquisition,
+    remove_property_from_acquisition,
     replace_acquisition_document,
     update_acquisition_record,
     upload_acquisition_document_file,
@@ -48,6 +51,16 @@ router = APIRouter(prefix="/acquisition", tags=["acquisition"])
 
 class PromoteToAcquisitionIn(AcquisitionRecordUpdate):
     pass
+
+
+@router.get("/document-kinds")
+def acquisition_document_kinds():
+    return {
+        "items": [
+            {"value": kind, "label": ACQUISITION_DOCUMENT_KIND_LABELS.get(kind, kind.replace("_", " ").title())}
+            for kind in ALLOWED_ACQUISITION_DOCUMENT_KINDS
+        ]
+    }
 
 
 @router.get("/queue")
@@ -119,6 +132,22 @@ def acquisition_property_update(
         payload=payload.model_dump(exclude_unset=True),
     )
     return {"ok": True, "acquisition": updated}
+
+
+@router.post("/properties/{property_id}/remove")
+def acquisition_property_remove(
+    property_id: int,
+    payload: dict | None = None,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    return remove_property_from_acquisition(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        actor_user_id=getattr(p, "user_id", None),
+        payload=dict(payload or {}),
+    )
 
 
 @router.get("/properties/{property_id}/participants")
@@ -262,7 +291,7 @@ def acquisition_document_delete(
     property_id: int,
     document_id: int,
     reason: str | None = Query(default=None),
-    hard_delete_file: bool = Query(default=False),
+    hard_delete_file: bool = Query(default=True),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):

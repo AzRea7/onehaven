@@ -2,7 +2,6 @@ import React from "react";
 import {
   AlertCircle,
   ArrowUpRight,
-  CalendarClock,
   CheckCircle2,
   Clock3,
   DollarSign,
@@ -11,6 +10,7 @@ import {
   FileText,
   Loader2,
   MapPin,
+  Mail,
   Phone,
   Search,
   Upload,
@@ -20,9 +20,16 @@ import {
   GitCompareArrows,
   ShieldAlert,
   Users,
+  Trash2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import AcquisitionParticipantsPanel from "../components/AcquisitionParticipantsPanel";
+import DocumentFieldReviewPanel, {
+  type FieldValueRow,
+  type MissingDocumentGroup,
+  type ReviewDocumentRow,
+} from "../components/DocumentFieldReviewPanel";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
 import Surface from "../components/Surface";
@@ -54,13 +61,20 @@ type QueueRow = {
 type AcquisitionDetail = {
   property: any;
   acquisition: any;
-  documents: any[];
+  documents: ReviewDocumentRow[];
+  document_contact_guide?: Record<string, any> | null;
+  field_values?: FieldValueRow[];
+  participants?: any[];
   required_documents: { kind: string; label: string; present: boolean }[];
   summary: {
     days_to_close?: number | null;
     document_count: number;
     required_documents_total: number;
     required_documents_present: number;
+    suggested_field_count?: number;
+    overdue_deadline_count?: number;
+    has_overdue_deadlines?: boolean;
+    has_missing_required_docs?: boolean;
   };
 };
 
@@ -71,8 +85,7 @@ type DocKind =
   | "closing_disclosure"
   | "title_documents"
   | "insurance_binder"
-  | "inspection_report"
-  | "other";
+  | "inspection_report";
 
 const DOC_KIND_OPTIONS: { value: DocKind; label: string }[] = [
   { value: "purchase_agreement", label: "Purchase agreement" },
@@ -82,7 +95,6 @@ const DOC_KIND_OPTIONS: { value: DocKind; label: string }[] = [
   { value: "title_documents", label: "Title / escrow" },
   { value: "insurance_binder", label: "Insurance binder" },
   { value: "inspection_report", label: "Inspection report" },
-  { value: "other", label: "Other" },
 ];
 
 const CLIENT_ALLOWED_EXTENSIONS = [
@@ -94,6 +106,83 @@ const CLIENT_ALLOWED_EXTENSIONS = [
   ".jpeg",
 ];
 const CLIENT_MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+
+function docKindLabel(kind?: string | null) {
+  const key = String(kind || "")
+    .trim()
+    .toLowerCase();
+  return (
+    DOC_KIND_OPTIONS.find((opt) => opt.value === key)?.label ||
+    (key ? key.replace(/_/g, " ") : "Document")
+  );
+}
+
+function suggestDocKindFromFilename(filename?: string | null): DocKind {
+  const lower = String(filename || "")
+    .trim()
+    .toLowerCase();
+
+  if (lower.includes("purchase") && lower.includes("agreement")) {
+    return "purchase_agreement";
+  }
+  if (lower.includes("loan") && lower.includes("estimate")) {
+    return "loan_estimate";
+  }
+  if (lower.includes("closing") && lower.includes("disclosure")) {
+    return "closing_disclosure";
+  }
+  if (
+    lower.includes("title") ||
+    lower.includes("commitment") ||
+    lower.includes("escrow") ||
+    lower.includes("deed")
+  ) {
+    return "title_documents";
+  }
+  if (lower.includes("insurance") || lower.includes("binder")) {
+    return "insurance_binder";
+  }
+  if (lower.includes("inspection") || lower.includes("report")) {
+    return "inspection_report";
+  }
+  if (
+    lower.includes("loan") ||
+    lower.includes("mortgage") ||
+    lower.includes("underwriting")
+  ) {
+    return "loan_documents";
+  }
+  return "inspection_report";
+}
+
+function duplicateUploadMessage(e: any, fallback: string) {
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+
+  if (detail && typeof detail === "object") {
+    const existing =
+      detail.existing_document ||
+      detail.duplicate_document ||
+      detail.document ||
+      null;
+    const existingName =
+      existing?.name ||
+      existing?.original_filename ||
+      (existing?.id != null ? `Document #${existing.id}` : "existing document");
+
+    if (
+      detail.error === "duplicate_document" ||
+      detail.reason === "duplicate_document" ||
+      e?.response?.status === 409
+    ) {
+      return `This exact file is already attached as ${existingName}. Choose it in "Replace existing document" if the new file should supersede it.`;
+    }
+
+    if (typeof detail.message === "string") return detail.message;
+  }
+
+  return formatApiError(e, fallback);
+}
 
 function money(v: any) {
   if (v == null || Number.isNaN(Number(v))) return "—";
@@ -373,7 +462,7 @@ function collectConflicts(detail: AcquisitionDetail | null) {
     Array<{ value: any; documentId: any; documentName: string }>
   >();
 
-  for (const doc of documents) {
+  for (const doc of documents as any[]) {
     const fields = doc?.extracted_fields || {};
     for (const [key, rawValue] of Object.entries(fields)) {
       const value = typeof rawValue === "string" ? rawValue.trim() : rawValue;
@@ -405,6 +494,373 @@ function collectConflicts(detail: AcquisitionDetail | null) {
   }
 
   return conflicts;
+}
+
+function buildMissingDocumentGroups(
+  detail: AcquisitionDetail | null,
+): MissingDocumentGroup[] {
+  const rows = Array.isArray(detail?.required_documents)
+    ? detail.required_documents
+    : [];
+  return rows
+    .filter((row) => !row?.present)
+    .map((row) => ({
+      kind: String(row.kind || "unknown"),
+      label: String(row.label || row.kind || "Missing document"),
+    }));
+}
+
+function documentRoleLabel(role?: string | null) {
+  const normalized = String(role || "")
+    .trim()
+    .toLowerCase();
+  const labels: Record<string, string> = {
+    listing_agent: "Listing agent",
+    buyer_agent: "Buyer agent",
+    seller_agent: "Seller agent",
+    listing_office: "Listing office",
+    lender: "Lender",
+    loan_officer: "Loan officer",
+    insurance_agent: "Insurance agent",
+    insurance_agency: "Insurance agency",
+    inspector: "Inspector",
+    inspection_company: "Inspection company",
+    title_company: "Title company",
+    escrow_officer: "Escrow officer",
+  };
+  return labels[normalized] || normalized.replace(/_/g, " ") || "Contact";
+}
+
+function contactHighlightTone(
+  contact: any,
+  acquisition: any,
+  docKind?: string | null,
+) {
+  const waiting = String(acquisition?.waiting_on || "")
+    .trim()
+    .toLowerCase();
+  const role = String(contact?.role || "")
+    .trim()
+    .toLowerCase();
+  const kind = String(docKind || "")
+    .trim()
+    .toLowerCase();
+
+  if (contact?.waiting_on) return "border-amber-500/30 bg-amber-500/10";
+
+  if (
+    waiting.includes(role.replace(/_/g, " ")) ||
+    (contact?.name &&
+      waiting.includes(String(contact.name).trim().toLowerCase()))
+  ) {
+    return "border-amber-500/30 bg-amber-500/10";
+  }
+
+  const docRoleMap: Record<string, string[]> = {
+    purchase_agreement: [
+      "listing_agent",
+      "buyer_agent",
+      "seller_agent",
+      "listing_office",
+    ],
+    loan_estimate: ["lender", "loan_officer"],
+    loan_documents: ["lender", "loan_officer"],
+    insurance_binder: ["insurance_agent", "insurance_agency"],
+    inspection_report: ["inspector", "inspection_company"],
+    title_documents: ["title_company", "escrow_officer"],
+    closing_disclosure: ["title_company", "escrow_officer"],
+  };
+
+  if ((docRoleMap[kind] || []).includes(role)) {
+    return "border-sky-500/25 bg-sky-500/5";
+  }
+
+  return "border-app bg-app";
+}
+
+function buildEmailHref(contact: any, doc: any, property: any) {
+  const rawEmail = String(contact?.email || "").trim();
+  if (!rawEmail) return null;
+
+  const emails = rawEmail
+    .split(/[;,]/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+
+  if (!emails.length) return null;
+
+  const contactName = String(contact?.name || "").trim() || "there";
+  const contactRole = String(contact?.role || contact?.role_label || "")
+    .trim()
+    .toLowerCase();
+  const docKind = String(doc?.kind || "")
+    .trim()
+    .toLowerCase();
+  const subjectBase = docKindLabel(doc?.kind);
+
+  const addressLine = [property?.address, property?.city, property?.state]
+    .filter(Boolean)
+    .join(", ");
+
+  const propertyLine = addressLine || "this property";
+
+  const primaryAskByKind: Record<string, string[]> = {
+    purchase_agreement: [
+      "I am following up on the purchase agreement and current contract status.",
+      "Please confirm whether there are any counters, signature items, or outstanding contract changes.",
+      "If anything is still needed to move the file forward, please send the latest update.",
+    ],
+    loan_estimate: [
+      "I am following up on the loan estimate and financing status.",
+      "Please confirm the latest terms, cash-to-close expectations, and whether any borrower conditions are still outstanding.",
+      "If revised disclosures are available, please send the most current copy.",
+    ],
+    loan_documents: [
+      "I am following up on the loan file and underwriting progress.",
+      "Please let me know what conditions are still open and what is needed to keep financing on track.",
+      "If there are updated loan documents or disclosures, please send the latest version.",
+    ],
+    insurance_binder: [
+      "I am following up on the insurance binder for this file.",
+      "Please confirm coverage is in place for the closing timeline and let me know if any updated binder or declarations page is available.",
+      "If anything is still needed from our side, please send the requirements.",
+    ],
+    inspection_report: [
+      "I am following up on the inspection report and any open questions from the findings.",
+      "Please let me know whether there is any clarification, addendum, or follow-up information available.",
+      "If updated report materials or supporting notes exist, please send the latest version.",
+    ],
+    title_documents: [
+      "I am following up on the title file and current closing readiness.",
+      "Please confirm whether there are any unresolved title issues, payoff items, or escrow requirements still open.",
+      "If updated title or escrow documents are available, please send the latest copy.",
+    ],
+    closing_disclosure: [
+      "I am following up on the closing disclosure and final settlement numbers.",
+      "Please confirm whether there have been any recent changes to funds needed, fees, or signing logistics.",
+      "If a revised closing disclosure is available, please send the most current version.",
+    ],
+  };
+
+  const roleSpecificLine = (() => {
+    if (contactRole.includes("loan") || contactRole.includes("lender")) {
+      return "I also want to confirm the financing timeline and any remaining lender-side conditions.";
+    }
+    if (contactRole.includes("title") || contactRole.includes("escrow")) {
+      return "I also want to confirm closing coordination, funds timing, and any remaining title or escrow items.";
+    }
+    if (contactRole.includes("insurance")) {
+      return "I also want to confirm coverage details, effective date, and any lender-required insurance items.";
+    }
+    if (contactRole.includes("inspect")) {
+      return "I also want to confirm any material findings, severity, and recommended follow-up items.";
+    }
+    if (
+      contactRole.includes("agent") ||
+      contactRole.includes("broker") ||
+      contactRole.includes("office")
+    ) {
+      return "I also want to confirm current deal status, open signatures, and any next steps needed from the parties.";
+    }
+    return "I also want to confirm any open items that could affect timing or execution.";
+  })();
+
+  const kindLines = primaryAskByKind[docKind] || [
+    `I am following up regarding the ${subjectBase.toLowerCase()}.`,
+    "Please send the latest update when you can.",
+  ];
+
+  const subject = encodeURIComponent(
+    `${subjectBase} follow-up${addressLine ? ` - ${addressLine}` : ""}`,
+  );
+
+  const bodyText = [
+    `Hi ${contactName},`,
+    "",
+    `${kindLines[0]}${addressLine ? ` This is for ${propertyLine}.` : ""}`,
+    "",
+    ...kindLines.slice(1),
+    "",
+    roleSpecificLine,
+    "",
+    "Thanks,",
+  ].join("\n");
+
+  const body = encodeURIComponent(bodyText);
+
+  return `mailto:${emails.join(",")}?subject=${subject}&body=${body}`;
+}
+
+function documentContactCardFor(doc: any, detail: AcquisitionDetail | null) {
+  if (doc?.document_contact_card) return doc.document_contact_card;
+  const guide =
+    detail?.document_contact_guide ||
+    detail?.acquisition?.document_contact_guide ||
+    {};
+  return (
+    guide[
+      String(doc?.kind || "")
+        .trim()
+        .toLowerCase()
+    ] || null
+  );
+}
+
+function renderDocumentWhoToCallCard(
+  doc: any,
+  detail: AcquisitionDetail | null,
+  property: any,
+  acquisition: any,
+  onAssignOwner: (contact: any, doc: any) => void,
+) {
+  const card = documentContactCardFor(doc, detail);
+  if (!card) return null;
+
+  const primary = card?.primary_contact_for_document_kind || null;
+  const fallbacks = Array.isArray(card?.fallback_contacts_for_document_kind)
+    ? card.fallback_contacts_for_document_kind
+    : [];
+  const missingRoles = Array.isArray(card?.missing_contact_roles)
+    ? card.missing_contact_roles
+    : [];
+
+  const renderContactBlock = (
+    contact: any,
+    opts?: { primary?: boolean; fallback?: boolean },
+  ) => {
+    const emailHref = buildEmailHref(contact, doc, property);
+    const toneClass = contactHighlightTone(contact, acquisition, doc?.kind);
+
+    return (
+      <div
+        key={`${contact?.id || contact?.role || "contact"}-${opts?.primary ? "primary" : "fallback"}`}
+        className={`rounded-2xl border px-4 py-3 ${toneClass}`}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-medium text-app-0">
+              {textValue(contact?.name)}
+            </div>
+            <div className="mt-1 text-xs text-app-4">
+              {[
+                documentRoleLabel(contact?.role_label || contact?.role),
+                contact?.company,
+              ]
+                .filter(Boolean)
+                .join(" • ")}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {opts?.primary ? (
+              <span className="oh-pill oh-pill-accent">primary</span>
+            ) : null}
+            {contact?.waiting_on ? (
+              <span className="oh-pill oh-pill-warn">action owner</span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-2 text-sm text-app-3 md:grid-cols-2">
+          <div className="flex items-center gap-2">
+            <Phone className="h-4 w-4 text-app-4" />
+            <span>{textValue(contact?.phone)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Mail className="h-4 w-4 text-app-4" />
+            {emailHref ? (
+              <a
+                href={emailHref}
+                className="text-app-1 underline underline-offset-2 hover:text-app-0"
+              >
+                {textValue(contact?.email)}
+              </a>
+            ) : (
+              <span>{textValue(contact?.email)}</span>
+            )}
+          </div>
+        </div>
+
+        {contact?.why_relevant ? (
+          <div className="mt-3 rounded-2xl border border-app bg-app-panel px-3 py-2 text-xs text-app-3">
+            {contact.why_relevant}
+          </div>
+        ) : null}
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {emailHref ? (
+            <a href={emailHref} className="oh-btn oh-btn-secondary">
+              <Mail className="h-4 w-4" />
+              Email contact
+            </a>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onAssignOwner(contact, doc)}
+            className="oh-btn oh-btn-secondary"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            Assign as owner
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="mt-3 rounded-2xl border border-app bg-app-panel px-3 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Who to call now
+          </div>
+          <div className="mt-1 text-sm font-semibold text-app-0">
+            {docKindLabel(doc?.kind)}
+          </div>
+        </div>
+        <Users className="h-4 w-4 text-app-4" />
+      </div>
+
+      {primary ? (
+        <div className="mt-3">
+          {renderContactBlock(primary, { primary: true })}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          No primary contact is saved yet for this document kind.
+        </div>
+      )}
+
+      {fallbacks.length ? (
+        <div className="mt-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Fallback contacts
+          </div>
+          <div className="mt-2 grid gap-3 lg:grid-cols-2">
+            {fallbacks.slice(0, 4).map((contact: any, idx: number) => (
+              <div key={`${contact?.id || contact?.role || "fallback"}-${idx}`}>
+                {renderContactBlock(contact, { fallback: true })}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {missingRoles.length ? (
+        <div className="mt-3 rounded-2xl border border-app bg-app px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Missing contact roles
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {missingRoles.map((role: string) => (
+              <span key={role} className="oh-pill oh-pill-warn">
+                {documentRoleLabel(role)}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function AcquisitionPane() {
@@ -443,7 +899,17 @@ export default function AcquisitionPane() {
     React.useState<DocKind>("purchase_agreement");
   const [uploadName, setUploadName] = React.useState("");
   const [uploadNotes, setUploadNotes] = React.useState("");
+  const [uploadReplaceDocumentId, setUploadReplaceDocumentId] =
+    React.useState<string>("");
   const [uploadFile, setUploadFile] = React.useState<File | null>(null);
+  const [deletingDocumentId, setDeletingDocumentId] = React.useState<
+    number | null
+  >(null);
+  const [showRemoveModal, setShowRemoveModal] = React.useState(false);
+  const [removingFromAcquire, setRemovingFromAcquire] = React.useState(false);
+  const [removePreserveSaved, setRemovePreserveSaved] = React.useState(true);
+  const [removePreserveShortlisted, setRemovePreserveShortlisted] =
+    React.useState(true);
 
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -607,7 +1073,7 @@ export default function AcquisitionPane() {
   ]);
 
   const handlePreviewDocument = React.useCallback(
-    async (documentId: number, filename?: string) => {
+    async (documentId: number) => {
       if (!selectedId) return;
 
       try {
@@ -657,6 +1123,68 @@ export default function AcquisitionPane() {
     [selectedId],
   );
 
+  const handleDeleteDocument = React.useCallback(
+    async (documentId: number) => {
+      if (!selectedId) return;
+      const confirmed = window.confirm(
+        "Delete this document from the stack and remove the uploaded file too?",
+      );
+      if (!confirmed) return;
+
+      setDeletingDocumentId(documentId);
+      setDetailErr(null);
+
+      try {
+        await api.delete(
+          `/acquisition/properties/${selectedId}/documents/${documentId}`,
+          {
+            params: { hard_delete_file: true },
+          },
+        );
+
+        if (uploadReplaceDocumentId === String(documentId)) {
+          setUploadReplaceDocumentId("");
+        }
+
+        await Promise.all([loadQueue(), loadDetail(selectedId)]);
+      } catch (e: any) {
+        setDetailErr(formatApiError(e, "Failed to delete document."));
+      } finally {
+        setDeletingDocumentId(null);
+      }
+    },
+    [selectedId, uploadReplaceDocumentId, loadQueue, loadDetail],
+  );
+
+  const handleRemoveFromAcquire = React.useCallback(async () => {
+    if (!selectedId) return;
+
+    setRemovingFromAcquire(true);
+    setDetailErr(null);
+
+    try {
+      await api.post(`/acquisition/properties/${selectedId}/remove`, {
+        delete_documents: true,
+        delete_deadlines: true,
+        delete_field_reviews: true,
+        preserve_tags: [
+          ...(removePreserveSaved ? ["saved"] : []),
+          ...(removePreserveShortlisted ? ["shortlisted"] : []),
+        ],
+      });
+
+      setShowRemoveModal(false);
+      await loadQueue();
+      setDetail(null);
+    } catch (e: any) {
+      setDetailErr(
+        formatApiError(e, "Failed to remove property from acquisition."),
+      );
+    } finally {
+      setRemovingFromAcquire(false);
+    }
+  }, [selectedId, removePreserveSaved, removePreserveShortlisted, loadQueue]);
+
   const handleUploadFile = React.useCallback(async () => {
     if (!selectedId) return;
 
@@ -672,8 +1200,14 @@ export default function AcquisitionPane() {
     try {
       const fd = new FormData();
       fd.append("kind", uploadKind);
-      fd.append("name", uploadName || uploadFile?.name || "Uploaded document");
+      fd.append(
+        "name",
+        uploadName || uploadFile?.name || docKindLabel(uploadKind),
+      );
       fd.append("notes", uploadNotes || "");
+      if (uploadReplaceDocumentId) {
+        fd.append("replace_document_id", uploadReplaceDocumentId);
+      }
       if (uploadFile) {
         fd.append("file", uploadFile);
       }
@@ -685,6 +1219,7 @@ export default function AcquisitionPane() {
 
       setUploadName("");
       setUploadNotes("");
+      setUploadReplaceDocumentId("");
       setUploadFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -692,7 +1227,7 @@ export default function AcquisitionPane() {
 
       await Promise.all([loadQueue(), loadDetail(selectedId)]);
     } catch (e: any) {
-      setUploadErr(formatApiError(e, "Failed to upload file."));
+      setUploadErr(duplicateUploadMessage(e, "Failed to upload file."));
     } finally {
       setUploadingFile(false);
     }
@@ -701,10 +1236,65 @@ export default function AcquisitionPane() {
     uploadKind,
     uploadName,
     uploadNotes,
+    uploadReplaceDocumentId,
     uploadFile,
     loadQueue,
     loadDetail,
   ]);
+
+  const handleAssignDocumentContactOwner = React.useCallback(
+    async (contact: any, doc: any) => {
+      if (!selectedId || !contact) return;
+
+      const roleLabel = documentRoleLabel(contact?.role_label || contact?.role);
+      const nameLabel = textValue(contact?.name, roleLabel);
+      const nextWaitingOn = `${roleLabel}: ${nameLabel}`;
+
+      setSavingRecord(true);
+      setDetailErr(null);
+      try {
+        await api.put(`/acquisition/properties/${selectedId}`, {
+          status: editStatus || null,
+          waiting_on: nextWaitingOn,
+          next_step:
+            editNextStep ||
+            `Follow up with ${nameLabel} about ${docKindLabel(doc?.kind).toLowerCase()}.`,
+          target_close_date: editTargetCloseDate || null,
+          purchase_price: editPurchasePrice ? Number(editPurchasePrice) : null,
+          loan_amount: editLoanAmount ? Number(editLoanAmount) : null,
+          cash_to_close: editCashToClose ? Number(editCashToClose) : null,
+          closing_costs: editClosingCosts ? Number(editClosingCosts) : null,
+          notes: editNotes || null,
+        });
+
+        setEditWaitingOn(nextWaitingOn);
+        if (!editNextStep) {
+          setEditNextStep(
+            `Follow up with ${nameLabel} about ${docKindLabel(doc?.kind).toLowerCase()}.`,
+          );
+        }
+
+        await Promise.all([loadQueue(), loadDetail(selectedId)]);
+      } catch (e: any) {
+        setDetailErr(formatApiError(e, "Failed to assign contact as owner."));
+      } finally {
+        setSavingRecord(false);
+      }
+    },
+    [
+      selectedId,
+      editStatus,
+      editNextStep,
+      editTargetCloseDate,
+      editPurchasePrice,
+      editLoanAmount,
+      editCashToClose,
+      editClosingCosts,
+      editNotes,
+      loadQueue,
+      loadDetail,
+    ],
+  );
 
   const activeQueueRow = React.useMemo(
     () =>
@@ -714,13 +1304,44 @@ export default function AcquisitionPane() {
 
   const property = detail?.property || {};
   const acquisition = detail?.acquisition || {};
-  const contacts = Array.isArray(acquisition?.contacts)
-    ? acquisition.contacts
-    : [];
+  const contacts = Array.isArray(detail?.participants)
+    ? detail.participants
+    : Array.isArray(acquisition?.contacts)
+      ? acquisition.contacts
+      : [];
   const documents = Array.isArray(detail?.documents) ? detail.documents : [];
+  const validDocumentIds = React.useMemo(
+    () =>
+      new Set(
+        documents.map((doc: any) => Number(doc?.id)).filter(Number.isFinite),
+      ),
+    [documents],
+  );
+  const fieldValues = Array.isArray(detail?.field_values)
+    ? detail.field_values.filter((row: any) => {
+        const sourceId = Number(row?.source_document_id);
+        return Number.isFinite(sourceId) && validDocumentIds.has(sourceId);
+      })
+    : [];
+  const replaceableDocuments = React.useMemo(
+    () =>
+      documents.map((doc: any) => ({
+        id: Number(doc?.id),
+        label:
+          doc?.name ||
+          doc?.original_filename ||
+          `Document #${String(doc?.id ?? "")}`,
+        kind: docKindLabel(doc?.kind),
+      })),
+    [documents],
+  );
   const requiredDocuments = Array.isArray(detail?.required_documents)
     ? detail.required_documents
     : [];
+  const missingDocumentGroups = React.useMemo(
+    () => buildMissingDocumentGroups(detail),
+    [detail],
+  );
 
   const waitingOn = textValue(acquisition?.waiting_on, "Nothing assigned");
   const waitingCategory = waitingOnCategory(acquisition?.waiting_on);
@@ -850,7 +1471,16 @@ export default function AcquisitionPane() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowRemoveModal(true)}
+                      className="inline-flex items-center gap-2 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/15"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Move Back To Investor
+                    </button>
+
                     <Link
                       to={`/properties/${property?.property_id}`}
                       className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app px-4 py-2 text-sm text-app-0"
@@ -950,7 +1580,9 @@ export default function AcquisitionPane() {
                         Estimated close readiness
                       </div>
                       <div
-                        className={`mt-3 text-lg font-semibold ${readinessTone(readiness)}`}
+                        className={`mt-3 text-lg font-semibold ${readinessTone(
+                          readiness,
+                        )}`}
                       >
                         {readiness}%
                       </div>
@@ -1187,8 +1819,9 @@ export default function AcquisitionPane() {
                     </div>
                   </div>
                   <div className="mt-1 text-xs text-app-4">
-                    Allowed: PDF, DOCX, TXT, PNG, JPG. Max 15 MB. Macro-enabled
-                    or suspicious files are blocked.
+                    Allowed acquisition kinds only. Supported file types: PDF,
+                    DOCX, TXT, PNG, JPG. Max 15 MB. Duplicate files are blocked
+                    unless you explicitly replace an existing document.
                   </div>
 
                   <div className="mt-5 grid gap-4">
@@ -1206,6 +1839,26 @@ export default function AcquisitionPane() {
                         {DOC_KIND_OPTIONS.map((opt) => (
                           <option key={opt.value} value={opt.value}>
                             {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <div className="mb-2 text-xs uppercase tracking-[0.16em] text-app-4">
+                        Replace existing document
+                      </div>
+                      <select
+                        value={uploadReplaceDocumentId}
+                        onChange={(e) =>
+                          setUploadReplaceDocumentId(e.target.value)
+                        }
+                        className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
+                      >
+                        <option value="">No, upload as new document</option>
+                        {replaceableDocuments.map((doc) => (
+                          <option key={doc.id} value={String(doc.id)}>
+                            {doc.label} • {doc.kind}
                           </option>
                         ))}
                       </select>
@@ -1231,9 +1884,18 @@ export default function AcquisitionPane() {
                         ref={fileInputRef}
                         type="file"
                         accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"
-                        onChange={(e) =>
-                          setUploadFile(e.target.files?.[0] || null)
-                        }
+                        onChange={(e) => {
+                          const nextFile = e.target.files?.[0] || null;
+                          setUploadFile(nextFile);
+                          if (nextFile) {
+                            setUploadKind(
+                              suggestDocKindFromFilename(nextFile.name),
+                            );
+                            if (!uploadName.trim()) {
+                              setUploadName(nextFile.name);
+                            }
+                          }
+                        }}
                         className="w-full rounded-2xl border border-app bg-app px-4 py-3 text-sm text-app-0 outline-none"
                       />
                     </label>
@@ -1275,7 +1937,7 @@ export default function AcquisitionPane() {
                   <div className="flex items-center gap-2">
                     <FileText className="h-4 w-4 text-app-4" />
                     <div className="text-sm font-semibold text-app-0">
-                      Add Exisiting document record
+                      Add existing document record
                     </div>
                   </div>
                   <div className="mt-1 text-xs text-app-4">
@@ -1369,7 +2031,8 @@ export default function AcquisitionPane() {
                   Document stack
                 </div>
                 <div className="mt-1 text-xs text-app-4">
-                  Review current documents, preview them, and download copies.
+                  Review current documents, preview them, download copies, and
+                  delete files from the stack.
                 </div>
 
                 {!documents.length ? (
@@ -1389,7 +2052,7 @@ export default function AcquisitionPane() {
                               {textValue(doc?.name)}
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-app-4">
-                              <span>{textValue(doc?.kind)}</span>
+                              <span>{docKindLabel(doc?.kind)}</span>
                               {doc?.original_filename ? (
                                 <span>• {doc.original_filename}</span>
                               ) : null}
@@ -1415,7 +2078,7 @@ export default function AcquisitionPane() {
                             <button
                               type="button"
                               onClick={() =>
-                                handlePreviewDocument(Number(doc.id), doc?.name)
+                                handlePreviewDocument(Number(doc.id))
                               }
                               className="oh-btn oh-btn-secondary"
                             >
@@ -1435,8 +2098,79 @@ export default function AcquisitionPane() {
                               <Download className="h-4 w-4" />
                               Download
                             </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDeleteDocument(Number(doc.id))
+                              }
+                              disabled={deletingDocumentId === Number(doc.id)}
+                              className="oh-btn oh-btn-secondary"
+                            >
+                              {deletingDocumentId === Number(doc.id) ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                              {deletingDocumentId === Number(doc.id)
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
                           </div>
                         </div>
+
+                        {doc?.actionable_intelligence ? (
+                          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                            {Array.isArray(
+                              doc?.actionable_intelligence
+                                ?.recommended_next_actions,
+                            ) &&
+                            doc.actionable_intelligence.recommended_next_actions
+                              .length ? (
+                              <div className="rounded-2xl border border-app bg-app-panel px-3 py-3">
+                                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                                  Next actions
+                                </div>
+                                <div className="mt-2 space-y-2 text-sm text-app-1">
+                                  {doc.actionable_intelligence.recommended_next_actions
+                                    .slice(0, 4)
+                                    .map((item: string, idx: number) => (
+                                      <div key={`action-${doc.id}-${idx}`}>
+                                        • {item}
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {Array.isArray(
+                              doc?.actionable_intelligence?.risk_flags,
+                            ) &&
+                            doc.actionable_intelligence.risk_flags.length ? (
+                              <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-3 py-3">
+                                <div className="text-[11px] uppercase tracking-[0.18em] text-red-200">
+                                  Warnings
+                                </div>
+                                <div className="mt-2 space-y-2 text-sm text-red-100">
+                                  {doc.actionable_intelligence.risk_flags
+                                    .slice(0, 4)
+                                    .map((item: any, idx: number) => (
+                                      <div key={`risk-${doc.id}-${idx}`}>
+                                        {item?.label || item?.code || "warning"}
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {renderDocumentWhoToCallCard(
+                          doc,
+                          detail,
+                          property,
+                          acquisition,
+                          handleAssignDocumentContactOwner,
+                        )}
 
                         {doc?.preview_text ? (
                           <div className="mt-3 rounded-2xl border border-app bg-app-panel px-3 py-3 text-xs text-app-3">
@@ -1450,54 +2184,113 @@ export default function AcquisitionPane() {
                 )}
               </Surface>
 
-              <Surface className="p-5">
-                <div className="text-sm font-semibold text-app-0">
-                  Contact panel
-                </div>
-                <div className="mt-1 text-xs text-app-4">
-                  Clean role-based visibility for who is involved.
-                </div>
+              <DocumentFieldReviewPanel
+                propertyId={Number(property?.property_id || selectedId || 0)}
+                items={fieldValues}
+                documents={documents}
+                missingDocumentGroups={missingDocumentGroups}
+                nextRequiredDocument={nextRequiredDocument(detail)}
+                estimatedCloseReadiness={readiness}
+                onAction={() =>
+                  selectedId ? loadDetail(selectedId) : Promise.resolve()
+                }
+              />
 
-                {contacts.length === 0 ? (
-                  <div className="mt-4 rounded-2xl border border-app bg-app px-4 py-4 text-sm text-app-4">
-                    No structured contacts saved yet.
-                  </div>
-                ) : (
-                  <div className="mt-4 space-y-3">
-                    {contacts.map((c: any, idx: number) => (
-                      <div
-                        key={idx}
-                        className="rounded-2xl border border-app bg-app px-4 py-4"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="text-sm font-medium text-app-0">
-                              {textValue(c?.name)}
-                            </div>
-                            <div className="mt-1 text-xs uppercase tracking-[0.16em] text-app-4">
-                              {textValue(c?.role)}
-                            </div>
-                          </div>
-                          <User2 className="h-4 w-4 text-app-4" />
-                        </div>
-                        <div className="mt-3 space-y-1 text-sm text-app-3">
-                          {c?.email ? <div>{c.email}</div> : null}
-                          {c?.phone ? (
-                            <div className="inline-flex items-center gap-1">
-                              <Phone className="h-3.5 w-3.5" />
-                              {c.phone}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Surface>
+              <AcquisitionParticipantsPanel
+                participants={contacts}
+                waitingOn={acquisition?.waiting_on}
+              />
             </>
           )}
         </div>
       </div>
+      {showRemoveModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-[32px] border border-red-500/20 bg-app-panel px-6 py-6 shadow-[0_24px_90px_rgba(0,0,0,0.55)]">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-200">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="text-lg font-semibold text-app-0">
+                  Remove from Acquire
+                </div>
+                <div className="mt-2 text-sm text-app-3">
+                  This will move this property back to Investor and purge the
+                  acquisition workspace for this file.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-4 text-sm text-red-100">
+              <div className="font-semibold">This action cannot be undone.</div>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>All acquisition documents will be deleted.</li>
+                <li>Parsed field review rows will be deleted.</li>
+                <li>
+                  Document-derived workflow items and deadlines will be deleted.
+                </li>
+                <li>
+                  The property will be moved back to the Investor workflow.
+                </li>
+                <li>
+                  Acquire posture tags like offer_candidate should be removed.
+                </li>
+              </ul>
+            </div>
+
+            <div className="mt-5 grid gap-3 rounded-2xl border border-app bg-app px-4 py-4">
+              <label className="flex items-center gap-3 text-sm text-app-1">
+                <input
+                  type="checkbox"
+                  checked={removePreserveSaved}
+                  onChange={(e) => setRemovePreserveSaved(e.target.checked)}
+                />
+                Preserve saved tag
+              </label>
+
+              <label className="flex items-center gap-3 text-sm text-app-1">
+                <input
+                  type="checkbox"
+                  checked={removePreserveShortlisted}
+                  onChange={(e) =>
+                    setRemovePreserveShortlisted(e.target.checked)
+                  }
+                />
+                Preserve shortlisted tag
+              </label>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowRemoveModal(false)}
+                disabled={removingFromAcquire}
+                className="inline-flex items-center gap-2 rounded-2xl border border-app bg-app px-4 py-2 text-sm text-app-0"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleRemoveFromAcquire}
+                disabled={removingFromAcquire}
+                className="inline-flex items-center gap-2 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-100 disabled:opacity-60"
+              >
+                {removingFromAcquire ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                {removingFromAcquire
+                  ? "Removing..."
+                  : "Confirm remove from Acquire"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </PageShell>
   );
 }

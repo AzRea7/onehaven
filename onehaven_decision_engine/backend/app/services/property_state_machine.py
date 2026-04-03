@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Optional
 
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, desc, func, select, text
 from sqlalchemy.orm import Session
 
 from ..domain.compliance.compliance_completion import compute_compliance_status
@@ -74,6 +74,31 @@ def _json_dumps(value: Any) -> str:
         return json.dumps(value, separators=(",", ":"), sort_keys=True, default=str)
     except Exception:
         return "{}"
+
+
+def _row_to_dict(row: Any | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    try:
+        return dict(row._mapping)
+    except Exception:
+        return dict(row)
+
+
+def _current_acquisition_record(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    row = db.execute(
+        text(
+            """
+            select *
+            from acquisition_records
+            where org_id = :org_id and property_id = :property_id
+            order by updated_at desc nulls last, id desc
+            limit 1
+            """
+        ),
+        {"org_id": int(org_id), "property_id": int(property_id)},
+    ).fetchone()
+    return _row_to_dict(row) or {}
 
 
 def normalize_decision_bucket(raw: Any) -> str:
@@ -680,7 +705,7 @@ def derive_stage_and_constraints(
     persisted_constraints = _safe_json_load(getattr(existing_row, "constraints_json", None), {})
     if not isinstance(persisted_constraints, dict):
         persisted_constraints = {}
-    persisted_acquisition = persisted_constraints.get("acquisition") if isinstance(persisted_constraints.get("acquisition"), dict) else {}
+    persisted_acquisition = _current_acquisition_record(db, org_id=org_id, property_id=property_id)
 
     readiness_info = readiness.get("readiness") or {}
     readiness_counts = readiness.get("counts") or {}

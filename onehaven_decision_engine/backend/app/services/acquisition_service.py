@@ -21,12 +21,18 @@ from .acquisition_document_review_service import (
     list_document_field_values,
 )
 from .acquisition_participant_service import (
+    build_document_contact_directory,
     list_participants,
     seed_listing_contacts_from_property,
 )
 from .document_parsing_service import parse_document
 from .virus_scanning_service import scan_file
-from .acquisition_tag_service import list_property_tags, replace_property_tags
+from .acquisition_tag_service import (
+    DEFAULT_INVESTOR_PRESERVE_TAGS,
+    list_property_tags,
+    normalize_preserve_tags,
+    replace_property_tags,
+)
 from .property_state_machine import get_state_payload, sync_property_state
 
 DEFAULT_REQUIRED_DOCS = [
@@ -38,6 +44,27 @@ DEFAULT_REQUIRED_DOCS = [
     {"kind": "insurance_binder", "label": "Insurance binder"},
     {"kind": "inspection_report", "label": "Inspection / due diligence"},
 ]
+
+
+ALLOWED_ACQUISITION_DOCUMENT_KINDS: tuple[str, ...] = (
+    "purchase_agreement",
+    "loan_estimate",
+    "loan_documents",
+    "closing_disclosure",
+    "title_documents",
+    "insurance_binder",
+    "inspection_report",
+)
+
+ACQUISITION_DOCUMENT_KIND_LABELS: dict[str, str] = {
+    "purchase_agreement": "Purchase agreement",
+    "loan_estimate": "Loan estimate",
+    "loan_documents": "Loan documents",
+    "closing_disclosure": "Closing disclosure",
+    "title_documents": "Title documents",
+    "insurance_binder": "Insurance binder",
+    "inspection_report": "Inspection report",
+}
 
 PROMOTION_REQUIRED_FIELDS: tuple[str, ...] = ()
 
@@ -107,6 +134,132 @@ def extract_document_highlights(text: str | None) -> list[dict[str, Any]]:
     return deduped[:20]
 
 
+
+def _safe_text(value: Any) -> str | None:
+    text = _clean_text(value)
+    return text or None
+
+
+def _safe_number(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+def _col_exists(db: Session, table_name: str, column_name: str) -> bool:
+    try:
+        result = db.execute(
+            text(
+                """
+                select 1
+                from information_schema.columns
+                where table_name = :table_name
+                  and column_name = :column_name
+                limit 1
+                """
+            ),
+            {
+                "table_name": table_name,
+                "column_name": column_name,
+            },
+        ).fetchone()
+        return result is not None
+    except Exception:
+        return False
+
+def _doc_json_payload(doc: dict[str, Any]) -> dict[str, Any]:
+    raw = _safe_json_load(doc.get("extracted_fields_json"), {})
+    if not isinstance(raw, dict):
+        raw = {}
+    return raw
+
+
+def _build_document_actionable_payload(doc: dict[str, Any], acquisition_row: dict[str, Any]) -> dict[str, Any]:
+    payload = _doc_json_payload(doc)
+    facts = payload.get("facts") if isinstance(payload.get("facts"), dict) else {}
+    if not facts and isinstance(doc.get("extracted_fields"), dict):
+        facts = {k: {"field_name": k, "value": v, "confidence": 0.75, "excerpt": None} for k, v in doc.get("extracted_fields", {}).items()}
+
+    canonical_pairs = {
+        "purchase_price": acquisition_row.get("purchase_price"),
+        "earnest_money": acquisition_row.get("earnest_money"),
+        "loan_amount": acquisition_row.get("loan_amount"),
+        "loan_type": acquisition_row.get("loan_type"),
+        "cash_to_close": acquisition_row.get("cash_to_close"),
+        "closing_costs": acquisition_row.get("closing_costs"),
+        "seller_credits": acquisition_row.get("seller_credits"),
+        "title_company": acquisition_row.get("title_company"),
+        "escrow_officer": acquisition_row.get("escrow_officer"),
+        "target_close_date": acquisition_row.get("target_close_date") or acquisition_row.get("closing_date"),
+    }
+
+    mismatch_indicators: list[dict[str, Any]] = []
+    for field_name, current_value in canonical_pairs.items():
+        fact = facts.get(field_name)
+        if not fact:
+            continue
+        parsed_value = fact.get("value")
+        if parsed_value in (None, "", []):
+            continue
+        if current_value in (None, "", []):
+            continue
+        if str(parsed_value).strip().lower() != str(current_value).strip().lower():
+            mismatch_indicators.append(
+                {
+                    "field_name": field_name,
+                    "parsed_value": parsed_value,
+                    "current_value": current_value,
+                    "excerpt": fact.get("excerpt"),
+                    "confidence": fact.get("confidence"),
+                }
+            )
+
+    return {
+        "normalized_document_type": payload.get("normalized_document_type") or doc.get("kind"),
+        "facts": facts,
+        "recommended_next_actions": payload.get("recommended_next_actions") or [],
+        "who_to_contact_next": payload.get("who_to_contact_next") or [],
+        "deadline_candidates": payload.get("deadline_candidates") or [],
+        "risk_flags": payload.get("risk_flags") or [],
+        "mismatch_indicators": mismatch_indicators,
+        "warnings": payload.get("warnings") or [x.get("label") for x in (payload.get("risk_flags") or []) if x.get("label")],
+    }
+
+
+def _rollup_actionable_summary(documents: list[dict[str, Any]]) -> dict[str, Any]:
+    actions: list[str] = []
+    contacts: list[dict[str, Any]] = []
+    deadlines: list[dict[str, Any]] = []
+    flags: list[dict[str, Any]] = []
+    mismatches: list[dict[str, Any]] = []
+    for doc in documents:
+        actionable = doc.get("actionable_intelligence") or {}
+        for item in actionable.get("recommended_next_actions") or []:
+            if item and item not in actions:
+                actions.append(str(item))
+        for item in actionable.get("who_to_contact_next") or []:
+            if item and item not in contacts:
+                contacts.append(item)
+        for item in actionable.get("deadline_candidates") or []:
+            if item and item not in deadlines:
+                deadlines.append(item)
+        for item in actionable.get("risk_flags") or []:
+            if item and item not in flags:
+                flags.append(item)
+        for item in actionable.get("mismatch_indicators") or []:
+            if item and item not in mismatches:
+                mismatches.append(item)
+    return {
+        "recommended_next_actions": actions[:20],
+        "who_to_contact_next": contacts[:20],
+        "deadline_candidates": deadlines[:20],
+        "risk_flags": flags[:20],
+        "mismatch_indicators": mismatches[:20],
+    }
+
+
 def _rows_to_dicts(rows: list[Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -158,6 +311,75 @@ def _clean_text(value: Any) -> str | None:
     text = str(value).strip()
     return text or None
 
+
+
+def _normalize_document_kind(kind: Any) -> str:
+    normalized = str(kind or "").strip().lower()
+    if normalized not in ALLOWED_ACQUISITION_DOCUMENT_KINDS:
+        allowed = ", ".join(ALLOWED_ACQUISITION_DOCUMENT_KINDS)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported acquisition document kind '{normalized or 'unknown'}'. Allowed kinds: {allowed}.",
+        )
+    return normalized
+
+
+def _get_document_by_id(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    document_id: int,
+) -> dict[str, Any] | None:
+    return _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_documents
+                where id = :document_id
+                  and org_id = :org_id
+                  and property_id = :property_id
+                limit 1
+                """
+            ),
+            {
+                "document_id": int(document_id),
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+            },
+        ).fetchone()
+    )
+
+
+def _get_duplicate_document_by_sha256(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    sha256: str,
+) -> dict[str, Any] | None:
+    return _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_documents
+                where org_id = :org_id
+                  and property_id = :property_id
+                  and sha256 = :sha256
+                  and coalesce(status, 'received') not in ('deleted', 'replaced')
+                order by id desc
+                limit 1
+                """
+            ),
+            {
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+                "sha256": str(sha256),
+            },
+        ).fetchone()
+    )
 
 def _acquisition_upload_root() -> Path:
     raw = os.getenv("ACQUISITION_UPLOAD_DIR", "/app/data/acquisition_uploads")
@@ -318,8 +540,8 @@ def _normalize_legacy_acquisition_record(
     return refreshed or row
 
 
-def ensure_acquisition_record(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    existing = _row_to_dict(
+def _get_acquisition_record(db: Session, *, org_id: int, property_id: int) -> dict[str, Any] | None:
+    row = _row_to_dict(
         db.execute(
             text(
                 """
@@ -329,16 +551,23 @@ def ensure_acquisition_record(db: Session, *, org_id: int, property_id: int) -> 
                 limit 1
                 """
             ),
-            {"org_id": org_id, "property_id": property_id},
+            {"org_id": int(org_id), "property_id": int(property_id)},
         ).fetchone()
     )
+    if not row:
+        return None
+    return _normalize_legacy_acquisition_record(
+        db,
+        org_id=int(org_id),
+        property_id=int(property_id),
+        row=row,
+    )
+
+
+def ensure_acquisition_record(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    existing = _get_acquisition_record(db, org_id=org_id, property_id=property_id)
     if existing:
-        return _normalize_legacy_acquisition_record(
-            db,
-            org_id=org_id,
-            property_id=property_id,
-            row=existing,
-        )
+        return existing
 
     db.execute(
         text(
@@ -674,6 +903,161 @@ def promote_property_to_acquisition(
     }
 
 
+def remove_property_from_acquisition(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    actor_user_id: int | None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = payload or {}
+    delete_documents = bool(payload.get("delete_documents", True))
+    delete_deadlines = bool(payload.get("delete_deadlines", True))
+    delete_field_reviews = bool(payload.get("delete_field_reviews", True))
+    delete_contacts = bool(payload.get("delete_contacts", True))
+    hard_delete_files = bool(payload.get("hard_delete_files", True))
+    preserve_tags = normalize_preserve_tags(
+        payload.get("preserve_tags"),
+        default_to_investor_tags=True,
+    )
+
+    prop = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select id, org_id, address, city, state, zip
+                from properties
+                where org_id = :org_id and id = :property_id
+                limit 1
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        ).fetchone()
+    )
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found.")
+
+    existing_tags = [
+        str(row.get("tag") or "").strip().lower()
+        for row in list_property_tags(db, org_id=int(org_id), property_id=int(property_id))
+        if row.get("tag")
+    ]
+    final_tags = [tag for tag in preserve_tags if tag in existing_tags]
+
+    active_documents = _rows_to_dicts(
+        db.execute(
+            text(
+                """
+                select id, storage_path
+                from acquisition_documents
+                where org_id = :org_id
+                  and property_id = :property_id
+                  and coalesce(status, 'received') not in ('deleted', 'replaced')
+                order by id asc
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        ).fetchall()
+    )
+
+    if delete_documents:
+        db.execute(
+            text(
+                """
+                update acquisition_documents
+                set status = 'deleted',
+                    storage_url = null,
+                    deleted_at = now(),
+                    deleted_reason = 'removed_from_acquire',
+                    updated_at = now()
+                where org_id = :org_id
+                  and property_id = :property_id
+                  and coalesce(status, 'received') not in ('deleted', 'replaced')
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        )
+
+    if delete_field_reviews:
+        db.execute(
+            text(
+                """
+                delete from acquisition_field_values
+                where org_id = :org_id and property_id = :property_id
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        )
+
+    if delete_deadlines:
+        db.execute(
+            text(
+                """
+                delete from acquisition_deadlines
+                where org_id = :org_id and property_id = :property_id
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        )
+
+    if delete_contacts and _col_exists(db, "acquisition_contacts", "property_id"):
+        db.execute(
+            text(
+                """
+                delete from acquisition_contacts
+                where org_id = :org_id and property_id = :property_id
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        )
+
+    db.execute(
+        text(
+            """
+            delete from acquisition_records
+            where org_id = :org_id and property_id = :property_id
+            """
+        ),
+        {"org_id": int(org_id), "property_id": int(property_id)},
+    )
+
+    replace_property_tags(
+        db,
+        org_id=int(org_id),
+        property_id=int(property_id),
+        tags=final_tags,
+        actor_user_id=actor_user_id,
+        source="operator",
+    )
+
+    sync_property_state(db, org_id=int(org_id), property_id=int(property_id))
+    db.commit()
+
+    if delete_documents and hard_delete_files:
+        for row in active_documents:
+            storage_path = _clean_text(row.get("storage_path"))
+            if storage_path:
+                try:
+                    Path(storage_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    state_payload = get_state_payload(db, org_id=int(org_id), property_id=int(property_id), recompute=True)
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "property": prop,
+        "deleted_documents": len(active_documents) if delete_documents else 0,
+        "deleted_field_reviews": bool(delete_field_reviews),
+        "deleted_deadlines": bool(delete_deadlines),
+        "deleted_contacts": bool(delete_contacts),
+        "preserved_tags": final_tags,
+        "state": state_payload,
+        "detail": get_acquisition_detail(db, org_id=int(org_id), property_id=int(property_id)),
+    }
+
+
 def get_acquisition_detail(
     db: Session,
     *,
@@ -726,22 +1110,9 @@ def get_acquisition_detail(
     if not property_row:
         return None
 
-    ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
-    _property_listing_contact_seed(db, org_id=org_id, property_id=property_id)
-
-    acquisition_row = _row_to_dict(
-        db.execute(
-            text(
-                """
-                select *
-                from acquisition_records
-                where org_id = :org_id and property_id = :property_id
-                limit 1
-                """
-            ),
-            {"org_id": int(org_id), "property_id": int(property_id)},
-        ).fetchone()
-    ) or {}
+    acquisition_row = _get_acquisition_record(db, org_id=org_id, property_id=property_id) or {}
+    if acquisition_row:
+        _property_listing_contact_seed(db, org_id=org_id, property_id=property_id)
 
     documents = _rows_to_dicts(
         db.execute(
@@ -775,7 +1146,10 @@ def get_acquisition_detail(
                     created_at,
                     updated_at
                 from acquisition_documents
-                where org_id = :org_id and property_id = :property_id
+                where org_id = :org_id
+                  and property_id = :property_id
+                  and coalesce(status, 'received') not in ('deleted', 'replaced')
+                  and deleted_at is null
                 order by created_at desc, id desc
                 """
             ),
@@ -784,10 +1158,14 @@ def get_acquisition_detail(
     )
 
     for doc in documents:
-        extracted_fields = _safe_json_load(doc.get("extracted_fields_json"), {})
-        doc["extracted_fields"] = extracted_fields
+        payload = _doc_json_payload(doc)
+        extracted_fields = payload.get("extracted_fields") if isinstance(payload.get("extracted_fields"), dict) else payload.get("fields") if isinstance(payload.get("fields"), dict) else payload if isinstance(payload, dict) else {}
+        doc["parser_payload"] = payload
+        doc["extracted_fields"] = extracted_fields if isinstance(extracted_fields, dict) else {}
+        doc["kind_label"] = ACQUISITION_DOCUMENT_KIND_LABELS.get(str(doc.get("kind") or "").strip().lower(), str(doc.get("kind") or "").replace("_", " ").title())
         source_text = doc.get("extracted_text") or doc.get("preview_text") or ""
         doc["highlights"] = extract_document_highlights(source_text)
+        doc["actionable_intelligence"] = _build_document_actionable_payload(doc, acquisition_row)
 
     contacts = _safe_json_load(acquisition_row.get("contacts_json"), [])
     milestones = _safe_json_load(acquisition_row.get("milestones_json"), [])
@@ -838,6 +1216,22 @@ def get_acquisition_detail(
 
         normalized_participants.append({**row, "waiting_on": waiting})
 
+    document_contact_guide = build_document_contact_directory(
+        normalized_participants,
+        [doc.get("kind") for doc in documents if str(doc.get("kind") or "").strip()],
+    )
+    for doc in documents:
+        kind_key = str(doc.get("kind") or "").strip().lower()
+        contact_card = document_contact_guide.get(kind_key) or {}
+        doc["primary_contact_for_document_kind"] = contact_card.get(
+            "primary_contact_for_document_kind"
+        )
+        doc["fallback_contacts_for_document_kind"] = contact_card.get(
+            "fallback_contacts_for_document_kind", []
+        )
+        doc["missing_contact_roles"] = contact_card.get("missing_contact_roles", [])
+        doc["document_contact_card"] = contact_card
+
     listing_contacts = []
     if property_row.get("listing_agent_name") or property_row.get("listing_agent_phone") or property_row.get("listing_agent_email"):
         listing_contacts.append(
@@ -863,6 +1257,8 @@ def get_acquisition_detail(
             }
         )
 
+    actionable_summary = _rollup_actionable_summary(documents)
+
     return {
         "property": property_row,
         "acquisition": {
@@ -873,12 +1269,16 @@ def get_acquisition_detail(
             "days_to_close": _days_to_close(target_close),
             "deadlines": deadlines,
             "field_values": field_values,
+            "actionable_summary": actionable_summary,
+            "document_contact_guide": document_contact_guide,
         },
         "documents": documents,
         "participants": normalized_participants,
         "deadlines": deadlines,
         "field_values": field_values,
         "required_documents": required_docs,
+        "actionable_summary": actionable_summary,
+        "document_contact_guide": document_contact_guide,
         "summary": {
             "days_to_close": _days_to_close(target_close),
             "document_count": len(documents),
@@ -1118,6 +1518,9 @@ def add_acquisition_document(
 ) -> dict[str, Any]:
     ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
 
+    kind = _normalize_document_kind(payload.get("kind"))
+    name = _clean_text(payload.get("name")) or ACQUISITION_DOCUMENT_KIND_LABELS.get(kind) or kind.replace("_", " ").title()
+
     db.execute(
         text(
             """
@@ -1152,13 +1555,13 @@ def add_acquisition_document(
         {
             "org_id": int(org_id),
             "property_id": int(property_id),
-            "kind": payload.get("kind"),
-            "name": payload.get("name"),
-            "status": payload.get("status") or "received",
-            "source_url": payload.get("source_url"),
-            "extracted_text": payload.get("extracted_text"),
+            "kind": kind,
+            "name": name,
+            "status": _clean_text(payload.get("status")) or "received",
+            "source_url": _clean_text(payload.get("source_url")),
+            "extracted_text": _clean_text(payload.get("extracted_text")),
             "extracted_fields_json": json.dumps(payload.get("extracted_fields") or {}),
-            "notes": payload.get("notes"),
+            "notes": _clean_text(payload.get("notes")),
         },
     )
     db.commit()
@@ -1193,8 +1596,28 @@ def upload_acquisition_document_file(
 ) -> dict[str, Any]:
     ensure_acquisition_record(db, org_id=org_id, property_id=property_id)
 
+    normalized_kind = _normalize_document_kind(kind)
     filename = _sanitize_filename(upload.filename or name or "upload")
     ext = _validate_extension_and_content_type(filename, upload.content_type)
+
+    replacement_row: dict[str, Any] | None = None
+    if replace_document_id is not None:
+        replacement_row = _get_document_by_id(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            document_id=int(replace_document_id),
+        )
+        if not replacement_row:
+            raise HTTPException(status_code=404, detail="Replacement target document not found.")
+        if str(replacement_row.get("status") or "").lower() in {"deleted", "replaced"}:
+            raise HTTPException(status_code=409, detail="Replacement target is not active.")
+        original_kind = str(replacement_row.get("kind") or "").strip().lower()
+        if original_kind and original_kind != normalized_kind:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Replacement kind mismatch. Existing document is '{original_kind}' but upload kind is '{normalized_kind}'.",
+            )
 
     root = _acquisition_upload_root()
     property_dir = root / str(org_id) / str(property_id)
@@ -1202,105 +1625,136 @@ def upload_acquisition_document_file(
     target_path = property_dir / unique_name
 
     meta = _stream_upload_to_disk(upload, target_path)
-    _sniff_magic_bytes(ext, meta["head"])
-    if ext == ".docx":
-        _validate_docx_safely(target_path)
+    try:
+        _sniff_magic_bytes(ext, meta["head"])
+        if ext == ".docx":
+            _validate_docx_safely(target_path)
 
-    scan_result = scan_file(target_path)
-    scan_status = "clean"
-    scan_result_text = "clean"
-    if isinstance(scan_result, dict):
-        scan_status = str(scan_result.get("status") or "clean")
-        scan_result_text = str(scan_result.get("result") or scan_result.get("detail") or scan_status)
-    elif isinstance(scan_result, str):
-        scan_result_text = scan_result
+        duplicate_row = _get_duplicate_document_by_sha256(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            sha256=meta["sha256"],
+        )
+        if duplicate_row:
+            duplicate_id = int(duplicate_row["id"])
+            if replace_document_id is None or duplicate_id != int(replace_document_id):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "duplicate_document",
+                        "message": "An identical file is already attached to this property. Use replace to supersede the existing document.",
+                        "existing_document_id": duplicate_id,
+                        "existing_kind": duplicate_row.get("kind"),
+                        "sha256": meta["sha256"],
+                    },
+                )
 
-    parsed = parse_document(target_path, upload.content_type or "application/octet-stream")
-    preview_text = None
-    extracted_text = None
-    extracted_fields = {}
-    parser_version = None
-    parse_status = "parsed"
+        scan_result = scan_file(target_path)
+        scan_status = "clean"
+        scan_result_text = "clean"
+        if isinstance(scan_result, dict):
+            scan_status = str(scan_result.get("status") or "clean")
+            scan_result_text = str(scan_result.get("result") or scan_result.get("detail") or scan_status)
+        elif isinstance(scan_result, str):
+            scan_result_text = scan_result
 
-    if isinstance(parsed, dict):
-        preview_text = parsed.get("preview_text")
-        extracted_text = parsed.get("text")
-        extracted_fields = parsed.get("fields") or {}
-        parser_version = parsed.get("parser_version")
-        parse_status = str(parsed.get("status") or "parsed")
+        parsed = parse_document(
+            target_path,
+            upload.content_type or "application/octet-stream",
+            document_kind=normalized_kind,
+            filename=upload.filename or filename,
+        )
+        preview_text = None
+        extracted_text = None
+        parser_payload: dict[str, Any] = {}
+        extracted_fields = {}
+        parser_version = None
+        parse_status = "parsed"
 
-    db.execute(
-        text(
-            """
-            insert into acquisition_documents (
-                org_id,
-                property_id,
-                kind,
-                name,
-                original_filename,
-                storage_path,
-                content_type,
-                file_size_bytes,
-                sha256,
-                upload_status,
-                scan_status,
-                scan_result,
-                parse_status,
-                parser_version,
-                preview_text,
-                status,
-                extracted_text,
-                extracted_fields_json,
-                notes,
-                created_at,
-                updated_at
-            )
-            values (
-                :org_id,
-                :property_id,
-                :kind,
-                :name,
-                :original_filename,
-                :storage_path,
-                :content_type,
-                :file_size_bytes,
-                :sha256,
-                'uploaded',
-                :scan_status,
-                :scan_result,
-                :parse_status,
-                :parser_version,
-                :preview_text,
-                'received',
-                :extracted_text,
-                :extracted_fields_json,
-                :notes,
-                now(),
-                now()
-            )
-            """
-        ),
-        {
-            "org_id": int(org_id),
-            "property_id": int(property_id),
-            "kind": _clean_text(kind) or "other",
-            "name": _clean_text(name) or filename,
-            "original_filename": upload.filename or filename,
-            "storage_path": str(target_path),
-            "content_type": upload.content_type,
-            "file_size_bytes": meta["size_bytes"],
-            "sha256": meta["sha256"],
-            "scan_status": scan_status,
-            "scan_result": scan_result_text,
-            "parse_status": parse_status,
-            "parser_version": parser_version,
-            "preview_text": preview_text,
-            "extracted_text": extracted_text,
-            "extracted_fields_json": json.dumps(extracted_fields or {}),
-            "notes": _clean_text(notes),
-        },
-    )
-    db.commit()
+        if isinstance(parsed, dict):
+            parser_payload = dict(parsed)
+            preview_text = parsed.get("preview_text")
+            extracted_text = parsed.get("extracted_text") or parsed.get("text")
+            extracted_fields = parsed.get("extracted_fields") or parsed.get("fields") or {}
+            parser_version = parsed.get("parser_version")
+            parse_status = str(parsed.get("parse_status") or parsed.get("status") or "parsed")
+
+        db.execute(
+            text(
+                """
+                insert into acquisition_documents (
+                    org_id,
+                    property_id,
+                    kind,
+                    name,
+                    original_filename,
+                    storage_path,
+                    content_type,
+                    file_size_bytes,
+                    sha256,
+                    upload_status,
+                    scan_status,
+                    scan_result,
+                    parse_status,
+                    parser_version,
+                    preview_text,
+                    status,
+                    extracted_text,
+                    extracted_fields_json,
+                    notes,
+                    created_at,
+                    updated_at
+                )
+                values (
+                    :org_id,
+                    :property_id,
+                    :kind,
+                    :name,
+                    :original_filename,
+                    :storage_path,
+                    :content_type,
+                    :file_size_bytes,
+                    :sha256,
+                    'uploaded',
+                    :scan_status,
+                    :scan_result,
+                    :parse_status,
+                    :parser_version,
+                    :preview_text,
+                    'received',
+                    :extracted_text,
+                    :extracted_fields_json,
+                    :notes,
+                    now(),
+                    now()
+                )
+                """
+            ),
+            {
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+                "kind": normalized_kind,
+                "name": _clean_text(name) or ACQUISITION_DOCUMENT_KIND_LABELS.get(normalized_kind) or filename,
+                "original_filename": upload.filename or filename,
+                "storage_path": str(target_path),
+                "content_type": upload.content_type,
+                "file_size_bytes": meta["size_bytes"],
+                "sha256": meta["sha256"],
+                "scan_status": scan_status,
+                "scan_result": scan_result_text,
+                "parse_status": parse_status,
+                "parser_version": parser_version,
+                "preview_text": preview_text,
+                "extracted_text": extracted_text,
+                "extracted_fields_json": json.dumps(parser_payload or extracted_fields or {}),
+                "notes": _clean_text(notes),
+            },
+        )
+        db.commit()
+    except Exception:
+        target_path.unlink(missing_ok=True)
+        raise
 
     row = _row_to_dict(
         db.execute(
@@ -1317,6 +1771,16 @@ def upload_acquisition_document_file(
         ).fetchone()
     ) or {}
     row["extracted_fields"] = _safe_json_load(row.get("extracted_fields_json"), {})
+
+    if replace_document_id is not None and row.get("id"):
+        replace_acquisition_document(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            document_id=int(replace_document_id),
+            replacement_document_id=int(row["id"]),
+            reason="superseded_by_upload",
+        )
 
     if row.get("id") and extracted_fields:
         create_field_suggestions_from_document(
@@ -1395,7 +1859,7 @@ def delete_acquisition_document(
     property_id: int,
     document_id: int,
     reason: str | None = None,
-    hard_delete_file: bool = False,
+    hard_delete_file: bool = True,
 ) -> dict[str, Any]:
     row = _row_to_dict(
         db.execute(
@@ -1423,6 +1887,7 @@ def delete_acquisition_document(
             """
             update acquisition_documents
             set status = 'deleted',
+                storage_url = null,
                 deleted_at = now(),
                 deleted_reason = :reason,
                 updated_at = now()
@@ -1431,6 +1896,63 @@ def delete_acquisition_document(
         ),
         {"document_id": int(document_id), "reason": _clean_text(reason)},
     )
+
+    # Remove all document-derived review rows so deleted documents stop surfacing
+    # in parsed field review immediately.
+    db.execute(
+        text(
+            """
+            delete from acquisition_field_values
+            where org_id = :org_id
+              and property_id = :property_id
+              and source_document_id = :document_id
+            """
+        ),
+        {
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "document_id": int(document_id),
+        },
+    )
+
+    # Remove document-derived deadlines and participants that were sourced from
+    # this document so operational panels stay in sync with the file stack.
+    # Remove document-derived deadlines
+    db.execute(
+        text(
+            """
+            delete from acquisition_deadlines
+            where org_id = :org_id
+            and property_id = :property_id
+            and source_document_id = :document_id
+            and coalesce(manually_overridden, false) = false
+            """
+        ),
+        {
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "document_id": int(document_id),
+        },
+    )
+
+# Remove document-derived participants (SAFE VERSION)
+    if _col_exists(db, "acquisition_contacts", "source_document_id"):
+        db.execute(
+            text(
+                """
+                delete from acquisition_contacts
+                where org_id = :org_id
+                and property_id = :property_id
+                and source_document_id = :document_id
+                and coalesce(manually_overridden, false) = false
+                """
+            ),
+            {
+                "org_id": int(org_id),
+                "property_id": int(property_id),
+                "document_id": int(document_id),
+            },
+        )
     db.commit()
 
     if hard_delete_file and storage_path:

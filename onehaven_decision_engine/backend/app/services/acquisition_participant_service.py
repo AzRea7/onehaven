@@ -7,6 +7,102 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 
+DOCUMENT_CONTACT_RULES: dict[str, dict[str, Any]] = {
+    "purchase_agreement": {
+        "target_roles": ["listing_agent", "buyer_agent", "seller_agent"],
+        "fallback_roles": ["listing_office"],
+        "why": {
+            "listing_agent": "This contact usually controls listing-side offer coordination, access, counters, and contract routing.",
+            "buyer_agent": "This contact usually owns buyer-side offer coordination, signatures, and deal positioning.",
+            "seller_agent": "This contact usually controls seller-side communication, counters, and execution details.",
+            "listing_office": "This brokerage office is the fallback when the individual agent is missing or unreachable.",
+        },
+    },
+    "loan_estimate": {
+        "target_roles": ["lender", "loan_officer"],
+        "fallback_roles": [],
+        "why": {
+            "lender": "This contact is responsible for financing terms, disclosures, and underwriting progress.",
+            "loan_officer": "This contact is responsible for explaining loan terms, collecting conditions, and moving financing forward.",
+        },
+    },
+    "loan_documents": {
+        "target_roles": ["lender", "loan_officer"],
+        "fallback_roles": [],
+        "why": {
+            "lender": "This contact is responsible for financing terms, disclosures, and underwriting progress.",
+            "loan_officer": "This contact is responsible for explaining loan terms, collecting conditions, and moving financing forward.",
+        },
+    },
+    "insurance_binder": {
+        "target_roles": ["insurance_agent", "insurance_agency"],
+        "fallback_roles": [],
+        "why": {
+            "insurance_agent": "This contact is responsible for the binder, coverage details, and effective-date corrections.",
+            "insurance_agency": "This agency is the fallback for binder delivery, declarations, and underwriting questions.",
+        },
+    },
+    "inspection_report": {
+        "target_roles": ["inspector", "inspection_company"],
+        "fallback_roles": [],
+        "why": {
+            "inspector": "This contact can clarify findings, severity, repair implications, and reinspection timing.",
+            "inspection_company": "This company is the fallback for scheduling, report delivery, and follow-up questions.",
+        },
+    },
+    "title_documents": {
+        "target_roles": ["title_company", "escrow_officer"],
+        "fallback_roles": [],
+        "why": {
+            "title_company": "This contact handles title commitment issues, payoff coordination, and closing readiness.",
+            "escrow_officer": "This contact handles escrow instructions, settlement coordination, and funds timing.",
+        },
+    },
+    "closing_disclosure": {
+        "target_roles": ["title_company", "escrow_officer"],
+        "fallback_roles": [],
+        "why": {
+            "title_company": "This contact handles title-side settlement corrections and final closing coordination.",
+            "escrow_officer": "This contact handles closing statement questions, funds, and signature logistics.",
+        },
+    },
+}
+
+
+ROLE_ALIASES: dict[str, str] = {
+    "agent": "listing_agent",
+    "listing agent": "listing_agent",
+    "listing_agent": "listing_agent",
+    "broker": "listing_agent",
+    "realtor": "listing_agent",
+    "seller agent": "seller_agent",
+    "seller_agent": "seller_agent",
+    "buyer agent": "buyer_agent",
+    "buyers agent": "buyer_agent",
+    "buyer_agent": "buyer_agent",
+    "office": "listing_office",
+    "brokerage": "listing_office",
+    "listing_office": "listing_office",
+    "title": "title_company",
+    "title company": "title_company",
+    "title_company": "title_company",
+    "escrow": "escrow_officer",
+    "escrow officer": "escrow_officer",
+    "escrow_officer": "escrow_officer",
+    "loan officer": "loan_officer",
+    "loan_officer": "loan_officer",
+    "lender": "lender",
+    "mortgage company": "lender",
+    "insurance agent": "insurance_agent",
+    "insurance_agent": "insurance_agent",
+    "insurance agency": "insurance_agency",
+    "insurance_agency": "insurance_agency",
+    "inspector": "inspector",
+    "inspection company": "inspection_company",
+    "inspection_company": "inspection_company",
+}
+
+
 def _row_to_dict(row: Any | None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -32,23 +128,26 @@ def _clean_role(role: Any) -> str:
 
 def _normalize_role(role: str) -> str:
     raw = _clean_role(role)
+    return ROLE_ALIASES.get(raw, raw.replace(" ", "_"))
 
-    aliases = {
-        "agent": "listing_agent",
-        "listing agent": "listing_agent",
-        "listing_agent": "listing_agent",
-        "broker": "listing_agent",
-        "realtor": "listing_agent",
-        "seller_agent": "listing_agent",
-        "office": "listing_office",
-        "brokerage": "listing_office",
-        "listing_office": "listing_office",
-        "title": "title_company",
-        "title_company": "title_company",
-        "loan officer": "loan_officer",
-        "loan_officer": "loan_officer",
+
+def _label_for_role(role: str) -> str:
+    normalized = _normalize_role(role)
+    labels = {
+        "listing_agent": "Listing agent",
+        "buyer_agent": "Buyer agent",
+        "seller_agent": "Seller agent",
+        "listing_office": "Listing office",
+        "lender": "Lender",
+        "loan_officer": "Loan officer",
+        "insurance_agent": "Insurance agent",
+        "insurance_agency": "Insurance agency",
+        "inspector": "Inspector",
+        "inspection_company": "Inspection company",
+        "title_company": "Title company",
+        "escrow_officer": "Escrow officer",
     }
-    return aliases.get(raw, raw.replace(" ", "_"))
+    return labels.get(normalized, normalized.replace("_", " ").title())
 
 
 def _col_exists(db: Session, table: str, column: str) -> bool:
@@ -83,6 +182,61 @@ def _participant_sort_rank(row: dict[str, Any]) -> tuple[int, str, int]:
         rank = 3
 
     return (rank, role, int(row.get("id") or 0))
+
+
+def _contact_completeness_score(row: dict[str, Any]) -> int:
+    score = 0
+    if _clean_text(row.get("phone")):
+        score += 3
+    if _clean_text(row.get("email")):
+        score += 3
+    if _clean_text(row.get("company")):
+        score += 1
+    if bool(row.get("waiting_on")):
+        score += 3
+    if bool(row.get("is_primary")):
+        score += 2
+    if str(row.get("source_type") or "").strip().lower() == "listing_import":
+        score += 1
+    return score
+
+
+def _contact_sort_key(row: dict[str, Any], preferred_role_order: list[str]) -> tuple[int, int, int, int]:
+    role = _normalize_role(str(row.get("role") or "other"))
+    try:
+        role_rank = preferred_role_order.index(role)
+    except ValueError:
+        role_rank = len(preferred_role_order) + 1
+    return (
+        role_rank,
+        0 if bool(row.get("waiting_on")) else 1,
+        0 if bool(row.get("is_primary")) else 1,
+        -_contact_completeness_score(row),
+    )
+
+
+def _serialize_document_contact(
+    row: dict[str, Any],
+    *,
+    document_kind: str,
+    why_map: dict[str, str],
+) -> dict[str, Any]:
+    normalized_role = _normalize_role(str(row.get("role") or "other"))
+    why_relevant = why_map.get(normalized_role) or f"This { _label_for_role(normalized_role).lower() } is relevant to {document_kind.replace('_', ' ')} follow-up."
+    return {
+        "id": row.get("id"),
+        "role": normalized_role,
+        "role_label": _label_for_role(normalized_role),
+        "name": row.get("name"),
+        "phone": row.get("phone"),
+        "email": row.get("email"),
+        "company": row.get("company"),
+        "notes": row.get("notes"),
+        "is_primary": bool(row.get("is_primary") or False),
+        "waiting_on": bool(row.get("waiting_on") or False),
+        "source_type": row.get("source_type"),
+        "why_relevant": why_relevant,
+    }
 
 
 def list_participants(
@@ -123,6 +277,7 @@ def list_participants(
     out.sort(key=_participant_sort_rank)
     return out
 
+
 def delete_participant(
     db: Session,
     *,
@@ -155,6 +310,7 @@ def delete_participant(
     )
     db.commit()
     return row
+
 
 def upsert_participant(
     db: Session,
@@ -472,3 +628,61 @@ def seed_listing_contacts_from_property(
         )
 
     return created
+
+
+def resolve_document_contact_card(
+    participants: list[dict[str, Any]] | None,
+    document_kind: str | None,
+) -> dict[str, Any]:
+    kind = str(document_kind or "").strip().lower()
+    rule = DOCUMENT_CONTACT_RULES.get(kind, {"target_roles": [], "fallback_roles": [], "why": {}})
+    target_roles = [_normalize_role(role) for role in rule.get("target_roles", [])]
+    fallback_roles = [_normalize_role(role) for role in rule.get("fallback_roles", [])]
+    why_map = dict(rule.get("why") or {})
+
+    participant_rows = list(participants or [])
+    normalized_rows = [
+        {**row, "role": _normalize_role(str(row.get("role") or "other"))}
+        for row in participant_rows
+    ]
+
+    target_matches = [row for row in normalized_rows if row.get("role") in set(target_roles)]
+    fallback_matches = [row for row in normalized_rows if row.get("role") in set(fallback_roles)]
+
+    ordered_matches = sorted(target_matches, key=lambda row: _contact_sort_key(row, target_roles))
+    ordered_fallbacks = sorted(fallback_matches, key=lambda row: _contact_sort_key(row, fallback_roles or target_roles))
+
+    primary_row = ordered_matches[0] if ordered_matches else (ordered_fallbacks[0] if ordered_fallbacks else None)
+    fallback_rows: list[dict[str, Any]] = []
+    for row in ordered_matches[1:] + ordered_fallbacks:
+        if primary_row and int(row.get("id") or 0) == int(primary_row.get("id") or 0):
+            continue
+        fallback_rows.append(row)
+
+    present_roles = {_normalize_role(str(row.get("role") or "")) for row in ordered_matches}
+    missing_roles = [_label_for_role(role) for role in target_roles if role not in present_roles]
+
+    return {
+        "document_kind": kind,
+        "document_kind_label": kind.replace("_", " ").title() if kind else "Document",
+        "target_roles": [_label_for_role(role) for role in target_roles],
+        "primary_contact_for_document_kind": _serialize_document_contact(primary_row, document_kind=kind, why_map=why_map) if primary_row else None,
+        "fallback_contacts_for_document_kind": [
+            _serialize_document_contact(row, document_kind=kind, why_map=why_map)
+            for row in fallback_rows[:4]
+        ],
+        "missing_contact_roles": missing_roles,
+    }
+
+
+
+def build_document_contact_directory(
+    participants: list[dict[str, Any]] | None,
+    document_kinds: list[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    kinds = document_kinds or list(DOCUMENT_CONTACT_RULES.keys())
+    return {
+        str(kind).strip().lower(): resolve_document_contact_card(participants, kind)
+        for kind in kinds
+        if str(kind).strip()
+    }

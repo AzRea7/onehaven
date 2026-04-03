@@ -2,7 +2,6 @@ import React from "react";
 import {
   AlertTriangle,
   Building2,
-  ExternalLink,
   Flag,
   Handshake,
   Mail,
@@ -25,9 +24,34 @@ export type AcquisitionParticipant = {
   notes?: string | null;
 };
 
+export type DocumentContact = {
+  id?: number;
+  role?: string;
+  role_label?: string;
+  name?: string;
+  company?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  is_primary?: boolean | null;
+  waiting_on?: boolean | null;
+  source_type?: string | null;
+  notes?: string | null;
+  why_relevant?: string | null;
+};
+
+export type DocumentContactCard = {
+  document_kind?: string;
+  document_kind_label?: string;
+  target_roles?: string[];
+  primary_contact_for_document_kind?: DocumentContact | null;
+  fallback_contacts_for_document_kind?: DocumentContact[];
+  missing_contact_roles?: string[];
+};
+
 type Props = {
   participants?: AcquisitionParticipant[];
   waitingOn?: string | null;
+  documentContactCard?: DocumentContactCard | null;
 };
 
 function normalizeRole(role?: string | null) {
@@ -40,11 +64,24 @@ function normalizeRole(role?: string | null) {
 
 function labelForRole(role?: string | null) {
   const normalized = normalizeRole(role);
-  if (normalized === "loan_officer") return "Loan officer";
-  if (normalized === "title_company") return "Title company";
-  if (normalized === "listing_agent") return "Listing agent";
-  if (normalized === "listing_office") return "Listing office";
-  return normalized.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const labels: Record<string, string> = {
+    loan_officer: "Loan officer",
+    lender: "Lender",
+    title_company: "Title company",
+    escrow_officer: "Escrow officer",
+    listing_agent: "Listing agent",
+    buyer_agent: "Buyer agent",
+    seller_agent: "Seller agent",
+    listing_office: "Listing office",
+    insurance_agent: "Insurance agent",
+    insurance_agency: "Insurance agency",
+    inspector: "Inspector",
+    inspection_company: "Inspection company",
+  };
+  return (
+    labels[normalized] ||
+    normalized.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
 }
 
 function roleTone(role?: string | null, waitingOn?: string | null) {
@@ -142,9 +179,136 @@ function sourceBadge(sourceType?: string | null) {
   return <span className="oh-pill">{source.replace(/_/g, " ")}</span>;
 }
 
+function buildEmailHref(contact: any, documentKindLabel?: string | null) {
+  const rawEmail = String(contact?.email || "").trim();
+  if (!rawEmail) return null;
+
+  const emails = rawEmail
+    .split(/[;,]/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+
+  if (!emails.length) return null;
+
+  const contactName = String(contact?.name || "").trim() || "there";
+  const contactRole = String(contact?.role || contact?.role_label || "")
+    .trim()
+    .toLowerCase();
+  const subjectBase =
+    String(documentKindLabel || "Document").trim() || "Document";
+
+  const subject = encodeURIComponent(`${subjectBase} follow-up`);
+
+  const roleSpecificLine = (() => {
+    if (contactRole.includes("loan") || contactRole.includes("lender")) {
+      return "I also want to confirm the financing timeline and any remaining lender-side conditions.";
+    }
+    if (contactRole.includes("title") || contactRole.includes("escrow")) {
+      return "I also want to confirm closing coordination, funds timing, and any remaining title or escrow items.";
+    }
+    if (contactRole.includes("insurance")) {
+      return "I also want to confirm coverage details, effective date, and any lender-required insurance items.";
+    }
+    if (contactRole.includes("inspect")) {
+      return "I also want to confirm any material findings, severity, and recommended follow-up items.";
+    }
+    if (
+      contactRole.includes("agent") ||
+      contactRole.includes("broker") ||
+      contactRole.includes("office")
+    ) {
+      return "I also want to confirm current deal status, open signatures, and any next steps needed from the parties.";
+    }
+    return "I also want to confirm any open items that could affect timing or execution.";
+  })();
+
+  const bodyText = [
+    `Hi ${contactName},`,
+    "",
+    `I am following up regarding the ${subjectBase.toLowerCase()}.`,
+    "",
+    "Please send the latest update when you can.",
+    "",
+    roleSpecificLine,
+    "",
+    "Thanks,",
+  ].join("\n");
+
+  const body = encodeURIComponent(bodyText);
+  return `mailto:${emails.join(",")}?subject=${subject}&body=${body}`;
+}
+
+function ContactRow({
+  contact,
+  documentKindLabel,
+}: {
+  contact: DocumentContact;
+  documentKindLabel?: string | null;
+}) {
+  const emailHref = buildEmailHref(contact, documentKindLabel);
+
+  return (
+    <div className="rounded-2xl border border-app bg-app px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-app-0">
+            {contact.name || "Unnamed contact"}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-2 text-xs text-app-4">
+            <span>{contact.role_label || labelForRole(contact.role)}</span>
+            {contact.company ? <span>• {contact.company}</span> : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {contact.is_primary ? (
+            <span className="oh-pill">
+              <Star className="mr-1 h-3.5 w-3.5" />
+              primary
+            </span>
+          ) : null}
+          {contact.waiting_on ? (
+            <span className="oh-pill oh-pill-warn">
+              <Flag className="mr-1 h-3.5 w-3.5" />
+              action owner
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-2 text-sm text-app-3">
+        <div className="flex items-center gap-2">
+          <Phone className="h-4 w-4 text-app-4" />
+          <span>{contact.phone || "No phone"}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Mail className="h-4 w-4 text-app-4" />
+          <span>{contact.email || "No email"}</span>
+        </div>
+
+        {emailHref ? (
+          <a
+            href={emailHref}
+            className="mt-2 inline-flex items-center gap-2 rounded-xl border border-app bg-app-panel px-3 py-2 text-xs font-medium text-app-0 transition hover:bg-app"
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Email
+          </a>
+        ) : null}
+
+        {contact.why_relevant ? (
+          <div className="rounded-2xl border border-app bg-app-panel px-3 py-2 text-xs text-app-3">
+            {contact.why_relevant}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function AcquisitionParticipantsPanel({
   participants = [],
   waitingOn,
+  documentContactCard,
 }: Props) {
   const grouped = participants.reduce<Record<string, AcquisitionParticipant[]>>(
     (acc, item) => {
@@ -172,6 +336,20 @@ export default function AcquisitionParticipantsPanel({
   const listingImportCount = participants.filter(
     (p) => String(p.source_type || "").toLowerCase() === "listing_import",
   ).length;
+  const primaryDocContact =
+    documentContactCard?.primary_contact_for_document_kind || null;
+  const fallbackDocContacts = Array.isArray(
+    documentContactCard?.fallback_contacts_for_document_kind,
+  )
+    ? documentContactCard?.fallback_contacts_for_document_kind || []
+    : [];
+  const missingContactRoles = Array.isArray(
+    documentContactCard?.missing_contact_roles,
+  )
+    ? documentContactCard?.missing_contact_roles || []
+    : [];
+  const documentKindLabel =
+    documentContactCard?.document_kind_label || "Document";
 
   return (
     <div className="rounded-3xl border border-app bg-app-panel p-5">
@@ -200,6 +378,67 @@ export default function AcquisitionParticipantsPanel({
           </span>
         </div>
       </div>
+
+      {documentContactCard ? (
+        <div className="mt-4 rounded-2xl border border-app bg-app-muted p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                Who to call now
+              </div>
+              <div className="mt-1 text-sm font-semibold text-app-0">
+                {documentKindLabel}
+              </div>
+            </div>
+            <ShieldCheck className="h-4 w-4 text-app-4" />
+          </div>
+
+          <div className="mt-3 space-y-3">
+            {primaryDocContact ? (
+              <ContactRow
+                contact={primaryDocContact}
+                documentKindLabel={documentKindLabel}
+              />
+            ) : (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                No primary contact is saved yet for this document kind.
+              </div>
+            )}
+
+            {fallbackDocContacts.length ? (
+              <div>
+                <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Fallback contacts
+                </div>
+                <div className="space-y-3">
+                  {fallbackDocContacts.map((contact, idx) => (
+                    <ContactRow
+                      key={`${contact.id || contact.role || "contact"}-${idx}`}
+                      contact={contact}
+                      documentKindLabel={documentKindLabel}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {missingContactRoles.length ? (
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm text-app-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Missing roles
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {missingContactRoles.map((role) => (
+                    <span key={role} className="oh-pill oh-pill-warn">
+                      {role}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {!participants.length ? (
         <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-4">
@@ -303,13 +542,6 @@ export default function AcquisitionParticipantsPanel({
                             </div>
                           ) : null}
                         </div>
-
-                        {String(person.source_type || "").toLowerCase() ===
-                        "listing_import" ? (
-                          <div className="mt-3 rounded-2xl border border-app bg-app-muted px-3 py-2 text-xs text-app-4">
-                            Seeded automatically from ingested listing metadata.
-                          </div>
-                        ) : null}
                       </div>
                     );
                   })}
@@ -317,19 +549,6 @@ export default function AcquisitionParticipantsPanel({
               </div>
             ))}
           </div>
-
-          {listingImportCount > 0 ? (
-            <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3 text-sm text-emerald-100">
-              <div className="flex items-start gap-2">
-                <ShieldCheck className="mt-0.5 h-4 w-4" />
-                <span>
-                  Listing agent and office contacts are already attached to this
-                  acquisition, which reduces manual handoff work for follow-up,
-                  scheduling, and broker outreach.
-                </span>
-              </div>
-            </div>
-          ) : null}
         </>
       )}
     </div>
