@@ -39,12 +39,11 @@ DEFAULT_REQUIRED_DOCS = [
     {"kind": "inspection_report", "label": "Inspection / due diligence"},
 ]
 
-PROMOTION_REQUIRED_FIELDS = (
-    "purchase_price",
-    "target_close_date",
-    "waiting_on",
-    "next_step",
-)
+PROMOTION_REQUIRED_FIELDS: tuple[str, ...] = ()
+
+DEFAULT_ACQUISITION_STATUS = "pursuing"
+DEFAULT_ACQUISITION_WAITING_ON = "Operator review / pre-offer pursuit"
+DEFAULT_ACQUISITION_NEXT_STEP = "Start pre-offer acquisition work"
 
 ALLOWED_UPLOAD_EXTENSIONS = {
     ".pdf": "application/pdf",
@@ -79,6 +78,7 @@ HIGHLIGHT_PATTERNS: list[tuple[str, str]] = [
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
+
 def extract_document_highlights(text: str | None) -> list[dict[str, Any]]:
     body = str(text or "").strip()
     if not body:
@@ -93,12 +93,7 @@ def extract_document_highlights(text: str | None) -> list[dict[str, Any]]:
             end = min(len(normalized), match.end() + 140)
             excerpt = normalized[start:end].strip()
             if excerpt:
-                highlights.append(
-                    {
-                        "code": code,
-                        "excerpt": excerpt,
-                    }
-                )
+                highlights.append({"code": code, "excerpt": excerpt})
 
     deduped: list[dict[str, Any]] = []
     seen = set()
@@ -110,6 +105,7 @@ def extract_document_highlights(text: str | None) -> list[dict[str, Any]]:
         deduped.append(item)
 
     return deduped[:20]
+
 
 def _rows_to_dicts(rows: list[Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
@@ -252,11 +248,74 @@ def _stream_upload_to_disk(upload: UploadFile, target_path: Path) -> dict[str, A
         target_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Failed to save upload: {exc}")
 
-    return {
-        "size_bytes": total,
-        "sha256": sha256.hexdigest(),
-        "head": first_chunk,
-    }
+    return {"size_bytes": total, "sha256": sha256.hexdigest(), "head": first_chunk}
+
+
+def _default_waiting_on(value: str | None) -> str:
+    return value or DEFAULT_ACQUISITION_WAITING_ON
+
+
+def _default_next_step(value: str | None) -> str:
+    return value or DEFAULT_ACQUISITION_NEXT_STEP
+
+
+def _looks_like_legacy_setup_row(row: dict[str, Any]) -> bool:
+    status = str(row.get("status") or "").strip().lower()
+    waiting_on = str(row.get("waiting_on") or "").strip().lower()
+    next_step = str(row.get("next_step") or "").strip().lower()
+    return (
+        status == "needs_setup"
+        and waiting_on == "purchase agreement"
+        and next_step == "import or enter acquisition data"
+    )
+
+
+def _normalize_legacy_acquisition_record(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    if not _looks_like_legacy_setup_row(row):
+        return row
+
+    db.execute(
+        text(
+            """
+            update acquisition_records
+            set
+                status = :status,
+                waiting_on = :waiting_on,
+                next_step = :next_step,
+                updated_at = now()
+            where org_id = :org_id and property_id = :property_id
+            """
+        ),
+        {
+            "org_id": int(org_id),
+            "property_id": int(property_id),
+            "status": DEFAULT_ACQUISITION_STATUS,
+            "waiting_on": DEFAULT_ACQUISITION_WAITING_ON,
+            "next_step": DEFAULT_ACQUISITION_NEXT_STEP,
+        },
+    )
+    db.commit()
+
+    refreshed = _row_to_dict(
+        db.execute(
+            text(
+                """
+                select *
+                from acquisition_records
+                where org_id = :org_id and property_id = :property_id
+                limit 1
+                """
+            ),
+            {"org_id": int(org_id), "property_id": int(property_id)},
+        ).fetchone()
+    )
+    return refreshed or row
 
 
 def ensure_acquisition_record(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
@@ -274,7 +333,12 @@ def ensure_acquisition_record(db: Session, *, org_id: int, property_id: int) -> 
         ).fetchone()
     )
     if existing:
-        return existing
+        return _normalize_legacy_acquisition_record(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            row=existing,
+        )
 
     db.execute(
         text(
@@ -293,9 +357,9 @@ def ensure_acquisition_record(db: Session, *, org_id: int, property_id: int) -> 
             values (
                 :org_id,
                 :property_id,
-                'needs_setup',
-                'Purchase agreement',
-                'Import or enter acquisition data',
+                :status,
+                :waiting_on,
+                :next_step,
                 :contacts_json,
                 :milestones_json,
                 now(),
@@ -306,6 +370,9 @@ def ensure_acquisition_record(db: Session, *, org_id: int, property_id: int) -> 
         {
             "org_id": org_id,
             "property_id": property_id,
+            "status": DEFAULT_ACQUISITION_STATUS,
+            "waiting_on": DEFAULT_ACQUISITION_WAITING_ON,
+            "next_step": DEFAULT_ACQUISITION_NEXT_STEP,
             "contacts_json": json.dumps([]),
             "milestones_json": json.dumps([]),
         },
@@ -447,16 +514,16 @@ def _as_float_or_none(value: Any) -> float | None:
 
 def _validate_promotion_payload(payload: dict[str, Any]) -> dict[str, Any]:
     cleaned = {
-        "status": _clean_text(payload.get("status")) or "active",
-        "waiting_on": _clean_text(payload.get("waiting_on")),
-        "next_step": _clean_text(payload.get("next_step")),
+        "status": _clean_text(payload.get("status")) or DEFAULT_ACQUISITION_STATUS,
+        "waiting_on": _default_waiting_on(_clean_text(payload.get("waiting_on"))),
+        "next_step": _default_next_step(_clean_text(payload.get("next_step"))),
         "contract_date": _clean_text(payload.get("contract_date")),
         "target_close_date": _clean_text(payload.get("target_close_date")),
         "closing_date": _clean_text(payload.get("closing_date")),
         "purchase_price": _as_float_or_none(payload.get("purchase_price")),
         "earnest_money": _as_float_or_none(payload.get("earnest_money")),
         "loan_amount": _as_float_or_none(payload.get("loan_amount")),
-        "loan_type": _clean_text(payload.get("loan_type")),
+        "loan_type": _clean_text(payload.get("loan_type")) or "dscr",
         "interest_rate": _as_float_or_none(payload.get("interest_rate")),
         "cash_to_close": _as_float_or_none(payload.get("cash_to_close")),
         "closing_costs": _as_float_or_none(payload.get("closing_costs")),
@@ -465,12 +532,6 @@ def _validate_promotion_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "escrow_officer": _clean_text(payload.get("escrow_officer")),
         "notes": _clean_text(payload.get("notes")),
     }
-
-    missing: list[str] = []
-    for key in PROMOTION_REQUIRED_FIELDS:
-        value = cleaned.get(key)
-        if value in (None, ""):
-            missing.append(key)
 
     purchase_price = cleaned.get("purchase_price")
     if purchase_price is not None and purchase_price <= 0:
@@ -488,24 +549,11 @@ def _validate_promotion_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if loan_type and loan_type not in allowed_loan_types:
         raise HTTPException(status_code=422, detail="loan_type is invalid.")
 
-    if loan_type and loan_type != "cash":
-        loan_amount = cleaned.get("loan_amount")
-        if loan_amount in (None, ""):
-            missing.append("loan_amount")
-        elif isinstance(loan_amount, (int, float)) and loan_amount <= 0:
-            raise HTTPException(
-                status_code=422,
-                detail="loan_amount must be greater than 0 for financed deals.",
-            )
-
-    if missing:
+    loan_amount = cleaned.get("loan_amount")
+    if loan_amount is not None and loan_amount <= 0:
         raise HTTPException(
             status_code=422,
-            detail={
-                "error": "acquisition_setup_required",
-                "message": "Required acquisition setup fields are missing.",
-                "missing_fields": sorted(set(missing)),
-            },
+            detail="loan_amount must be greater than 0 when provided.",
         )
 
     return cleaned
@@ -550,7 +598,8 @@ def promote_property_to_acquisition(
                     state,
                     zip,
                     county,
-                    asking_price,
+                    listing_price as asking_price,
+                    listing_price,
                     listing_agent_name,
                     listing_agent_phone,
                     listing_agent_email,
@@ -739,7 +788,7 @@ def get_acquisition_detail(
         doc["extracted_fields"] = extracted_fields
         source_text = doc.get("extracted_text") or doc.get("preview_text") or ""
         doc["highlights"] = extract_document_highlights(source_text)
-    
+
     contacts = _safe_json_load(acquisition_row.get("contacts_json"), [])
     milestones = _safe_json_load(acquisition_row.get("milestones_json"), [])
     target_close = acquisition_row.get("target_close_date") or acquisition_row.get("closing_date")
@@ -968,7 +1017,6 @@ def list_acquisition_queue(
         field_values = detail.get("field_values") if detail else []
         participants = detail.get("participants") if detail else []
 
-        conflict_count = 0
         grouped_values: dict[str, set[str]] = {}
         for fv in field_values:
             key = str(fv.get("field_name") or "").strip().lower()
@@ -1058,10 +1106,7 @@ def list_acquisition_queue(
             }
         )
 
-    return {
-        "items": filtered,
-        "count": len(filtered),
-    }
+    return {"items": filtered, "count": len(filtered)}
 
 
 def add_acquisition_document(
@@ -1170,10 +1215,7 @@ def upload_acquisition_document_file(
     elif isinstance(scan_result, str):
         scan_result_text = scan_result
 
-    parsed = parse_document(
-        target_path,
-        upload.content_type or "application/octet-stream",
-    )
+    parsed = parse_document(target_path, upload.content_type or "application/octet-stream")
     preview_text = None
     extracted_text = None
     extracted_fields = {}

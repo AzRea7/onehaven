@@ -24,18 +24,38 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
 
 def _stage_matches_pane(pane: str, stage: str) -> bool:
     stage = str(stage or "").strip().lower()
+
     if pane == "investor":
-        return stage in {"discovered", "shortlisted", "underwritten", "offer"}
+        return stage in {"discovered", "shortlisted", "underwritten"}
+
     if pane == "acquisition":
-        return stage in {"offer", "acquired"}
+        return stage in {
+            "pursuing",
+            "offer_prep",
+            "offer_ready",
+            "offer_submitted",
+            "negotiating",
+            "under_contract",
+            "due_diligence",
+            "closing",
+            "owned",
+            # temporary backwards compatibility
+            "offer",
+            "acquired",
+        }
+
     if pane == "compliance":
         return stage in {"rehab", "compliance_readying", "inspection_pending"}
+
     if pane == "tenants":
         return stage in {"tenant_marketing", "tenant_screening", "leased"}
+
     if pane == "management":
         return stage in {"occupied", "turnover", "maintenance"}
+
     if pane == "admin":
         return True
+
     return False
 
 

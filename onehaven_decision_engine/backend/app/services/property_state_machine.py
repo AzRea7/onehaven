@@ -34,6 +34,7 @@ from ..models import (
 )
 from ..policy_models import JurisdictionProfile
 from .inspection_failure_task_service import build_failure_next_actions
+from .acquisition_tag_service import list_property_tags
 from .inspection_readiness_service import build_property_readiness_summary
 from .jurisdiction_task_mapper import map_profile_jurisdiction_task_dicts
 from .risk_scoring import classify_deal_candidate
@@ -242,6 +243,51 @@ def _asking_price(prop: Optional[Property], deal: Optional[Deal]) -> Optional[fl
         if value is not None:
             return _safe_float(value, 0.0)
     return None
+
+
+def _derive_stage_from_acquisition_record(
+    acquisition: dict[str, Any] | None,
+    current_stage: str | None,
+) -> str:
+    current = str(current_stage or "").strip().lower()
+    acq = acquisition or {}
+
+    if not acq:
+        return current or "discovered"
+
+    status = str(
+        acq.get("status")
+        or acq.get("pursuit_status")
+        or acq.get("stage")
+        or ""
+    ).strip().lower()
+    waiting_on = str(acq.get("waiting_on") or "").strip().lower()
+    next_step = str(acq.get("next_step") or "").strip().lower()
+
+    if status in {"owned", "acquired"}:
+        return "owned"
+    if status in {"closing", "clear_to_close", "ready_to_close"}:
+        return "closing"
+    if status in {"under_contract"}:
+        return "under_contract"
+    if status in {"negotiating"}:
+        return "negotiating"
+    if status in {"offer_submitted"}:
+        return "offer_submitted"
+    if status in {"offer_ready", "offer"}:
+        return "offer_ready"
+    if status in {"offer_prep", "procurement"}:
+        return "offer_prep"
+    if status in {"pursuing", "active", "started", "acquisition"}:
+        return "pursuing"
+
+    if current in {"discovered", "shortlisted", "underwritten", "", None}:
+        return "pursuing"
+
+    if waiting_on or next_step:
+        return "pursuing"
+
+    return current or "pursuing"
 
 
 def _decision_reason_list(uw: Optional[UnderwritingResult]) -> list[str]:
@@ -694,6 +740,13 @@ def derive_stage_and_constraints(
     pursuit_status = str(persisted_acquisition.get("pursuit_status") or "").strip().lower()
     acquisition_stage_override = str(persisted_acquisition.get("stage") or "").strip().lower()
     manual_start_requested = bool(persisted_acquisition.get("start_requested") or persisted_acquisition.get("manual_start_approved"))
+    property_tags = {
+        str(row.get("tag") or "").strip().lower()
+        for row in list_property_tags(db, org_id=org_id, property_id=property_id)
+    }
+    has_saved_tag = "saved" in property_tags
+    has_shortlisted_tag = "shortlisted" in property_tags
+    has_offer_candidate_tag = "offer_candidate" in property_tags
     has_agent_owner = bool(
         persisted_acquisition.get("owner_user_id")
         or persisted_acquisition.get("owner_name")
@@ -706,17 +759,44 @@ def derive_stage_and_constraints(
         or persisted_acquisition.get("proposed_offer_price") is not None
         or persisted_acquisition.get("finance_plan")
     )
+    has_active_acquisition_record = bool(
+        persisted_acquisition
+        and (
+            persisted_acquisition.get("id") is not None
+            or persisted_acquisition.get("status")
+            or persisted_acquisition.get("stage")
+            or persisted_acquisition.get("pursuit_status")
+            or persisted_acquisition.get("waiting_on")
+            or persisted_acquisition.get("next_step")
+            or persisted_acquisition.get("target_close_date")
+            or persisted_acquisition.get("purchase_price") is not None
+            or persisted_acquisition.get("loan_amount") is not None
+            or persisted_acquisition.get("cash_to_close") is not None
+            or persisted_acquisition.get("buyer_agent_name")
+            or persisted_acquisition.get("buyer_agent_email")
+            or persisted_acquisition.get("title_company")
+            or persisted_acquisition.get("escrow_officer")
+            or persisted_acquisition.get("notes")
+        )
+    )
+    investor_marked_for_acquisition = bool(
+        manual_start_requested
+        or has_saved_tag
+        or has_shortlisted_tag
+        or has_offer_candidate_tag
+    )
     start_acquisition_ready = bool(
         underwriting_complete
-        and decision_bucket == "GOOD"
-        and asking_price is not None
-        and not deal_filter.get("suppress_from_investor")
+        and decision_bucket != "REJECT"
         and not acquired_complete
-        and manual_start_requested
-        and (has_agent_owner or has_pre_offer_plan)
+        and investor_marked_for_acquisition
     )
 
-    acquisition_started = bool(start_acquisition_ready or pursuit_status in {"active", "started"} or acquisition_stage_override in {"pursuing", "offer_prep", "offer_ready", "offer_submitted", "negotiating", "under_contract", "due_diligence", "closing"})
+    acquisition_started = bool(
+        has_active_acquisition_record
+        or pursuit_status in {"active", "started"}
+        or acquisition_stage_override in {"pursuing", "offer_prep", "offer_ready", "offer_submitted", "negotiating", "under_contract", "due_diligence", "closing", "owned"}
+    )
     offer_prep_complete = bool(acquisition_started and (persisted_acquisition.get("pre_offer_criteria_checked") or persisted_acquisition.get("pre_offer_packet_started") or has_pre_offer_plan))
     offer_packet_ready = bool(offer_prep_complete and (persisted_acquisition.get("offer_packet_ready") or persisted_acquisition.get("offer_terms_finalized")))
     offer_submitted_flag = bool(persisted_acquisition.get("offer_submitted") or acquisition_stage_override in {"offer_submitted", "negotiating", "under_contract", "due_diligence", "closing"})
@@ -747,6 +827,11 @@ def derive_stage_and_constraints(
         current_stage = "discovered"
     elif not underwriting_complete:
         current_stage = "shortlisted"
+    elif has_active_acquisition_record and not acquired_complete:
+        current_stage = _derive_stage_from_acquisition_record(
+            persisted_acquisition,
+            acquisition_stage_override or "underwritten",
+        )
     elif not acquisition_started and not acquired_complete:
         current_stage = "underwritten"
     elif acquired_complete and not rehab["has_plan"] and not rehab_complete:
@@ -789,19 +874,13 @@ def derive_stage_and_constraints(
         next_actions.append("Property is currently rejected. Update assumptions only if you want to re-underwrite.")
 
     if underwriting_complete and not acquired_complete and not acquisition_started:
-        if not manual_start_requested:
-            blockers.append("acquisition_start_not_requested")
-            next_actions.append("Mark the property as intentionally pursued before handing it to Acquire.")
-        if asking_price is None:
-            blockers.append("missing_asking_price")
-            next_actions.append("Resolve asking price before starting acquisition.")
-        if deal_filter.get("suppress_from_investor"):
-            blockers.append("suppressed_from_investor")
-            next_actions.append("Resolve the investor suppress reasons before starting acquisition.")
-        if not (has_agent_owner or has_pre_offer_plan):
-            blockers.append("missing_pre_offer_owner_or_plan")
-            next_actions.append("Assign an acquisition owner or add pre-offer notes / strategy before starting acquisition.")
-        if start_acquisition_ready:
+        if decision_bucket == "REJECT":
+            blockers.append("decision_reject")
+            next_actions.append("Property is currently rejected. Update assumptions only if you want to re-underwrite.")
+        elif not investor_marked_for_acquisition:
+            blockers.append("not_marked_for_acquisition")
+            next_actions.append("Mark the property as saved, shortlisted, or offer-candidate to move it into Acquire.")
+        else:
             next_actions.append("Start acquisition and move the property into Pursuing.")
 
     if acquisition_started and current_stage == "pursuing":
@@ -891,11 +970,11 @@ def derive_stage_and_constraints(
 
     start_gate = {
         "ok": start_acquisition_ready,
-        "blocked_reason": None if start_acquisition_ready else "Minimum pre-offer pursuit criteria are not complete.",
+        "blocked_reason": None if start_acquisition_ready else "Property must be intentionally marked before entering Acquire.",
         "blockers": [
             blocker
             for blocker in blockers
-            if blocker in {"decision_review", "decision_reject", "acquisition_start_not_requested", "missing_asking_price", "suppressed_from_investor", "missing_pre_offer_owner_or_plan"}
+            if blocker in {"decision_review", "decision_reject", "not_marked_for_acquisition"}
         ],
         "target_stage": "pursuing",
     }
@@ -1008,6 +1087,7 @@ def derive_stage_and_constraints(
         "completion_projection": completion_info,
         "acquisition": {
             **persisted_acquisition,
+            "has_active_record": has_active_acquisition_record,
             "start_gate": start_gate,
             "acquisition_started": acquisition_started,
             "offer_prep_complete": offer_prep_complete,

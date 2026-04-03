@@ -5,7 +5,7 @@ import time
 from collections import defaultdict
 from typing import Any, Optional
 
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -37,6 +37,25 @@ STANDARD_FILTER_KEYS = (
     "stage",
     "urgency",
 )
+
+def _active_acquisition_property_ids(db: Session, org_id: int) -> set[int]:
+    rows = db.execute(
+        text(
+            """
+            SELECT property_id
+            FROM acquisition_records
+            WHERE org_id = :org_id
+              AND property_id IS NOT NULL
+            """
+        ),
+        {"org_id": int(org_id)},
+    ).fetchall()
+
+    return {
+        int(row[0])
+        for row in rows
+        if row and row[0] is not None
+    }
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
@@ -849,11 +868,20 @@ def _filter_rows_for_pane(
     urgency: Optional[str],
     deals_only: bool = False,
     include_suppressed: bool = False,
+    active_acquisition_ids: set[int] | None = None,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
+    active_acquisition_ids = active_acquisition_ids or set()
 
     for row in rows:
+        property_id = int(row.get("property_id") or row.get("id") or 0)
         current_pane = clamp_pane(row.get("current_pane"))
+
+        if pane == "investor" and property_id in active_acquisition_ids:
+            continue
+        if pane == "acquisition" and property_id not in active_acquisition_ids:
+            continue
+
         if not _property_matches_pane(pane, current_pane=current_pane):
             continue
         if not _property_matches_status(row, status=status):
@@ -959,6 +987,7 @@ def _build_contract_response(
     limit: int,
     deals_only: bool = False,
     include_suppressed: bool = False,
+    db: Session,
 ) -> dict[str, Any]:
     allowed = allowed_panes_for_principal(principal)
     if pane_key not in allowed and pane_key != "admin":
@@ -970,6 +999,8 @@ def _build_contract_response(
             "allowed_panes": allowed,
         }
 
+    active_acquisition_ids = _active_acquisition_property_ids(db, org_id)
+
     pane_rows = _filter_rows_for_pane(
         raw_rows,
         pane=pane_key,
@@ -978,6 +1009,7 @@ def _build_contract_response(
         urgency=urgency,
         deals_only=deals_only,
         include_suppressed=include_suppressed,
+        active_acquisition_ids=active_acquisition_ids,
     )
 
     if pane_key == "investor":
@@ -1100,6 +1132,8 @@ def build_pane_dashboard(
         limit=limit,
         include_suppressed=include_suppressed,
         deals_only=deals_only,
+        db=db,
+
     )
 
     total_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -1182,6 +1216,7 @@ def build_all_pane_summaries(
             limit=limit,
             include_suppressed=include_suppressed,
             deals_only=deals_only,
+            db=db,
         )
 
         panes.append(
