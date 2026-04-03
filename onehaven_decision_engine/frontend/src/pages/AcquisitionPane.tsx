@@ -1275,7 +1275,7 @@ export default function AcquisitionPane() {
                   <div className="flex items-center gap-2">
                     <FileText className="h-4 w-4 text-app-4" />
                     <div className="text-sm font-semibold text-app-0">
-                      Import external document
+                      Add Exisiting document record
                     </div>
                   </div>
                   <div className="mt-1 text-xs text-app-4">

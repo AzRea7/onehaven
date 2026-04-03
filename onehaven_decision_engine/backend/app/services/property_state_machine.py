@@ -630,6 +630,12 @@ def derive_stage_and_constraints(
     completion = compute_compliance_status(db, org_id=org_id, property_id=property_id)
     failure_actions = build_failure_next_actions(db, org_id=org_id, property_id=property_id, limit=10)
 
+    existing_row = ensure_state_row(db, org_id=org_id, property_id=property_id)
+    persisted_constraints = _safe_json_load(getattr(existing_row, "constraints_json", None), {})
+    if not isinstance(persisted_constraints, dict):
+        persisted_constraints = {}
+    persisted_acquisition = persisted_constraints.get("acquisition") if isinstance(persisted_constraints.get("acquisition"), dict) else {}
+
     readiness_info = readiness.get("readiness") or {}
     readiness_counts = readiness.get("counts") or {}
     completion_info = readiness.get("completion") or {}
@@ -661,6 +667,21 @@ def derive_stage_and_constraints(
 
     deal_exists = deal is not None or uw is not None
     underwriting_complete = uw is not None
+    
+    acquisition_ready = bool(readiness_info.get("acquisition_ready"))
+    acquisition_blockers = readiness_info.get("acquisition_blockers") or []
+    acquisition_next_actions = readiness_info.get("acquisition_next_actions") or []
+
+    if not isinstance(acquisition_blockers, list):
+        acquisition_blockers = []
+    if not isinstance(acquisition_next_actions, list):
+        acquisition_next_actions = []
+
+    offer_ready = bool(
+        underwriting_complete
+        and decision_bucket != "REJECT"
+        and acquisition_ready
+    )
 
     acquired_complete = bool(
         (deal is not None and (getattr(deal, "purchase_price", None) is not None or getattr(deal, "closing_date", None) is not None))
@@ -670,7 +691,39 @@ def derive_stage_and_constraints(
         or rehab["has_plan"]
     )
 
-    offer_ready = bool(underwriting_complete and decision_bucket == "GOOD" and not acquired_complete)
+    pursuit_status = str(persisted_acquisition.get("pursuit_status") or "").strip().lower()
+    acquisition_stage_override = str(persisted_acquisition.get("stage") or "").strip().lower()
+    manual_start_requested = bool(persisted_acquisition.get("start_requested") or persisted_acquisition.get("manual_start_approved"))
+    has_agent_owner = bool(
+        persisted_acquisition.get("owner_user_id")
+        or persisted_acquisition.get("owner_name")
+        or persisted_acquisition.get("buyer_agent_name")
+        or persisted_acquisition.get("buyer_agent_email")
+    )
+    has_pre_offer_plan = bool(
+        persisted_acquisition.get("pre_offer_notes")
+        or persisted_acquisition.get("offer_strategy")
+        or persisted_acquisition.get("proposed_offer_price") is not None
+        or persisted_acquisition.get("finance_plan")
+    )
+    start_acquisition_ready = bool(
+        underwriting_complete
+        and decision_bucket == "GOOD"
+        and asking_price is not None
+        and not deal_filter.get("suppress_from_investor")
+        and not acquired_complete
+        and manual_start_requested
+        and (has_agent_owner or has_pre_offer_plan)
+    )
+
+    acquisition_started = bool(start_acquisition_ready or pursuit_status in {"active", "started"} or acquisition_stage_override in {"pursuing", "offer_prep", "offer_ready", "offer_submitted", "negotiating", "under_contract", "due_diligence", "closing"})
+    offer_prep_complete = bool(acquisition_started and (persisted_acquisition.get("pre_offer_criteria_checked") or persisted_acquisition.get("pre_offer_packet_started") or has_pre_offer_plan))
+    offer_packet_ready = bool(offer_prep_complete and (persisted_acquisition.get("offer_packet_ready") or persisted_acquisition.get("offer_terms_finalized")))
+    offer_submitted_flag = bool(persisted_acquisition.get("offer_submitted") or acquisition_stage_override in {"offer_submitted", "negotiating", "under_contract", "due_diligence", "closing"})
+    negotiation_started = bool(persisted_acquisition.get("negotiation_started") or acquisition_stage_override in {"negotiating", "under_contract", "due_diligence", "closing"})
+    under_contract_flag = bool(persisted_acquisition.get("under_contract") or acquisition_stage_override in {"under_contract", "due_diligence", "closing"})
+    due_diligence_complete = bool(persisted_acquisition.get("due_diligence_complete") or acquisition_stage_override in {"closing"})
+
     rehab_complete = bool(acquired_complete and rehab["is_complete"])
 
     compliance_complete = bool(
@@ -688,19 +741,16 @@ def derive_stage_and_constraints(
     tenant_complete = bool(compliance_complete and lease["active"])
     cash_complete = bool(tenant_complete and cash["has_transactions"])
     occupied_complete = bool(tenant_complete and cash_complete)
-
     turnover_active = bool(acquired_complete and lease_exists and not lease["active"] and not tenant_complete)
 
     if not deal_exists:
         current_stage = "discovered"
     elif not underwriting_complete:
         current_stage = "shortlisted"
-    elif not offer_ready and not acquired_complete:
+    elif not acquisition_started and not acquired_complete:
         current_stage = "underwritten"
-    elif offer_ready and not acquired_complete:
-        current_stage = "offer"
     elif acquired_complete and not rehab["has_plan"] and not rehab_complete:
-        current_stage = "acquired"
+        current_stage = "owned"
     elif acquired_complete and not rehab_complete:
         current_stage = "rehab"
     elif rehab_complete and not inspection["exists"]:
@@ -720,7 +770,10 @@ def derive_stage_and_constraints(
     elif occupied_complete:
         current_stage = "occupied"
     else:
-        current_stage = "tenant_marketing"
+        current_stage = clamp_stage(acquisition_stage_override or "pursuing")
+
+    if current_stage in {"pursuing", "offer_prep", "offer_ready", "offer_submitted", "negotiating", "under_contract", "due_diligence", "closing"} and acquisition_stage_override:
+        current_stage = clamp_stage(acquisition_stage_override)
 
     blockers: list[str] = []
     next_actions: list[str] = []
@@ -730,25 +783,60 @@ def derive_stage_and_constraints(
         next_actions.append("Run underwriting evaluation for the property.")
     elif decision_bucket == "REVIEW":
         blockers.append("decision_review")
-        next_actions.append("Review underwriting assumptions and decide whether this property should move to offer.")
+        next_actions.append("Review underwriting assumptions and decide whether this property should move into Acquire.")
     elif decision_bucket == "REJECT":
         blockers.append("decision_reject")
         next_actions.append("Property is currently rejected. Update assumptions only if you want to re-underwrite.")
 
-    if underwriting_complete and decision_bucket == "GOOD" and not acquired_complete:
-        next_actions.append("Track or create active offer / acquisition execution details.")
+    if underwriting_complete and not acquired_complete and not acquisition_started:
+        if not manual_start_requested:
+            blockers.append("acquisition_start_not_requested")
+            next_actions.append("Mark the property as intentionally pursued before handing it to Acquire.")
+        if asking_price is None:
+            blockers.append("missing_asking_price")
+            next_actions.append("Resolve asking price before starting acquisition.")
+        if deal_filter.get("suppress_from_investor"):
+            blockers.append("suppressed_from_investor")
+            next_actions.append("Resolve the investor suppress reasons before starting acquisition.")
+        if not (has_agent_owner or has_pre_offer_plan):
+            blockers.append("missing_pre_offer_owner_or_plan")
+            next_actions.append("Assign an acquisition owner or add pre-offer notes / strategy before starting acquisition.")
+        if start_acquisition_ready:
+            next_actions.append("Start acquisition and move the property into Pursuing.")
+
+    if acquisition_started and current_stage == "pursuing":
+        next_actions.append("Open pre-offer work and move this deal into Offer Prep.")
+    if current_stage == "offer_prep" and not offer_prep_complete:
+        blockers.append("offer_prep_incomplete")
+        next_actions.append("Finish pre-offer criteria, ownership, and strategy inputs.")
+    if current_stage == "offer_ready" and not offer_packet_ready:
+        blockers.append("offer_packet_incomplete")
+        next_actions.append("Finalize terms and mark the offer packet ready before submission.")
+    if current_stage == "offer_submitted" and not offer_submitted_flag:
+        blockers.append("offer_not_submitted")
+        next_actions.append("Record the submitted offer details.")
+    if current_stage == "negotiating" and not (negotiation_started or under_contract_flag):
+        blockers.append("negotiation_not_started")
+        next_actions.append("Record negotiation activity or move the deal back to Offer Submitted.")
+    if current_stage == "under_contract" and not under_contract_flag:
+        blockers.append("not_under_contract")
+        next_actions.append("Record contract acceptance before due diligence.")
+    if current_stage == "due_diligence" and not due_diligence_complete:
+        blockers.append("due_diligence_incomplete")
+        next_actions.append("Finish due diligence and clear remaining contingencies.")
+    if current_stage == "closing" and not acquired_complete:
+        blockers.append("not_owned")
+        next_actions.append("Complete close and record ownership.")
 
     if acquired_complete and not rehab["has_plan"]:
         blockers.append("missing_rehab_plan")
-        next_actions.append("Create rehab scope and rehab tasks for the acquired property.")
-
+        next_actions.append("Create rehab scope and rehab tasks for the owned property.")
     if acquired_complete and rehab["blocked"] > 0:
         blockers.append("rehab_blocked")
         next_actions.append(f"Resolve rehab blockers ({rehab['blocked']} blocked tasks).")
     elif acquired_complete and rehab["open"] > 0:
         blockers.append("rehab_open_tasks")
         next_actions.append(f"Complete rehab tasks ({rehab['open']} still open).")
-
     if rehab_complete and not jurisdiction["exists"]:
         blockers.append("missing_jurisdiction_profile")
         next_actions.append("Create or resolve jurisdiction profile coverage for this property market.")
@@ -758,48 +846,36 @@ def derive_stage_and_constraints(
     elif rehab_complete and jurisdiction["is_stale"]:
         blockers.append("jurisdiction_stale")
         next_actions.append("Refresh stale jurisdiction policy coverage before advancing compliance.")
-
     if rehab_complete and not inspection["exists"]:
         blockers.append("missing_inspection")
         next_actions.append("Schedule and record the first inspection.")
     elif rehab_complete and not completion.latest_inspection_passed:
         blockers.append("latest_inspection_not_passed")
         next_actions.append("Address failed inspection findings and pass the latest inspection.")
-
     if rehab_complete and inspection["open_failed_items"] > 0:
         blockers.append("inspection_open_failures")
         next_actions.append(f"Resolve failed inspection items ({inspection['open_failed_items']} still open).")
-
     if rehab_complete and completion.failed_count > 0:
         blockers.append("compliance_failed_items")
         next_actions.append(f"Resolve compliance failed items ({completion.failed_count} remaining).")
-
     if rehab_complete and completion.blocked_count > 0:
         blockers.append("compliance_blocked_items")
         next_actions.append(f"Resolve blocked compliance items ({completion.blocked_count} remaining).")
-
     if rehab_complete and completion.latest_readiness_status in {"critical", "needs_work", "unknown"}:
         blockers.append("inspection_readiness_not_sufficient")
-        next_actions.append(
-            f"Improve inspection readiness (current status: {completion.latest_readiness_status}, score: {completion.latest_readiness_score})."
-        )
-
+        next_actions.append(f"Improve inspection readiness (current status: {completion.latest_readiness_status}, score: {completion.latest_readiness_score}).")
     if compliance_complete and not lease_exists:
         blockers.append("missing_tenant_pipeline")
         next_actions.append("Start tenant marketing or match the property to an eligible tenant.")
-
     if compliance_complete and lease_exists and not lease["active"]:
         blockers.append("tenant_pipeline_in_progress")
         next_actions.append("Complete screening and activate the lease.")
-
     if tenant_complete and not cash["has_transactions"]:
         blockers.append("missing_cash_transactions")
         next_actions.append("Record first income and expense transactions for the property.")
-
     if occupied_complete and not valuation["exists"]:
         blockers.append("missing_valuation")
         next_actions.append("Add a valuation snapshot for equity tracking.")
-
     if turnover_active:
         blockers.append("turnover_active")
         next_actions.append("Route turnover through compliance or investor review depending on the blocker profile.")
@@ -808,18 +884,35 @@ def derive_stage_and_constraints(
         title = str(action.get("title") or "").strip()
         if title and title not in next_actions:
             next_actions.append(title)
-
     for task in jurisdiction["tasks"]:
         title = str(task.get("title") or "").strip()
         if title and title not in next_actions:
             next_actions.append(title)
+
+    start_gate = {
+        "ok": start_acquisition_ready,
+        "blocked_reason": None if start_acquisition_ready else "Minimum pre-offer pursuit criteria are not complete.",
+        "blockers": [
+            blocker
+            for blocker in blockers
+            if blocker in {"decision_review", "decision_reject", "acquisition_start_not_requested", "missing_asking_price", "suppressed_from_investor", "missing_pre_offer_owner_or_plan"}
+        ],
+        "target_stage": "pursuing",
+    }
 
     gate = gate_for_next_stage(
         current_stage=current_stage,
         decision_bucket=decision_bucket,
         deal_exists=deal_exists,
         underwriting_complete=underwriting_complete,
-        offer_ready=offer_ready,
+        start_acquisition_ready=start_acquisition_ready,
+        acquisition_started=acquisition_started,
+        offer_prep_complete=offer_prep_complete,
+        offer_packet_ready=offer_packet_ready,
+        offer_submitted_flag=offer_submitted_flag,
+        negotiation_started=negotiation_started,
+        under_contract_flag=under_contract_flag,
+        due_diligence_complete=due_diligence_complete,
         acquired_complete=acquired_complete,
         rehab_complete=rehab_complete,
         inspection_exists=bool(inspection["exists"]),
@@ -837,9 +930,16 @@ def derive_stage_and_constraints(
     stage_completion_summary = [
         {"stage": "discovered", "label": stage_label("discovered"), "is_complete": deal_exists, "blockers": [] if deal_exists else ["not_shortlisted"]},
         {"stage": "shortlisted", "label": stage_label("shortlisted"), "is_complete": underwriting_complete, "blockers": ["missing_underwriting"] if not underwriting_complete else []},
-        {"stage": "underwritten", "label": stage_label("underwritten"), "is_complete": offer_ready or acquired_complete, "blockers": ["offer_not_ready"] if underwriting_complete and not (offer_ready or acquired_complete) else []},
-        {"stage": "offer", "label": stage_label("offer"), "is_complete": acquired_complete, "blockers": ["not_acquired"] if offer_ready and not acquired_complete else []},
-        {"stage": "acquired", "label": stage_label("acquired"), "is_complete": acquired_complete, "blockers": ["not_acquired"] if not acquired_complete else []},
+        {"stage": "underwritten", "label": stage_label("underwritten"), "is_complete": acquisition_started or acquired_complete, "blockers": start_gate["blockers"] if not (acquisition_started or acquired_complete) else []},
+        {"stage": "pursuing", "label": stage_label("pursuing"), "is_complete": offer_prep_complete or acquired_complete, "blockers": ["offer_prep_incomplete"] if acquisition_started and not (offer_prep_complete or acquired_complete) else []},
+        {"stage": "offer_prep", "label": stage_label("offer_prep"), "is_complete": offer_packet_ready or acquired_complete, "blockers": ["offer_packet_incomplete"] if offer_prep_complete and not (offer_packet_ready or acquired_complete) else []},
+        {"stage": "offer_ready", "label": stage_label("offer_ready"), "is_complete": offer_submitted_flag or acquired_complete, "blockers": ["offer_not_submitted"] if offer_packet_ready and not (offer_submitted_flag or acquired_complete) else []},
+        {"stage": "offer_submitted", "label": stage_label("offer_submitted"), "is_complete": negotiation_started or under_contract_flag or acquired_complete, "blockers": ["negotiation_not_started"] if offer_submitted_flag and not (negotiation_started or under_contract_flag or acquired_complete) else []},
+        {"stage": "negotiating", "label": stage_label("negotiating"), "is_complete": under_contract_flag or acquired_complete, "blockers": ["not_under_contract"] if negotiation_started and not (under_contract_flag or acquired_complete) else []},
+        {"stage": "under_contract", "label": stage_label("under_contract"), "is_complete": due_diligence_complete or acquired_complete, "blockers": ["due_diligence_incomplete"] if under_contract_flag and not (due_diligence_complete or acquired_complete) else []},
+        {"stage": "due_diligence", "label": stage_label("due_diligence"), "is_complete": acquired_complete or due_diligence_complete, "blockers": ["not_owned"] if due_diligence_complete and not acquired_complete else []},
+        {"stage": "closing", "label": stage_label("closing"), "is_complete": acquired_complete, "blockers": ["not_owned"] if not acquired_complete and current_stage == "closing" else []},
+        {"stage": "owned", "label": stage_label("owned"), "is_complete": acquired_complete, "blockers": ["not_owned"] if not acquired_complete else []},
         {"stage": "rehab", "label": stage_label("rehab"), "is_complete": rehab_complete, "blockers": [x for x in blockers if x.startswith("rehab_") or x == "missing_rehab_plan"]},
         {"stage": "compliance_readying", "label": stage_label("compliance_readying"), "is_complete": bool(rehab_complete and (inspection["exists"] or compliance_complete)), "blockers": [x for x in blockers if x.startswith("jurisdiction_") or x == "missing_jurisdiction_profile"]},
         {"stage": "inspection_pending", "label": stage_label("inspection_pending"), "is_complete": compliance_complete, "blockers": [x for x in blockers if "inspection" in x or "compliance_" in x]},
@@ -906,6 +1006,17 @@ def derive_stage_and_constraints(
         },
         "readiness_summary": readiness,
         "completion_projection": completion_info,
+        "acquisition": {
+            **persisted_acquisition,
+            "start_gate": start_gate,
+            "acquisition_started": acquisition_started,
+            "offer_prep_complete": offer_prep_complete,
+            "offer_packet_ready": offer_packet_ready,
+            "offer_submitted": offer_submitted_flag,
+            "negotiation_started": negotiation_started,
+            "under_contract": under_contract_flag,
+            "due_diligence_complete": due_diligence_complete,
+        },
     }
 
     pane = build_pane_context(

@@ -28,7 +28,6 @@ def _turnover_target_from_constraints(constraints: dict[str, Any]) -> str:
         or (completion.get("blocked_count") or 0) > 0
         or (rehab.get("blocked") or 0) > 0
     )
-
     if compliance_issue:
         return "compliance"
     if decision_bucket in {"REVIEW", "REJECT"}:
@@ -40,31 +39,18 @@ def build_pane_context(*, current_stage: Optional[str], constraints: Optional[di
     constraints = constraints or {}
     stage_key = str(current_stage or "").strip().lower()
     turnover_target = _turnover_target_from_constraints(constraints)
-
     current_pane = stage_to_pane(stage_key, turnover_target=turnover_target)
     next_stage_key = next_stage(stage_key)
     suggested_next_pane = next_stage_to_pane(next_stage_key, turnover_target=turnover_target)
-
     allowed_panes = allowed_panes_for_principal(principal)
     roles = principal_roles(principal)
-
     is_visible = current_pane in allowed_panes
     default_visible_pane = current_pane if is_visible else (allowed_panes[0] if allowed_panes else "investor")
 
-    if stage_key == "turnover":
-        route_reason = (
-            "Turnover routed to Compliance because inspection, rehab, or jurisdiction blockers are still open."
-            if turnover_target == "compliance"
-            else "Turnover routed to Investor because the unit needs re-evaluation before the next placement cycle."
-            if turnover_target == "investor"
-            else "Turnover routed to Management because the unit is operationally ready for standard turnover handling."
-        )
-    elif stage_key == "acquired":
-        route_reason = "Property has been acquired and is now routed into post-close compliance workflow."
-    elif stage_key == "inspection_pending":
-        route_reason = "Property is waiting on inspection completion before tenant placement can continue."
-    elif stage_key == "leased":
-        route_reason = "Lease is active and the property is transitioning into managed occupancy."
+    if stage_key in {"pursuing", "offer_prep", "offer_ready", "offer_submitted", "negotiating", "under_contract", "due_diligence", "closing", "owned"}:
+        route_reason = f"{stage_label(stage_key)} belongs in Acquire because the property is in pre-offer or active purchase execution."
+    elif stage_key == "turnover":
+        route_reason = "Turnover is routed by the blocker profile so the next operator lands in the right pane immediately."
     else:
         route_reason = f"{stage_label(stage_key)} currently belongs to the {pane_label(current_pane)} pane."
 

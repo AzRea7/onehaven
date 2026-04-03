@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Iterable, Optional
 
 PANES: list[str] = [
-    "acquisition",
     "investor",
+    "acquisition",
     "compliance",
     "tenants",
     "management",
@@ -12,71 +12,37 @@ PANES: list[str] = [
 ]
 
 _PANE_RANK: dict[str, int] = {pane: idx for idx, pane in enumerate(PANES)}
-
 _PANE_ALIASES: dict[str, str] = {
-    "acquisition": "acquisition",
-    "buy": "acquisition",
-    "buybox": "acquisition",
-    "pipeline": "acquisition",
     "investor": "investor",
     "analysis": "investor",
     "underwriting": "investor",
+    "acquisition": "acquisition",
+    "buy": "acquisition",
+    "pipeline": "acquisition",
+    "offer": "acquisition",
     "compliance": "compliance",
     "s8": "compliance",
-    "section8": "compliance",
-    "inspection": "compliance",
     "tenants": "tenants",
     "tenant": "tenants",
-    "placement": "tenants",
     "leasing": "tenants",
     "management": "management",
-    "admin": "admin",
-    "administration": "admin",
     "ops": "management",
-    "operations": "management",
+    "admin": "admin",
 }
 
-_PANE_META: dict[str, dict[str, Any]] = {
-    "acquisition": {
-        "label": "Acquisition",
-        "description": "Active pursuit of properties that are moving toward purchase or close.",
-        "default_roles": ["admin", "owner", "acquisitions", "analyst"],
-    },
-    "investor": {
-        "label": "Investor",
-        "description": "Discovery, shortlist, underwriting, and investor-grade property analysis.",
-        "default_roles": ["admin", "owner", "analyst", "viewer"],
-    },
-    "compliance": {
-        "label": "Compliance / S8",
-        "description": "Rehab, jurisdiction readiness, inspections, and voucher compliance workflow.",
-        "default_roles": ["admin", "owner", "compliance", "inspector", "operator"],
-    },
-    "tenants": {
-        "label": "Tenant Placement",
-        "description": "Marketing, screening, matching, leasing, and move-in workflow.",
-        "default_roles": ["admin", "owner", "leasing", "operator", "compliance"],
-    },
-    "management": {
-        "label": "Administration / Management",
-        "description": "Occupied operations, cashflow, maintenance, and property management.",
-        "default_roles": ["admin", "owner", "manager", "operator", "accounting"],
-    },
-    "admin": {
-        "label": "Admin",
-        "description": "Org-level controls, settings, contracts, permissions, and platform operations.",
-        "default_roles": ["admin", "owner"],
-    },
+_PANE_META = {
+    "investor": {"label": "Investor", "description": "Discovery, shortlist, underwriting, and pre-handoff decisioning.", "default_roles": ["admin", "owner", "analyst", "viewer"]},
+    "acquisition": {"label": "Acquire", "description": "Pre-offer pursuit through close and ownership handoff.", "default_roles": ["admin", "owner", "analyst", "acquisitions"]},
+    "compliance": {"label": "Compliance / S8", "description": "Rehab, jurisdiction readiness, inspections, and voucher compliance workflow.", "default_roles": ["admin", "owner", "compliance", "inspector", "operator"]},
+    "tenants": {"label": "Tenant Placement", "description": "Marketing, screening, matching, leasing, and move-in workflow.", "default_roles": ["admin", "owner", "leasing", "operator", "compliance"]},
+    "management": {"label": "Administration / Management", "description": "Occupied operations, cashflow, maintenance, and property management.", "default_roles": ["admin", "owner", "manager", "operator", "accounting"]},
+    "admin": {"label": "Admin", "description": "Org-level controls, settings, permissions, and platform operations.", "default_roles": ["admin", "owner"]},
 }
 
 
 def clamp_pane(value: Optional[str]) -> str:
     raw = str(value or "").strip().lower()
-    if raw in _PANE_RANK:
-        return raw
-    if raw in _PANE_ALIASES:
-        return _PANE_ALIASES[raw]
-    return "investor"
+    return raw if raw in _PANE_RANK else _PANE_ALIASES.get(raw, "investor")
 
 
 def pane_rank(value: Optional[str]) -> int:
@@ -86,13 +52,7 @@ def pane_rank(value: Optional[str]) -> int:
 def pane_meta(value: Optional[str]) -> dict[str, Any]:
     key = clamp_pane(value)
     meta = _PANE_META.get(key, {})
-    return {
-        "key": key,
-        "rank": pane_rank(key),
-        "label": meta.get("label", key.title()),
-        "description": meta.get("description", ""),
-        "default_roles": list(meta.get("default_roles", [])),
-    }
+    return {"key": key, "rank": pane_rank(key), "label": meta.get("label", key.title()), "description": meta.get("description", ""), "default_roles": list(meta.get("default_roles", []))}
 
 
 def pane_label(value: Optional[str]) -> str:
@@ -100,40 +60,29 @@ def pane_label(value: Optional[str]) -> str:
 
 
 def pane_catalog() -> list[dict[str, Any]]:
-    return [pane_meta(pane) for pane in PANES]
+    return [pane_meta(p) for p in PANES]
 
 
 def stage_to_pane(stage: Optional[str], *, turnover_target: str = "compliance") -> str:
     raw = str(stage or "").strip().lower()
-
     if raw in {"discovered", "shortlisted", "underwritten"}:
         return "investor"
-
-    if raw in {"offer"}:
+    if raw in {"pursuing", "offer_prep", "offer_ready", "offer_submitted", "negotiating", "under_contract", "due_diligence", "closing", "owned"}:
         return "acquisition"
-
-    if raw in {"acquired", "rehab", "compliance_readying", "inspection_pending"}:
+    if raw in {"rehab", "compliance_readying", "inspection_pending"}:
         return "compliance"
-
     if raw in {"tenant_marketing", "tenant_screening", "leased"}:
         return "tenants"
-
     if raw in {"occupied", "maintenance"}:
         return "management"
-
     if raw == "turnover":
         target = clamp_pane(turnover_target)
-        if target in {"investor", "compliance", "management"}:
-            return target
-        return "compliance"
-
+        return target if target in {"investor", "compliance", "management"} else "compliance"
     return "investor"
 
 
 def next_stage_to_pane(next_stage: Optional[str], *, turnover_target: str = "compliance") -> Optional[str]:
-    if next_stage is None:
-        return None
-    return stage_to_pane(next_stage, turnover_target=turnover_target)
+    return None if next_stage is None else stage_to_pane(next_stage, turnover_target=turnover_target)
 
 
 def _normalize_roles(roles: Iterable[str]) -> list[str]:
@@ -141,49 +90,33 @@ def _normalize_roles(roles: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     for role in roles:
         value = str(role or "").strip().lower()
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        out.append(value)
+        if value and value not in seen:
+            seen.add(value)
+            out.append(value)
     return out
 
 
 def principal_roles(principal: Any) -> list[str]:
     if principal is None:
         return ["admin", "owner", "analyst", "operator", "manager", "compliance", "leasing", "viewer"]
-
     roles: list[str] = []
-
-    raw_role = getattr(principal, "role", None)
-    if raw_role:
-        roles.append(str(raw_role))
-
-    raw_roles = getattr(principal, "roles", None)
-    if isinstance(raw_roles, (list, tuple, set)):
-        roles.extend(str(x) for x in raw_roles)
-
+    if getattr(principal, "role", None):
+        roles.append(str(getattr(principal, "role")))
+    if isinstance(getattr(principal, "roles", None), (list, tuple, set)):
+        roles.extend(str(x) for x in getattr(principal, "roles"))
     if bool(getattr(principal, "is_admin", False)):
         roles.append("admin")
-
     if bool(getattr(principal, "is_owner", False)):
         roles.append("owner")
-
     normalized = _normalize_roles(roles)
     return normalized or ["viewer"]
 
 
 def allowed_panes_for_roles(roles: Iterable[str]) -> list[str]:
     role_set = set(_normalize_roles(roles))
-    allowed: list[str] = []
-
-    for pane in PANES:
-        defaults = set(_PANE_META.get(pane, {}).get("default_roles", []))
-        if role_set.intersection(defaults):
-            allowed.append(pane)
-
     if "admin" in role_set or "owner" in role_set:
         return list(PANES)
-
+    allowed = [pane for pane in PANES if role_set.intersection(set(_PANE_META.get(pane, {}).get("default_roles", [])))]
     return allowed or ["investor"]
 
 

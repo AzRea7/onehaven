@@ -63,8 +63,53 @@ ALLOWED_UPLOAD_CONTENT_TYPES = {
     "image/jpeg",
 }
 
+HIGHLIGHT_PATTERNS: list[tuple[str, str]] = [
+    ("seller_credit", r"\bseller\s+credit[s]?\b"),
+    ("commission_split", r"\b(?:buyer(?:'s)?\s+agent|selling\s+agent|co-?op)\b.*?\b(?:0\.5%|0\.50%|1%|1\.0%)\b"),
+    ("commission_reduction", r"\bcommission\b.*?\breduc"),
+    ("as_is", r"\bas[- ]is\b"),
+    ("inspection_deadline", r"\binspection\b.*?\b(?:deadline|within \d+ days|contingency)\b"),
+    ("financing_contingency", r"\bfinancing contingency\b"),
+    ("appraisal_gap", r"\bappraisal gap\b"),
+    ("earnest_money", r"\bearnest money\b"),
+    ("occupancy", r"\boccupancy\b"),
+    ("closing_date", r"\bclosing\b.*?\bdate\b"),
+    ("title_issue", r"\btitle\b.*?\b(issue|objection|commitment)\b"),
+]
+
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
+def extract_document_highlights(text: str | None) -> list[dict[str, Any]]:
+    body = str(text or "").strip()
+    if not body:
+        return []
+
+    normalized = re.sub(r"\s+", " ", body)
+    highlights: list[dict[str, Any]] = []
+
+    for code, pattern in HIGHLIGHT_PATTERNS:
+        for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
+            start = max(0, match.start() - 90)
+            end = min(len(normalized), match.end() + 140)
+            excerpt = normalized[start:end].strip()
+            if excerpt:
+                highlights.append(
+                    {
+                        "code": code,
+                        "excerpt": excerpt,
+                    }
+                )
+
+    deduped: list[dict[str, Any]] = []
+    seen = set()
+    for item in highlights:
+        key = (item["code"], item["excerpt"].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+
+    return deduped[:20]
 
 def _rows_to_dicts(rows: list[Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
@@ -128,7 +173,7 @@ def _acquisition_upload_root() -> Path:
 def _sanitize_filename(filename: str | None) -> str:
     raw = (filename or "upload").strip()
     raw = raw.replace("\\", "/").split("/")[-1]
-    raw = re.sub(r"[^A-Za-z0-9._\\- ]+", "_", raw).strip()
+    raw = re.sub(r"[^A-Za-z0-9._ -]+", "_", raw).strip()
     raw = re.sub(r"\s+", "_", raw)
     if not raw:
         raw = "upload"
@@ -690,8 +735,11 @@ def get_acquisition_detail(
     )
 
     for doc in documents:
-        doc["extracted_fields"] = _safe_json_load(doc.get("extracted_fields_json"), {})
-
+        extracted_fields = _safe_json_load(doc.get("extracted_fields_json"), {})
+        doc["extracted_fields"] = extracted_fields
+        source_text = doc.get("extracted_text") or doc.get("preview_text") or ""
+        doc["highlights"] = extract_document_highlights(source_text)
+    
     contacts = _safe_json_load(acquisition_row.get("contacts_json"), [])
     milestones = _safe_json_load(acquisition_row.get("milestones_json"), [])
     target_close = acquisition_row.get("target_close_date") or acquisition_row.get("closing_date")
@@ -1122,7 +1170,10 @@ def upload_acquisition_document_file(
     elif isinstance(scan_result, str):
         scan_result_text = scan_result
 
-    parsed = parse_document(target_path)
+    parsed = parse_document(
+        target_path,
+        upload.content_type or "application/octet-stream",
+    )
     preview_text = None
     extracted_text = None
     extracted_fields = {}
@@ -1225,12 +1276,14 @@ def upload_acquisition_document_file(
     ) or {}
     row["extracted_fields"] = _safe_json_load(row.get("extracted_fields_json"), {})
 
-    if row.get("id"):
+    if row.get("id") and extracted_fields:
         create_field_suggestions_from_document(
             db,
             org_id=org_id,
             property_id=property_id,
             document_id=int(row["id"]),
+            extracted_fields=extracted_fields or {},
+            extraction_version=parser_version,
         )
 
     return row

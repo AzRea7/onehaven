@@ -313,6 +313,103 @@ function panePillClass(raw?: string) {
   return "oh-pill";
 }
 
+const ACQUIRE_STAGES = new Set([
+  "pursuing",
+  "offer_prep",
+  "offer_ready",
+  "offer_submitted",
+  "negotiating",
+  "under_contract",
+  "due_diligence",
+  "closing",
+  "owned",
+]);
+
+function isAcquireStage(raw?: string | null) {
+  return ACQUIRE_STAGES.has(
+    String(raw || "")
+      .trim()
+      .toLowerCase(),
+  );
+}
+
+function isAcquirePane(raw?: string | null) {
+  return (
+    String(raw || "")
+      .trim()
+      .toLowerCase() === "acquisition"
+  );
+}
+
+function isInAcquireFlow(property: PropertyPayload | null) {
+  if (!property) return false;
+  return (
+    isAcquirePane(property.current_pane) ||
+    isAcquirePane(property.suggested_pane) ||
+    isAcquireStage(property.current_stage)
+  );
+}
+
+function acquireEntryLabel(property: PropertyPayload | null) {
+  return isInAcquireFlow(property) ? "Update acquisition" : "Start acquisition";
+}
+
+function deriveAcquireBlockers(property: PropertyPayload | null) {
+  const blockers = Array.isArray(property?.blockers)
+    ? property!.blockers
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    : [];
+
+  const gateStatus = String(property?.gate_status || "")
+    .trim()
+    .toLowerCase();
+
+  if (gateStatus.includes("blocked") && !blockers.length) {
+    blockers.push("Workflow gate is currently blocked.");
+  }
+
+  return blockers;
+}
+
+function canStartAcquisition(property: PropertyPayload | null) {
+  if (!property) return false;
+
+  if (
+    isAcquirePane(property.current_pane) ||
+    isAcquireStage(property.current_stage)
+  ) {
+    return true;
+  }
+
+  const blockers = deriveAcquireBlockers(property);
+  if (blockers.length) return false;
+
+  const gateStatus = String(property.gate_status || "")
+    .trim()
+    .toLowerCase();
+  const suggestedPane = String(property.suggested_pane || "")
+    .trim()
+    .toLowerCase();
+  const currentPane = String(property.current_pane || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    gateStatus.includes("blocked") ||
+    gateStatus.includes("denied") ||
+    gateStatus.includes("fail")
+  ) {
+    return false;
+  }
+
+  return suggestedPane === "acquisition" || currentPane === "investor";
+}
+
+function acquisitionReadinessLabel(property: PropertyPayload | null) {
+  return canStartAcquisition(property) ? "ready" : "blocked";
+}
+
 function waitingOnLabel(raw?: string) {
   const value = String(raw || "").trim();
   return value || "Nothing assigned";
@@ -518,9 +615,11 @@ function buildPromoteDraft(
   const acq = detail?.acquisition || {};
 
   return {
-    status: String(acq.status || "active"),
-    waiting_on: String(acq.waiting_on || "Purchase agreement"),
-    next_step: String(acq.next_step || "Open acquisition execution"),
+    status: String(acq.status || "pursuing"),
+    waiting_on: String(
+      acq.waiting_on || "seller response / access / diligence kickoff",
+    ),
+    next_step: String(acq.next_step || "Start pre-offer acquisition work"),
     target_close_date: String(acq.target_close_date || ""),
     purchase_price:
       acq.purchase_price != null
@@ -1050,9 +1149,9 @@ export default function Property() {
   const [promoteSaving, setPromoteSaving] = React.useState(false);
   const [promoteError, setPromoteError] = React.useState<string | null>(null);
   const [promoteForm, setPromoteForm] = React.useState<PromoteFormState>({
-    status: "active",
-    waiting_on: "Purchase agreement",
-    next_step: "Open acquisition execution",
+    status: "pursuing",
+    waiting_on: "seller response / access / diligence kickoff",
+    next_step: "Start pre-offer acquisition work",
     target_close_date: "",
     purchase_price: "",
     loan_type: "dscr",
@@ -1133,56 +1232,77 @@ export default function Property() {
     setPromoteError(null);
   }, [promoteSaving]);
 
-  async function handlePromoteToAcquisition() {
-    if (!id) return;
+ async function handlePromoteToAcquisition() {
+   if (!id) return;
 
-    setPromoteSaving(true);
-    setPromoteError(null);
+   setPromoteSaving(true);
+   setPromoteError(null);
 
-    try {
-      const payload = {
-        status: promoteForm.status || "active",
-        waiting_on: promoteForm.waiting_on,
-        next_step: promoteForm.next_step,
-        target_close_date: promoteForm.target_close_date,
-        purchase_price:
-          promoteForm.purchase_price === ""
-            ? null
-            : Number(promoteForm.purchase_price),
-        loan_type: promoteForm.loan_type || null,
-        loan_amount:
-          promoteForm.loan_amount === ""
-            ? null
-            : Number(promoteForm.loan_amount),
-        cash_to_close:
-          promoteForm.cash_to_close === ""
-            ? null
-            : Number(promoteForm.cash_to_close),
-        title_company: promoteForm.title_company || null,
-        escrow_officer: promoteForm.escrow_officer || null,
-        notes: promoteForm.notes || null,
-      };
+   try {
+     const payload = {
+       status: promoteForm.status || "active",
+       waiting_on: promoteForm.waiting_on || null,
+       next_step: promoteForm.next_step || null,
+       target_close_date: promoteForm.target_close_date || null,
+       purchase_price:
+         promoteForm.purchase_price === ""
+           ? null
+           : Number(promoteForm.purchase_price),
+       loan_type: promoteForm.loan_type || null,
+       loan_amount:
+         promoteForm.loan_amount === ""
+           ? null
+           : Number(promoteForm.loan_amount),
+       cash_to_close:
+         promoteForm.cash_to_close === ""
+           ? null
+           : Number(promoteForm.cash_to_close),
+       title_company: promoteForm.title_company || null,
+       escrow_officer: promoteForm.escrow_officer || null,
+       notes: promoteForm.notes || null,
+     };
 
-      const out = await api.post<PromoteResponse>(
-        `/acquisition/properties/${id}/promote`,
-        payload,
-      );
+     const hasAcquisitionRecord = Boolean(
+       acquisition?.acquisition &&
+       (acquisition?.acquisition?.id != null ||
+         acquisition?.acquisition?.status ||
+         acquisition?.acquisition?.waiting_on ||
+         acquisition?.acquisition?.next_step),
+     );
 
-      if (out?.detail) {
-        setAcquisition(out.detail);
-      }
+     if (hasAcquisitionRecord) {
+       const out = await api.put<{ ok?: boolean; acquisition?: any }>(
+         `/acquisition/properties/${id}`,
+         payload,
+       );
 
-      await refresh();
-      setShowPromoteModal(false);
-    } catch (error: any) {
-      setPromoteError(
-        detailMessage(error, "Failed to move property into acquisition."),
-      );
-    } finally {
-      setPromoteSaving(false);
-    }
-  }
+       if (out?.acquisition) {
+         setAcquisition((prev) => ({
+           ...(prev || {}),
+           acquisition: out.acquisition,
+         }));
+       }
+     } else {
+       const out = await api.post<PromoteResponse>(
+         `/acquisition/properties/${id}/promote`,
+         payload,
+       );
 
+       if (out?.detail) {
+         setAcquisition(out.detail);
+       }
+     }
+
+     await refresh();
+     setShowPromoteModal(false);
+   } catch (error: any) {
+     setPromoteError(
+       detailMessage(error, "Failed to save acquisition details."),
+     );
+   } finally {
+     setPromoteSaving(false);
+   }
+ }
   React.useEffect(() => {
     refresh();
   }, [refresh]);
@@ -1299,7 +1419,11 @@ export default function Property() {
   const acquisitionReadiness = closeReadiness(acquisition);
   const conflicts = collectConflicts(acquisition);
   const tags = extractTags(acquisitionTags);
-
+  const acquireBlockers = deriveAcquireBlockers(data);
+  const isAcquireFlow = isInAcquireFlow(data);
+  const canEnterAcquisition = canStartAcquisition(data);
+  const acquireActionLabel = acquireEntryLabel(data);
+  const acquireReadinessState = acquisitionReadinessLabel(data);
   return (
     <PageShell>
       <PageHero
@@ -1968,7 +2092,79 @@ export default function Property() {
                 </div>
               </div>
 
-              {nextStagePane ? (
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Acquisition entry readiness
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span
+                    className={
+                      acquireReadinessState === "ready"
+                        ? "oh-pill oh-pill-good"
+                        : "oh-pill oh-pill-bad"
+                    }
+                  >
+                    {acquireReadinessState}
+                  </span>
+                  <span className="text-sm text-app-3">
+                    {isAcquireFlow
+                      ? "This property is already in the acquisition workflow."
+                      : canEnterAcquisition
+                        ? "Pre-offer criteria are satisfied and acquisition can be started."
+                        : "This property still has blockers before acquisition can be started."}
+                  </span>
+                </div>
+
+                {data.route_reason ? (
+                  <div className="mt-3 text-sm text-app-4">
+                    Route reason: {data.route_reason}
+                  </div>
+                ) : null}
+
+                {acquireBlockers.length ? (
+                  <div className="mt-3 space-y-2 text-sm text-app-3">
+                    {acquireBlockers.map((blocker) => (
+                      <div key={blocker} className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-300" />
+                        <span>{blocker}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {!acquireBlockers.length &&
+                Array.isArray(data.next_actions) &&
+                data.next_actions.length ? (
+                  <div className="mt-3 space-y-2 text-sm text-app-3">
+                    {data.next_actions.slice(0, 3).map((action) => (
+                      <div key={action} className="flex items-start gap-2">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-300" />
+                        <span>{action}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {currentPane !== "acquisition" ? (
+                <button
+                  type="button"
+                  className="oh-btn w-full"
+                  onClick={openPromoteModal}
+                  disabled={!canEnterAcquisition}
+                  title={
+                    canEnterAcquisition
+                      ? "Start acquisition from investor readiness"
+                      : acquireBlockers[0] ||
+                        "This property is not ready for acquisition yet."
+                  }
+                >
+                  <ArrowRight className="h-4 w-4" />
+                  {acquireActionLabel}
+                </button>
+              ) : null}
+
+              {nextStagePane && nextStagePane !== currentPane ? (
                 <Link
                   to={`/panes/${nextStagePane}`}
                   className="inline-flex w-full items-center justify-between rounded-2xl border border-app bg-app-panel px-4 py-3 text-sm text-app-0 hover:bg-app-muted"
@@ -1982,7 +2178,7 @@ export default function Property() {
 
           <Surface
             title="Acquisition posture"
-            subtitle="What the team is waiting on and how close this is to execution."
+            subtitle="Pre-offer pursuit through close: what the team is waiting on, what is missing, and how close this deal is to execution."
           >
             <div className="space-y-4">
               <div className="flex flex-wrap gap-2">
@@ -2033,9 +2229,16 @@ export default function Property() {
                 type="button"
                 className="oh-btn w-full"
                 onClick={openPromoteModal}
+                disabled={!isAcquireFlow && !canEnterAcquisition}
+                title={
+                  !isAcquireFlow && !canEnterAcquisition
+                    ? acquireBlockers[0] ||
+                      "This property is not ready for acquisition yet."
+                    : undefined
+                }
               >
                 <ArrowRight className="h-4 w-4" />
-                Promote / update acquisition
+                {acquireActionLabel}
               </button>
             </div>
           </Surface>
@@ -2120,10 +2323,11 @@ export default function Property() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-lg font-semibold text-app-0">
-                  Promote to acquisition
+                  {isAcquireFlow ? "Update acquisition" : "Start acquisition"}
                 </div>
                 <div className="mt-1 text-sm text-app-4">
-                  Set the acquisition-ready details for this property.
+                  Capture the pre-offer pursuit details that justify moving this
+                  deal from Investor into Acquire.
                 </div>
               </div>
 
@@ -2143,21 +2347,50 @@ export default function Property() {
               </div>
             ) : null}
 
+            {!isAcquireFlow && acquireBlockers.length ? (
+              <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                <div className="font-semibold">
+                  Acquisition is still blocked.
+                </div>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {acquireBlockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <label className="block">
-                <span className="oh-field-label">Status</span>
-                <input
+                <span className="oh-field-label">Acquire stage</span>
+                <select
                   className="oh-input"
                   value={promoteForm.status}
                   onChange={(e) =>
                     setPromoteForm((s) => ({ ...s, status: e.target.value }))
                   }
-                />
+                >
+                  {[
+                    "pursuing",
+                    "offer_prep",
+                    "offer_ready",
+                    "offer_submitted",
+                    "negotiating",
+                    "under_contract",
+                    "due_diligence",
+                    "closing",
+                    "owned",
+                  ].map((stage) => (
+                    <option key={stage} value={stage}>
+                      {stage.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="block">
                 <span className="oh-field-label">Waiting on</span>
-                <input
+                <select
                   className="oh-input"
                   value={promoteForm.waiting_on}
                   onChange={(e) =>
@@ -2166,11 +2399,26 @@ export default function Property() {
                       waiting_on: e.target.value,
                     }))
                   }
-                />
+                >
+                  {[
+                    "seller response / access / diligence kickoff",
+                    "buyer underwriting review",
+                    "lender quote",
+                    "title / escrow setup",
+                    "inspection scheduling",
+                    "document collection",
+                  ].map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="block md:col-span-2">
-                <span className="oh-field-label">Next step</span>
+                <span className="oh-field-label">
+                  Immediate acquisition next step
+                </span>
                 <input
                   className="oh-input"
                   value={promoteForm.next_step}
@@ -2301,9 +2549,15 @@ export default function Property() {
                 type="button"
                 className="oh-btn"
                 onClick={handlePromoteToAcquisition}
-                disabled={promoteSaving}
+                disabled={
+                  promoteSaving || (!isAcquireFlow && !canEnterAcquisition)
+                }
               >
-                {promoteSaving ? "Saving..." : "Save acquisition setup"}
+                {promoteSaving
+                  ? "Saving..."
+                  : isAcquireFlow
+                    ? "Save acquisition update"
+                    : "Start acquisition"}
               </button>
             </div>
           </div>

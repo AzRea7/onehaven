@@ -1,7 +1,5 @@
 import React from "react";
 import {
-  AlertTriangle,
-  BadgeDollarSign,
   ClipboardCheck,
   Landmark,
   LocateFixed,
@@ -13,7 +11,6 @@ import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
 import Surface from "../components/Surface";
 import KpiCard from "../components/KpiCard";
-import EmptyState from "../components/EmptyState";
 import { api } from "../lib/api";
 import Golem from "../components/Golem";
 import PaneSwitcher from "../components/PaneSwitcher";
@@ -31,7 +28,6 @@ type PaneOverviewPayload = {
   }>;
   allowed_panes?: string[];
 };
-
 type PaneDashboardPayload = {
   ok?: boolean;
   pane?: string;
@@ -63,25 +59,9 @@ type PaneDashboardPayload = {
   count?: number;
 };
 
-function money(v?: number | null) {
-  const n = Number(v || 0);
-  return n.toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-}
-
-function num(v?: number | null, digits = 2) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return n.toFixed(digits);
-}
-
 export default function Dashboard() {
   const [searchParams] = useSearchParams();
   const pane = (searchParams.get("pane") || "").trim().toLowerCase();
-
   const [overview, setOverview] = React.useState<PaneOverviewPayload | null>(
     null,
   );
@@ -95,14 +75,12 @@ export default function Dashboard() {
   const refresh = React.useCallback(async () => {
     try {
       setLoading(true);
-
       const [overviewOut, paneOut] = await Promise.all([
         api.get<PaneOverviewPayload>("/dashboard/panes"),
         pane
           ? api.get<PaneDashboardPayload>(`/dashboard/panes/${pane}`)
           : Promise.resolve(null),
       ]);
-
       setOverview(overviewOut);
       setPaneData(paneOut);
       setErr(null);
@@ -117,8 +95,10 @@ export default function Dashboard() {
   React.useEffect(() => {
     refresh();
   }, [refresh]);
-
   const activePaneLabel = paneData?.pane_label || (pane ? pane : "Portfolio");
+  const acquisitionCount = Number(
+    overview?.panes?.find((x) => x.pane === "acquisition")?.count || 0,
+  );
 
   return (
     <PageShell>
@@ -129,7 +109,7 @@ export default function Dashboard() {
           subtitle={
             pane
               ? "This dashboard is filtered into one operating mode so the user sees the correct queue, blockers, stale items, and next actions for that pane."
-              : "The dashboard now acts as the portfolio command surface: pane summaries, blockers, stale items, and normalized action queues all live here."
+              : "The dashboard is now organized around pane ownership, with a real investor-to-acquire handoff instead of a UI-only button."
           }
           right={
             <div className="pointer-events-auto absolute inset-0 flex items-center justify-center overflow-visible">
@@ -145,7 +125,10 @@ export default function Dashboard() {
                 Sync dashboard
               </button>
               <Link to="/panes/investor" className="oh-btn oh-btn-secondary">
-                Open lifecycle start
+                Open investor
+              </Link>
+              <Link to="/panes/acquisition" className="oh-btn oh-btn-secondary">
+                Open acquire
               </Link>
               <div className="px-2 py-2 text-[11px] text-app-4">
                 {lastSync
@@ -160,7 +143,6 @@ export default function Dashboard() {
           activePane={pane || undefined}
           allowedPanes={paneData?.allowed_panes || overview?.allowed_panes}
         />
-
         {err ? (
           <Surface tone="danger">
             <div className="text-sm text-red-300">{err}</div>
@@ -171,11 +153,10 @@ export default function Dashboard() {
           <>
             <Surface
               title="Pane summaries"
-              subtitle="Every pane now consumes the same dashboard shape, so the portfolio can summarize them consistently."
+              subtitle="Portfolio view of every operating pane."
             >
               <PaneSummaryCards panes={overview?.panes} />
             </Surface>
-
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
               <KpiCard
                 title="Visible panes"
@@ -195,6 +176,13 @@ export default function Dashboard() {
                 subtitle="discovery and underwriting"
                 icon={Wallet}
                 tone="success"
+              />
+              <KpiCard
+                title="Acquire"
+                value={acquisitionCount}
+                subtitle="pre-offer pursuit through close"
+                icon={Wallet}
+                tone="warning"
               />
               <KpiCard
                 title="Compliance"
@@ -220,178 +208,17 @@ export default function Dashboard() {
           </>
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-              <Surface title="Properties" subtitle="Visible in this pane">
-                <div className="text-3xl font-semibold text-app-0">
-                  {Number(paneData?.kpis?.total_properties || 0)}
-                </div>
-              </Surface>
-              <Surface title="Blockers" subtitle="Properties with blockers">
-                <div className="text-3xl font-semibold text-app-0">
-                  {Number(paneData?.kpis?.with_blockers || 0)}
-                </div>
-              </Surface>
-              <Surface
-                title="Stale items"
-                subtitle="Needs attention or refresh"
-              >
-                <div className="text-3xl font-semibold text-app-0">
-                  {Number(paneData?.kpis?.stale_items || 0)}
-                </div>
-              </Surface>
-              <Surface
-                title="Next actions"
-                subtitle="Immediate actionable rows"
-              >
-                <div className="text-3xl font-semibold text-app-0">
-                  {Number(paneData?.kpis?.with_next_actions || 0)}
-                </div>
-              </Surface>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-              <Surface
-                title="Top blockers"
-                subtitle="Most common issues slowing this pane down."
-              >
-                {loading ? (
-                  <div className="oh-skeleton h-[220px] rounded-3xl" />
-                ) : !(paneData?.blockers || []).length ? (
-                  <EmptyState compact title="No blockers found." />
-                ) : (
-                  <div className="space-y-3">
-                    {paneData?.blockers?.slice(0, 8).map((row, idx) => (
-                      <div
-                        key={`${row.blocker}-${idx}`}
-                        className="rounded-2xl border border-app bg-app-panel px-4 py-3"
-                      >
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="text-sm font-medium text-app-0">
-                            {String(row.blocker || "unknown").replace(
-                              /_/g,
-                              " ",
-                            )}
-                          </div>
-                          <div className="text-sm font-semibold text-app-1">
-                            {Number(row.count || 0)}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Surface>
-
-              <Surface
-                title="Next actions"
-                subtitle="Action list already normalized for this pane."
-              >
-                {loading ? (
-                  <div className="oh-skeleton h-[220px] rounded-3xl" />
-                ) : !(paneData?.next_actions || []).length ? (
-                  <EmptyState compact title="No next actions yet." />
-                ) : (
-                  <div className="space-y-3">
-                    {paneData?.next_actions?.slice(0, 8).map((row, idx) => (
-                      <Link
-                        key={`${row.property_id}-${idx}`}
-                        to={
-                          row.property_id
-                            ? `/properties/${row.property_id}`
-                            : "/panes/investor"
-                        }
-                        className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
-                      >
-                        <div className="text-sm font-semibold text-app-0">
-                          {row.address || `Property #${row.property_id ?? "—"}`}
-                        </div>
-                        <div className="mt-1 text-xs text-app-4">
-                          {[row.city, row.stage].filter(Boolean).join(" · ")}
-                        </div>
-                        <div className="mt-2 text-sm text-app-2">
-                          {row.action}
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </Surface>
-
-              <Surface
-                title="Stale items"
-                subtitle="Rows that need refresh, cleanup, or manual review."
-              >
-                {loading ? (
-                  <div className="oh-skeleton h-[220px] rounded-3xl" />
-                ) : !(paneData?.stale_items || []).length ? (
-                  <EmptyState compact title="No stale rows." />
-                ) : (
-                  <div className="space-y-3">
-                    {paneData?.stale_items?.slice(0, 8).map((row, idx) => (
-                      <Link
-                        key={`${row.property_id}-${idx}`}
-                        to={
-                          row.property_id
-                            ? `/properties/${row.property_id}`
-                            : "/panes/investor"
-                        }
-                        className="block rounded-2xl border border-app bg-app-panel px-4 py-3 transition hover:border-app-strong hover:bg-app-muted"
-                      >
-                        <div className="text-sm font-semibold text-app-0">
-                          {row.address || `Property #${row.property_id ?? "—"}`}
-                        </div>
-                        <div className="mt-1 text-xs text-app-4">
-                          {[row.city, row.stage].filter(Boolean).join(" · ")}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {(row.reasons || []).slice(0, 3).map((reason) => (
-                            <span key={reason} className="oh-pill oh-pill-warn">
-                              {reason.replace(/_/g, " ")}
-                            </span>
-                          ))}
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </Surface>
-            </div>
-
             <Surface
-              title="Pane operating quality"
-              subtitle="Shared metrics stay visible while the dashboard is scoped to one mode."
+              title={`${activePaneLabel} overview`}
+              subtitle={
+                loading
+                  ? "Refreshing..."
+                  : "Live pane summary from the workflow engine."
+              }
             >
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <div className="rounded-3xl border border-app bg-app-panel p-5">
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
-                    <BadgeDollarSign className="h-3.5 w-3.5" />
-                    Avg DSCR
-                  </div>
-                  <div className="mt-2 text-3xl font-semibold text-app-0">
-                    {num(paneData?.kpis?.avg_dscr)}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-app bg-app-panel p-5">
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
-                    <Wallet className="h-3.5 w-3.5" />
-                    Avg cashflow est.
-                  </div>
-                  <div className="mt-2 text-3xl font-semibold text-app-0">
-                    {money(paneData?.kpis?.avg_projected_monthly_cashflow)}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-app bg-app-panel p-5">
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-app-4">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    With blockers
-                  </div>
-                  <div className="mt-2 text-3xl font-semibold text-app-0">
-                    {Number(paneData?.kpis?.with_blockers || 0)}
-                  </div>
-                </div>
-              </div>
+              <pre className="overflow-x-auto text-xs text-app-3">
+                {JSON.stringify(paneData, null, 2)}
+              </pre>
             </Surface>
           </>
         )}

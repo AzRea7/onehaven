@@ -479,6 +479,11 @@ function readinessTone(score: number) {
   return "text-red-300";
 }
 
+function documentHighlights(doc: AcquisitionDocument | null | undefined) {
+  const raw = (doc as any)?.highlights;
+  return Array.isArray(raw) ? raw : [];
+}
+
 export default function AcquisitionQueue() {
   const [filters, setFilters] =
     React.useState<AcquisitionQueueFiltersValue>(DEFAULT_FILTERS);
@@ -489,6 +494,12 @@ export default function AcquisitionQueue() {
 
   const [queueError, setQueueError] = React.useState<string | null>(null);
   const [detailError, setDetailError] = React.useState<string | null>(null);
+
+  const [previewDocument, setPreviewDocument] =
+    React.useState<AcquisitionDocument | null>(null);
+  const [deletingDocumentId, setDeletingDocumentId] = React.useState<
+    number | null
+  >(null);
 
   const [queue, setQueue] = React.useState<QueueItem[]>([]);
   const [selectedPropertyId, setSelectedPropertyId] = React.useState<
@@ -827,14 +838,52 @@ export default function AcquisitionQueue() {
       await loadDetail(selectedPropertyId);
       await loadQueue();
     } catch (error: any) {
-      setDetailError(
-        error?.response?.data?.detail ||
-          error?.message ||
-          "Failed to upload document.",
-      );
+      const status = error?.response?.status;
+      const detail = error?.response?.data?.detail || error?.message;
+
+      if (status === 413) {
+        setDetailError(
+          "Upload failed because the file is too large for the server/proxy limit.",
+        );
+      } else {
+        setDetailError(detail || "Failed to upload document.");
+      }
     } finally {
       setUploadingDocument(false);
       event.target.value = "";
+    }
+  }
+
+  function openPreview(doc: AcquisitionDocument) {
+    setPreviewDocument(doc);
+  }
+
+  async function onDeleteDocument(documentId: number) {
+    if (!selectedPropertyId) return;
+
+    const confirmed = window.confirm("Delete this document?");
+    if (!confirmed) return;
+
+    setDeletingDocumentId(documentId);
+    setDetailError(null);
+
+    try {
+      await api.delete(
+        `/acquisition/properties/${selectedPropertyId}/documents/${documentId}`,
+      );
+      if (previewDocument?.id === documentId) {
+        setPreviewDocument(null);
+      }
+      await loadDetail(selectedPropertyId);
+      await loadQueue();
+    } catch (error: any) {
+      setDetailError(
+        error?.response?.data?.detail ||
+          error?.message ||
+          "Failed to delete document.",
+      );
+    } finally {
+      setDeletingDocumentId(null);
     }
   }
 
@@ -1212,6 +1261,106 @@ export default function AcquisitionQueue() {
                     </div>
                   }
                 >
+                  {safeArray(detail?.documents).length ? (
+                    <div className="mb-6 space-y-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        Uploaded documents
+                      </div>
+
+                      {safeArray(detail?.documents).map((doc) => (
+                        <div
+                          key={doc.id}
+                          className="rounded-2xl border border-app bg-app-panel px-4 py-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-app-0">
+                                {doc.name ||
+                                  doc.original_filename ||
+                                  `Document #${doc.id}`}
+                              </div>
+                              <div className="mt-1 text-xs text-app-4">
+                                {[doc.kind, doc.parse_status, doc.content_type]
+                                  .filter(Boolean)
+                                  .join(" • ")}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              {doc.file_size_bytes != null ? (
+                                <span className="oh-pill">
+                                  {Math.round(
+                                    Number(doc.file_size_bytes) / 1024,
+                                  )}{" "}
+                                  KB
+                                </span>
+                              ) : null}
+                              {doc.created_at ? (
+                                <span className="oh-pill">
+                                  {new Date(
+                                    doc.created_at,
+                                  ).toLocaleDateString()}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          {documentHighlights(doc).length ? (
+                            <div className="mt-3 space-y-2">
+                              {documentHighlights(doc)
+                                .slice(0, 3)
+                                .map((item: any, idx: number) => (
+                                  <div
+                                    key={`${doc.id}-${item.code}-${idx}`}
+                                    className="rounded-xl border border-app bg-app-muted/40 px-3 py-3"
+                                  >
+                                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-app-4">
+                                      {String(item.code || "").replace(
+                                        /_/g,
+                                        " ",
+                                      )}
+                                    </div>
+                                    <div className="mt-1 text-sm text-app-1">
+                                      {item.excerpt}
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          ) : null}
+
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="oh-btn oh-btn-secondary"
+                              onClick={() => openPreview(doc)}
+                            >
+                              Preview
+                            </button>
+
+                            <a
+                              href={`/api/acquisition/properties/${selectedPropertyId}/documents/${doc.id}/preview`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="oh-btn oh-btn-secondary"
+                            >
+                              Open raw file
+                            </a>
+
+                            <button
+                              type="button"
+                              className="oh-btn oh-btn-secondary"
+                              onClick={() => onDeleteDocument(Number(doc.id))}
+                              disabled={deletingDocumentId === Number(doc.id)}
+                            >
+                              {deletingDocumentId === Number(doc.id)
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="grid gap-4 md:grid-cols-2">
                     <label className="block">
                       <span className="oh-field-label">Status</span>
@@ -1389,6 +1538,116 @@ export default function AcquisitionQueue() {
           </div>
         </div>
       </div>
+      {previewDocument ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+          <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-[32px] border border-app bg-app px-6 py-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-lg font-semibold text-app-0">
+                  {previewDocument?.name ||
+                    previewDocument?.original_filename ||
+                    "Document preview"}
+                </div>
+                <div className="mt-1 text-sm text-app-4">
+                  {previewDocument?.kind || "document"}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="rounded-xl border border-app p-2 text-app-3 hover:bg-app-panel"
+                onClick={() => setPreviewDocument(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            {documentHighlights(previewDocument).length ? (
+              <div className="mt-6 rounded-2xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Important highlights
+                </div>
+                <div className="mt-3 space-y-3">
+                  {documentHighlights(previewDocument).map(
+                    (item: any, idx: number) => (
+                      <div
+                        key={`${item.code}-${idx}`}
+                        className="rounded-xl border border-app bg-app-muted/40 px-3 py-3"
+                      >
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-app-4">
+                          {String(item.code || "").replace(/_/g, " ")}
+                        </div>
+                        <div className="mt-1 text-sm text-app-1">
+                          {item.excerpt}
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {previewDocument?.preview_text ? (
+              <div className="mt-6 rounded-2xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Preview text
+                </div>
+                <pre className="mt-3 whitespace-pre-wrap text-sm text-app-1">
+                  {previewDocument.preview_text}
+                </pre>
+              </div>
+            ) : null}
+
+            {previewDocument?.extracted_fields &&
+            Object.keys(previewDocument.extracted_fields).length ? (
+              <div className="mt-6 rounded-2xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                  Extracted fields
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {Object.entries(previewDocument.extracted_fields).map(
+                    ([key, value]) => (
+                      <div
+                        key={key}
+                        className="rounded-xl border border-app bg-app-muted/40 px-3 py-3"
+                      >
+                        <div className="text-xs uppercase tracking-[0.14em] text-app-4">
+                          {key.replace(/_/g, " ")}
+                        </div>
+                        <div className="mt-1 text-sm text-app-0">
+                          {String(value)}
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <a
+                href={`/api/acquisition/properties/${selectedPropertyId}/documents/${previewDocument.id}/preview`}
+                target="_blank"
+                rel="noreferrer"
+                className="oh-btn oh-btn-secondary"
+              >
+                Open raw file
+              </a>
+
+              <button
+                type="button"
+                className="oh-btn"
+                onClick={() => onDeleteDocument(Number(previewDocument.id))}
+                disabled={deletingDocumentId === Number(previewDocument.id)}
+              >
+                {deletingDocumentId === Number(previewDocument.id)
+                  ? "Deleting..."
+                  : "Delete document"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </PageShell>
   );
 }

@@ -1189,6 +1189,40 @@ def update_property_tags(
     )
     return {"ok": True, "property_id": property_id, "tags": tags}
 
+@router.get("/{property_id}/acquisition-tags", response_model=list[dict])
+def property_acquisition_tags_alias(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = db.scalar(
+        select(Property).where(Property.org_id == p.org_id, Property.id == property_id)
+    )
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return list_property_tags(db, org_id=p.org_id, property_id=property_id)
+
+
+@router.put("/{property_id}/acquisition-tags", response_model=dict)
+def update_property_acquisition_tags_alias(
+    property_id: int,
+    payload: AcquisitionTagsIn,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = db.scalar(
+        select(Property).where(Property.org_id == p.org_id, Property.id == property_id)
+    )
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    tags = replace_property_tags(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        tags=payload.tags,
+    )
+    return {"ok": True, "property_id": property_id, "tags": tags}
 
 @router.post("/{property_id}/enrich/insurance", response_model=FinancialEnrichmentOut)
 def enrich_property_insurance_route(
