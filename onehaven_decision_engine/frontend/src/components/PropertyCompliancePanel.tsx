@@ -1,24 +1,27 @@
-// frontend/src/components/PropertyCompliancePanel.tsx
 import React from "react";
 import {
   AlertTriangle,
   BadgeCheck,
   Building2,
+  CalendarClock,
   Camera,
   CheckCircle2,
   ClipboardList,
   ClipboardX,
   FileCheck2,
+  FileText,
   Image as ImageIcon,
+  Mail,
   ShieldAlert,
   ShieldCheck,
   TriangleAlert,
   Wrench,
-  XCircle,
 } from "lucide-react";
 import { api } from "../lib/api";
 import Surface from "./Surface";
 import EmptyState from "./EmptyState";
+import ComplianceDocumentUploader from "./ComplianceDocumentUploader";
+import ComplianceDocumentStack from "./ComplianceDocumentStack";
 
 type PropertyLike = {
   id?: number;
@@ -86,48 +89,63 @@ function fmtBoolish(v: any) {
 function badgeTone(v: any) {
   const s = String(v || "").toLowerCase();
   if (
-    s === "verified" ||
-    s === "yes" ||
-    s === "ready" ||
-    s === "high" ||
-    s === "complete" ||
-    s === "pass" ||
-    s === "good"
+    [
+      "verified",
+      "yes",
+      "ready",
+      "high",
+      "complete",
+      "pass",
+      "good",
+      "confirmed",
+      "scheduled",
+      "clean",
+      "parsed",
+    ].includes(s)
   ) {
     return "oh-pill oh-pill-good";
   }
-
   if (
-    s === "partial" ||
-    s === "medium" ||
-    s === "unknown" ||
-    s === "conditional" ||
-    s === "attention" ||
-    s === "in_progress" ||
-    s === "pending" ||
-    s === "warn" ||
-    s === "warning"
+    [
+      "partial",
+      "medium",
+      "unknown",
+      "conditional",
+      "attention",
+      "in_progress",
+      "pending",
+      "warn",
+      "warning",
+      "draft",
+      "queued",
+      "skipped",
+    ].includes(s)
   ) {
     return "oh-pill oh-pill-warn";
   }
-
   if (
-    s === "low" ||
-    s === "needs_review" ||
-    s === "no" ||
-    s === "missing" ||
-    s === "stale" ||
-    s === "blocked" ||
-    s === "critical_failures" ||
-    s === "needs_remediation" ||
-    s === "not_ready" ||
-    s === "fail" ||
-    s === "critical" ||
-    s === "reinspection_required"
+    [
+      "low",
+      "needs_review",
+      "no",
+      "missing",
+      "stale",
+      "blocked",
+      "critical_failures",
+      "needs_remediation",
+      "not_ready",
+      "fail",
+      "critical",
+      "reinspection_required",
+      "failed",
+      "canceled",
+      "cancelled",
+      "infected",
+      "error",
+    ].includes(s)
   ) {
     return "oh-pill oh-pill-bad";
   }
-
   return "oh-pill";
 }
 
@@ -163,6 +181,9 @@ function statusTone(value?: string | boolean | null) {
       "reinspection_required",
       "not_ready",
       "needs_work",
+      "failed",
+      "canceled",
+      "cancelled",
     ].includes(s)
   ) {
     return "oh-pill oh-pill-bad";
@@ -175,6 +196,8 @@ function statusTone(value?: string | boolean | null) {
       "unknown",
       "attention",
       "inconclusive",
+      "draft",
+      "scheduled",
     ].includes(s)
   ) {
     return "oh-pill oh-pill-warn";
@@ -340,7 +363,8 @@ function InspectionHistoryCard({
         {active ? <span className="oh-pill oh-pill-accent">Latest</span> : null}
         {passed === true ? (
           <span className="oh-pill oh-pill-good">Passed</span>
-        ) : passed === false ? (
+        ) : null}
+        {passed === false ? (
           <span className="oh-pill oh-pill-bad">Failed</span>
         ) : null}
         {inspection?.reinspect_required ? (
@@ -473,8 +497,24 @@ export default function PropertyCompliancePanel({
 }) {
   const [brief, setBrief] = React.useState<Brief | null>(compliance || null);
   const [readiness, setReadiness] = React.useState<any | null>(null);
+  const [scheduleSummary, setScheduleSummary] = React.useState<any | null>(
+    null,
+  );
+  const [documentStack, setDocumentStack] = React.useState<any | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const refreshDocuments = React.useCallback(async () => {
+    if (!property?.id) return;
+    try {
+      const out = await api.get(
+        `/compliance/properties/${property.id}/document-stack`,
+      );
+      setDocumentStack(out?.documents || out || null);
+    } catch {
+      setDocumentStack(null);
+    }
+  }, [property?.id]);
 
   React.useEffect(() => {
     if (!property?.id) return;
@@ -488,26 +528,42 @@ export default function PropertyCompliancePanel({
         ? Promise.resolve(compliance)
         : api.compliancePropertyBrief(property.id),
       api.complianceInspectionReadiness(property.id),
+      api.get(`/inspections/property/${property.id}/schedule-summary`),
+      api.get(`/compliance/properties/${property.id}/document-stack`),
     ])
       .then((results) => {
         if (cancelled) return;
 
         const briefRes = results[0];
         const readinessRes = results[1];
+        const scheduleRes = results[2];
+        const documentRes = results[3];
 
-        if (briefRes.status === "fulfilled") {
+        if (briefRes.status === "fulfilled")
           setBrief((briefRes.value as any) || null);
-        }
-
-        if (readinessRes.status === "fulfilled") {
+        if (readinessRes.status === "fulfilled")
           setReadiness((readinessRes.value as any) || null);
-        }
+        if (scheduleRes.status === "fulfilled")
+          setScheduleSummary((scheduleRes.value as any) || null);
+        if (documentRes.status === "fulfilled")
+          setDocumentStack(
+            (documentRes.value as any)?.documents ||
+              (documentRes.value as any) ||
+              null,
+          );
 
         if (
           briefRes.status === "rejected" &&
-          readinessRes.status === "rejected"
+          readinessRes.status === "rejected" &&
+          scheduleRes.status === "rejected" &&
+          documentRes.status === "rejected"
         ) {
-          throw briefRes.reason || readinessRes.reason;
+          throw (
+            briefRes.reason ||
+            readinessRes.reason ||
+            scheduleRes.reason ||
+            documentRes.reason
+          );
         }
       })
       .catch((e: any) => {
@@ -559,11 +615,16 @@ export default function PropertyCompliancePanel({
   );
   const displayedChecklist =
     checklistItems.length > 0 ? checklistItems : mergedBlockingItems;
+  const appointment =
+    scheduleSummary?.appointment || scheduleSummary?.latest_appointment || null;
+  const documents = Array.isArray(documentStack?.rows)
+    ? documentStack.rows
+    : [];
 
   return (
     <Surface
       title="Compliance posture"
-      subtitle="Property-scoped compliance now merges inspection history, checklist execution state, unresolved failures, and remediation actions."
+      subtitle="Property-scoped compliance now merges inspection history, checklist execution state, unresolved failures, remediation actions, appointment scheduling, and evidence documents."
       actions={
         readiness?.posture ? (
           <span className={badgeTone(readiness.posture)}>
@@ -778,113 +839,75 @@ export default function PropertyCompliancePanel({
               }
             />
             <Field
-              label="History"
-              value={`${inspectionHistory.length} inspection${inspectionHistory.length === 1 ? "" : "s"}`}
+              label="Documents"
+              value={`${documents.length} file${documents.length === 1 ? "" : "s"}`}
             />
           </div>
 
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Field
-              label="HQS"
+              label="Appointment status"
               value={
-                <span
-                  className={badgeTone(
-                    readinessState?.hqs_ready ? "ready" : "blocked",
-                  )}
-                >
-                  {readinessState?.hqs_ready == null
-                    ? "—"
-                    : readinessState.hqs_ready
-                      ? "Ready"
-                      : "Blocked"}
-                </span>
+                appointment?.status ? (
+                  <span className={badgeTone(appointment.status)}>
+                    {titleCase(appointment.status)}
+                  </span>
+                ) : (
+                  "—"
+                )
               }
             />
             <Field
-              label="Local"
+              label="Scheduled for"
               value={
-                <span
-                  className={badgeTone(
-                    readinessState?.local_ready ? "ready" : "blocked",
-                  )}
-                >
-                  {readinessState?.local_ready == null
-                    ? "—"
-                    : readinessState.local_ready
-                      ? "Ready"
-                      : "Blocked"}
-                </span>
+                appointment?.scheduled_for ? (
+                  <span className="inline-flex items-center gap-2">
+                    <CalendarClock className="h-4 w-4 text-app-4" />
+                    {appointment.scheduled_for}
+                  </span>
+                ) : (
+                  "—"
+                )
               }
             />
             <Field
-              label="Voucher"
+              label="Inspector contact"
               value={
-                <span
-                  className={badgeTone(
-                    readinessState?.voucher_ready ? "ready" : "blocked",
-                  )}
-                >
-                  {readinessState?.voucher_ready == null
-                    ? "—"
-                    : readinessState.voucher_ready
-                      ? "Ready"
-                      : "Blocked"}
-                </span>
+                appointment?.inspector_name || appointment?.inspector_email ? (
+                  <div className="space-y-1">
+                    <div>{appointment?.inspector_name || "—"}</div>
+                    {appointment?.inspector_email ? (
+                      <div className="inline-flex items-center gap-2 text-app-3">
+                        <Mail className="h-4 w-4 text-app-4" />
+                        {appointment.inspector_email}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  "—"
+                )
               }
             />
             <Field
-              label="Lease-up"
+              label="Document stack"
               value={
-                <span
-                  className={badgeTone(
-                    readinessState?.lease_up_ready ? "ready" : "blocked",
-                  )}
-                >
-                  {readinessState?.lease_up_ready == null
-                    ? "—"
-                    : readinessState.lease_up_ready
-                      ? "Ready"
-                      : "Blocked"}
+                <span className="inline-flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-app-4" />
+                  {documents.length ? `${documents.length} uploaded` : "Empty"}
                 </span>
               }
             />
           </div>
 
-          <div className="grid gap-3 md:grid-cols-4">
-            <Field
-              label="Completeness status"
-              value={
-                <span className={badgeTone(coverage.completeness_status)}>
-                  {coverage.completeness_status || "—"}
-                </span>
-              }
+          <div className="grid gap-4 xl:grid-cols-2">
+            <ComplianceDocumentUploader
+              propertyId={property?.id || 0}
+              inspectionId={latestInspection?.id || null}
+              onUploaded={refreshDocuments}
             />
-            <Field
-              label="Completeness score"
-              value={
-                coverage.completeness_score != null
-                  ? Number(coverage.completeness_score).toFixed(2)
-                  : "—"
-              }
-            />
-            <Field
-              label="Stale"
-              value={
-                <span
-                  className={badgeTone(coverage.is_stale ? "stale" : "ready")}
-                >
-                  {coverage.is_stale ? "Yes" : "No"}
-                </span>
-              }
-            />
-            <Field
-              label="Failure-driven actions"
-              value={String(
-                (recommendedActions.length > 0
-                  ? recommendedActions
-                  : failureActions
-                ).length,
-              )}
+            <ComplianceDocumentStack
+              data={documentStack}
+              onDeleted={refreshDocuments}
             />
           </div>
 
@@ -1137,7 +1160,8 @@ export default function PropertyCompliancePanel({
               <div className="mt-2 text-sm leading-6 text-app-3">
                 This panel now reflects the latest inspection, inspection
                 history, checklist execution state, unresolved failures, blocked
-                items, and failure-driven remediation actions directly on the
+                items, failure-driven remediation actions, appointment
+                scheduling, and compliance evidence documents directly on the
                 property.
               </div>
             </div>
@@ -1155,9 +1179,9 @@ export default function PropertyCompliancePanel({
                 </div>
               )}
               <div className="mt-2 text-sm leading-6 text-app-3">
-                Inspection notes, evidence, photo references, and remediation
-                guidance are treated as execution data, not just template
-                defaults.
+                Inspection notes, evidence, photo references, remediation
+                guidance, and uploaded compliance documents are treated as
+                execution data, not just template defaults.
               </div>
             </div>
           </div>

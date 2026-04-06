@@ -5,15 +5,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.models import WorkflowEvent
 
 
 def _dumps(v: Any) -> str:
     try:
-        return json.dumps(v)
+        return json.dumps(v, default=str)
     except Exception:
         return "{}"
 
@@ -70,8 +70,7 @@ class WorkflowFacade:
             created_at=created_at or datetime.utcnow(),
         )
         db.add(row)
-        db.commit()
-        db.refresh(row)
+        db.flush()
         return row
 
     def list(
@@ -115,11 +114,6 @@ class WorkflowFacade:
         event_type: str,
         payload: dict[str, Any] | None = None,
     ) -> WorkflowEvent:
-        """
-        Convenience helper for inspection flows.
-        Keeps your event taxonomy consistent:
-            inspection_created / inspection_updated / inspection_failed / inspection_passed ...
-        """
         base = {"inspection_id": int(inspection_id)}
         if payload:
             base.update(payload)
@@ -132,6 +126,57 @@ class WorkflowFacade:
             payload=base,
         )
 
+    def emit_reminder_event(
+        self,
+        db: Session,
+        *,
+        org_id: int,
+        property_id: Optional[int],
+        actor_user_id: Optional[int],
+        inspection_id: int,
+        reminder_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> WorkflowEvent:
+        base = {
+            "inspection_id": int(inspection_id),
+            "reminder_type": str(reminder_type),
+        }
+        if payload:
+            base.update(payload)
+        return self.emit(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            actor_user_id=actor_user_id,
+            event_type="inspection.reminder.sent",
+            payload=base,
+        )
 
-# The symbol your router expects:
+    def inspection_timeline(
+        self,
+        db: Session,
+        *,
+        org_id: int,
+        property_id: int,
+        inspection_id: int | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        rows = self.list(db, org_id=org_id, property_id=property_id, limit=limit)
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(row.payload or {})
+            if inspection_id is not None and int(payload.get("inspection_id") or 0) != int(inspection_id):
+                continue
+            out.append(
+                {
+                    "id": row.id,
+                    "event_type": row.event_type,
+                    "inspection_id": payload.get("inspection_id"),
+                    "created_at": row.created_at,
+                    "payload": payload,
+                }
+            )
+        return out
+
+
 wf = WorkflowFacade()

@@ -104,14 +104,11 @@ def upsert_zillow_photos(
 
     db.commit()
 
-    total = db.scalar(
-        select(PropertyPhoto)
-        .where(
-            PropertyPhoto.org_id == org_id,
-            PropertyPhoto.property_id == property_id,
-        )
-    )
-    return {"created": created, "existing": existing, "total": len(list_property_photos(db, org_id=org_id, property_id=property_id))}
+    return {
+        "created": created,
+        "existing": existing,
+        "total": len(list_property_photos(db, org_id=org_id, property_id=property_id)),
+    }
 
 
 def create_uploaded_photo(
@@ -124,17 +121,30 @@ def create_uploaded_photo(
     kind: str = "unknown",
     label: str | None = None,
     content_type: str | None = None,
+    inspection_id: int | None = None,
+    checklist_item_id: int | None = None,
 ) -> PropertyPhoto:
     ensure_property_exists(db, org_id=org_id, property_id=property_id)
 
     current_count = len(list_property_photos(db, org_id=org_id, property_id=property_id))
+
+    extra_bits: list[str] = []
+    if inspection_id is not None:
+        extra_bits.append(f"inspection:{int(inspection_id)}")
+    if checklist_item_id is not None:
+        extra_bits.append(f"checklist_item:{int(checklist_item_id)}")
+
+    final_label = label
+    if extra_bits:
+        suffix = " | ".join(extra_bits)
+        final_label = f"{label} [{suffix}]" if label else suffix
 
     row = PropertyPhoto(
         org_id=org_id,
         property_id=property_id,
         source="upload",
         kind=kind or "unknown",
-        label=label,
+        label=final_label,
         url=url,
         storage_key=storage_key,
         content_type=content_type,

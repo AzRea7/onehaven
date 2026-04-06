@@ -95,6 +95,79 @@ class ImportSnapshotOut(BaseModel):
     created_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
+class ComplianceDocumentUploadOut(BaseModel):
+    ok: bool = True
+    document: ComplianceDocumentOut
+
+ComplianceDocumentCategory = Literal[
+    "inspection_report",
+    "pass_certificate",
+    "reinspection_notice",
+    "repair_invoice",
+    "utility_confirmation",
+    "smoke_detector_proof",
+    "lead_based_paint_paperwork",
+    "local_jurisdiction_document",
+    "approval_letter",
+    "denial_letter",
+    "photo_evidence",
+    "other_evidence",
+]
+
+
+class ComplianceDocumentCreate(BaseModel):
+    category: ComplianceDocumentCategory = "other_evidence"
+    inspection_id: Optional[int] = None
+    checklist_item_id: Optional[int] = None
+    label: Optional[str] = None
+    notes: Optional[str] = None
+    parse_document: bool = True
+
+
+class ComplianceDocumentOut(BaseModel):
+    id: int
+    org_id: int
+    property_id: int
+    inspection_id: Optional[int] = None
+    checklist_item_id: Optional[int] = None
+    created_by_user_id: Optional[int] = None
+
+    category: str
+    source: str
+
+    label: Optional[str] = None
+    notes: Optional[str] = None
+
+    original_filename: Optional[str] = None
+    storage_key: Optional[str] = None
+    public_url: Optional[str] = None
+    content_type: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+
+    parse_status: Optional[str] = None
+    extracted_text_preview: Optional[str] = None
+    parser_meta_json: Optional[str] = None
+
+    scan_status: Optional[str] = None
+    scan_result: Optional[str] = None
+
+    metadata_json: Optional[str] = None
+
+    deleted_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ComplianceDocumentStackOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    count: int = 0
+    rows: List[ComplianceDocumentOut] = Field(default_factory=list)
+    by_category: Dict[str, List[ComplianceDocumentOut]] = Field(default_factory=dict)
+    by_inspection: Dict[str, List[ComplianceDocumentOut]] = Field(default_factory=dict)
+    by_checklist_item: Dict[str, List[ComplianceDocumentOut]] = Field(default_factory=dict)
 
 class ImportErrorRow(BaseModel):
     row: int

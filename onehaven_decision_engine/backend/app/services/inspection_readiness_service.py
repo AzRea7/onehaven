@@ -423,3 +423,34 @@ def build_property_readiness_summary(
         },
         "raw": asdict(score),
     }
+
+
+
+def build_property_readiness_with_schedule(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    """
+    Chunk 2 helper: combine readiness posture with appointment/reminder state.
+    Imported lazily to avoid circular imports.
+    """
+    from ..services.inspection_scheduling_service import build_property_schedule_summary
+
+    readiness = build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    schedule = build_property_schedule_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "readiness_summary": readiness,
+        "schedule_summary": schedule,
+    }

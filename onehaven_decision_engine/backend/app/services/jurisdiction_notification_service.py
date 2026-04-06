@@ -232,3 +232,55 @@ def notify_stale_jurisdictions(
         "skipped_count": skipped,
         "results": results,
     }
+
+
+
+
+def build_inspection_reminder_notification(
+    *,
+    org_id: int | None,
+    inspection_id: int,
+    property_id: int | None,
+    scheduled_for: datetime | None,
+    inspector_name: str | None,
+    reminder_offset_minutes: int,
+) -> JurisdictionNotification:
+    when_text = scheduled_for.isoformat() if scheduled_for is not None else None
+    return JurisdictionNotification(
+        action="inspection_reminder_ready",
+        org_id=org_id,
+        entity_id=str(inspection_id),
+        message=(
+            f"Inspection reminder ready for property {property_id or 'unknown'} "
+            f"({reminder_offset_minutes} minutes before appointment)."
+        ),
+        payload={
+            "inspection_id": int(inspection_id),
+            "property_id": int(property_id) if property_id is not None else None,
+            "scheduled_for": when_text,
+            "inspector_name": inspector_name,
+            "reminder_offset_minutes": int(reminder_offset_minutes),
+        },
+    )
+
+
+def create_inspection_reminder_audit_event(
+    db: Session,
+    *,
+    org_id: int | None,
+    inspection_id: int,
+    property_id: int | None,
+    scheduled_for: datetime | None,
+    inspector_name: str | None,
+    reminder_offset_minutes: int,
+) -> AuditEvent:
+    notification = build_inspection_reminder_notification(
+        org_id=org_id,
+        inspection_id=inspection_id,
+        property_id=property_id,
+        scheduled_for=scheduled_for,
+        inspector_name=inspector_name,
+        reminder_offset_minutes=reminder_offset_minutes,
+    )
+    row = create_notification_audit_event(db, notification=notification)
+    return row

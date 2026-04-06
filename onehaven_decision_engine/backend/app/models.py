@@ -236,6 +236,11 @@ class Property(Base):
         back_populates="property", cascade="all, delete-orphan"
     )
 
+    compliance_documents: Mapped[List["ComplianceDocument"]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+)
+
     checklists: Mapped[List["PropertyChecklist"]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )
@@ -1054,6 +1059,89 @@ class TrustScore(Base):
 # -----------------------------
 # Phase 4/5: rehab, tenants, cash, equity
 # -----------------------------
+class ComplianceDocument(Base):
+    __tablename__ = "compliance_documents"
+    __table_args__ = (
+        Index("ix_compliance_documents_org_property", "org_id", "property_id"),
+        Index("ix_compliance_documents_org_inspection", "org_id", "inspection_id"),
+        Index("ix_compliance_documents_org_checklist_item", "org_id", "checklist_item_id"),
+        Index("ix_compliance_documents_org_category", "org_id", "category"),
+        Index("ix_compliance_documents_org_deleted_at", "org_id", "deleted_at"),
+        Index("ix_compliance_documents_org_property_category", "org_id", "property_id", "category"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    org_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id"),
+        nullable=False,
+        index=True,
+    )
+
+    property_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    inspection_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("inspections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    checklist_item_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("property_checklist_items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("app_users.id"),
+        nullable=True,
+        index=True,
+    )
+
+    category: Mapped[str] = mapped_column(String(80), nullable=False, default="other_evidence")
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="upload")
+
+    label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    original_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    storage_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    public_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+
+    parse_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    extracted_text_preview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parser_meta_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    scan_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    scan_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    property: Mapped["Property"] = relationship("Property", back_populates="compliance_documents")
+    inspection: Mapped[Optional["Inspection"]] = relationship("Inspection")
+    checklist_item: Mapped[Optional["PropertyChecklistItem"]] = relationship("PropertyChecklistItem")
+
+
 class PropertyPhoto(Base):
     __tablename__ = "property_photos"
     __table_args__ = (

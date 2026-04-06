@@ -15,6 +15,7 @@ function kindTone(kind?: string | null) {
   if (k === "interior") return "oh-pill oh-pill-good";
   if (k === "exterior") return "oh-pill oh-pill-accent";
   if (k === "damage" || k === "issue") return "oh-pill oh-pill-bad";
+  if (k === "smoke_detector") return "oh-pill oh-pill-warn";
   return "oh-pill";
 }
 
@@ -53,7 +54,7 @@ export default function PhotoGallery({
       actions={<div className="text-xs text-app-4">{rows.length} photos</div>}
     >
       <div className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
-        <div className="rounded-2xl border border-app bg-app-muted overflow-hidden min-h-[320px]">
+        <div className="min-h-[320px] overflow-hidden rounded-2xl border border-app bg-app-muted">
           {selected ? (
             <img
               src={selected.url}

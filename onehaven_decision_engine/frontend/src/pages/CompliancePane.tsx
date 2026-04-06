@@ -1,9 +1,9 @@
-// frontend/src/pages/CompliancePane.tsx
 import React from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
+  CalendarClock,
   ClipboardCheck,
   Eye,
   RefreshCcw,
@@ -16,6 +16,12 @@ import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
 import PropertyCompliancePanel from "../components/PropertyCompliancePanel";
 import InspectionReadiness from "../components/InspectionReadiness";
+import InspectionSchedulerModal from "../components/InspectionSchedulerModal";
+import InspectionTimelineCard from "../components/InspectionTimelineCard";
+import ComplianceReminderPanel from "../components/ComplianceReminderPanel";
+import ComplianceDocumentUploader from "../components/ComplianceDocumentUploader";
+import ComplianceDocumentStack from "../components/ComplianceDocumentStack";
+import PhotoUploader from "../components/PhotoUploader";
 import { api } from "../lib/api";
 
 type ComplianceRow = {
@@ -123,7 +129,7 @@ function urgencyTone(urgency?: string | null) {
 
 function statusTone(value?: string | boolean | null) {
   const v = String(value ?? "").toLowerCase();
-  if (v === "true" || v === "pass" || v === "ready")
+  if (v === "true" || v === "pass" || v === "ready" || v === "confirmed")
     return "oh-pill oh-pill-good";
   if (
     [
@@ -136,11 +142,24 @@ function statusTone(value?: string | boolean | null) {
       "needs_remediation",
       "reinspection_required",
       "not_ready",
+      "failed",
+      "canceled",
+      "cancelled",
     ].includes(v)
   ) {
     return "oh-pill oh-pill-bad";
   }
-  if (["attention", "warn", "warning", "pending", "unknown"].includes(v)) {
+  if (
+    [
+      "attention",
+      "warn",
+      "warning",
+      "pending",
+      "unknown",
+      "draft",
+      "scheduled",
+    ].includes(v)
+  ) {
     return "oh-pill oh-pill-warn";
   }
   return "oh-pill";
@@ -170,6 +189,16 @@ export default function CompliancePane() {
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailError, setDetailError] = React.useState<string | null>(null);
 
+  const [scheduleSummary, setScheduleSummary] = React.useState<any | null>(
+    null,
+  );
+  const [timelineRows, setTimelineRows] = React.useState<any[]>([]);
+  const [reminderRows, setReminderRows] = React.useState<any[]>([]);
+  const [documentStack, setDocumentStack] = React.useState<any | null>(null);
+  const [photos, setPhotos] = React.useState<any[]>([]);
+  const [scheduleLoading, setScheduleLoading] = React.useState(false);
+  const [schedulerOpen, setSchedulerOpen] = React.useState(false);
+
   const refresh = React.useCallback(async () => {
     try {
       setLoading(true);
@@ -180,6 +209,49 @@ export default function CompliancePane() {
       setErr(String(e?.message || e));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const refreshPropertyArtifacts = React.useCallback(
+    async (propertyId: number) => {
+      try {
+        const [docs, photoRows] = await Promise.all([
+          api.get(`/compliance/properties/${propertyId}/document-stack`),
+          api.get(`/photos/${propertyId}`),
+        ]);
+        setDocumentStack(docs?.documents || docs || null);
+        setPhotos(Array.isArray(photoRows) ? photoRows : []);
+      } catch {
+        setDocumentStack(null);
+        setPhotos([]);
+      }
+    },
+    [],
+  );
+
+  const refreshScheduling = React.useCallback(async (propertyId: number) => {
+    try {
+      setScheduleLoading(true);
+      const [summary, timeline, reminders] = await Promise.all([
+        api.get(`/inspections/property/${propertyId}/schedule-summary`),
+        api.get(`/inspections/property/${propertyId}/timeline`),
+        api.get("/automation/inspection-reminders/preview"),
+      ]);
+      setScheduleSummary(summary || null);
+      setTimelineRows(
+        Array.isArray(timeline?.rows)
+          ? timeline.rows
+          : Array.isArray(timeline)
+            ? timeline
+            : [],
+      );
+      setReminderRows(Array.isArray(reminders?.rows) ? reminders.rows : []);
+    } catch {
+      setScheduleSummary(null);
+      setTimelineRows([]);
+      setReminderRows([]);
+    } finally {
+      setScheduleLoading(false);
     }
   }, []);
 
@@ -221,6 +293,11 @@ export default function CompliancePane() {
       setSelectedBrief(null);
       setSelectedReadiness(null);
       setDetailError(null);
+      setScheduleSummary(null);
+      setTimelineRows([]);
+      setReminderRows([]);
+      setDocumentStack(null);
+      setPhotos([]);
       return;
     }
 
@@ -266,10 +343,28 @@ export default function CompliancePane() {
         setDetailLoading(false);
       });
 
+    refreshScheduling(selectedProperty.id);
+    refreshPropertyArtifacts(selectedProperty.id);
+
     return () => {
       cancelled = true;
     };
-  }, [selectedProperty?.id]);
+  }, [refreshScheduling, refreshPropertyArtifacts, selectedProperty?.id]);
+
+  const selectedInspectionId =
+    scheduleSummary?.appointment?.inspection_id ||
+    scheduleSummary?.latest_appointment?.inspection_id ||
+    selectedReadiness?.latest_inspection?.id ||
+    null;
+
+  const selectedAppointment =
+    scheduleSummary?.appointment || scheduleSummary?.latest_appointment || null;
+
+  async function deletePhoto(photoId: number) {
+    await api.delete(`/photos/${photoId}`);
+    if (selectedProperty?.id)
+      await refreshPropertyArtifacts(selectedProperty.id);
+  }
 
   return (
     <PageShell>
@@ -277,12 +372,23 @@ export default function CompliancePane() {
         <PageHero
           eyebrow="Lifecycle pane"
           title="Compliance / S8 pane"
-          subtitle="Property-scoped compliance, inspection history, readiness posture, unresolved failures, and remediation now flow through one pane."
+          subtitle="Property-scoped compliance, inspection history, readiness posture, scheduling, reminders, document evidence, and remediation now flow through one pane."
           actions={
-            <button onClick={refresh} className="oh-btn oh-btn-secondary">
-              <RefreshCcw className="h-4 w-4" />
-              Refresh pane
-            </button>
+            <div className="flex flex-wrap gap-3">
+              {selectedProperty?.id ? (
+                <button
+                  onClick={() => setSchedulerOpen(true)}
+                  className="oh-btn"
+                >
+                  <CalendarClock className="h-4 w-4" />
+                  Schedule inspection
+                </button>
+              ) : null}
+              <button onClick={refresh} className="oh-btn oh-btn-secondary">
+                <RefreshCcw className="h-4 w-4" />
+                Refresh pane
+              </button>
+            </div>
           }
         />
 
@@ -464,7 +570,7 @@ export default function CompliancePane() {
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Surface
             title="Compliance queue"
-            subtitle="Select a property to inspect its current readiness, inspection posture, and failure-driven actions."
+            subtitle="Select a property to inspect its current readiness, scheduling state, document stack, and failure-driven actions."
           >
             {loading ? (
               <div className="grid gap-3">
@@ -638,7 +744,7 @@ export default function CompliancePane() {
                   compact
                   icon={ClipboardCheck}
                   title="No property selected"
-                  description="Select a property to inspect readiness, checklist state, inspection history, and remediation guidance."
+                  description="Select a property to inspect readiness, checklist state, inspection history, scheduling, compliance documents, and remediation guidance."
                 />
               </Surface>
             ) : detailError ? (
@@ -664,14 +770,25 @@ export default function CompliancePane() {
               <>
                 <Surface
                   title="Selected property"
-                  subtitle="Latest inspection, unresolved failures, and readiness summary for the active property."
+                  subtitle="Latest inspection, unresolved failures, readiness summary, scheduling state, and evidence uploads for the active property."
                   actions={
-                    <Link
-                      to={`/properties/${selectedProperty.id}`}
-                      className="oh-btn oh-btn-secondary"
-                    >
-                      Open property
-                    </Link>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        onClick={() => setSchedulerOpen(true)}
+                        className="oh-btn"
+                      >
+                        <CalendarClock className="h-4 w-4" />
+                        {selectedAppointment
+                          ? "Edit schedule"
+                          : "Schedule inspection"}
+                      </button>
+                      <Link
+                        to={`/properties/${selectedProperty.id}`}
+                        className="oh-btn oh-btn-secondary"
+                      >
+                        Open property
+                      </Link>
+                    </div>
                   }
                 >
                   <div className="grid gap-3 md:grid-cols-2">
@@ -727,6 +844,13 @@ export default function CompliancePane() {
                             )}
                           </span>
                         ) : null}
+                        {selectedAppointment?.status ? (
+                          <span
+                            className={statusTone(selectedAppointment.status)}
+                          >
+                            {labelize(selectedAppointment.status)}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -738,6 +862,45 @@ export default function CompliancePane() {
                   status={selectedReadiness?.latest_inspection}
                   summary={selectedReadiness?.run_summary}
                 />
+
+                <InspectionTimelineCard
+                  rows={timelineRows}
+                  loading={scheduleLoading}
+                />
+
+                <ComplianceReminderPanel
+                  propertyId={selectedProperty.id}
+                  rows={reminderRows}
+                  loading={scheduleLoading}
+                  onSent={() => refreshScheduling(selectedProperty.id)}
+                />
+
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <ComplianceDocumentUploader
+                    propertyId={selectedProperty.id}
+                    inspectionId={selectedInspectionId}
+                    onUploaded={() =>
+                      refreshPropertyArtifacts(selectedProperty.id)
+                    }
+                  />
+                  <PhotoUploader
+                    propertyId={selectedProperty.id}
+                    inspectionId={selectedInspectionId}
+                    attachToComplianceByDefault
+                    onUploaded={() =>
+                      refreshPropertyArtifacts(selectedProperty.id)
+                    }
+                  />
+                </div>
+
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <ComplianceDocumentStack
+                    data={documentStack}
+                    onDeleted={() =>
+                      refreshPropertyArtifacts(selectedProperty.id)
+                    }
+                  />
+                </div>
 
                 <PropertyCompliancePanel
                   property={selectedProperty}
@@ -879,6 +1042,28 @@ export default function CompliancePane() {
           </Surface>
         ) : null}
       </div>
+
+      <InspectionSchedulerModal
+        open={schedulerOpen}
+        onClose={() => setSchedulerOpen(false)}
+        inspectionId={selectedInspectionId}
+        propertyLabel={
+          selectedProperty?.address ||
+          (selectedProperty?.id
+            ? `Property #${selectedProperty.id}`
+            : undefined)
+        }
+        existing={selectedAppointment}
+        onSaved={() => {
+          if (selectedProperty?.id) {
+            refreshScheduling(selectedProperty.id);
+            api
+              .complianceInspectionReadiness(selectedProperty.id)
+              .then(setSelectedReadiness)
+              .catch(() => {});
+          }
+        }}
+      />
     </PageShell>
   );
 }

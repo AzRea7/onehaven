@@ -13,12 +13,14 @@ from app.auth import get_principal, require_operator
 from app.db import get_db
 from app.models import Property, PropertyPhoto
 from app.schemas import PropertyPhotoCreate, PropertyPhotoOut
+from app.services.compliance_document_service import create_compliance_document_from_path
 from app.services.property_photo_service import (
     create_uploaded_photo,
     ensure_property_exists,
     list_property_photos,
     upsert_zillow_photos,
 )
+from app.services.virus_scanning_service import scan_file
 from app.services.zillow_photo_source import classify_photo_kind
 
 router = APIRouter(prefix="/photos", tags=["photos"])
@@ -62,11 +64,15 @@ def sync_zillow_photos(
     return {"ok": True, **result}
 
 
-@router.post("/upload", response_model=PropertyPhotoOut)
+@router.post("/upload", response_model=dict)
 async def upload_photo(
     property_id: int = Form(...),
     kind: str = Form("unknown"),
     label: str | None = Form(default=None),
+    inspection_id: int | None = Form(default=None),
+    checklist_item_id: int | None = Form(default=None),
+    evidence_category: str | None = Form(default="photo_evidence"),
+    attach_to_compliance: bool = Form(default=False),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
@@ -89,6 +95,14 @@ async def upload_photo(
     with open(path, "wb") as f:
         f.write(content)
 
+    scan = scan_file(path)
+    if bool(scan.get("infected")):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail="Uploaded photo failed virus scan")
+
     row = create_uploaded_photo(
         db,
         org_id=p.org_id,
@@ -98,8 +112,38 @@ async def upload_photo(
         kind=kind or classify_photo_kind(file.filename or ""),
         label=label,
         content_type=file.content_type,
+        inspection_id=int(inspection_id) if inspection_id is not None else None,
+        checklist_item_id=int(checklist_item_id) if checklist_item_id is not None else None,
     )
-    return row
+
+    compliance_document = None
+    if attach_to_compliance:
+        compliance_document = create_compliance_document_from_path(
+            db,
+            org_id=int(p.org_id),
+            actor_user_id=int(p.user_id),
+            property_id=int(property_id),
+            category=str(evidence_category or "photo_evidence"),
+            absolute_path=path,
+            original_filename=file.filename or safe_name,
+            content_type=file.content_type,
+            inspection_id=int(inspection_id) if inspection_id is not None else None,
+            checklist_item_id=int(checklist_item_id) if checklist_item_id is not None else None,
+            label=label or "Photo evidence",
+            notes=f"Mirrored from property photo upload (photo_id pending url={row.url})",
+            parse_document=False,
+            existing_storage_key=safe_name,
+            public_url=f"/api/photos/raw/{safe_name}",
+            scan_result=scan,
+        )
+        db.commit()
+
+    return {
+        "ok": True,
+        "photo": row,
+        "compliance_document": compliance_document,
+        "scan": scan,
+    }
 
 
 @router.get("/raw/{storage_key}")

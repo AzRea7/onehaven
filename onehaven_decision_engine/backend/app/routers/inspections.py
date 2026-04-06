@@ -38,6 +38,19 @@ from ..services.inspection_failure_task_service import (
     create_failure_tasks_from_inspection,
 )
 from ..services.inspection_readiness_service import build_property_readiness_summary
+from ..services.inspection_scheduling_service import (
+    build_inspection_ics_payload,
+    build_inspection_timeline,
+    build_property_schedule_summary,
+    cancel_inspection_appointment,
+    mark_inspection_completed,
+    schedule_inspection_appointment,
+    send_inspection_reminder,
+)
+from ..services.inspector_communication_service import (
+    build_inspection_reminder_message,
+    build_inspector_contact_payload,
+)
 from ..services.ownership import must_get_property
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
@@ -751,3 +764,270 @@ def inspection_readiness(
             recompute=True,
         ),
     }
+
+
+
+
+@router.post("/{inspection_id}/appointment", response_model=dict)
+def upsert_inspection_appointment(
+    inspection_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+        min_stage="compliance",
+        action="schedule inspection appointment",
+    )
+    try:
+        result = schedule_inspection_appointment(
+            db,
+            org_id=int(p.org_id),
+            actor_user_id=int(p.user_id),
+            inspection_id=int(inspection_id),
+            scheduled_for=payload.get("scheduled_for"),
+            inspector_name=payload.get("inspector_name"),
+            inspector_company=payload.get("inspector_company"),
+            inspector_email=payload.get("inspector_email"),
+            inspector_phone=payload.get("inspector_phone"),
+            reminder_offsets=payload.get("reminder_offsets"),
+            appointment_notes=payload.get("appointment_notes"),
+            status=payload.get("status"),
+            calendar_provider=payload.get("calendar_provider"),
+        )
+        sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
+        db.commit()
+        return {
+            **result,
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=insp.property_id,
+                recompute=True,
+            ),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{inspection_id}/appointment/cancel", response_model=dict)
+def cancel_appointment(
+    inspection_id: int,
+    payload: dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+        min_stage="compliance",
+        action="cancel inspection appointment",
+    )
+    try:
+        result = cancel_inspection_appointment(
+            db,
+            org_id=int(p.org_id),
+            actor_user_id=int(p.user_id),
+            inspection_id=int(inspection_id),
+            reason=payload.get("reason"),
+        )
+        sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
+        db.commit()
+        return {
+            **result,
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=insp.property_id,
+                recompute=True,
+            ),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{inspection_id}/mark-completed", response_model=dict)
+def mark_completed(
+    inspection_id: int,
+    payload: dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+        min_stage="compliance",
+        action="mark inspection completed",
+    )
+    try:
+        result = mark_inspection_completed(
+            db,
+            org_id=int(p.org_id),
+            actor_user_id=int(p.user_id),
+            inspection_id=int(inspection_id),
+            status=payload.get("status"),
+            passed=payload.get("passed"),
+            reinspect_required=payload.get("reinspect_required"),
+            notes=payload.get("notes"),
+            completed_at=payload.get("completed_at"),
+        )
+        sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
+        db.commit()
+        return {
+            **result,
+            "workflow": build_workflow_summary(
+                db,
+                org_id=p.org_id,
+                property_id=insp.property_id,
+                recompute=True,
+            ),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{inspection_id}/remind", response_model=dict)
+def send_reminder(
+    inspection_id: int,
+    payload: dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+    _op=Depends(require_operator),
+):
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=insp.property_id,
+        min_stage="compliance",
+        action="send inspection reminder",
+    )
+    try:
+        result = send_inspection_reminder(
+            db,
+            org_id=int(p.org_id),
+            actor_user_id=int(p.user_id),
+            inspection_id=int(inspection_id),
+            reminder_offset_minutes=payload.get("reminder_offset_minutes"),
+        )
+        db.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{inspection_id}/contact-payload", response_model=dict)
+def inspection_contact_payload(
+    inspection_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
+    return {
+        "ok": True,
+        "inspection_id": int(inspection_id),
+        "property_id": int(insp.property_id),
+        "contact_payload": build_inspector_contact_payload(
+            db,
+            org_id=int(p.org_id),
+            inspection_id=int(inspection_id),
+        ),
+    }
+
+
+@router.get("/{inspection_id}/reminder-payload", response_model=dict)
+def inspection_reminder_payload(
+    inspection_id: int,
+    reminder_offset_minutes: int = Query(default=60, ge=0, le=10080),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
+    return {
+        "ok": True,
+        "inspection_id": int(inspection_id),
+        "property_id": int(insp.property_id),
+        "payload": build_inspection_reminder_message(
+            db,
+            org_id=int(p.org_id),
+            inspection_id=int(inspection_id),
+            reminder_offset_minutes=int(reminder_offset_minutes),
+        ),
+    }
+
+
+@router.get("/{inspection_id}/ics", response_model=dict)
+def inspection_ics_export(
+    inspection_id: int,
+    duration_minutes: int = Query(default=60, ge=15, le=480),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
+    try:
+        return {
+            "ok": True,
+            **build_inspection_ics_payload(
+                db,
+                org_id=int(p.org_id),
+                inspection_id=int(inspection_id),
+                duration_minutes=int(duration_minutes),
+            ),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/property/{property_id}/timeline", response_model=dict)
+def inspection_timeline(
+    property_id: int,
+    limit: int = Query(default=100, ge=1, le=300),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view inspection timeline",
+    )
+    return build_inspection_timeline(
+        db,
+        org_id=int(p.org_id),
+        property_id=int(property_id),
+        limit=int(limit),
+    )
+
+
+@router.get("/property/{property_id}/schedule-summary", response_model=dict)
+def inspection_schedule_summary(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view inspection schedule summary",
+    )
+    return build_property_schedule_summary(
+        db,
+        org_id=int(p.org_id),
+        property_id=int(property_id),
+    )

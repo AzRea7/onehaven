@@ -18,16 +18,17 @@ def _bool_env(name: str, default: bool = False) -> bool:
 
 
 def virus_scanning_enabled() -> bool:
-    return _bool_env("ACQUISITION_VIRUS_SCAN_ENABLED", False)
+    return _bool_env("ACQUISITION_VIRUS_SCAN_ENABLED", False) or _bool_env("COMPLIANCE_VIRUS_SCAN_ENABLED", False)
 
 
-def scan_file(path: Path) -> dict[str, Any]:
+def scan_file(path: str | Path) -> dict[str, Any]:
     """
     Default-safe implementation:
     - If scanning disabled => mark as skipped
     - If ClamAV TCP is configured => try scan
     - If scan service errors => mark as error, caller can decide fail-open/fail-closed
     """
+    path = Path(path)
     if not virus_scanning_enabled():
         return {
             "scan_status": "skipped",

@@ -34,6 +34,7 @@ from ..services.inspection_template_service import (
 )
 from ..services.jurisdiction_profile_service import resolve_operational_policy
 from ..services.policy_projection_service import build_property_compliance_brief
+from ..services.compliance_document_service import build_property_document_stack
 
 
 STATUS_PASS = "pass"
@@ -1203,3 +1204,76 @@ def preview_property_inspection_template(
         org_id=org_id,
         property_id=property_id,
     )
+
+def build_property_schedule_snapshot(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    readiness = build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    schedule = build_property_schedule_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "schedule": schedule,
+        "readiness_summary": readiness,
+    }
+
+
+def build_property_compliance_timeline(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    limit: int = 100,
+) -> dict[str, Any]:
+    readiness = build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    timeline = build_property_inspection_timeline(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        limit=limit,
+    )
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "timeline": timeline,
+        "readiness_summary": readiness,
+    }
+
+
+def build_property_document_stack_snapshot(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    readiness = build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    documents = build_property_document_stack(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "documents": documents,
+        "readiness_summary": readiness,
+    }
