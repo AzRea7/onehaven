@@ -1,3 +1,4 @@
+# backend/app/routers/compliance.py
 from __future__ import annotations
 
 import json
@@ -389,6 +390,8 @@ def _inspection_row_payload(row: Inspection) -> dict[str, Any]:
         "passed": row.passed,
         "reinspect_required": row.reinspect_required,
         "notes": row.notes,
+        "inspector": getattr(row, "inspector", None),
+        "jurisdiction": getattr(row, "jurisdiction", None),
         "template_key": getattr(row, "template_key", None),
         "template_version": getattr(row, "template_version", None),
         "result_status": getattr(row, "result_status", None),
@@ -678,6 +681,59 @@ def get_latest_checklist(
     )
 
 
+@router.get("/property/{property_id}/brief", response_model=dict)
+def property_brief(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view property compliance brief",
+    )
+    return build_property_compliance_brief(
+        db,
+        org_id=p.org_id,
+        state=getattr(prop, "state", None) or "MI",
+        county=getattr(prop, "county", None),
+        city=getattr(prop, "city", None),
+        pha_name=None,
+    )
+
+
+@router.get("/property/{property_id}/inspection-readiness", response_model=dict)
+def property_inspection_readiness(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view property inspection readiness",
+    )
+    readiness = build_property_inspection_readiness(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+    history = _history_rows_for_property(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        limit=25,
+    )
+    readiness["inspection_history"] = history
+    return readiness
+
+
 @router.get("/property/{property_id}/record", response_model=dict)
 def property_compliance_record(
     property_id: int,
@@ -782,6 +838,9 @@ def property_compliance_record(
             "latest_result_status": completion.latest_result_status,
             "posture": completion.posture,
             "is_compliant": completion.is_compliant,
+            "critical_count": completion.critical_count,
+            "unresolved_count": completion.unresolved_count,
+            "reinspection_needed": completion.reinspection_needed,
         },
         "jurisdiction": jurisdiction,
         "workflow": build_workflow_summary(
@@ -847,6 +906,12 @@ def compliance_status(
         org_id=p.org_id,
         property_id=property_id,
     )
+    history = _history_rows_for_property(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        limit=25,
+    )
 
     return {
         "property_id": property_id,
@@ -867,6 +932,8 @@ def compliance_status(
         "warning_items": readiness["warning_items"],
         "recommended_actions": readiness["recommended_actions"],
         "coverage": readiness["coverage"],
+        "latest_inspection": readiness.get("latest_inspection"),
+        "inspection_history": history,
         "completion": {
             "completion_pct": completion.completion_pct,
             "completion_projection_pct": completion.completion_projection_pct,
@@ -878,6 +945,9 @@ def compliance_status(
             "latest_result_status": completion.latest_result_status,
             "posture": completion.posture,
             "is_compliant": completion.is_compliant,
+            "critical_count": completion.critical_count,
+            "unresolved_count": completion.unresolved_count,
+            "reinspection_needed": completion.reinspection_needed,
         },
     }
 
@@ -921,6 +991,157 @@ def run_compliance_hqs(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"run failed: {e}")
+
+
+@router.post("/property/{property_id}/generate-policy-tasks", response_model=dict)
+def generate_policy_tasks(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="generate policy tasks",
+    )
+    result = generate_policy_tasks_for_property(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        property_id=property_id,
+    )
+    sync_property_state(db, org_id=p.org_id, property_id=property_id)
+    db.commit()
+    return {
+        **result,
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            recompute=True,
+        ),
+    }
+
+
+@router.post("/inspection/{property_id}/{inspection_id}/apply-form", response_model=dict)
+def apply_form_results(
+    property_id: int,
+    inspection_id: int,
+    raw_payload: dict[str, Any] | list[dict[str, Any]] = Body(...),
+    sync_checklist: bool = Query(default=True),
+    create_failure_tasks: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    _must_get_inspection(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+    )
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="apply inspection form results",
+    )
+    result = apply_inspection_form_results(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+        raw_payload=raw_payload,
+        sync_checklist=sync_checklist,
+        create_failure_tasks=create_failure_tasks,
+    )
+    sync_property_state(db, org_id=p.org_id, property_id=property_id)
+    db.commit()
+    return {
+        **result,
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            recompute=True,
+        ),
+    }
+
+
+@router.get("/inspection/{property_id}/{inspection_id}/failure-actions", response_model=dict)
+def failure_actions(
+    property_id: int,
+    inspection_id: int,
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    _must_get_inspection(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+    )
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view failure actions",
+    )
+    return build_failure_next_actions(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+        limit=limit,
+    )
+
+
+@router.post("/inspection/{property_id}/{inspection_id}/tasks-from-failures", response_model=dict)
+def tasks_from_failures(
+    property_id: int,
+    inspection_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    _must_get_inspection(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+    )
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="create failure tasks",
+    )
+    out = create_failure_tasks_from_inspection(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+    )
+    sync_property_state(db, org_id=p.org_id, property_id=property_id)
+    db.commit()
+    return {
+        **out,
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            recompute=True,
+        ),
+    }
 
 
 @router.get("/timeline/{property_id}", response_model=dict)
@@ -1021,471 +1242,6 @@ def run_hqs_summary_only(
         "jurisdiction_profile_id": jurisdiction.get("profile_id"),
         "jurisdiction_scope": jurisdiction.get("scope"),
         "jurisdiction_match_level": jurisdiction.get("match_level"),
-        "blocking_items": jurisdiction.get("blocking_items", []),
-        "required_actions": jurisdiction.get("required_actions", []),
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
+        "jurisdiction_required_actions": len(jurisdiction.get("required_actions") or []),
+        "jurisdiction_blocking_items": len(jurisdiction.get("blocking_items") or []),
     }
-
-
-@router.get("/property/{property_id}/brief", response_model=dict)
-def property_compliance_brief(
-    property_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    jurisdiction = resolve_operational_policy(
-        db,
-        org_id=p.org_id,
-        city=prop.city,
-        county=getattr(prop, "county", None),
-        state=prop.state or "MI",
-    )
-    policy_brief = build_property_compliance_brief(
-        db,
-        org_id=None,
-        state=prop.state or "MI",
-        county=getattr(prop, "county", None),
-        city=prop.city,
-        pha_name=jurisdiction.get("pha_name"),
-    )
-    return {
-        "property_id": property_id,
-        "address": getattr(prop, "address", None),
-        "city": prop.city,
-        "county": getattr(prop, "county", None),
-        "state": prop.state or "MI",
-        "jurisdiction": jurisdiction,
-        "brief": policy_brief,
-        "coverage": jurisdiction.get("coverage", {}),
-        "blocking_items": jurisdiction.get("blocking_items", []),
-        "required_actions": jurisdiction.get("required_actions", []),
-        "evidence_links": jurisdiction.get("evidence_links", []),
-    }
-
-
-@router.get("/property/{property_id}/inspection-template", response_model=dict)
-def property_inspection_template(
-    property_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view inspection template",
-    )
-    return preview_property_inspection_template(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-    )
-
-
-@router.get("/property/{property_id}/inspection-readiness", response_model=dict)
-def property_inspection_readiness(
-    property_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view policy-driven inspection readiness",
-    )
-    return build_property_inspection_readiness(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-    )
-
-
-@router.get("/property/{property_id}/readiness-summary", response_model=dict)
-def property_readiness_summary(
-    property_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view readiness summary",
-    )
-    return build_property_readiness_summary(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-    )
-
-
-@router.get("/property/{property_id}/completion-projection", response_model=dict)
-def property_completion_projection(
-    property_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view compliance completion projection",
-    )
-    status = compute_compliance_status(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-    )
-    return {
-        "ok": True,
-        "property_id": property_id,
-        "completion_pct": status.completion_pct,
-        "completion_projection_pct": status.completion_projection_pct,
-        "failed_count": status.failed_count,
-        "blocked_count": status.blocked_count,
-        "latest_inspection_passed": status.latest_inspection_passed,
-        "latest_readiness_score": status.latest_readiness_score,
-        "latest_readiness_status": status.latest_readiness_status,
-        "latest_result_status": status.latest_result_status,
-        "posture": status.posture,
-        "is_compliant": status.is_compliant,
-    }
-
-
-@router.get("/property/{property_id}/failure-actions", response_model=dict)
-def property_failure_actions(
-    property_id: int,
-    inspection_id: int | None = Query(default=None),
-    limit: int = Query(default=10, ge=1, le=50),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view failure-generated actions",
-    )
-    if inspection_id is not None:
-        _must_get_inspection(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            inspection_id=inspection_id,
-        )
-    return build_failure_next_actions(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        inspection_id=inspection_id,
-        limit=limit,
-    )
-
-
-@router.post("/property/{property_id}/tasks/from-failures", response_model=dict)
-def create_tasks_from_failures(
-    property_id: int,
-    inspection_id: int | None = Query(default=None),
-    db: Session = Depends(get_db),
-    p=Depends(require_owner),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="create tasks from inspection failures",
-    )
-    if inspection_id is not None:
-        _must_get_inspection(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            inspection_id=inspection_id,
-        )
-    try:
-        result = create_failure_tasks_from_inspection(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            inspection_id=inspection_id,
-        )
-        sync_property_state(db, org_id=p.org_id, property_id=property_id)
-        db.commit()
-        return {
-            **result,
-            "workflow": build_workflow_summary(
-                db,
-                org_id=p.org_id,
-                property_id=property_id,
-                recompute=True,
-            ),
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failure task generation failed: {e}")
-
-
-@router.post("/property/{property_id}/automation/run", response_model=dict)
-def run_property_compliance_automation(
-    property_id: int,
-    create_tasks: bool = Query(default=True),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="run compliance automation",
-    )
-    try:
-        result = run_hqs_service(
-            db,
-            org_id=p.org_id,
-            actor_user_id=p.user_id,
-            actor_email=p.email,
-            property_id=property_id,
-            create_tasks=create_tasks,
-        )
-        sync_property_state(db, org_id=p.org_id, property_id=property_id)
-        db.commit()
-        readiness = result.get("inspection_readiness") or {}
-        return {
-            **result,
-            "summary": readiness.get("run_summary") or {},
-            "workflow": build_workflow_summary(
-                db,
-                org_id=p.org_id,
-                property_id=property_id,
-                recompute=True,
-            ),
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"automation run failed: {e}")
-
-
-@router.post("/property/{property_id}/tasks/from-policy", response_model=dict)
-def create_tasks_from_policy(
-    property_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(require_owner),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="acquisition",
-        action="create rehab/compliance tasks from policy",
-    )
-    try:
-        result = generate_policy_tasks_for_property(
-            db,
-            org_id=p.org_id,
-            actor_user_id=p.user_id,
-            property_id=property_id,
-        )
-        sync_property_state(db, org_id=p.org_id, property_id=property_id)
-        db.commit()
-        return {
-            **result,
-            "workflow": build_workflow_summary(
-                db,
-                org_id=p.org_id,
-                property_id=property_id,
-                recompute=True,
-            ),
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"policy task generation failed: {e}")
-
-
-@router.post("/property/{property_id}/inspections/{inspection_id}/submit-form", response_model=dict)
-def submit_property_inspection_form(
-    property_id: int,
-    inspection_id: int,
-    raw_payload: dict[str, Any] | list[dict[str, Any]] = Body(...),
-    sync_checklist: bool = Query(default=True),
-    create_failure_tasks: bool = Query(default=True),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    _must_get_inspection(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        inspection_id=inspection_id,
-    )
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="submit inspection form",
-    )
-    try:
-        result = apply_inspection_form_results(
-            db,
-            org_id=p.org_id,
-            actor_user_id=p.user_id,
-            property_id=property_id,
-            inspection_id=inspection_id,
-            raw_payload=raw_payload,
-            sync_checklist=sync_checklist,
-            create_failure_tasks=create_failure_tasks,
-        )
-        sync_property_state(db, org_id=p.org_id, property_id=property_id)
-        db.commit()
-        return {
-            **result,
-            "workflow": build_workflow_summary(
-                db,
-                org_id=p.org_id,
-                property_id=property_id,
-                recompute=True,
-            ),
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"inspection form submission failed: {e}")
-
-
-@router.patch("/checklist/{property_id}/items/{item_code}", response_model=ChecklistItemOut)
-def update_checklist_item(
-    property_id: int,
-    item_code: str,
-    payload: ChecklistItemUpdateIn,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="update compliance checklist item",
-    )
-
-    normalized_code = (item_code or "").strip().upper()
-    row = db.scalar(
-        select(PropertyChecklistItem).where(
-            PropertyChecklistItem.org_id == p.org_id,
-            PropertyChecklistItem.property_id == property_id,
-            PropertyChecklistItem.item_code == normalized_code,
-        )
-    )
-    if not row:
-        raise HTTPException(
-            status_code=404,
-            detail="checklist item not found (generate checklist first)",
-        )
-
-    before = {
-        "status": row.status,
-        "proof_url": row.proof_url,
-        "notes": row.notes,
-        "marked_by_user_id": row.marked_by_user_id,
-        "marked_at": row.marked_at.isoformat() if row.marked_at else None,
-    }
-
-    now = datetime.utcnow()
-
-    if payload.status is not None:
-        s = (payload.status or "").strip().lower()
-        if s not in _ALLOWED_STATUS:
-            raise HTTPException(status_code=400, detail=f"invalid status: {payload.status}")
-        row.status = s
-        row.marked_by_user_id = p.user_id
-        row.marked_at = now
-
-    if payload.proof_url is not None:
-        row.proof_url = payload.proof_url
-    if payload.notes is not None:
-        row.notes = payload.notes
-
-    row.updated_at = now
-    db.add(row)
-
-    after = {
-        "status": row.status,
-        "proof_url": row.proof_url,
-        "notes": row.notes,
-        "marked_by_user_id": row.marked_by_user_id,
-        "marked_at": row.marked_at.isoformat() if row.marked_at else None,
-    }
-
-    db.add(
-        AuditEvent(
-            org_id=p.org_id,
-            actor_user_id=p.user_id,
-            action="checklist_item_updated",
-            entity_type="property_checklist_item",
-            entity_id=f"{property_id}:{normalized_code}",
-            before_json=json.dumps(before),
-            after_json=json.dumps(after),
-            created_at=now,
-        )
-    )
-    db.add(
-        WorkflowEvent(
-            org_id=p.org_id,
-            property_id=property_id,
-            actor_user_id=p.user_id,
-            event_type="checklist_item_updated",
-            payload_json=json.dumps({"item_code": normalized_code, "status": row.status}),
-            created_at=now,
-        )
-    )
-
-    sync_property_state(db, org_id=p.org_id, property_id=property_id)
-    db.commit()
-    db.refresh(row)
-
-    marked_by_email = p.email
-    if row.marked_by_user_id and row.marked_by_user_id != p.user_id:
-        user = db.get(AppUser, row.marked_by_user_id)
-        if user and user.email:
-            marked_by_email = user.email
-
-    return ChecklistItemOut(
-        item_code=row.item_code,
-        category=row.category,
-        description=row.description,
-        severity=int(row.severity),
-        common_fail=bool(row.common_fail),
-        applies_if=json.loads(row.applies_if_json) if row.applies_if_json else None,
-        status=row.status,
-        marked_at=row.marked_at,
-        proof_url=row.proof_url,
-        notes=row.notes,
-        marked_by=marked_by_email,
-    )

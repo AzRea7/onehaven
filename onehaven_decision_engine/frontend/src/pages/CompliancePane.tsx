@@ -833,7 +833,7 @@ export default function CompliancePane() {
                     </div>
 
                     {item?.notes ? (
-                      <div className="mt-2 text-sm leading-6 text-app-3 whitespace-pre-wrap">
+                      <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-app-3">
                         {item.notes}
                       </div>
                     ) : null}

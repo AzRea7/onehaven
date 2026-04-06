@@ -1,3 +1,4 @@
+# backend/app/domain/compliance/compliance_stats.py
 from __future__ import annotations
 
 import json
@@ -52,6 +53,25 @@ def _decode_json_list(value: Any) -> list[Any]:
     return []
 
 
+def _severity_of(row: Any) -> str:
+    if not isinstance(row, dict):
+        return ""
+    sev = str(row.get("severity") or row.get("severity_label") or "").strip().lower()
+    if sev in {"critical", "fail", "warn", "info"}:
+        return sev
+    try:
+        sev_num = int(row.get("severity"))
+        if sev_num >= 4:
+            return "critical"
+        if sev_num == 3:
+            return "fail"
+        if sev_num == 2:
+            return "warn"
+        return "info"
+    except Exception:
+        return sev
+
+
 def compliance_stats(rows: Iterable[Any]) -> dict[str, Any]:
     """
     Property-scoped inspection/compliance stats rollup.
@@ -71,9 +91,11 @@ def compliance_stats(rows: Iterable[Any]) -> dict[str, Any]:
     reinspection_needed = 0
     evidence_count = 0
     photo_count = 0
+    critical_count = 0
 
     for row in rows:
-        status_counter[_status_of(row)] += 1
+        status = _status_of(row)
+        status_counter[status] += 1
 
         jurisdiction = str(row.get("jurisdiction") or "").strip()
         if jurisdiction:
@@ -92,11 +114,14 @@ def compliance_stats(rows: Iterable[Any]) -> dict[str, Any]:
         if template_version:
             template_versions[template_version] += 1
 
-        if bool(row.get("requires_reinspection")):
+        if bool(row.get("requires_reinspection") or row.get("reinspect_required")):
             reinspection_needed += 1
 
         evidence_count += len(_decode_json_list(row.get("evidence_json")))
         photo_count += len(_decode_json_list(row.get("photo_references_json")))
+
+        if _severity_of(row) == "critical":
+            critical_count += 1
 
     passed = status_counter["passed"]
     failed = status_counter["failed"]
@@ -104,6 +129,7 @@ def compliance_stats(rows: Iterable[Any]) -> dict[str, Any]:
     inconclusive = status_counter["inconclusive"]
     pending = status_counter["pending"]
     unresolved = failed + blocked + inconclusive + pending
+    unresolved_plus_critical = unresolved + critical_count
 
     return {
         "total_events": total,
@@ -113,7 +139,9 @@ def compliance_stats(rows: Iterable[Any]) -> dict[str, Any]:
         "inconclusive": inconclusive,
         "pending": pending,
         "not_applicable": status_counter["not_applicable"],
+        "critical": critical_count,
         "unresolved": unresolved,
+        "unresolved_plus_critical": unresolved_plus_critical,
         "pass_rate": (passed / total) if total else None,
         "reinspection_needed_count": reinspection_needed,
         "evidence_count": evidence_count,
