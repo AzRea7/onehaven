@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
 from .inspection_rules import get_hud_52580a_criteria, normalize_rule_code, normalize_severity
@@ -45,7 +45,7 @@ def base_hqs_template() -> list[ChecklistTemplateItem]:
                 not_applicable_allowed=c.not_applicable_allowed,
             )
         )
-    return out
+    return ordered_template_items(out)
 
 
 def template_items_from_effective_rules(effective_items: Iterable[dict[str, Any]]) -> list[ChecklistTemplateItem]:
@@ -72,7 +72,7 @@ def template_items_from_effective_rules(effective_items: Iterable[dict[str, Any]
                 not_applicable_allowed=bool(raw.get("not_applicable_allowed", False)),
             )
         )
-    return out
+    return ordered_template_items(out)
 
 
 def template_lookup(items: Iterable[ChecklistTemplateItem]) -> dict[str, ChecklistTemplateItem]:
@@ -105,4 +105,75 @@ def fail_points_to_items(fail_points: Iterable[str]) -> list[ChecklistTemplateIt
                 inspection_rule_code=normalize_rule_code(t),
             )
         )
-    return out
+    return ordered_template_items(out)
+
+
+def ordered_template_items(items: Iterable[ChecklistTemplateItem]) -> list[ChecklistTemplateItem]:
+    deduped: dict[str, ChecklistTemplateItem] = {}
+    for item in items or []:
+        if not item.code:
+            continue
+        deduped[item.code] = item
+
+    return sorted(
+        deduped.values(),
+        key=lambda item: (
+            str(item.template_key or "hud_52580a"),
+            str(item.template_version or "hud_52580a_2019"),
+            str(item.section or ""),
+            str(item.item_number or ""),
+            str(item.room_scope or ""),
+            str(item.category or ""),
+            str(item.code or ""),
+        ),
+    )
+
+
+def template_items_as_dicts(items: Iterable[ChecklistTemplateItem]) -> list[dict[str, Any]]:
+    return [asdict(item) for item in ordered_template_items(items)]
+
+
+def build_property_scoped_checklist_items(
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int | None,
+    jurisdiction: str | None,
+    template_items: Iterable[ChecklistTemplateItem],
+    inspector_name: str | None = None,
+    inspection_date: str | None = None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for sort_index, item in enumerate(ordered_template_items(template_items), start=1):
+        rows.append(
+            {
+                "org_id": org_id,
+                "property_id": property_id,
+                "inspection_id": inspection_id,
+                "inspection_date": inspection_date,
+                "inspector_name": inspector_name,
+                "jurisdiction": (jurisdiction or "").strip() or None,
+                "template_key": item.template_key,
+                "template_version": item.template_version,
+                "sort_order": sort_index,
+                "item_code": item.code,
+                "inspection_rule_code": item.inspection_rule_code or item.code,
+                "description": item.description,
+                "category": item.category,
+                "section": item.section,
+                "item_number": item.item_number,
+                "room_scope": item.room_scope,
+                "severity": item.severity,
+                "default_status": item.default_status,
+                "result_status": item.default_status,
+                "common_fail": item.common_fail,
+                "not_applicable_allowed": item.not_applicable_allowed,
+                "suggested_fix": item.suggested_fix,
+                "notes": None,
+                "evidence_json": "[]",
+                "photo_references_json": "[]",
+                "is_resolved": False,
+                "requires_reinspection": False,
+            }
+        )
+    return rows

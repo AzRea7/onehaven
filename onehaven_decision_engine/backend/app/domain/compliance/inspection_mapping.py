@@ -750,3 +750,108 @@ def map_raw_form_answers(payload: dict[str, Any] | list[dict[str, Any]] | None) 
         )
 
     return rows
+
+def build_property_item_outcome(
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int | None,
+    jurisdiction: str | None,
+    raw_result: dict[str, Any],
+    template_item: dict[str, Any] | None = None,
+    inspector_name: str | None = None,
+    inspection_date: str | None = None,
+) -> dict[str, Any]:
+    """
+    Domain helper for turning a normalized inspection result into a property-specific
+    checklist line outcome. This keeps services thin and preserves per-property
+    history across first inspection, reinspections, and ongoing readiness work.
+    """
+    template_item = dict(template_item or {})
+    item_code = str(
+        raw_result.get("item_code")
+        or template_item.get("code")
+        or raw_result.get("code")
+        or ""
+    ).strip()
+
+    result_status = normalize_inspection_item_status(
+        raw_result.get("result_status"),
+        failed=raw_result.get("failed"),
+    )
+    failed = result_status == "fail"
+    blocked = result_status == "blocked"
+
+    return {
+        "org_id": org_id,
+        "property_id": property_id,
+        "inspection_id": inspection_id,
+        "inspection_date": inspection_date,
+        "inspector_name": inspector_name,
+        "jurisdiction": (jurisdiction or "").strip() or None,
+        "template_key": template_item.get("template_key") or "hud_52580a",
+        "template_version": template_item.get("template_version") or "hud_52580a_2019",
+        "section": template_item.get("section"),
+        "item_number": template_item.get("item_number"),
+        "room_scope": template_item.get("room_scope"),
+        "item_code": item_code,
+        "inspection_rule_code": raw_result.get("inspection_rule_code") or item_code,
+        "description": template_item.get("description"),
+        "category": raw_result.get("category") or template_item.get("category") or "other",
+        "severity": raw_result.get("severity") or template_item.get("severity") or "fail",
+        "result_status": result_status,
+        "failed": failed,
+        "blocked": blocked,
+        "not_applicable": result_status == "not_applicable",
+        "inconclusive": result_status == "inconclusive",
+        "requires_reinspection": bool(raw_result.get("requires_reinspection", failed or blocked)),
+        "readiness_impact": float(raw_result.get("readiness_impact", 0.0) or 0.0),
+        "fail_reason": raw_result.get("fail_reason"),
+        "details": raw_result.get("details"),
+        "location": raw_result.get("location"),
+        "remediation_guidance": raw_result.get("remediation_guidance") or template_item.get("suggested_fix"),
+        "evidence_json": raw_result.get("evidence_json") or "[]",
+        "photo_references_json": raw_result.get("photo_references_json") or "[]",
+        "rehab_title": raw_result.get("rehab_title"),
+        "rehab_category": raw_result.get("rehab_category"),
+        "standard_label": raw_result.get("standard_label") or template_item.get("standard_label"),
+        "standard_citation": raw_result.get("standard_citation") or template_item.get("standard_citation"),
+        "common_fail": bool(template_item.get("common_fail", True)),
+        "not_applicable_allowed": bool(template_item.get("not_applicable_allowed", False)),
+        "is_resolved": False,
+    }
+
+
+def summarize_property_item_outcomes(rows: list[dict[str, Any]] | None) -> dict[str, Any]:
+    rows = list(rows or [])
+    total = len(rows)
+    failed = sum(1 for row in rows if str(row.get("result_status") or "").lower() == "fail")
+    blocked = sum(1 for row in rows if str(row.get("result_status") or "").lower() == "blocked")
+    passed = sum(1 for row in rows if str(row.get("result_status") or "").lower() == "pass")
+    not_applicable = sum(1 for row in rows if str(row.get("result_status") or "").lower() == "not_applicable")
+    inconclusive = sum(1 for row in rows if str(row.get("result_status") or "").lower() == "inconclusive")
+    pending = sum(
+        1
+        for row in rows
+        if str(row.get("result_status") or "").lower() in {"todo", "pending", "scheduled", ""}
+    )
+
+    unresolved = failed + blocked + inconclusive + pending
+    pass_rate = (passed / total) if total else None
+    readiness_penalty = sum(float(row.get("readiness_impact", 0.0) or 0.0) for row in rows)
+    readiness_score = max(0.0, 100.0 - readiness_penalty)
+
+    return {
+        "total_items": total,
+        "passed": passed,
+        "failed": failed,
+        "blocked": blocked,
+        "not_applicable": not_applicable,
+        "inconclusive": inconclusive,
+        "pending": pending,
+        "unresolved": unresolved,
+        "pass_rate": pass_rate,
+        "readiness_score": round(readiness_score, 2),
+        "latest_inspection_passed": total > 0 and unresolved == 0,
+        "requires_reinspection": failed > 0 or blocked > 0 or inconclusive > 0,
+    }

@@ -49,7 +49,8 @@ from ..services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
-_SECTION8_TEMPLATE: list[dict] = [
+
+_SECTION8_TEMPLATE: list[dict[str, Any]] = [
     {
         "category": "Electrical",
         "item_code": "GFCI",
@@ -139,8 +140,27 @@ def _must_get_property(db: Session, *, org_id: int, property_id: int) -> Propert
     return prop
 
 
+def _must_get_inspection(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int,
+) -> Inspection:
+    row = db.scalar(
+        select(Inspection).where(
+            Inspection.id == inspection_id,
+            Inspection.org_id == org_id,
+            Inspection.property_id == property_id,
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="inspection not found for property")
+    return row
+
+
 def _applies(
-    cond: dict | None,
+    cond: dict[str, Any] | None,
     *,
     year_built: int | None,
     has_garage: bool,
@@ -148,21 +168,17 @@ def _applies(
 ) -> bool:
     if not cond:
         return True
-
     if "year_built_lt" in cond:
         y = year_built if year_built is not None else 9999
         if not (y < int(cond["year_built_lt"])):
             return False
-
     if "has_garage" in cond:
         if bool(cond["has_garage"]) != bool(has_garage):
             return False
-
     if "property_type_in" in cond:
         allowed = cond.get("property_type_in") or []
         if isinstance(allowed, list) and (property_type or "") not in allowed:
             return False
-
     return True
 
 
@@ -178,7 +194,6 @@ def _items_from_templates(
                 cond = json.loads(t.applies_if_json)
             except Exception:
                 cond = None
-
         if not _applies(
             cond,
             year_built=prop.year_built,
@@ -186,7 +201,6 @@ def _items_from_templates(
             property_type=prop.property_type,
         ):
             continue
-
         items.append(
             ChecklistItemOut(
                 category=t.category,
@@ -228,7 +242,6 @@ def _items_from_fallback(prop: Property) -> list[ChecklistItemOut]:
 
 def _items_from_policy_brief(brief: dict[str, Any]) -> list[ChecklistItemOut]:
     items: list[ChecklistItemOut] = []
-
     required_actions = brief.get("required_actions") or []
     blocking_items = brief.get("blocking_items") or []
 
@@ -279,15 +292,13 @@ def _dedupe_items(items: list[ChecklistItemOut]) -> list[ChecklistItemOut]:
     seen: dict[str, ChecklistItemOut] = {}
     for item in items:
         code = item.item_code.strip().upper()
+        item.item_code = code
         if code not in seen:
-            item.item_code = code
             seen[code] = item
             continue
-
         existing = seen[code]
         if int(item.severity) > int(existing.severity):
             seen[code] = item
-
     return sorted(
         seen.values(),
         key=lambda x: (str(x.category or "").lower(), str(x.item_code or "").lower()),
@@ -308,7 +319,6 @@ def _merge_state(
         )
     ).all()
     state_by_code: dict[str, PropertyChecklistItem] = {r.item_code: r for r in state_rows}
-
     user_ids = {r.marked_by_user_id for r in state_rows if r.marked_by_user_id}
     users_by_id: dict[int, str] = {}
     if user_ids:
@@ -343,7 +353,6 @@ def _summarize_status(items: list[PropertyChecklistItem]) -> dict[str, Any]:
     blocked = counts["blocked"]
     in_progress = counts["in_progress"]
     todo = counts["todo"]
-
     pct_done = (done / total) if total else 0.0
 
     return {
@@ -357,14 +366,56 @@ def _summarize_status(items: list[PropertyChecklistItem]) -> dict[str, Any]:
     }
 
 
-def _is_template_version_locked(db: Session, *, org_id: int, strategy: str, version: str) -> bool:
+def _is_template_version_locked(
+    db: Session,
+    *,
+    org_id: int,
+    strategy: str,
+    version: str,
+) -> bool:
     if (version or "").strip().lower() != "v1":
         return False
-
     insp_id = db.scalar(
         select(Inspection.id).where(Inspection.org_id == org_id).limit(1)
     )
     return insp_id is not None
+
+
+def _inspection_row_payload(row: Inspection) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "property_id": row.property_id,
+        "inspection_date": row.inspection_date.isoformat() if row.inspection_date else None,
+        "passed": row.passed,
+        "reinspect_required": row.reinspect_required,
+        "notes": row.notes,
+        "template_key": getattr(row, "template_key", None),
+        "template_version": getattr(row, "template_version", None),
+        "result_status": getattr(row, "result_status", None),
+        "readiness_score": getattr(row, "readiness_score", None),
+        "readiness_status": getattr(row, "readiness_status", None),
+        "submitted_at": getattr(row, "submitted_at", None),
+        "completed_at": getattr(row, "completed_at", None),
+    }
+
+
+def _history_rows_for_property(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    rows = db.scalars(
+        select(Inspection)
+        .where(
+            Inspection.org_id == org_id,
+            Inspection.property_id == property_id,
+        )
+        .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
+        .limit(limit)
+    ).all()
+    return [_inspection_row_payload(r) for r in rows]
 
 
 @router.get("/templates", response_model=list[ChecklistTemplateItemOut])
@@ -392,7 +443,6 @@ def upsert_template(
     p=Depends(get_principal),
 ):
     require_owner(p)
-
     if _is_template_version_locked(
         db,
         org_id=p.org_id,
@@ -411,7 +461,6 @@ def upsert_template(
             ChecklistTemplateItem.code == payload.code,
         )
     )
-
     applies_if_json = json.dumps(payload.applies_if) if payload.applies_if else None
 
     if not row:
@@ -471,7 +520,6 @@ def generate_checklist(
 
     policy_items: list[ChecklistItemOut] = []
     jurisdiction: dict[str, Any] = {}
-
     if include_policy:
         jurisdiction = resolve_operational_policy(
             db,
@@ -483,7 +531,6 @@ def generate_checklist(
         policy_items = _items_from_policy_brief(jurisdiction)
 
     items = _dedupe_items(base_items + policy_items)
-
     out = ChecklistOut(
         property_id=property_id,
         strategy=strategy,
@@ -494,7 +541,6 @@ def generate_checklist(
 
     if persist:
         now = datetime.utcnow()
-
         row = db.scalar(
             select(PropertyChecklist).where(
                 PropertyChecklist.org_id == p.org_id,
@@ -503,9 +549,7 @@ def generate_checklist(
                 PropertyChecklist.version == version,
             )
         )
-
         serialized = [i.model_dump() for i in items]
-
         if not row:
             row = PropertyChecklist(
                 org_id=p.org_id,
@@ -532,7 +576,6 @@ def generate_checklist(
                 )
             )
             applies_if_json = json.dumps(i.applies_if) if i.applies_if else None
-
             if not existing:
                 db.add(
                     PropertyChecklistItem(
@@ -579,16 +622,15 @@ def generate_checklist(
                 created_at=now,
             )
         )
-
         sync_property_state(db, org_id=p.org_id, property_id=property_id)
         db.commit()
-        out.items = _merge_state(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            items=out.items,
-        )
 
+    out.items = _merge_state(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        items=out.items,
+    )
     return out
 
 
@@ -634,6 +676,150 @@ def get_latest_checklist(
         generated_at=row.generated_at,
         items=items,
     )
+
+
+@router.get("/property/{property_id}/record", response_model=dict)
+def property_compliance_record(
+    property_id: int,
+    inspection_limit: int = Query(default=25, ge=1, le=200),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view property compliance record",
+    )
+
+    latest_checklist = db.scalar(
+        select(PropertyChecklist)
+        .where(
+            PropertyChecklist.org_id == p.org_id,
+            PropertyChecklist.property_id == property_id,
+        )
+        .order_by(desc(PropertyChecklist.id))
+        .limit(1)
+    )
+    checklist_items = db.scalars(
+        select(PropertyChecklistItem).where(
+            PropertyChecklistItem.org_id == p.org_id,
+            PropertyChecklistItem.property_id == property_id,
+        )
+    ).all()
+    checklist_summary = _summarize_status(checklist_items)
+
+    readiness = build_property_inspection_readiness(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+    completion = compute_compliance_status(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+    readiness_summary = build_property_readiness_summary(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+    inspection_template = preview_property_inspection_template(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+    history = _history_rows_for_property(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        limit=inspection_limit,
+    )
+    latest_inspection = history[0] if history else None
+    jurisdiction = resolve_operational_policy(
+        db,
+        org_id=p.org_id,
+        city=prop.city,
+        county=getattr(prop, "county", None),
+        state=prop.state or "MI",
+    )
+
+    return {
+        "ok": True,
+        "property": {
+            "id": prop.id,
+            "address": getattr(prop, "address", None),
+            "city": prop.city,
+            "county": getattr(prop, "county", None),
+            "state": prop.state or "MI",
+            "property_type": getattr(prop, "property_type", None),
+            "year_built": getattr(prop, "year_built", None),
+            "has_garage": bool(getattr(prop, "has_garage", False)),
+        },
+        "checklist": {
+            "latest_id": latest_checklist.id if latest_checklist else None,
+            "strategy": latest_checklist.strategy if latest_checklist else None,
+            "version": latest_checklist.version if latest_checklist else None,
+            "generated_at": latest_checklist.generated_at if latest_checklist else None,
+            "summary": checklist_summary,
+        },
+        "latest_inspection": latest_inspection,
+        "inspection_history": history,
+        "inspection_attempt_count": len(history),
+        "inspection_template": inspection_template,
+        "readiness": readiness,
+        "readiness_summary": readiness_summary,
+        "completion": {
+            "completion_pct": completion.completion_pct,
+            "completion_projection_pct": completion.completion_projection_pct,
+            "failed_count": completion.failed_count,
+            "blocked_count": completion.blocked_count,
+            "latest_inspection_passed": completion.latest_inspection_passed,
+            "latest_readiness_score": completion.latest_readiness_score,
+            "latest_readiness_status": completion.latest_readiness_status,
+            "latest_result_status": completion.latest_result_status,
+            "posture": completion.posture,
+            "is_compliant": completion.is_compliant,
+        },
+        "jurisdiction": jurisdiction,
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            recompute=True,
+        ),
+    }
+
+
+@router.get("/property/{property_id}/inspections", response_model=dict)
+def property_inspection_history(
+    property_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view property inspection history",
+    )
+    rows = _history_rows_for_property(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        limit=limit,
+    )
+    return {
+        "ok": True,
+        "property_id": property_id,
+        "count": len(rows),
+        "rows": rows,
+    }
 
 
 @router.get("/status/{property_id}", response_model=dict)
@@ -711,7 +897,6 @@ def run_compliance_hqs(
         min_stage="compliance",
         action="run compliance HQS",
     )
-
     try:
         result = run_hqs_service(
             db,
@@ -763,7 +948,6 @@ def compliance_timeline(
             payload = json.loads(r.payload_json or "{}")
         except Exception:
             payload = {"raw": r.payload_json}
-
         out.append(
             {
                 "id": r.id,
@@ -773,7 +957,6 @@ def compliance_timeline(
                 "actor_user_id": r.actor_user_id,
             }
         )
-
     return {"property_id": property_id, "rows": out, "count": len(out)}
 
 
@@ -798,28 +981,31 @@ def run_hqs_summary_only(
             PropertyChecklistItem.property_id == property_id,
         )
     ).all()
-
     total = len(items)
     passed_ct = sum(1 for x in items if (x.status or "").lower() == "done")
     failed_ct = sum(1 for x in items if (x.status or "").lower() == "failed")
     blocked_ct = sum(1 for x in items if (x.status or "").lower() == "blocked")
     not_yet = total - passed_ct - failed_ct - blocked_ct
-
     score_pct = round((passed_ct / total) * 100.0, 2) if total else 0.0
     fail_codes = sorted(
-        [
-            x.item_code
-            for x in items
-            if (x.status or "").lower() == "failed" and x.item_code
-        ]
+        [x.item_code for x in items if (x.status or "").lower() == "failed" and x.item_code]
     )
-
     jurisdiction = resolve_operational_policy(
         db,
         org_id=p.org_id,
         city=prop.city,
         county=getattr(prop, "county", None),
         state=prop.state or "MI",
+    )
+
+    latest_inspection = db.scalar(
+        select(Inspection)
+        .where(
+            Inspection.org_id == p.org_id,
+            Inspection.property_id == property_id,
+        )
+        .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
+        .limit(1)
     )
 
     return {
@@ -831,6 +1017,7 @@ def run_hqs_summary_only(
         "not_yet": not_yet,
         "score_pct": score_pct,
         "fail_codes": fail_codes,
+        "latest_inspection": _inspection_row_payload(latest_inspection) if latest_inspection else None,
         "jurisdiction_profile_id": jurisdiction.get("profile_id"),
         "jurisdiction_scope": jurisdiction.get("scope"),
         "jurisdiction_match_level": jurisdiction.get("match_level"),
@@ -852,7 +1039,6 @@ def property_compliance_brief(
     p=Depends(get_principal),
 ):
     prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
-
     jurisdiction = resolve_operational_policy(
         db,
         org_id=p.org_id,
@@ -860,7 +1046,6 @@ def property_compliance_brief(
         county=getattr(prop, "county", None),
         state=prop.state or "MI",
     )
-
     policy_brief = build_property_compliance_brief(
         db,
         org_id=None,
@@ -869,7 +1054,6 @@ def property_compliance_brief(
         city=prop.city,
         pha_name=jurisdiction.get("pha_name"),
     )
-
     return {
         "property_id": property_id,
         "address": getattr(prop, "address", None),
@@ -899,7 +1083,6 @@ def property_inspection_template(
         min_stage="compliance",
         action="view inspection template",
     )
-
     return preview_property_inspection_template(
         db,
         org_id=p.org_id,
@@ -921,7 +1104,6 @@ def property_inspection_readiness(
         min_stage="compliance",
         action="view policy-driven inspection readiness",
     )
-
     return build_property_inspection_readiness(
         db,
         org_id=p.org_id,
@@ -943,7 +1125,6 @@ def property_readiness_summary(
         min_stage="compliance",
         action="view readiness summary",
     )
-
     return build_property_readiness_summary(
         db,
         org_id=p.org_id,
@@ -965,13 +1146,11 @@ def property_completion_projection(
         min_stage="compliance",
         action="view compliance completion projection",
     )
-
     status = compute_compliance_status(
         db,
         org_id=p.org_id,
         property_id=property_id,
     )
-
     return {
         "ok": True,
         "property_id": property_id,
@@ -1004,7 +1183,13 @@ def property_failure_actions(
         min_stage="compliance",
         action="view failure-generated actions",
     )
-
+    if inspection_id is not None:
+        _must_get_inspection(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            inspection_id=inspection_id,
+        )
     return build_failure_next_actions(
         db,
         org_id=p.org_id,
@@ -1029,7 +1214,13 @@ def create_tasks_from_failures(
         min_stage="compliance",
         action="create tasks from inspection failures",
     )
-
+    if inspection_id is not None:
+        _must_get_inspection(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            inspection_id=inspection_id,
+        )
     try:
         result = create_failure_tasks_from_inspection(
             db,
@@ -1069,7 +1260,6 @@ def run_property_compliance_automation(
         min_stage="compliance",
         action="run compliance automation",
     )
-
     try:
         result = run_hqs_service(
             db,
@@ -1081,7 +1271,6 @@ def run_property_compliance_automation(
         )
         sync_property_state(db, org_id=p.org_id, property_id=property_id)
         db.commit()
-
         readiness = result.get("inspection_readiness") or {}
         return {
             **result,
@@ -1113,7 +1302,6 @@ def create_tasks_from_policy(
         min_stage="acquisition",
         action="create rehab/compliance tasks from policy",
     )
-
     try:
         result = generate_policy_tasks_for_property(
             db,
@@ -1149,6 +1337,12 @@ def submit_property_inspection_form(
     p=Depends(get_principal),
 ):
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    _must_get_inspection(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+    )
     require_stage(
         db,
         org_id=p.org_id,
@@ -1156,7 +1350,6 @@ def submit_property_inspection_form(
         min_stage="compliance",
         action="submit inspection form",
     )
-
     try:
         result = apply_inspection_form_results(
             db,
@@ -1202,11 +1395,12 @@ def update_checklist_item(
         action="update compliance checklist item",
     )
 
+    normalized_code = (item_code or "").strip().upper()
     row = db.scalar(
         select(PropertyChecklistItem).where(
             PropertyChecklistItem.org_id == p.org_id,
             PropertyChecklistItem.property_id == property_id,
-            PropertyChecklistItem.item_code == item_code,
+            PropertyChecklistItem.item_code == normalized_code,
         )
     )
     if not row:
@@ -1255,7 +1449,7 @@ def update_checklist_item(
             actor_user_id=p.user_id,
             action="checklist_item_updated",
             entity_type="property_checklist_item",
-            entity_id=f"{property_id}:{item_code}",
+            entity_id=f"{property_id}:{normalized_code}",
             before_json=json.dumps(before),
             after_json=json.dumps(after),
             created_at=now,
@@ -1267,7 +1461,7 @@ def update_checklist_item(
             property_id=property_id,
             actor_user_id=p.user_id,
             event_type="checklist_item_updated",
-            payload_json=json.dumps({"item_code": item_code, "status": row.status}),
+            payload_json=json.dumps({"item_code": normalized_code, "status": row.status}),
             created_at=now,
         )
     )
@@ -1275,6 +1469,12 @@ def update_checklist_item(
     sync_property_state(db, org_id=p.org_id, property_id=property_id)
     db.commit()
     db.refresh(row)
+
+    marked_by_email = p.email
+    if row.marked_by_user_id and row.marked_by_user_id != p.user_id:
+        user = db.get(AppUser, row.marked_by_user_id)
+        if user and user.email:
+            marked_by_email = user.email
 
     return ChecklistItemOut(
         item_code=row.item_code,
@@ -1287,5 +1487,5 @@ def update_checklist_item(
         marked_at=row.marked_at,
         proof_url=row.proof_url,
         notes=row.notes,
-        marked_by=p.email,
+        marked_by=marked_by_email,
     )

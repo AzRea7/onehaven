@@ -8,6 +8,12 @@ from sqlalchemy.orm import Session
 from app.models import Property
 from app.policy_models import HqsAddendum, HqsRule
 
+from .checklist_templates import (
+    ChecklistTemplateItem,
+    build_property_scoped_checklist_items,
+    template_items_as_dicts,
+    template_items_from_effective_rules,
+)
 from .inspection_rules import criteria_as_dicts, normalize_rule_code, normalize_severity
 
 
@@ -359,5 +365,73 @@ def get_effective_hqs_items(
             "baseline": len(baseline_items),
             "profile_items": len(profile_items),
             "contextual_items": len(ctx_items),
+        },
+    }
+
+
+def build_property_inspection_packet(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+    property_id: int | None = None,
+    inspection_id: int | None = None,
+    profile_summary: dict[str, Any] | None = None,
+    jurisdiction: str | None = None,
+    inspector_name: str | None = None,
+    inspection_date: str | None = None,
+) -> dict[str, Any]:
+    """
+    Domain-only helper that turns the effective rule library into a property-scoped
+    inspection packet. Services can persist the returned rows directly into
+    property-specific inspection item tables.
+    """
+    effective = get_effective_hqs_items(
+        db,
+        org_id=org_id,
+        prop=prop,
+        profile_summary=profile_summary,
+    )
+    template_items = template_items_from_effective_rules(effective.get("items") or [])
+    resolved_property_id = int(property_id or getattr(prop, "id", 0) or 0)
+
+    checklist_rows = build_property_scoped_checklist_items(
+        org_id=org_id,
+        property_id=resolved_property_id,
+        inspection_id=inspection_id,
+        jurisdiction=jurisdiction,
+        template_items=template_items,
+        inspector_name=inspector_name,
+        inspection_date=inspection_date,
+    )
+
+    template_versions = sorted(
+        {
+            (
+                item.template_key,
+                item.template_version,
+            )
+            for item in template_items
+        }
+    )
+
+    return {
+        "property_id": resolved_property_id,
+        "org_id": org_id,
+        "jurisdiction": (jurisdiction or "").strip() or None,
+        "template_catalog": template_items_as_dicts(template_items),
+        "template_sources": effective.get("sources") or [],
+        "template_counts": effective.get("counts") or {},
+        "template_versions": [
+            {"template_key": key, "template_version": version}
+            for key, version in template_versions
+        ],
+        "inspection_items": checklist_rows,
+        "summary": {
+            "total_items": len(checklist_rows),
+            "common_fail_count": sum(1 for row in checklist_rows if row.get("common_fail")),
+            "critical_items": sum(1 for row in checklist_rows if str(row.get("severity")).lower() == "critical"),
+            "fail_items": sum(1 for row in checklist_rows if str(row.get("severity")).lower() == "fail"),
+            "warn_items": sum(1 for row in checklist_rows if str(row.get("severity")).lower() == "warn"),
         },
     }

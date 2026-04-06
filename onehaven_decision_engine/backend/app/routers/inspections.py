@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 
@@ -9,10 +8,10 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
+from ..db import get_db
 from ..domain.audit import emit_audit
 from ..domain.compliance import compliance_stats, top_fail_points
 from ..domain.compliance.inspection_mapping import map_inspection_code
-from ..db import get_db
 from ..models import (
     Inspection,
     InspectionItem,
@@ -65,6 +64,8 @@ def _inspection_payload(row: Inspection) -> dict[str, Any]:
         "result_status": getattr(row, "result_status", None),
         "readiness_score": getattr(row, "readiness_score", None),
         "readiness_status": getattr(row, "readiness_status", None),
+        "submitted_at": getattr(row, "submitted_at", None),
+        "completed_at": getattr(row, "completed_at", None),
     }
 
 
@@ -92,6 +93,84 @@ def _inspection_item_payload(row: InspectionItem) -> dict[str, Any]:
     }
 
 
+def _must_get_org_inspection(db: Session, *, org_id: int, inspection_id: int) -> Inspection:
+    row = db.scalar(
+        select(Inspection).where(
+            Inspection.id == inspection_id,
+            Inspection.org_id == org_id,
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Inspection not found")
+    return row
+
+
+def _must_get_property_for_inspection(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> Property:
+    return must_get_property(db, org_id=org_id, property_id=property_id)
+
+
+def _sync_checklist_state_from_inspection_item(
+    db: Session,
+    *,
+    org_id: int,
+    actor_user_id: int,
+    property_id: int,
+    inspection_item: InspectionItem,
+) -> dict[str, Any] | None:
+    mapped = map_inspection_code(inspection_item.code)
+    if not mapped:
+        return None
+
+    now = datetime.utcnow()
+    ci = db.scalar(
+        select(PropertyChecklistItem).where(
+            PropertyChecklistItem.org_id == org_id,
+            PropertyChecklistItem.property_id == property_id,
+            PropertyChecklistItem.item_code == mapped.checklist_code,
+        )
+    )
+
+    if ci is None:
+        ci = PropertyChecklistItem(
+            org_id=org_id,
+            property_id=property_id,
+            checklist_id=None,
+            item_code=mapped.checklist_code,
+            category="inspection",
+            description=f"Auto-mapped from inspection item: {inspection_item.code}",
+            severity=max(int(inspection_item.severity or 2), 2),
+            common_fail=True,
+            applies_if_json=None,
+            status="failed" if inspection_item.failed else "done",
+            marked_by_user_id=actor_user_id,
+            marked_at=now,
+            notes=inspection_item.details,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(ci)
+    else:
+        ci.status = "failed" if inspection_item.failed else "done"
+        ci.marked_by_user_id = actor_user_id
+        ci.marked_at = now
+        ci.updated_at = now
+        if inspection_item.details:
+            ci.notes = inspection_item.details
+        db.add(ci)
+
+    return {
+        "mapped_checklist_code": mapped.checklist_code,
+        "rehab_title": mapped.rehab_title,
+        "rehab_category": mapped.rehab_category,
+        "inspection_relevant": bool(mapped.inspection_relevant),
+    }
+
+
 @router.put("/inspectors", response_model=InspectorOut)
 def upsert_inspector(
     payload: InspectorUpsert,
@@ -110,7 +189,6 @@ def upsert_inspector(
         stmt = stmt.where(Inspector.agency == payload.agency)
 
     ins = db.scalar(stmt)
-
     if ins is None:
         ins = Inspector(name=name, agency=payload.agency)
         db.add(ins)
@@ -131,7 +209,11 @@ def create_inspection(
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ) -> InspectionOut:
-    must_get_property(db, org_id=p.org_id, property_id=payload.property_id)
+    _must_get_property_for_inspection(
+        db,
+        org_id=p.org_id,
+        property_id=payload.property_id,
+    )
     require_stage(
         db,
         org_id=p.org_id,
@@ -167,7 +249,6 @@ def create_inspection(
         before=None,
         after=_inspection_payload(insp),
     )
-
     wf(
         db,
         org_id=p.org_id,
@@ -178,10 +259,61 @@ def create_inspection(
     )
 
     sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
-
     db.commit()
     db.refresh(insp)
     return insp
+
+
+@router.get("/{inspection_id}", response_model=dict)
+def get_inspection(
+    inspection_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
+    rows = db.scalars(
+        select(InspectionItem)
+        .where(InspectionItem.inspection_id == inspection_id)
+        .order_by(InspectionItem.id.asc())
+    ).all()
+    return {
+        "ok": True,
+        "inspection": _inspection_payload(insp),
+        "items": [_inspection_item_payload(r) for r in rows],
+        "count": len(rows),
+    }
+
+
+@router.get("/property/{property_id}", response_model=dict)
+def list_property_inspections(
+    property_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
+    require_stage(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        min_stage="compliance",
+        action="view inspection history",
+    )
+    rows = db.scalars(
+        select(Inspection)
+        .where(
+            Inspection.org_id == p.org_id,
+            Inspection.property_id == property_id,
+        )
+        .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
+        .limit(limit)
+    ).all()
+    return {
+        "ok": True,
+        "property_id": property_id,
+        "count": len(rows),
+        "rows": [_inspection_payload(r) for r in rows],
+    }
 
 
 @router.post("/{inspection_id}/items", response_model=InspectionItemOut)
@@ -192,13 +324,7 @@ def add_item(
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ) -> InspectionItemOut:
-    insp = db.get(Inspection, inspection_id)
-    if not insp:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-
-    if getattr(insp, "org_id", None) != p.org_id:
-        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
-
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
     require_stage(
         db,
         org_id=p.org_id,
@@ -207,7 +333,12 @@ def add_item(
         action="add inspection item",
     )
 
-    prop = db.scalar(select(Property).where(Property.id == insp.property_id, Property.org_id == p.org_id))
+    prop = db.scalar(
+        select(Property).where(
+            Property.id == insp.property_id,
+            Property.org_id == p.org_id,
+        )
+    )
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
 
@@ -225,18 +356,15 @@ def add_item(
     before = None
     if existing:
         before = _inspection_item_payload(existing)
-
         existing.failed = payload.failed
         existing.severity = payload.severity
         existing.location = payload.location
         existing.details = payload.details
-
         if existing.failed is False and existing.resolved_at is None:
             existing.resolved_at = datetime.utcnow()
         if existing.failed is True and existing.resolved_at is not None:
             existing.resolved_at = None
-            existing.resolution_notes = None
-
+        existing.resolution_notes = None
         row = existing
     else:
         row = InspectionItem(
@@ -249,8 +377,8 @@ def add_item(
         )
         if row.failed is False:
             row.resolved_at = datetime.utcnow()
-        db.add(row)
 
+    db.add(row)
     db.flush()
 
     emit_audit(
@@ -264,79 +392,49 @@ def add_item(
         after=_inspection_item_payload(row),
     )
 
-    if row.failed:
-        mapped = map_inspection_code(row.code)
+    mapping_meta = _sync_checklist_state_from_inspection_item(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        property_id=prop.id,
+        inspection_item=row,
+    )
 
-        if mapped:
-            ci = db.scalar(
-                select(PropertyChecklistItem).where(
-                    PropertyChecklistItem.org_id == p.org_id,
-                    PropertyChecklistItem.property_id == prop.id,
-                    PropertyChecklistItem.item_code == mapped.checklist_code,
+    if row.failed:
+        if mapping_meta and mapping_meta.get("rehab_title"):
+            now = datetime.utcnow()
+            existing_task = db.scalar(
+                select(RehabTask).where(
+                    RehabTask.org_id == p.org_id,
+                    RehabTask.property_id == prop.id,
+                    RehabTask.title == mapping_meta["rehab_title"],
                 )
             )
-
-            now = datetime.utcnow()
-            if ci is None:
-                ci = PropertyChecklistItem(
+            if existing_task is None:
+                task = RehabTask(
                     org_id=p.org_id,
                     property_id=prop.id,
-                    checklist_id=None,
-                    item_code=mapped.checklist_code,
-                    category="inspection",
-                    description=f"Auto-mapped from inspection failure: {row.code}",
-                    severity=max(int(row.severity or 2), 2),
-                    common_fail=True,
-                    applies_if_json=None,
-                    status="failed",
-                    marked_by_user_id=p.user_id,
-                    marked_at=now,
-                    notes=row.details,
+                    title=mapping_meta["rehab_title"],
+                    category=mapping_meta["rehab_category"],
+                    inspection_relevant=bool(mapping_meta["inspection_relevant"]),
+                    status="todo",
                     created_at=now,
-                    updated_at=now,
                 )
-                db.add(ci)
-            else:
-                ci.status = "failed"
-                ci.marked_by_user_id = p.user_id
-                ci.marked_at = now
-                ci.updated_at = now
-                if row.details:
-                    ci.notes = (ci.notes or "") + (("\n" if ci.notes else "") + row.details)
+                db.add(task)
 
-            if mapped.rehab_title:
-                existing_task = db.scalar(
-                    select(RehabTask).where(
-                        RehabTask.org_id == p.org_id,
-                        RehabTask.property_id == prop.id,
-                        RehabTask.title == mapped.rehab_title,
-                    )
-                )
-                if existing_task is None:
-                    task = RehabTask(
-                        org_id=p.org_id,
-                        property_id=prop.id,
-                        title=mapped.rehab_title,
-                        category=mapped.rehab_category,
-                        inspection_relevant=bool(mapped.inspection_relevant),
-                        status="todo",
-                        created_at=now,
-                    )
-                    db.add(task)
-
-            wf(
-                db,
-                org_id=p.org_id,
-                actor_user_id=p.user_id,
-                event_type="inspection.item_failed",
-                property_id=prop.id,
-                payload={
-                    "inspection_id": insp.id,
-                    "code": row.code,
-                    "mapped_checklist": mapped.checklist_code,
-                    "rehab_task_title": mapped.rehab_title,
-                },
-            )
+        wf(
+            db,
+            org_id=p.org_id,
+            actor_user_id=p.user_id,
+            event_type="inspection.item_failed",
+            property_id=prop.id,
+            payload={
+                "inspection_id": insp.id,
+                "code": row.code,
+                "mapped_checklist": mapping_meta["mapped_checklist_code"] if mapping_meta else None,
+                "rehab_task_title": mapping_meta["rehab_title"] if mapping_meta else None,
+            },
+        )
     else:
         wf(
             db,
@@ -349,11 +447,11 @@ def add_item(
                 "item_id": row.id,
                 "code": row.code,
                 "failed": row.failed,
+                "mapped_checklist": mapping_meta["mapped_checklist_code"] if mapping_meta else None,
             },
         )
 
     sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
-
     db.commit()
     db.refresh(row)
     return row
@@ -371,13 +469,7 @@ def resolve_item(
     if not item:
         raise HTTPException(status_code=404, detail="Inspection item not found")
 
-    insp = db.get(Inspection, item.inspection_id)
-    if not insp:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-
-    if getattr(insp, "org_id", None) != p.org_id:
-        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
-
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=item.inspection_id)
     require_stage(
         db,
         org_id=p.org_id,
@@ -387,12 +479,18 @@ def resolve_item(
     )
 
     before = _inspection_item_payload(item)
-
     item.failed = False
     item.resolution_notes = payload.resolution_notes
     item.resolved_at = payload.resolved_at or datetime.utcnow()
-
     db.flush()
+
+    _sync_checklist_state_from_inspection_item(
+        db,
+        org_id=p.org_id,
+        actor_user_id=p.user_id,
+        property_id=insp.property_id,
+        inspection_item=item,
+    )
 
     emit_audit(
         db,
@@ -404,7 +502,6 @@ def resolve_item(
         before=before,
         after=_inspection_item_payload(item),
     )
-
     wf(
         db,
         org_id=p.org_id,
@@ -415,7 +512,6 @@ def resolve_item(
     )
 
     sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
-
     db.commit()
     db.refresh(item)
     return item
@@ -431,13 +527,7 @@ def submit_inspection_form(
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ):
-    insp = db.get(Inspection, inspection_id)
-    if not insp:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-
-    if getattr(insp, "org_id", None) != p.org_id:
-        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
-
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
     require_stage(
         db,
         org_id=p.org_id,
@@ -445,7 +535,6 @@ def submit_inspection_form(
         min_stage="compliance",
         action="submit inspection form",
     )
-
     try:
         result = apply_inspection_form_results(
             db,
@@ -459,7 +548,6 @@ def submit_inspection_form(
         )
         sync_property_state(db, org_id=p.org_id, property_id=insp.property_id)
         db.commit()
-
         return {
             **result,
             "workflow": build_workflow_summary(
@@ -481,19 +569,12 @@ def inspection_normalized_results(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    insp = db.get(Inspection, inspection_id)
-    if not insp:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-
-    if getattr(insp, "org_id", None) != p.org_id:
-        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
-
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
     rows = db.scalars(
         select(InspectionItem)
         .where(InspectionItem.inspection_id == inspection_id)
         .order_by(InspectionItem.id.asc())
     ).all()
-
     return {
         "ok": True,
         "inspection": _inspection_payload(insp),
@@ -508,13 +589,7 @@ def inspection_readiness_summary(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    insp = db.get(Inspection, inspection_id)
-    if not insp:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-
-    if getattr(insp, "org_id", None) != p.org_id:
-        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
-
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
     return build_property_readiness_summary(
         db,
         org_id=p.org_id,
@@ -529,13 +604,7 @@ def inspection_tasks_from_failures(
     p=Depends(get_principal),
     _op=Depends(require_operator),
 ):
-    insp = db.get(Inspection, inspection_id)
-    if not insp:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-
-    if getattr(insp, "org_id", None) != p.org_id:
-        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
-
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
     require_stage(
         db,
         org_id=p.org_id,
@@ -543,7 +612,6 @@ def inspection_tasks_from_failures(
         min_stage="compliance",
         action="generate tasks from inspection failures",
     )
-
     try:
         result = create_failure_tasks_from_inspection(
             db,
@@ -573,13 +641,7 @@ def inspection_failure_actions(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    insp = db.get(Inspection, inspection_id)
-    if not insp:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-
-    if getattr(insp, "org_id", None) != p.org_id:
-        must_get_property(db, org_id=p.org_id, property_id=insp.property_id)
-
+    insp = _must_get_org_inspection(db, org_id=p.org_id, inspection_id=inspection_id)
     return build_failure_next_actions(
         db,
         org_id=p.org_id,
@@ -605,8 +667,13 @@ def predict_fail_points(
             raise HTTPException(status_code=400, detail="Invalid inspector_id")
         inspector_name = ins.name
 
-    out = top_fail_points(db, city=city, state=state, inspector_id=inspector_id, limit=limit)
-
+    out = top_fail_points(
+        db,
+        city=city,
+        state=state,
+        inspector_id=inspector_id,
+        limit=limit,
+    )
     return PredictFailPointsOut(
         city=city,
         inspector=inspector_name,
@@ -624,7 +691,6 @@ def stats(
     p=Depends(get_principal),
 ) -> ComplianceStatsOut:
     s = compliance_stats(db, city=city, state=state, limit=limit)
-
     return ComplianceStatsOut(
         city=city,
         inspections=s.get("inspections", 0),
@@ -640,7 +706,7 @@ def inspection_readiness(
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
-    must_get_property(db, org_id=p.org_id, property_id=property_id)
+    _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
     require_stage(
         db,
         org_id=p.org_id,
@@ -651,29 +717,37 @@ def inspection_readiness(
 
     latest = db.scalar(
         select(Inspection)
-        .where(Inspection.org_id == p.org_id, Inspection.property_id == property_id)
-        .order_by(desc(Inspection.id))
+        .where(
+            Inspection.org_id == p.org_id,
+            Inspection.property_id == property_id,
+        )
+        .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
         .limit(1)
     )
-
     items = db.scalars(
         select(InspectionItem)
         .join(Inspection, Inspection.id == InspectionItem.inspection_id)
-        .where(Inspection.org_id == p.org_id, Inspection.property_id == property_id)
+        .where(
+            Inspection.org_id == p.org_id,
+            Inspection.property_id == property_id,
+        )
     ).all()
-
     open_failed = [i for i in items if bool(i.failed) and i.resolved_at is None]
     readiness_summary = build_property_readiness_summary(
         db,
         org_id=p.org_id,
         property_id=property_id,
     )
-
     return {
         "property_id": property_id,
         "latest_inspection": _inspection_payload(latest) if latest else None,
         "open_failed_count": len(open_failed),
         "open_failed_items": [_inspection_item_payload(i) for i in open_failed[:25]],
         "readiness_summary": readiness_summary,
-        "workflow": build_workflow_summary(db, org_id=p.org_id, property_id=property_id, recompute=True),
+        "workflow": build_workflow_summary(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            recompute=True,
+        ),
     }
