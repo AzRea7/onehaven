@@ -1,10 +1,11 @@
+# backend/app/services/compliance_service.py
 from __future__ import annotations
 
 import json
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..domain.compliance.hqs import summarize_items, top_fix_candidates
@@ -12,6 +13,7 @@ from ..domain.compliance.hqs_library import get_effective_hqs_items
 from ..models import (
     AuditEvent,
     Inspection,
+    InspectionItem,
     Property,
     PropertyChecklistItem,
     RehabTask,
@@ -65,8 +67,22 @@ def _latest_inspection(db: Session, *, org_id: int, property_id: int) -> Inspect
     return db.scalar(
         select(Inspection)
         .where(Inspection.org_id == org_id, Inspection.property_id == property_id)
-        .order_by(Inspection.id.desc())
+        .order_by(
+            desc(Inspection.inspection_date),
+            desc(Inspection.created_at),
+            desc(Inspection.id),
+        )
         .limit(1)
+    )
+
+
+def _inspection_rows(db: Session, *, inspection_id: int) -> list[InspectionItem]:
+    return list(
+        db.scalars(
+            select(InspectionItem)
+            .where(InspectionItem.inspection_id == inspection_id)
+            .order_by(InspectionItem.id.asc())
+        ).all()
     )
 
 
@@ -121,6 +137,8 @@ def _ensure_policy_task(
 
     if hasattr(row, "inspection_relevant"):
         row.inspection_relevant = True
+    if hasattr(row, "priority"):
+        row.priority = priority
     if hasattr(row, "cost_estimate"):
         row.cost_estimate = None
     if hasattr(row, "updated_at"):
@@ -284,7 +302,11 @@ def _build_warren_fallback_rules(profile_summary: dict[str, Any]) -> list[dict[s
 
     if inspection_required:
         inspection_frequency = str(compliance.get("inspection_frequency") or "required").strip().lower()
-        frequency_label = "Warren biennial rental inspection required" if inspection_frequency == "biennial" else "Warren rental inspection required"
+        frequency_label = (
+            "Warren biennial rental inspection required"
+            if inspection_frequency == "biennial"
+            else "Warren rental inspection required"
+        )
         out.append(
             _rule_result(
                 key="WARREN_BIENNIAL_INSPECTION_REQUIRED",
@@ -549,6 +571,29 @@ def _sorted_actions(rows: list[dict[str, Any]], *, limit: int = 8) -> list[dict[
     )[: max(1, int(limit))]
 
 
+def _inspection_item_to_rule(item: InspectionItem) -> dict[str, Any]:
+    status = str(getattr(item, "result_status", "") or "").strip().lower()
+    severity_num = int(getattr(item, "severity", 3) or 3)
+    severity = "critical" if severity_num >= 4 else "fail" if severity_num == 3 else "warn" if severity_num == 2 else "info"
+    code = str(getattr(item, "code", "") or "").strip().upper() or "INSPECTION_ITEM"
+
+    is_failing = status in {"fail", "blocked", "inconclusive"}
+    return _rule_result(
+        key=f"INSPECTION_{code}",
+        label=str(getattr(item, "standard_label", None) or getattr(item, "fail_reason", None) or code),
+        source="inspection_results",
+        status=STATUS_FAIL if is_failing else STATUS_PASS if status == "pass" else STATUS_UNKNOWN,
+        severity=severity,
+        category=str(getattr(item, "category", None) or "inspection"),
+        blocks_hqs=is_failing and severity in {"fail", "critical"},
+        blocks_local=is_failing and severity in {"fail", "critical"},
+        blocks_voucher=is_failing and severity in {"fail", "critical"},
+        blocks_lease_up=is_failing and severity in {"fail", "critical"},
+        suggested_fix=str(getattr(item, "remediation_guidance", None) or getattr(item, "fail_reason", None) or "").strip() or None,
+        evidence=str(getattr(item, "details", None) or getattr(item, "location", None) or "").strip() or None,
+    )
+
+
 def ensure_property_compliance_template(
     db: Session,
     *,
@@ -627,9 +672,10 @@ def build_property_inspection_readiness(
     local_rules = _build_local_rules_from_profile(profile_summary)
 
     latest_inspection = _latest_inspection(db, org_id=org_id, property_id=property_id)
+    inspection_result_rules: list[dict[str, Any]] = []
+    latest_inspection_id = getattr(latest_inspection, "id", None) if latest_inspection else None
     if latest_inspection is not None:
         passed = bool(getattr(latest_inspection, "passed", False))
-        inspection_id = getattr(latest_inspection, "id", None)
         local_rules.append(
             _rule_result(
                 key="LATEST_INSPECTION_PASSED",
@@ -642,14 +688,35 @@ def build_property_inspection_readiness(
                 blocks_voucher=not passed,
                 blocks_lease_up=not passed,
                 suggested_fix="Address failing items and pass reinspection.",
-                evidence=f"inspection_id={inspection_id}" if inspection_id is not None else None,
+                evidence=f"inspection_id={latest_inspection_id}" if latest_inspection_id is not None else None,
             )
         )
+        if bool(getattr(latest_inspection, "reinspect_required", False)):
+            local_rules.append(
+                _rule_result(
+                    key="LATEST_INSPECTION_REINSPECTION_REQUIRED",
+                    label="Latest inspection requires reinspection",
+                    source="inspection_history",
+                    status=STATUS_FAIL,
+                    severity="fail",
+                    category="inspection_history",
+                    blocks_hqs=True,
+                    blocks_local=True,
+                    blocks_voucher=True,
+                    blocks_lease_up=True,
+                    suggested_fix="Resolve all failing or blocked items and schedule reinspection.",
+                    evidence=f"inspection_id={latest_inspection_id}",
+                )
+            )
 
-    all_results = _dedupe_rules(hqs_results + local_rules)
+        for inspection_item in _inspection_rows(db, inspection_id=int(latest_inspection.id)):
+            inspection_result_rules.append(_inspection_item_to_rule(inspection_item))
+
+    all_results = _dedupe_rules(hqs_results + local_rules + inspection_result_rules)
 
     blockers = [
-        r for r in all_results
+        r
+        for r in all_results
         if r["status"] in {STATUS_FAIL, STATUS_UNKNOWN}
         and (r["blocks_hqs"] or r["blocks_local"] or r["blocks_voucher"] or r["blocks_lease_up"])
     ]
@@ -676,7 +743,6 @@ def build_property_inspection_readiness(
         profile_summary=profile_summary,
     )
 
-    latest_inspection_id = getattr(latest_inspection, "id", None) if latest_inspection else None
     failure_actions = build_failure_next_actions(
         db,
         org_id=org_id,
@@ -697,8 +763,8 @@ def build_property_inspection_readiness(
                 "label": action.get("title"),
                 "source": "inspection_failure",
                 "status": STATUS_FAIL,
-                "severity": "fail" if action.get("priority") != "high" else "critical",
-                "category": action.get("category") or "compliance_repair",
+                "severity": "critical" if action.get("priority") == "high" else "fail",
+                "category": action.get("rehab_category") or action.get("category") or "compliance_repair",
                 "blocks_hqs": bool(action.get("requires_reinspection", True)),
                 "blocks_local": False,
                 "blocks_voucher": bool(action.get("requires_reinspection", True)),
@@ -711,10 +777,24 @@ def build_property_inspection_readiness(
     recommended_actions = _sorted_actions(recommended_actions, limit=10)
 
     overall_status = "ready"
-    if readiness_score.posture in {"critical_failures", "needs_remediation", "not_ready"}:
+    if readiness_score.posture in {"critical_failures", "needs_remediation", "not_ready", "reinspection_required"}:
         overall_status = "blocked"
     elif warnings:
         overall_status = "attention"
+
+    latest_inspection_payload = {
+        "id": latest_inspection_id,
+        "passed": bool(getattr(latest_inspection, "passed", False)) if latest_inspection else None,
+        "template_key": getattr(latest_inspection, "template_key", None) if latest_inspection else None,
+        "template_version": getattr(latest_inspection, "template_version", None) if latest_inspection else None,
+        "result_status": getattr(latest_inspection, "result_status", None) if latest_inspection else None,
+        "readiness_status": getattr(latest_inspection, "readiness_status", None) if latest_inspection else None,
+        "readiness_score": float(getattr(latest_inspection, "readiness_score", 0.0) or 0.0) if latest_inspection else None,
+        "reinspect_required": bool(getattr(latest_inspection, "reinspect_required", False)) if latest_inspection else None,
+        "inspection_date": getattr(latest_inspection, "inspection_date", None) if latest_inspection else None,
+        "inspector": getattr(latest_inspection, "inspector", None) if latest_inspection else None,
+        "jurisdiction": getattr(latest_inspection, "jurisdiction", None) if latest_inspection else None,
+    }
 
     return {
         "ok": True,
@@ -748,6 +828,7 @@ def build_property_inspection_readiness(
             "result_status": readiness_score.result_status,
             "latest_inspection_passed": bool(readiness_score.latest_inspection_passed),
             "is_compliant": bool(readiness_score.is_compliant),
+            "reinspect_required": bool(readiness_score.reinspect_required),
         },
         "counts": {
             "total_rules": len(all_results),
@@ -763,6 +844,9 @@ def build_property_inspection_readiness(
             "inspection_failed_critical_items": int(readiness_score.failed_critical_items),
             "checklist_failed_count": int(readiness_score.checklist_failed_count),
             "checklist_blocked_count": int(readiness_score.checklist_blocked_count),
+            "unresolved_failure_count": int(readiness_score.unresolved_failure_count),
+            "unresolved_blocked_count": int(readiness_score.unresolved_blocked_count),
+            "unresolved_critical_count": int(readiness_score.unresolved_critical_count),
         },
         "results": all_results,
         "blocking_items": blockers,
@@ -773,12 +857,7 @@ def build_property_inspection_readiness(
         "effective_hqs_counts": effective_hqs.get("counts") or {},
         "policy_brief": brief,
         "jurisdiction": profile_summary,
-        "latest_inspection": {
-            "id": latest_inspection_id,
-            "passed": bool(getattr(latest_inspection, "passed", False)) if latest_inspection else None,
-            "template_key": getattr(latest_inspection, "template_key", None) if latest_inspection else None,
-            "template_version": getattr(latest_inspection, "template_version", None) if latest_inspection else None,
-        },
+        "latest_inspection": latest_inspection_payload,
         "template": {
             "template_key": checklist_sync["template_key"],
             "template_version": checklist_sync["template_version"],
@@ -796,6 +875,7 @@ def build_property_inspection_readiness(
             "completion_pct": float(readiness_score.completion_pct),
             "completion_projection_pct": float(readiness_score.completion_projection_pct),
             "posture": readiness_score.posture,
+            "reinspect_required": bool(readiness_score.reinspect_required),
         },
         "readiness_summary": readiness_summary,
     }
@@ -859,6 +939,7 @@ def apply_inspection_form_results(
                     "created_items": result["created_items"],
                     "updated_items": result["updated_items"],
                     "readiness": result["readiness"],
+                    "history": result.get("history"),
                     "failure_tasks": failure_task_result,
                     "readiness_summary": readiness_summary,
                     "workflow_effect": {

@@ -1,10 +1,11 @@
+# backend/app/services/inspection_template_service.py
 from __future__ import annotations
 
 import json
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..domain.compliance.checklist_templates import (
@@ -33,6 +34,22 @@ def _j(v: Any) -> str:
     return json.dumps(v, separators=(",", ":"), ensure_ascii=False, default=str)
 
 
+def _json_loads(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return default
+        try:
+            return json.loads(raw)
+        except Exception:
+            return default
+    return default
+
+
 def _severity_to_int(severity: str | None) -> int:
     s = str(severity or "").strip().lower()
     if s == "critical":
@@ -44,17 +61,41 @@ def _severity_to_int(severity: str | None) -> int:
     return 1
 
 
+def _severity_to_label(value: Any) -> str:
+    rank = _severity_to_int(str(value or ""))
+    if rank >= 4:
+        return "critical"
+    if rank == 3:
+        return "fail"
+    if rank == 2:
+        return "warn"
+    return "info"
+
+
 def _checklist_status_from_result(result_status: str) -> str:
     s = str(result_status or "").strip().lower()
     if s == "pass":
         return "done"
     if s == "fail":
         return "failed"
-    if s in {"blocked", "inconclusive"}:
+    if s in {"blocked", "inconclusive", "pending"}:
         return "blocked"
     if s == "not_applicable":
         return "done"
     return "todo"
+
+
+def _normalize_result_status(value: Any, *, default: str = "pending") -> str:
+    s = str(value or "").strip().lower()
+    if s in {"pass", "fail", "blocked", "not_applicable", "inconclusive", "pending"}:
+        return s
+    if s in {"na", "n/a"}:
+        return "not_applicable"
+    if s in {"done", "completed", "complete", "passed"}:
+        return "pass"
+    if s in {"failed", "open"}:
+        return "fail"
+    return default
 
 
 def _get_property(db: Session, *, org_id: int, property_id: int) -> Property:
@@ -67,6 +108,46 @@ def _get_property(db: Session, *, org_id: int, property_id: int) -> Property:
     if not prop:
         raise ValueError("property not found")
     return prop
+
+
+def _get_inspection(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int,
+) -> Inspection:
+    inspection = db.scalar(
+        select(Inspection).where(
+            Inspection.org_id == org_id,
+            Inspection.property_id == property_id,
+            Inspection.id == inspection_id,
+        )
+    )
+    if inspection is None:
+        raise ValueError("inspection not found")
+    return inspection
+
+
+def _latest_inspection(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> Inspection | None:
+    return db.scalar(
+        select(Inspection)
+        .where(
+            Inspection.org_id == org_id,
+            Inspection.property_id == property_id,
+        )
+        .order_by(
+            desc(Inspection.inspection_date),
+            desc(Inspection.created_at),
+            desc(Inspection.id),
+        )
+        .limit(1)
+    )
 
 
 def _find_property_checklist(
@@ -119,6 +200,97 @@ def _find_inspection_items(
     )
 
 
+def _extract_payload_meta(raw_payload: dict[str, Any] | list[dict[str, Any]] | None) -> dict[str, Any]:
+    if isinstance(raw_payload, dict):
+        meta = raw_payload.get("inspection") or raw_payload.get("inspection_meta") or raw_payload.get("meta") or {}
+        if isinstance(meta, dict):
+            return meta
+    return {}
+
+
+def _safe_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    parsed = _json_loads(value, None)
+    if isinstance(parsed, list):
+        return parsed
+    if parsed is None:
+        return []
+    return [parsed]
+
+
+def _coalesce_text(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _build_template_item(row: dict[str, Any]) -> ChecklistTemplateItem:
+    return ChecklistTemplateItem(
+        code=str(row["code"]),
+        description=str(row["description"]),
+        category=str(row["category"]),
+        default_status=str(row.get("default_status") or "todo"),
+        severity=str(row["severity"]),
+        common_fail=bool(row["common_fail"]),
+        inspection_rule_code=row.get("inspection_rule_code"),
+        suggested_fix=row.get("suggested_fix"),
+        template_key=str(row["template_key"]),
+        template_version=str(row["template_version"]),
+        section=row.get("section"),
+        item_number=row.get("item_number"),
+        room_scope=row.get("room_scope"),
+        not_applicable_allowed=bool(row.get("not_applicable_allowed", False)),
+    )
+
+
+def _build_checklist_metadata(
+    *,
+    template_item: ChecklistTemplateItem,
+    property_id: int,
+    inspection_id: int | None,
+    result_status: str | None = None,
+    fail_reason: str | None = None,
+    remediation_guidance: str | None = None,
+    evidence: list[Any] | None = None,
+    photos: list[Any] | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    metadata = {
+        "template_key": template_item.template_key,
+        "template_version": template_item.template_version,
+        "section": template_item.section,
+        "item_number": template_item.item_number,
+        "room_scope": template_item.room_scope,
+        "inspection_rule_code": template_item.inspection_rule_code,
+        "not_applicable_allowed": template_item.not_applicable_allowed,
+        "property_id": property_id,
+        "inspection_id": inspection_id,
+        "mapped_code": template_item.code,
+    }
+    if result_status is not None:
+        metadata["latest_result_status"] = result_status
+    if fail_reason:
+        metadata["latest_fail_reason"] = fail_reason
+    if remediation_guidance:
+        metadata["latest_remediation_guidance"] = remediation_guidance
+    if notes:
+        metadata["latest_notes"] = notes
+    if evidence is not None:
+        metadata["latest_evidence"] = evidence
+    if photos is not None:
+        metadata["latest_photos"] = photos
+    return metadata
+
+
 def build_inspection_template(
     db: Session,
     *,
@@ -144,10 +316,7 @@ def build_inspection_template(
         profile_summary=profile_summary or {},
     )
 
-    template_items = template_items_from_effective_rules(effective.get("items") or [])
-    if not template_items:
-        template_items = []
-
+    template_items = template_items_from_effective_rules(effective.get("items") or []) or []
     template_key = template_items[0].template_key if template_items else "hud_52580a"
     template_version = template_items[0].template_version if template_items else "hud_52580a_2019"
 
@@ -228,6 +397,8 @@ def ensure_template_backed_checklist(
         created_checklist = True
     else:
         checklist.items_json = _j(template["items"])
+        if hasattr(checklist, "generated_at") and getattr(checklist, "generated_at", None) is None:
+            checklist.generated_at = now
 
     existing_rows = _find_checklist_items(
         db,
@@ -239,8 +410,16 @@ def ensure_template_backed_checklist(
     created_items = 0
     updated_items = 0
 
-    for item in template["items"]:
-        code = str(item["code"]).strip().upper()
+    for item_dict in template["items"]:
+        template_item = _build_template_item(item_dict)
+        code = template_item.code.strip().upper()
+        desired_applies = _j(
+            _build_checklist_metadata(
+                template_item=template_item,
+                property_id=property_id,
+                inspection_id=None,
+            )
+        )
         row = by_code.get(code)
         if row is None:
             row = PropertyChecklistItem(
@@ -248,66 +427,44 @@ def ensure_template_backed_checklist(
                 property_id=property_id,
                 checklist_id=checklist.id,
                 item_code=code,
-                category=str(item["category"]),
-                description=str(item["description"]),
-                severity=int(item["severity_int"]),
-                common_fail=bool(item["common_fail"]),
-                applies_if_json=_j(
-                    {
-                        "template_key": item["template_key"],
-                        "template_version": item["template_version"],
-                        "section": item.get("section"),
-                        "item_number": item.get("item_number"),
-                        "room_scope": item.get("room_scope"),
-                        "inspection_rule_code": item.get("inspection_rule_code"),
-                        "not_applicable_allowed": item.get("not_applicable_allowed", False),
-                    }
-                ),
-                status=str(item.get("default_status") or "todo"),
-                notes=item.get("suggested_fix"),
+                category=template_item.category,
+                description=template_item.description,
+                severity=_severity_to_int(template_item.severity),
+                common_fail=bool(template_item.common_fail),
+                applies_if_json=desired_applies,
+                status=str(template_item.default_status or "todo"),
+                notes=template_item.suggested_fix,
                 created_at=now,
                 updated_at=now,
             )
             db.add(row)
             created_items += 1
-        else:
-            changed = False
-            if row.checklist_id != checklist.id:
-                row.checklist_id = checklist.id
-                changed = True
-            if row.category != str(item["category"]):
-                row.category = str(item["category"])
-                changed = True
-            if row.description != str(item["description"]):
-                row.description = str(item["description"])
-                changed = True
-            desired_severity = int(item["severity_int"])
-            if int(row.severity or 0) != desired_severity:
-                row.severity = desired_severity
-                changed = True
-            desired_common_fail = bool(item["common_fail"])
-            if bool(row.common_fail) != desired_common_fail:
-                row.common_fail = desired_common_fail
-                changed = True
+            continue
 
-            desired_applies = _j(
-                {
-                    "template_key": item["template_key"],
-                    "template_version": item["template_version"],
-                    "section": item.get("section"),
-                    "item_number": item.get("item_number"),
-                    "room_scope": item.get("room_scope"),
-                    "inspection_rule_code": item.get("inspection_rule_code"),
-                    "not_applicable_allowed": item.get("not_applicable_allowed", False),
-                }
-            )
-            if (row.applies_if_json or "") != desired_applies:
-                row.applies_if_json = desired_applies
-                changed = True
-
-            if changed:
-                row.updated_at = now
-                updated_items += 1
+        changed = False
+        if getattr(row, "checklist_id", None) != checklist.id:
+            row.checklist_id = checklist.id
+            changed = True
+        if getattr(row, "category", None) != template_item.category:
+            row.category = template_item.category
+            changed = True
+        if getattr(row, "description", None) != template_item.description:
+            row.description = template_item.description
+            changed = True
+        desired_severity = _severity_to_int(template_item.severity)
+        if int(getattr(row, "severity", 0) or 0) != desired_severity:
+            row.severity = desired_severity
+            changed = True
+        desired_common_fail = bool(template_item.common_fail)
+        if bool(getattr(row, "common_fail", False)) != desired_common_fail:
+            row.common_fail = desired_common_fail
+            changed = True
+        if (getattr(row, "applies_if_json", None) or "") != desired_applies:
+            row.applies_if_json = desired_applies
+            changed = True
+        if changed:
+            row.updated_at = now
+            updated_items += 1
 
     return {
         "ok": True,
@@ -343,39 +500,16 @@ def apply_raw_inspection_payload(
         property_id=property_id,
     )
     template_rows = template_info["template"]["items"]
-    lookup = template_lookup(
-        [
-            ChecklistTemplateItem(
-                code=str(r["code"]),
-                description=str(r["description"]),
-                category=str(r["category"]),
-                default_status=str(r.get("default_status") or "todo"),
-                severity=str(r["severity"]),
-                common_fail=bool(r["common_fail"]),
-                inspection_rule_code=r.get("inspection_rule_code"),
-                suggested_fix=r.get("suggested_fix"),
-                template_key=str(r["template_key"]),
-                template_version=str(r["template_version"]),
-                section=r.get("section"),
-                item_number=r.get("item_number"),
-                room_scope=r.get("room_scope"),
-                not_applicable_allowed=bool(r.get("not_applicable_allowed", False)),
-            )
-            for r in template_rows
-        ]
-    )
+    template_items = [_build_template_item(row) for row in template_rows]
+    template_by_code = template_lookup(template_items)
 
-    mapped_rows = map_raw_inspection_payload(raw_payload=raw_payload)
-
-    inspection = db.scalar(
-        select(Inspection).where(
-            Inspection.org_id == org_id,
-            Inspection.property_id == property_id,
-            Inspection.id == inspection_id,
-        )
+    inspection = _get_inspection(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
     )
-    if inspection is None:
-        raise ValueError("inspection not found")
+    payload_meta = _extract_payload_meta(raw_payload)
 
     existing_items = _find_inspection_items(db, inspection_id=inspection_id)
     existing_by_code = {str(r.code or "").strip().upper(): r for r in existing_items}
@@ -383,72 +517,103 @@ def apply_raw_inspection_payload(
     checklist_rows = _find_checklist_items(db, org_id=org_id, property_id=property_id)
     checklist_by_code = {str(r.item_code or "").strip().upper(): r for r in checklist_rows}
 
+    mapped_rows = map_raw_inspection_payload(raw_payload=raw_payload)
+    mapped_by_code: dict[str, dict[str, Any]] = {}
+    for row in mapped_rows:
+        code = str(row.get("code") or "").strip().upper()
+        if not code:
+            continue
+        mapped_by_code[code] = row
+
     now = _now()
     created = 0
     updated = 0
 
-    for row in mapped_rows:
-        code = str(row["code"]).strip().upper()
-        template_item = lookup.get(code)
-        if template_item is None:
-            continue
+    for template_item in template_items:
+        code = template_item.code.strip().upper()
+        mapped = mapped_by_code.get(code, {})
+        result_status = _normalize_result_status(mapped.get("result_status"), default="pending")
+        fail_reason = _coalesce_text(mapped.get("fail_reason"))
+        remediation_guidance = _coalesce_text(mapped.get("remediation_guidance"), template_item.suggested_fix)
+        evidence = _safe_list(mapped.get("evidence_json"))
+        photos = _safe_list(mapped.get("photo_references_json"))
+        details = _coalesce_text(mapped.get("details"))
+        notes = _coalesce_text(details, fail_reason, remediation_guidance)
 
         item = existing_by_code.get(code)
         if item is None:
             item = InspectionItem(
                 inspection_id=inspection_id,
                 code=code,
-                failed=bool(row["failed"]),
-                severity=int(row["severity_int"]),
-                location=row.get("location"),
-                details=row.get("details"),
-                category=row.get("category"),
-                result_status=row.get("result_status"),
-                fail_reason=row.get("fail_reason"),
-                remediation_guidance=row.get("remediation_guidance"),
-                evidence_json=row.get("evidence_json") or "[]",
-                photo_references_json=row.get("photo_references_json") or "[]",
-                standard_label=row.get("standard_label"),
-                standard_citation=row.get("standard_citation"),
-                readiness_impact=float(row.get("readiness_impact") or 0.0),
-                requires_reinspection=bool(row.get("requires_reinspection", False)),
+                failed=bool(result_status == "fail" or mapped.get("failed", False)),
+                severity=int(mapped.get("severity_int") or _severity_to_int(template_item.severity)),
+                location=mapped.get("location"),
+                details=details,
+                category=mapped.get("category") or template_item.category,
+                result_status=result_status,
+                fail_reason=fail_reason,
+                remediation_guidance=remediation_guidance,
+                evidence_json=_j(evidence),
+                photo_references_json=_j(photos),
+                standard_label=mapped.get("standard_label") or template_item.description,
+                standard_citation=mapped.get("standard_citation") or template_item.inspection_rule_code,
+                readiness_impact=float(mapped.get("readiness_impact") or 0.0),
+                requires_reinspection=bool(
+                    mapped.get("requires_reinspection", result_status in {"fail", "blocked", "inconclusive"})
+                ),
                 created_at=now,
             )
             db.add(item)
             created += 1
         else:
-            item.failed = bool(row["failed"])
-            item.severity = int(row["severity_int"])
-            item.location = row.get("location")
-            item.details = row.get("details")
+            item.failed = bool(result_status == "fail" or mapped.get("failed", False))
+            item.severity = int(mapped.get("severity_int") or _severity_to_int(template_item.severity))
+            item.location = mapped.get("location")
+            item.details = details
             if hasattr(item, "category"):
-                item.category = row.get("category")
+                item.category = mapped.get("category") or template_item.category
             if hasattr(item, "result_status"):
-                item.result_status = row.get("result_status")
+                item.result_status = result_status
             if hasattr(item, "fail_reason"):
-                item.fail_reason = row.get("fail_reason")
+                item.fail_reason = fail_reason
             if hasattr(item, "remediation_guidance"):
-                item.remediation_guidance = row.get("remediation_guidance")
+                item.remediation_guidance = remediation_guidance
             if hasattr(item, "evidence_json"):
-                item.evidence_json = row.get("evidence_json") or "[]"
+                item.evidence_json = _j(evidence)
             if hasattr(item, "photo_references_json"):
-                item.photo_references_json = row.get("photo_references_json") or "[]"
+                item.photo_references_json = _j(photos)
             if hasattr(item, "standard_label"):
-                item.standard_label = row.get("standard_label")
+                item.standard_label = mapped.get("standard_label") or template_item.description
             if hasattr(item, "standard_citation"):
-                item.standard_citation = row.get("standard_citation")
+                item.standard_citation = mapped.get("standard_citation") or template_item.inspection_rule_code
             if hasattr(item, "readiness_impact"):
-                item.readiness_impact = float(row.get("readiness_impact") or 0.0)
+                item.readiness_impact = float(mapped.get("readiness_impact") or 0.0)
             if hasattr(item, "requires_reinspection"):
-                item.requires_reinspection = bool(row.get("requires_reinspection", False))
+                item.requires_reinspection = bool(
+                    mapped.get("requires_reinspection", result_status in {"fail", "blocked", "inconclusive"})
+                )
+            if hasattr(item, "updated_at"):
+                item.updated_at = now
             updated += 1
 
-        if sync_checklist:
-            checklist_row = checklist_by_code.get(code)
-            if checklist_row is not None:
-                checklist_row.status = _checklist_status_from_result(str(row["result_status"]))
-                checklist_row.notes = row.get("fail_reason") or row.get("remediation_guidance") or checklist_row.notes
-                checklist_row.updated_at = now
+        checklist_row = checklist_by_code.get(code)
+        if sync_checklist and checklist_row is not None:
+            checklist_row.status = _checklist_status_from_result(result_status)
+            checklist_row.notes = notes or checklist_row.notes
+            checklist_row.updated_at = now
+            checklist_row.applies_if_json = _j(
+                _build_checklist_metadata(
+                    template_item=template_item,
+                    property_id=property_id,
+                    inspection_id=inspection_id,
+                    result_status=result_status,
+                    fail_reason=fail_reason,
+                    remediation_guidance=remediation_guidance,
+                    evidence=evidence,
+                    photos=photos,
+                    notes=notes,
+                )
+            )
 
     db.flush()
 
@@ -457,62 +622,93 @@ def apply_raw_inspection_payload(
 
     inspection.template_key = template_info["template_key"]
     inspection.template_version = template_info["template_version"]
+
     if hasattr(inspection, "inspection_status"):
         inspection.inspection_status = "completed"
     if hasattr(inspection, "result_status"):
-        inspection.result_status = readiness.result_status
+        inspection.result_status = str(readiness.result_status)
     if hasattr(inspection, "readiness_score"):
-        inspection.readiness_score = readiness.readiness_score
+        inspection.readiness_score = float(readiness.readiness_score)
     if hasattr(inspection, "readiness_status"):
-        inspection.readiness_status = readiness.readiness_status
+        inspection.readiness_status = str(readiness.readiness_status)
     if hasattr(inspection, "total_items"):
-        inspection.total_items = readiness.total_items
+        inspection.total_items = int(readiness.total_items)
     if hasattr(inspection, "passed_items"):
-        inspection.passed_items = readiness.passed_items
+        inspection.passed_items = int(readiness.passed_items)
     if hasattr(inspection, "failed_items"):
-        inspection.failed_items = readiness.failed_items
+        inspection.failed_items = int(readiness.failed_items)
     if hasattr(inspection, "blocked_items"):
-        inspection.blocked_items = readiness.blocked_items
+        inspection.blocked_items = int(readiness.blocked_items)
     if hasattr(inspection, "na_items"):
-        inspection.na_items = readiness.na_items
+        inspection.na_items = int(readiness.na_items)
     if hasattr(inspection, "failed_critical_items"):
-        inspection.failed_critical_items = readiness.failed_critical_items
+        inspection.failed_critical_items = int(readiness.failed_critical_items)
     if hasattr(inspection, "last_scored_at"):
         inspection.last_scored_at = now
-    if hasattr(inspection, "completed_at") and inspection.completed_at is None:
+    if hasattr(inspection, "completed_at") and getattr(inspection, "completed_at", None) is None:
         inspection.completed_at = now
 
-    inspection.passed = readiness.result_status == "pass"
-    inspection.reinspect_required = readiness.result_status != "pass"
+    inspection.passed = bool(readiness.result_status == "pass")
+    inspection.reinspect_required = bool(readiness.result_status != "pass")
+
+    if hasattr(inspection, "inspection_date") and payload_meta.get("inspection_date"):
+        try:
+            inspection.inspection_date = payload_meta.get("inspection_date")
+        except Exception:
+            pass
+    if hasattr(inspection, "inspector") and payload_meta.get("inspector"):
+        inspection.inspector = payload_meta.get("inspector")
+    if hasattr(inspection, "jurisdiction") and payload_meta.get("jurisdiction"):
+        inspection.jurisdiction = payload_meta.get("jurisdiction")
+
+    evidence_summary = {
+        "mapped_result_count": len(mapped_by_code),
+        "template_item_count": len(template_items),
+        "created_items": created,
+        "updated_items": updated,
+        "inspection_context": {
+            "inspection_id": inspection_id,
+            "inspection_date": str(getattr(inspection, "inspection_date", None) or payload_meta.get("inspection_date") or ""),
+            "inspector": getattr(inspection, "inspector", None) or payload_meta.get("inspector"),
+            "jurisdiction": getattr(inspection, "jurisdiction", None) or payload_meta.get("jurisdiction"),
+            "template_key": template_info["template_key"],
+            "template_version": template_info["template_version"],
+        },
+    }
     if hasattr(inspection, "evidence_summary_json"):
-        inspection.evidence_summary_json = _j(
-            {
-                "mapped_result_count": len(mapped_rows),
-                "created_items": created,
-                "updated_items": updated,
-            }
-        )
+        inspection.evidence_summary_json = _j(evidence_summary)
+
+    latest = _latest_inspection(db, org_id=org_id, property_id=property_id)
+    history = {
+        "latest_inspection_id": int(latest.id) if latest is not None else inspection_id,
+        "current_inspection_id": inspection_id,
+        "is_latest_inspection": bool(latest is not None and int(latest.id) == int(inspection_id)),
+        "passed": bool(inspection.passed),
+        "reinspect_required": bool(inspection.reinspect_required),
+    }
 
     return {
         "ok": True,
         "inspection_id": inspection_id,
         "template_key": template_info["template_key"],
         "template_version": template_info["template_version"],
-        "mapped_count": len(mapped_rows),
+        "mapped_count": len(mapped_by_code),
+        "template_item_count": len(template_items),
         "created_items": created,
         "updated_items": updated,
+        "history": history,
         "readiness": {
-            "score": readiness.readiness_score,
-            "status": readiness.readiness_status,
-            "result_status": readiness.result_status,
+            "score": float(readiness.readiness_score),
+            "status": str(readiness.readiness_status),
+            "result_status": str(readiness.result_status),
             "counts": {
-                "total_items": readiness.total_items,
-                "scored_items": readiness.scored_items,
-                "passed_items": readiness.passed_items,
-                "failed_items": readiness.failed_items,
-                "blocked_items": readiness.blocked_items,
-                "na_items": readiness.na_items,
-                "failed_critical_items": readiness.failed_critical_items,
+                "total_items": int(readiness.total_items),
+                "scored_items": int(readiness.scored_items),
+                "passed_items": int(readiness.passed_items),
+                "failed_items": int(readiness.failed_items),
+                "blocked_items": int(readiness.blocked_items),
+                "na_items": int(readiness.na_items),
+                "failed_critical_items": int(readiness.failed_critical_items),
             },
         },
     }

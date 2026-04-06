@@ -1,15 +1,19 @@
+// frontend/src/components/PropertyCompliancePanel.tsx
 import React from "react";
 import {
+  AlertTriangle,
+  BadgeCheck,
+  Building2,
+  Camera,
+  CheckCircle2,
+  ClipboardList,
+  ClipboardX,
+  FileCheck2,
+  Image as ImageIcon,
+  ShieldAlert,
   ShieldCheck,
   TriangleAlert,
-  FileCheck2,
-  Building2,
-  AlertTriangle,
-  ClipboardX,
   Wrench,
-  ShieldAlert,
-  BadgeCheck,
-  CheckCircle2,
   XCircle,
 } from "lucide-react";
 import { api } from "../lib/api";
@@ -22,6 +26,7 @@ type PropertyLike = {
   county?: string | null;
   city?: string | null;
   strategy?: string | null;
+  address?: string | null;
 };
 
 type Brief = {
@@ -55,6 +60,22 @@ type Brief = {
   };
 };
 
+type InspectionRecord = {
+  id?: number;
+  inspection_date?: string | null;
+  inspector?: string | null;
+  jurisdiction?: string | null;
+  template_key?: string | null;
+  template_version?: string | null;
+  passed?: boolean | null;
+  result_status?: string | null;
+  readiness_status?: string | null;
+  readiness_score?: number | null;
+  reinspect_required?: boolean | null;
+  completion_pct?: number | null;
+  counts?: Record<string, any>;
+};
+
 function fmtBoolish(v: any) {
   if (v == null || v === "unknown") return "Unknown";
   if (v === true || String(v).toLowerCase() === "yes") return "Yes";
@@ -69,7 +90,9 @@ function badgeTone(v: any) {
     s === "yes" ||
     s === "ready" ||
     s === "high" ||
-    s === "complete"
+    s === "complete" ||
+    s === "pass" ||
+    s === "good"
   ) {
     return "oh-pill oh-pill-good";
   }
@@ -80,7 +103,10 @@ function badgeTone(v: any) {
     s === "unknown" ||
     s === "conditional" ||
     s === "attention" ||
-    s === "in_progress"
+    s === "in_progress" ||
+    s === "pending" ||
+    s === "warn" ||
+    s === "warning"
   ) {
     return "oh-pill oh-pill-warn";
   }
@@ -94,7 +120,10 @@ function badgeTone(v: any) {
     s === "blocked" ||
     s === "critical_failures" ||
     s === "needs_remediation" ||
-    s === "not_ready"
+    s === "not_ready" ||
+    s === "fail" ||
+    s === "critical" ||
+    s === "reinspection_required"
   ) {
     return "oh-pill oh-pill-bad";
   }
@@ -119,6 +148,146 @@ function titleCase(v: any) {
     .trim();
 }
 
+function statusTone(value?: string | boolean | null) {
+  const s = String(value ?? "").toLowerCase();
+  if (s === "true" || s === "ready" || s === "pass")
+    return "oh-pill oh-pill-good";
+  if (
+    [
+      "false",
+      "fail",
+      "blocked",
+      "critical",
+      "critical_failures",
+      "needs_remediation",
+      "reinspection_required",
+      "not_ready",
+      "needs_work",
+    ].includes(s)
+  ) {
+    return "oh-pill oh-pill-bad";
+  }
+  if (
+    [
+      "pending",
+      "warn",
+      "warning",
+      "unknown",
+      "attention",
+      "inconclusive",
+    ].includes(s)
+  ) {
+    return "oh-pill oh-pill-warn";
+  }
+  return "oh-pill";
+}
+
+function toArray<T = any>(value: any): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeInspectionHistory(readiness: any): InspectionRecord[] {
+  const candidates = [
+    readiness?.inspection_history,
+    readiness?.history,
+    readiness?.inspections,
+    readiness?.latest_inspection_history,
+    readiness?.readiness_summary?.history,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate) && candidate.length > 0) {
+      return candidate as InspectionRecord[];
+    }
+  }
+
+  if (readiness?.latest_inspection) {
+    return [readiness.latest_inspection as InspectionRecord];
+  }
+
+  return [];
+}
+
+function normalizeChecklistItems(readiness: any) {
+  const preferred = [
+    readiness?.results,
+    readiness?.checklist_items,
+    readiness?.readiness_summary?.items,
+    readiness?.template?.items,
+  ];
+
+  for (const candidate of preferred) {
+    if (Array.isArray(candidate) && candidate.length > 0) {
+      return candidate;
+    }
+  }
+
+  return [];
+}
+
+function itemStatus(item: any) {
+  return String(
+    item?.result_status ||
+      item?.status ||
+      item?.latest_result_status ||
+      item?.readiness_status ||
+      "unknown",
+  ).toLowerCase();
+}
+
+function itemSeverity(item: any) {
+  const raw = String(
+    item?.severity || item?.severity_label || "",
+  ).toLowerCase();
+  if (["critical", "fail", "warn", "info"].includes(raw)) return raw;
+  const n = Number(item?.severity);
+  if (!Number.isNaN(n)) {
+    if (n >= 4) return "critical";
+    if (n === 3) return "fail";
+    if (n === 2) return "warn";
+    return "info";
+  }
+  return raw || "unknown";
+}
+
+function itemTitle(item: any) {
+  return (
+    item?.label ||
+    item?.title ||
+    item?.description ||
+    item?.code ||
+    item?.item_code ||
+    item?.rule_key ||
+    "Untitled item"
+  );
+}
+
+function itemNotes(item: any) {
+  return (
+    item?.notes ||
+    item?.suggested_fix ||
+    item?.fail_reason ||
+    item?.remediation_guidance ||
+    item?.evidence ||
+    null
+  );
+}
+
+function evidenceList(item: any): any[] {
+  if (Array.isArray(item?.evidence)) return item.evidence;
+  if (Array.isArray(item?.latest_evidence)) return item.latest_evidence;
+  if (Array.isArray(item?.evidence_json)) return item.evidence_json;
+  return [];
+}
+
+function photoList(item: any): any[] {
+  if (Array.isArray(item?.photo_references)) return item.photo_references;
+  if (Array.isArray(item?.photo_references_json))
+    return item.photo_references_json;
+  if (Array.isArray(item?.latest_photos)) return item.latest_photos;
+  return [];
+}
+
 function FindingCard({ item, tone }: { item: any; tone: "bad" | "warn" }) {
   const outer =
     tone === "bad"
@@ -131,19 +300,164 @@ function FindingCard({ item, tone }: { item: any; tone: "bad" | "warn" }) {
   return (
     <div className={outer}>
       <div className={`text-sm font-medium ${titleTone}`}>
-        {item?.label ||
-          item?.title ||
-          item?.description ||
-          item?.code ||
-          item?.key ||
-          "Untitled finding"}
+        {itemTitle(item)}
       </div>
       <div className={`mt-1 text-xs ${metaTone}`}>
-        {(item?.category || item?.severity || "uncategorized").toString()}
+        {(item?.category || itemSeverity(item) || "uncategorized").toString()}
       </div>
-      {item?.suggested_fix ? (
+      {itemNotes(item) ? (
         <div className={`mt-2 text-sm leading-6 ${detailTone}`}>
-          {item.suggested_fix}
+          {itemNotes(item)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InspectionHistoryCard({
+  inspection,
+  active,
+}: {
+  inspection: InspectionRecord;
+  active?: boolean;
+}) {
+  const passed = inspection?.passed;
+  const resultStatus =
+    inspection?.result_status || inspection?.readiness_status || undefined;
+
+  return (
+    <div
+      className={[
+        "rounded-2xl border px-4 py-4",
+        active ? "border-app-strong bg-app-muted" : "border-app bg-app-panel",
+      ].join(" ")}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-sm font-semibold text-app-0">
+          {inspection?.inspection_date ||
+            `Inspection #${inspection?.id || "—"}`}
+        </div>
+        {active ? <span className="oh-pill oh-pill-accent">Latest</span> : null}
+        {passed === true ? (
+          <span className="oh-pill oh-pill-good">Passed</span>
+        ) : passed === false ? (
+          <span className="oh-pill oh-pill-bad">Failed</span>
+        ) : null}
+        {inspection?.reinspect_required ? (
+          <span className="oh-pill oh-pill-bad">Reinspection required</span>
+        ) : null}
+        {resultStatus ? (
+          <span className={statusTone(resultStatus)}>
+            {titleCase(resultStatus)}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="mt-3 grid gap-2 text-sm text-app-3 md:grid-cols-2">
+        <div>Inspector: {inspection?.inspector || "—"}</div>
+        <div>Jurisdiction: {inspection?.jurisdiction || "—"}</div>
+        <div>Template: {inspection?.template_key || "—"}</div>
+        <div>Version: {inspection?.template_version || "—"}</div>
+        <div>
+          Readiness score:{" "}
+          {inspection?.readiness_score != null
+            ? `${Number(inspection.readiness_score).toFixed(1)}%`
+            : "—"}
+        </div>
+        <div>ID: {inspection?.id || "—"}</div>
+      </div>
+    </div>
+  );
+}
+
+function ChecklistExecutionCard({ item }: { item: any }) {
+  const status = itemStatus(item);
+  const severity = itemSeverity(item);
+  const notes = itemNotes(item);
+  const evidence = evidenceList(item);
+  const photos = photoList(item);
+
+  return (
+    <div
+      className={[
+        "rounded-2xl border px-4 py-4",
+        severity === "critical" || status === "fail"
+          ? "border-red-500/20 bg-red-500/[0.04]"
+          : status === "blocked" || status === "inconclusive"
+            ? "border-amber-400/20 bg-amber-500/[0.06]"
+            : "border-app bg-app-panel",
+      ].join(" ")}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-sm font-semibold text-app-0">
+          {itemTitle(item)}
+        </div>
+        <span className={statusTone(status)}>{titleCase(status)}</span>
+        <span className={badgeTone(severity)}>{titleCase(severity)}</span>
+        {item?.code || item?.item_code || item?.rule_key ? (
+          <span className="oh-pill">
+            {item?.code || item?.item_code || item?.rule_key}
+          </span>
+        ) : null}
+      </div>
+
+      {item?.category ? (
+        <div className="mt-2 text-xs text-app-4">
+          {titleCase(item.category)}
+        </div>
+      ) : null}
+
+      {notes ? (
+        <div className="mt-3 text-sm leading-6 text-app-3">{notes}</div>
+      ) : null}
+
+      {evidence.length > 0 || photos.length > 0 ? (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-app-4">
+              <ClipboardList className="h-3.5 w-3.5" />
+              Evidence
+            </div>
+            {evidence.length ? (
+              <div className="mt-2 space-y-1 text-sm text-app-3">
+                {evidence.slice(0, 4).map((entry: any, idx: number) => (
+                  <div
+                    key={`${item?.code || item?.item_code || "evidence"}-${idx}`}
+                    className="break-words"
+                  >
+                    {typeof entry === "string" ? entry : JSON.stringify(entry)}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2 text-sm text-app-4">
+                No evidence attached.
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted px-3 py-3">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-app-4">
+              <Camera className="h-3.5 w-3.5" />
+              Photo references
+            </div>
+            {photos.length ? (
+              <div className="mt-2 space-y-1 text-sm text-app-3">
+                {photos.slice(0, 4).map((entry: any, idx: number) => (
+                  <div
+                    key={`${item?.code || item?.item_code || "photo"}-${idx}`}
+                    className="break-words"
+                  >
+                    {typeof entry === "string" ? entry : JSON.stringify(entry)}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2 text-sm text-app-4">
+                No photo references attached.
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
     </div>
@@ -213,40 +527,43 @@ export default function PropertyCompliancePanel({
   const c = brief?.compliance || {};
   const m = brief?.market || {};
   const coverage = brief?.coverage || {};
-  const requiredActions = Array.isArray(brief?.required_actions)
-    ? brief.required_actions
-    : [];
-  const blockingItems = Array.isArray(brief?.blocking_items)
-    ? brief.blocking_items
-    : [];
+  const requiredActions = toArray(brief?.required_actions);
+  const blockingItems = toArray(brief?.blocking_items);
 
   const readinessState = readiness?.readiness || {};
   const readinessSummary = readiness?.readiness_summary || {};
   const readinessMeta = readinessSummary?.readiness || {};
   const completionMeta = readinessSummary?.completion || {};
   const readinessCounts = readiness?.counts || {};
-  const readinessBlockingItems = Array.isArray(readiness?.blocking_items)
-    ? readiness.blocking_items
-    : [];
-  const readinessWarningItems = Array.isArray(readiness?.warning_items)
-    ? readiness.warning_items
-    : [];
-  const recommendedActions = Array.isArray(readiness?.recommended_actions)
-    ? readiness.recommended_actions
-    : [];
-  const failureActions = Array.isArray(
+  const readinessBlockingItems = toArray(readiness?.blocking_items);
+  const readinessWarningItems = toArray(readiness?.warning_items);
+  const recommendedActions = toArray(readiness?.recommended_actions);
+  const failureActions = toArray(
     readiness?.inspection_failure_actions?.recommended_actions,
-  )
-    ? readiness.inspection_failure_actions.recommended_actions
-    : [];
+  );
+  const inspectionHistory = normalizeInspectionHistory(readiness);
+  const checklistItems = normalizeChecklistItems(readiness);
 
+  const latestInspection =
+    readiness?.latest_inspection || inspectionHistory[0] || null;
   const mergedBlockingItems =
     readinessBlockingItems.length > 0 ? readinessBlockingItems : blockingItems;
+  const criticalChecklistItems = checklistItems.filter(
+    (item) => itemSeverity(item) === "critical",
+  );
+  const failedChecklistItems = checklistItems.filter(
+    (item) => itemStatus(item) === "fail",
+  );
+  const blockedChecklistItems = checklistItems.filter(
+    (item) => itemStatus(item) === "blocked",
+  );
+  const displayedChecklist =
+    checklistItems.length > 0 ? checklistItems : mergedBlockingItems;
 
   return (
     <Surface
       title="Compliance posture"
-      subtitle="Municipal rules, inspection readiness, blockers, failed items, and remediation now live directly on the property page."
+      subtitle="Property-scoped compliance now merges inspection history, checklist execution state, unresolved failures, and remediation actions."
       actions={
         readiness?.posture ? (
           <span className={badgeTone(readiness.posture)}>
@@ -325,7 +642,9 @@ export default function PropertyCompliancePanel({
               value={
                 readiness?.score_pct != null
                   ? `${Number(readiness.score_pct).toFixed(1)}%`
-                  : "—"
+                  : readinessMeta?.score != null
+                    ? `${Number(readinessMeta.score).toFixed(1)}%`
+                    : "—"
               }
             />
             <Field
@@ -397,6 +716,75 @@ export default function PropertyCompliancePanel({
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Field
+              label="Latest inspection"
+              value={
+                <span className="flex flex-wrap gap-2">
+                  {latestInspection?.passed === true ? (
+                    <span className="oh-pill oh-pill-good">Passed</span>
+                  ) : latestInspection?.passed === false ? (
+                    <span className="oh-pill oh-pill-bad">Failed</span>
+                  ) : (
+                    <span className="oh-pill">No result</span>
+                  )}
+                  {latestInspection?.reinspect_required ? (
+                    <span className="oh-pill oh-pill-bad">
+                      Reinspection required
+                    </span>
+                  ) : null}
+                </span>
+              }
+            />
+            <Field
+              label="Inspection date"
+              value={latestInspection?.inspection_date || "—"}
+            />
+            <Field
+              label="Inspector"
+              value={latestInspection?.inspector || "—"}
+            />
+            <Field
+              label="Template"
+              value={
+                latestInspection?.template_key
+                  ? `${latestInspection.template_key}${latestInspection.template_version ? ` · ${latestInspection.template_version}` : ""}`
+                  : "—"
+              }
+            />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field
+              label="Failed items"
+              value={
+                readinessCounts?.inspection_failed_items ??
+                failedChecklistItems.length ??
+                "—"
+              }
+            />
+            <Field
+              label="Blocked items"
+              value={
+                readinessCounts?.inspection_blocked_items ??
+                blockedChecklistItems.length ??
+                "—"
+              }
+            />
+            <Field
+              label="Critical items"
+              value={
+                readinessCounts?.inspection_failed_critical_items ??
+                criticalChecklistItems.length ??
+                "—"
+              }
+            />
+            <Field
+              label="History"
+              value={`${inspectionHistory.length} inspection${inspectionHistory.length === 1 ? "" : "s"}`}
+            />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field
               label="HQS"
               value={
                 <span
@@ -462,7 +850,7 @@ export default function PropertyCompliancePanel({
             />
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-4">
             <Field
               label="Completeness status"
               value={
@@ -490,89 +878,13 @@ export default function PropertyCompliancePanel({
               }
             />
             <Field
-              label="Failed / blocked"
-              value={`${readinessCounts?.failing ?? 0} / ${readinessCounts?.blocking ?? 0}`}
-            />
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-4">
-            <Field
-              label="Latest inspection passed"
-              value={
-                <span
-                  className={badgeTone(
-                    readinessState?.latest_inspection_passed
-                      ? "ready"
-                      : "blocked",
-                  )}
-                >
-                  {readinessState?.latest_inspection_passed == null
-                    ? "—"
-                    : readinessState.latest_inspection_passed
-                      ? "Yes"
-                      : "No"}
-                </span>
-              }
-            />
-            <Field
-              label="Inspection failed items"
-              value={readinessCounts?.inspection_failed_items ?? "—"}
-            />
-            <Field
-              label="Critical failed items"
-              value={readinessCounts?.inspection_failed_critical_items ?? "—"}
-            />
-            <Field label="Warning items" value={readinessWarningItems.length} />
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-4">
-            <Field
-              label="Blocking findings"
-              value={
-                <span className="flex items-center gap-2">
-                  <XCircle className="h-4 w-4 text-red-300" />
-                  {mergedBlockingItems.length}
-                </span>
-              }
-            />
-            <Field
-              label="Required actions"
-              value={
-                <span className="flex items-center gap-2">
-                  <ClipboardX className="h-4 w-4 text-app-4" />
-                  {requiredActions.length}
-                </span>
-              }
-            />
-            <Field
-              label="Remediation actions"
-              value={
-                <span className="flex items-center gap-2">
-                  <Wrench className="h-4 w-4 text-app-4" />
-                  {
-                    (recommendedActions.length > 0
-                      ? recommendedActions
-                      : failureActions
-                    ).length
-                  }
-                </span>
-              }
-            />
-            <Field
-              label="PHA workflow"
-              value={
-                <span
-                  className={badgeTone(
-                    c.pha_specific_workflow ? "ready" : "unknown",
-                  )}
-                >
-                  {c.pha_specific_workflow == null
-                    ? "Unknown"
-                    : c.pha_specific_workflow
-                      ? "Specific"
-                      : "Standard"}
-                </span>
-              }
+              label="Failure-driven actions"
+              value={String(
+                (recommendedActions.length > 0
+                  ? recommendedActions
+                  : failureActions
+                ).length,
+              )}
             />
           </div>
 
@@ -610,6 +922,38 @@ export default function PropertyCompliancePanel({
               </div>
               <div className="mt-2 text-sm leading-6 text-app-3">
                 {brief.explanation}
+              </div>
+            </div>
+          ) : null}
+
+          {inspectionHistory.length > 0 ? (
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                <BadgeCheck className="h-4 w-4 text-app-4" />
+                Inspection history
+              </div>
+              <div className="mt-3 grid gap-3">
+                {inspectionHistory.map((inspection, idx) => (
+                  <InspectionHistoryCard
+                    key={`${inspection?.id || inspection?.inspection_date || idx}`}
+                    inspection={inspection}
+                    active={idx === 0}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {latestInspection?.reinspect_required ? (
+            <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.06] px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-red-200">
+                <ShieldAlert className="h-4 w-4" />
+                Reinspection required
+              </div>
+              <div className="mt-2 text-sm leading-6 text-red-100/90">
+                The latest inspection plus unresolved failed or blocked
+                checklist items still prevent this property from reaching a
+                ready state.
               </div>
             </div>
           ) : null}
@@ -659,7 +1003,7 @@ export default function PropertyCompliancePanel({
           <div className="grid gap-4 xl:grid-cols-2">
             <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <BadgeCheck className="h-4 w-4" />
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                 Required actions
               </div>
 
@@ -696,7 +1040,7 @@ export default function PropertyCompliancePanel({
 
             <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <Wrench className="h-4 w-4" />
+                <Wrench className="h-4 w-4 text-app-4" />
                 Remediation actions
               </div>
 
@@ -717,18 +1061,34 @@ export default function PropertyCompliancePanel({
                         key={`${item?.rule_key || item?.code || item?.title || idx}`}
                         className="rounded-2xl border border-app bg-app-muted px-3 py-3"
                       >
-                        <div className="text-sm font-medium text-app-0">
-                          {item?.label ||
-                            item?.title ||
-                            item?.description ||
-                            item?.code ||
-                            "Untitled remediation"}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-medium text-app-0">
+                            {item?.label ||
+                              item?.title ||
+                              item?.description ||
+                              item?.code ||
+                              "Untitled remediation"}
+                          </div>
+                          {item?.priority ? (
+                            <span className={statusTone(item.priority)}>
+                              {titleCase(item.priority)}
+                            </span>
+                          ) : null}
+                          {item?.severity ? (
+                            <span className={statusTone(item.severity)}>
+                              {titleCase(item.severity)}
+                            </span>
+                          ) : null}
+                          {item?.requires_reinspection ? (
+                            <span className="oh-pill oh-pill-bad">
+                              Reinspection
+                            </span>
+                          ) : null}
                         </div>
                         <div className="mt-1 text-xs text-app-4">
                           {(
+                            item?.rehab_category ||
                             item?.category ||
-                            item?.severity ||
-                            item?.priority ||
                             "uncategorized"
                           ).toString()}
                         </div>
@@ -744,34 +1104,60 @@ export default function PropertyCompliancePanel({
             </div>
           </div>
 
+          <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+              <ClipboardList className="h-4 w-4 text-app-4" />
+              Inspection-driven checklist execution
+            </div>
+
+            {!displayedChecklist.length ? (
+              <div className="mt-3 text-sm text-app-4">
+                No checklist execution rows were returned for this property.
+              </div>
+            ) : (
+              <div className="mt-3 grid gap-3">
+                {displayedChecklist
+                  .slice(0, 12)
+                  .map((item: any, idx: number) => (
+                    <ChecklistExecutionCard
+                      key={`${item?.rule_key || item?.code || item?.item_code || item?.title || idx}`}
+                      item={item}
+                    />
+                  ))}
+              </div>
+            )}
+          </div>
+
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                What survives from the old compliance drilldown
+                <ShieldCheck className="h-4 w-4 text-app-4" />
+                Property-scoped compliance
               </div>
               <div className="mt-2 text-sm leading-6 text-app-3">
-                Inspection readiness, blocking findings, warning findings,
-                required actions, remediation actions, and jurisdiction quality
-                all now live directly on the property page.
+                This panel now reflects the latest inspection, inspection
+                history, checklist execution state, unresolved failures, blocked
+                items, and failure-driven remediation actions directly on the
+                property.
               </div>
             </div>
 
             <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
               {m?.pha_name ? (
                 <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                  <ShieldCheck className="h-4 w-4 text-app-4" />
+                  <TriangleAlert className="h-4 w-4 text-app-4" />
                   PHA: {m.pha_name}
                 </div>
               ) : (
                 <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                  <TriangleAlert className="h-4 w-4 text-app-4" />
+                  <ImageIcon className="h-4 w-4 text-app-4" />
                   No specific PHA override shown in this brief
                 </div>
               )}
               <div className="mt-2 text-sm leading-6 text-app-3">
-                This panel is now the single operating view for compliance
-                readiness instead of a separate page.
+                Inspection notes, evidence, photo references, and remediation
+                guidance are treated as execution data, not just template
+                defaults.
               </div>
             </div>
           </div>

@@ -1,11 +1,12 @@
+# backend/app/services/inspection_failure_task_service.py
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..domain.compliance.inspection_mapping import map_inspection_code
@@ -51,6 +52,10 @@ def _priority_from_item(item: InspectionItem) -> str:
 
 
 def _task_category_from_item(item: InspectionItem, default: str = "compliance_repair") -> str:
+    code = str(getattr(item, "code", "") or "").strip().upper()
+    mapped = map_inspection_code(code)
+    if mapped and mapped.rehab_category:
+        return str(mapped.rehab_category).strip()
     category = str(getattr(item, "category", "") or "").strip().lower()
     if category:
         return category
@@ -92,10 +97,19 @@ def _task_notes_from_item(
     location = str(getattr(item, "location", "") or "").strip()
     result_status = str(getattr(item, "result_status", "") or "").strip().lower()
     severity = getattr(item, "severity", None)
+    inspection_date = getattr(inspection, "inspection_date", None)
+    inspector = getattr(inspection, "inspector", None)
+    jurisdiction = getattr(inspection, "jurisdiction", None)
+    template_key = getattr(inspection, "template_key", None)
+    template_version = getattr(inspection, "template_version", None)
 
     lines = [
         "Auto-generated from inspection failure.",
         f"Inspection ID: {getattr(inspection, 'id', None)}",
+        f"Inspection date: {inspection_date}",
+        f"Inspector: {inspector}",
+        f"Jurisdiction: {jurisdiction}",
+        f"Template: {template_key}:{template_version}",
         f"Inspection code: {code or 'UNKNOWN'}",
         f"Result status: {result_status or 'unknown'}",
         f"Severity: {severity}",
@@ -155,6 +169,8 @@ class FailureTaskBlueprint:
     inspection_relevant: bool = True
     requires_reinspection: bool = True
     rehab_category: str | None = None
+    result_status: str | None = None
+    severity: int | None = None
 
 
 def _blueprint_from_item(
@@ -176,12 +192,14 @@ def _blueprint_from_item(
         inspection_item_id=int(getattr(item, "id")),
         code=code,
         title=_task_title_from_item(item),
-        category=(mapped.rehab_category if mapped and mapped.rehab_category else _task_category_from_item(item)),
+        category=_task_category_from_item(item),
         priority=_priority_from_item(item),
         notes=_task_notes_from_item(item=item, inspection=inspection, property_obj=property_obj),
         inspection_relevant=bool(getattr(item, "requires_reinspection", True)),
         requires_reinspection=bool(getattr(item, "requires_reinspection", True)),
         rehab_category=(mapped.rehab_category if mapped and mapped.rehab_category else None),
+        result_status=result_status,
+        severity=int(getattr(item, "severity", 0) or 0),
     )
 
 
@@ -189,7 +207,11 @@ def _latest_inspection(db: Session, *, org_id: int, property_id: int) -> Inspect
     return db.scalar(
         select(Inspection)
         .where(Inspection.org_id == org_id, Inspection.property_id == property_id)
-        .order_by(Inspection.id.desc())
+        .order_by(
+            desc(Inspection.inspection_date),
+            desc(Inspection.created_at),
+            desc(Inspection.id),
+        )
         .limit(1)
     )
 
@@ -261,6 +283,7 @@ def collect_failure_task_blueprints(
         blueprints,
         key=lambda b: (
             0 if b.priority == "high" else 1 if b.priority == "med" else 2,
+            0 if (b.severity or 0) >= 4 else 1,
             b.category,
             b.code,
             b.title,
@@ -317,6 +340,19 @@ def create_failure_tasks_from_inspection(
             row.updated_at = _now()
         if hasattr(row, "cost_estimate"):
             row.cost_estimate = None
+        if hasattr(row, "priority"):
+            row.priority = bp.priority
+        if hasattr(row, "metadata_json"):
+            row.metadata_json = _j(
+                {
+                    "inspection_item_id": bp.inspection_item_id,
+                    "inspection_id": collected["inspection_id"],
+                    "result_status": bp.result_status,
+                    "severity": bp.severity,
+                    "requires_reinspection": bp.requires_reinspection,
+                    "rehab_category": bp.rehab_category,
+                }
+            )
 
         db.add(row)
         created += 1
@@ -359,7 +395,10 @@ def build_failure_next_actions(
                 "title": bp.title,
                 "category": bp.category,
                 "priority": bp.priority,
+                "severity": bp.severity,
+                "result_status": bp.result_status,
                 "requires_reinspection": bp.requires_reinspection,
+                "rehab_category": bp.rehab_category,
                 "notes": bp.notes,
             }
         )

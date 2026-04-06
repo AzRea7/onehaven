@@ -1,3 +1,4 @@
+# backend/app/services/inspection_readiness_service.py
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -38,12 +39,16 @@ class InspectionReadinessScore:
     latest_inspection_passed: bool
     checklist_failed_count: int
     checklist_blocked_count: int
+    unresolved_failure_count: int
+    unresolved_blocked_count: int
+    unresolved_critical_count: int
 
     hqs_ready: bool
     local_ready: bool
     voucher_ready: bool
     lease_up_ready: bool
     is_compliant: bool
+    reinspect_required: bool
 
     posture: str
     completion_projection_pct: float
@@ -88,6 +93,17 @@ def _inspection_rows(db: Session, *, inspection_id: int) -> list[InspectionItem]
     )
 
 
+def _severity_label_from_row(row: PropertyChecklistItem) -> str:
+    severity_num = int(getattr(row, "severity", 3) or 3)
+    if severity_num >= 4:
+        return "critical"
+    if severity_num == 3:
+        return "fail"
+    if severity_num == 2:
+        return "warn"
+    return "info"
+
+
 def _status_from_checklist_row(row: PropertyChecklistItem) -> str:
     status = str(getattr(row, "status", "") or "").strip().lower()
     if status in {"done", "pass", "passed", "complete", "completed"}:
@@ -107,8 +123,7 @@ def _checklist_as_scored_rows(rows: list[PropertyChecklistItem]) -> list[dict[st
     out: list[dict[str, Any]] = []
     for row in rows:
         status = _status_from_checklist_row(row)
-        severity_num = int(getattr(row, "severity", 3) or 3)
-        severity = "critical" if severity_num >= 4 else "fail" if severity_num == 3 else "warn" if severity_num == 2 else "info"
+        severity = _severity_label_from_row(row)
         out.append(
             {
                 "code": str(getattr(row, "item_code", None) or ""),
@@ -129,12 +144,6 @@ def _completion_projection_pct(
     blocked_count: int,
     failed_critical_items: int,
 ) -> float:
-    """
-    Conservative projection:
-      - start from current completion %
-      - cap by readiness score
-      - apply penalties for unresolved blockers/fails
-    """
     penalty = 0.0
     penalty += float(failed_count) * 4.0
     penalty += float(blocked_count) * 3.0
@@ -154,23 +163,42 @@ def _inspection_grade_posture(
     failed_critical_items: int,
     latest_inspection_passed: bool,
     completion_pct: float,
+    reinspect_required: bool,
 ) -> str:
     if latest_inspection_passed and failed_count == 0 and blocked_count == 0 and completion_pct >= 95.0:
         return "inspection_ready"
-
     if failed_critical_items > 0:
         return "critical_failures"
-
+    if reinspect_required:
+        return "reinspection_required"
     if result_status == "fail" and (failed_count > 0 or blocked_count > 0):
         return "needs_remediation"
-
-    if readiness_status in {"needs_work", "critical"}:
+    if readiness_status in {"needs_work", "critical", "blocked"}:
         return "not_ready"
-
     if completion_pct < 95.0:
         return "in_progress"
-
     return "unknown"
+
+
+def _compute_combined_status(
+    *,
+    latest_result_status: str,
+    latest_passed: bool,
+    unresolved_failure_count: int,
+    unresolved_blocked_count: int,
+    unresolved_critical_count: int,
+) -> tuple[str, str, bool]:
+    if unresolved_critical_count > 0:
+        return "critical", "fail", True
+    if unresolved_failure_count > 0 or unresolved_blocked_count > 0:
+        return "needs_work" if unresolved_blocked_count == 0 else "blocked", "fail", True
+    if latest_result_status in {"blocked", "inconclusive"}:
+        return "blocked", "fail", True
+    if latest_result_status == "fail":
+        return "needs_work", "fail", True
+    if latest_passed or latest_result_status == "pass":
+        return "ready", "pass", False
+    return "unknown", "pending", True
 
 
 def compute_property_readiness_score(
@@ -207,7 +235,6 @@ def compute_property_readiness_score(
             == "pass"
             or getattr(latest, "passed", False)
         )
-
         readiness_score_value = float(getattr(latest, "readiness_score", 0.0) or 0.0)
         readiness_status = str(getattr(latest, "readiness_status", "unknown") or "unknown")
         result_status = str(getattr(latest, "result_status", "pending") or "pending")
@@ -235,7 +262,6 @@ def compute_property_readiness_score(
             readiness_score_value = float(scored.readiness_score)
             readiness_status = str(scored.readiness_status)
             result_status = str(scored.result_status)
-
             total_items = int(scored.total_items)
             scored_items = int(scored.scored_items)
             passed_items = int(scored.passed_items)
@@ -247,48 +273,68 @@ def compute_property_readiness_score(
     summary = summarize_items(checklist_rows, latest_inspection_passed=latest_inspection_passed)
     completion_pct = float(round(summary.pct_done * 100.0, 2))
 
-    checklist_failed_count = sum(
-        1 for row in checklist_rows
-        if str(getattr(row, "status", "") or "").strip().lower() in {"failed", "fail", "open"}
+    checklist_failed_count = sum(1 for row in checklist_rows if _status_from_checklist_row(row) == "fail")
+    checklist_blocked_count = sum(1 for row in checklist_rows if _status_from_checklist_row(row) == "blocked")
+    unresolved_failure_count = checklist_failed_count
+    unresolved_blocked_count = checklist_blocked_count
+    unresolved_critical_count = sum(
+        1
+        for row in checklist_rows
+        if _status_from_checklist_row(row) in {"fail", "blocked"} and int(getattr(row, "severity", 0) or 0) >= 4
     )
-    checklist_blocked_count = sum(
-        1 for row in checklist_rows
-        if str(getattr(row, "status", "") or "").strip().lower() in {"blocked"}
+
+    combined_readiness_status, combined_result_status, combined_reinspect_required = _compute_combined_status(
+        latest_result_status=result_status,
+        latest_passed=latest_inspection_passed,
+        unresolved_failure_count=unresolved_failure_count,
+        unresolved_blocked_count=unresolved_blocked_count,
+        unresolved_critical_count=unresolved_critical_count,
     )
+
+    if combined_result_status == "fail":
+        readiness_score_value = max(
+            0.0,
+            float(readiness_score_value)
+            - (float(unresolved_failure_count) * 6.0)
+            - (float(unresolved_blocked_count) * 4.0)
+            - (float(unresolved_critical_count) * 8.0),
+        )
 
     unknown_items = max(
         0,
         int(total_items) - int(passed_items) - int(failed_items) - int(blocked_items) - int(na_items),
     )
 
-    hqs_ready = failed_items == 0 and blocked_items == 0 and checklist_failed_count == 0 and checklist_blocked_count == 0
-    local_ready = result_status != "fail" and failed_critical_items == 0
-    voucher_ready = hqs_ready and result_status != "fail"
-    lease_up_ready = voucher_ready and completion_pct >= 95.0
+    hqs_ready = unresolved_failure_count == 0 and unresolved_blocked_count == 0 and combined_result_status != "fail"
+    local_ready = unresolved_critical_count == 0 and combined_result_status != "fail"
+    voucher_ready = hqs_ready and local_ready
+    lease_up_ready = voucher_ready and completion_pct >= 95.0 and not combined_reinspect_required
 
     is_compliant = bool(
         completion_pct >= 95.0
-        and checklist_failed_count == 0
-        and checklist_blocked_count == 0
+        and unresolved_failure_count == 0
+        and unresolved_blocked_count == 0
         and latest_inspection_passed
+        and not combined_reinspect_required
     )
 
     completion_projection_pct = _completion_projection_pct(
         completion_pct=completion_pct,
         readiness_score=readiness_score_value,
-        failed_count=failed_items + checklist_failed_count,
-        blocked_count=blocked_items + checklist_blocked_count,
-        failed_critical_items=failed_critical_items,
+        failed_count=failed_items + unresolved_failure_count,
+        blocked_count=blocked_items + unresolved_blocked_count,
+        failed_critical_items=failed_critical_items + unresolved_critical_count,
     )
 
     posture = _inspection_grade_posture(
-        readiness_status=readiness_status,
-        result_status=result_status,
-        failed_count=failed_items + checklist_failed_count,
-        blocked_count=blocked_items + checklist_blocked_count,
-        failed_critical_items=failed_critical_items,
+        readiness_status=combined_readiness_status,
+        result_status=combined_result_status,
+        failed_count=failed_items + unresolved_failure_count,
+        blocked_count=blocked_items + unresolved_blocked_count,
+        failed_critical_items=failed_critical_items + unresolved_critical_count,
         latest_inspection_passed=latest_inspection_passed,
         completion_pct=completion_pct,
+        reinspect_required=combined_reinspect_required,
     )
 
     return InspectionReadinessScore(
@@ -298,8 +344,8 @@ def compute_property_readiness_score(
         template_version=template_version,
         completion_pct=completion_pct,
         readiness_score=float(round(readiness_score_value, 2)),
-        readiness_status=readiness_status,
-        result_status=result_status,
+        readiness_status=combined_readiness_status,
+        result_status=combined_result_status,
         total_items=int(total_items),
         scored_items=int(scored_items),
         passed_items=int(passed_items),
@@ -311,11 +357,15 @@ def compute_property_readiness_score(
         latest_inspection_passed=bool(latest_inspection_passed),
         checklist_failed_count=int(checklist_failed_count),
         checklist_blocked_count=int(checklist_blocked_count),
+        unresolved_failure_count=int(unresolved_failure_count),
+        unresolved_blocked_count=int(unresolved_blocked_count),
+        unresolved_critical_count=int(unresolved_critical_count),
         hqs_ready=bool(hqs_ready),
         local_ready=bool(local_ready),
         voucher_ready=bool(voucher_ready),
         lease_up_ready=bool(lease_up_ready),
         is_compliant=bool(is_compliant),
+        reinspect_required=bool(combined_reinspect_required),
         posture=posture,
         completion_projection_pct=float(completion_projection_pct),
     )
@@ -354,6 +404,7 @@ def build_property_readiness_summary(
             "local_ready": score.local_ready,
             "voucher_ready": score.voucher_ready,
             "lease_up_ready": score.lease_up_ready,
+            "reinspect_required": score.reinspect_required,
         },
         "counts": {
             "total_items": score.total_items,
@@ -366,6 +417,9 @@ def build_property_readiness_summary(
             "failed_critical_items": score.failed_critical_items,
             "checklist_failed_count": score.checklist_failed_count,
             "checklist_blocked_count": score.checklist_blocked_count,
+            "unresolved_failure_count": score.unresolved_failure_count,
+            "unresolved_blocked_count": score.unresolved_blocked_count,
+            "unresolved_critical_count": score.unresolved_critical_count,
         },
         "raw": asdict(score),
     }

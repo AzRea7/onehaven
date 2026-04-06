@@ -1,15 +1,21 @@
+// frontend/src/pages/CompliancePane.tsx
 import React from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
   ClipboardCheck,
+  Eye,
   RefreshCcw,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 import PageShell from "../components/PageShell";
 import PageHero from "../components/PageHero";
 import Surface from "../components/Surface";
 import EmptyState from "../components/EmptyState";
+import PropertyCompliancePanel from "../components/PropertyCompliancePanel";
+import InspectionReadiness from "../components/InspectionReadiness";
 import { api } from "../lib/api";
 
 type ComplianceRow = {
@@ -31,6 +37,10 @@ type ComplianceRow = {
     blocked_count?: number;
     open_failed_items?: number;
     latest_inspection_passed?: boolean;
+    reinspect_required?: boolean;
+    readiness_score?: number;
+    readiness_status?: string;
+    result_status?: string;
   };
   jurisdiction?: {
     completeness_status?: string;
@@ -89,6 +99,14 @@ type PanePayload = {
   count?: number;
 };
 
+type PropertyLite = {
+  id: number;
+  address?: string;
+  city?: string;
+  state?: string;
+  county?: string;
+};
+
 function labelize(value?: string | null) {
   return String(value || "")
     .replace(/_/g, " ")
@@ -103,10 +121,54 @@ function urgencyTone(urgency?: string | null) {
   return "oh-pill";
 }
 
+function statusTone(value?: string | boolean | null) {
+  const v = String(value ?? "").toLowerCase();
+  if (v === "true" || v === "pass" || v === "ready")
+    return "oh-pill oh-pill-good";
+  if (
+    [
+      "false",
+      "fail",
+      "blocked",
+      "critical",
+      "needs_work",
+      "critical_failures",
+      "needs_remediation",
+      "reinspection_required",
+      "not_ready",
+    ].includes(v)
+  ) {
+    return "oh-pill oh-pill-bad";
+  }
+  if (["attention", "warn", "warning", "pending", "unknown"].includes(v)) {
+    return "oh-pill oh-pill-warn";
+  }
+  return "oh-pill";
+}
+
+function toPropertyLite(row?: ComplianceRow | null): PropertyLite | null {
+  if (!row?.property_id) return null;
+  return {
+    id: row.property_id,
+    address: row.address,
+    city: row.city,
+    state: row.state,
+    county: row.county,
+  };
+}
+
 export default function CompliancePane() {
   const [data, setData] = React.useState<PanePayload | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
+
+  const [selectedId, setSelectedId] = React.useState<number | null>(null);
+  const [selectedBrief, setSelectedBrief] = React.useState<any | null>(null);
+  const [selectedReadiness, setSelectedReadiness] = React.useState<any | null>(
+    null,
+  );
+  const [detailLoading, setDetailLoading] = React.useState(false);
+  const [detailError, setDetailError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -132,13 +194,90 @@ export default function CompliancePane() {
     : [];
   const staleItems = Array.isArray(data?.stale_items) ? data!.stale_items! : [];
 
+  React.useEffect(() => {
+    if (!rows.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (
+      selectedId == null ||
+      !rows.some((row) => row.property_id === selectedId)
+    ) {
+      setSelectedId(rows[0].property_id);
+    }
+  }, [rows, selectedId]);
+
+  const selectedRow = React.useMemo(
+    () => rows.find((row) => row.property_id === selectedId) || null,
+    [rows, selectedId],
+  );
+  const selectedProperty = React.useMemo(
+    () => toPropertyLite(selectedRow),
+    [selectedRow],
+  );
+
+  React.useEffect(() => {
+    if (!selectedProperty?.id) {
+      setSelectedBrief(null);
+      setSelectedReadiness(null);
+      setDetailError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setDetailLoading(true);
+    setDetailError(null);
+
+    Promise.allSettled([
+      api.compliancePropertyBrief(selectedProperty.id),
+      api.complianceInspectionReadiness(selectedProperty.id),
+    ])
+      .then((results) => {
+        if (cancelled) return;
+
+        const briefRes = results[0];
+        const readinessRes = results[1];
+
+        if (briefRes.status === "fulfilled") {
+          setSelectedBrief((briefRes.value as any) || null);
+        } else {
+          setSelectedBrief(null);
+        }
+
+        if (readinessRes.status === "fulfilled") {
+          setSelectedReadiness((readinessRes.value as any) || null);
+        } else {
+          setSelectedReadiness(null);
+        }
+
+        if (
+          briefRes.status === "rejected" &&
+          readinessRes.status === "rejected"
+        ) {
+          throw briefRes.reason || readinessRes.reason;
+        }
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        setDetailError(String(e?.message || e));
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setDetailLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProperty?.id]);
+
   return (
     <PageShell>
       <div className="space-y-6">
         <PageHero
           eyebrow="Lifecycle pane"
           title="Compliance / S8 pane"
-          subtitle="Run rehab readiness, jurisdiction checks, inspections, and blocker resolution from one shared pane contract."
+          subtitle="Property-scoped compliance, inspection history, readiness posture, unresolved failures, and remediation now flow through one pane."
           actions={
             <button onClick={refresh} className="oh-btn oh-btn-secondary">
               <RefreshCcw className="h-4 w-4" />
@@ -322,122 +461,292 @@ export default function CompliancePane() {
           </Surface>
         </div>
 
-        <Surface
-          title="Compliance queue"
-          subtitle="Properties currently routed into rehab, readiness, and inspection work."
-        >
-          {loading ? (
-            <div className="grid gap-3">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="oh-skeleton h-[132px] rounded-3xl" />
-              ))}
-            </div>
-          ) : !rows.length ? (
-            <EmptyState
-              icon={ClipboardCheck}
-              title="No compliance properties"
-              description="Nothing is currently routed into the compliance pane."
-            />
-          ) : (
-            <div className="grid gap-4">
-              {rows.map((row) => (
-                <Link
-                  key={row.property_id}
-                  to={`/properties/${row.property_id}`}
-                  className="rounded-3xl border border-app bg-app-panel px-5 py-4 transition hover:border-app-strong hover:bg-app-muted"
+        <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <Surface
+            title="Compliance queue"
+            subtitle="Select a property to inspect its current readiness, inspection posture, and failure-driven actions."
+          >
+            {loading ? (
+              <div className="grid gap-3">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="oh-skeleton h-[132px] rounded-3xl" />
+                ))}
+              </div>
+            ) : !rows.length ? (
+              <EmptyState
+                icon={ClipboardCheck}
+                title="No compliance properties"
+                description="Nothing is currently routed into the compliance pane."
+              />
+            ) : (
+              <div className="grid gap-4">
+                {rows.map((row) => {
+                  const isSelected = row.property_id === selectedId;
+                  const readinessStatus =
+                    row.compliance?.result_status ||
+                    row.compliance?.readiness_status ||
+                    undefined;
+                  const reinspectRequired = Boolean(
+                    row.compliance?.reinspect_required,
+                  );
+
+                  return (
+                    <button
+                      key={row.property_id}
+                      type="button"
+                      onClick={() => setSelectedId(row.property_id)}
+                      className={[
+                        "w-full rounded-3xl border px-5 py-4 text-left transition",
+                        isSelected
+                          ? "border-app-strong bg-app-muted"
+                          : "border-app bg-app-panel hover:border-app-strong hover:bg-app-muted",
+                      ].join(" ")}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="text-base font-semibold text-app-0">
+                              {row.address || `Property #${row.property_id}`}
+                            </div>
+                            {row.urgency ? (
+                              <span className={urgencyTone(row.urgency)}>
+                                {labelize(row.urgency)}
+                              </span>
+                            ) : null}
+                            {readinessStatus ? (
+                              <span className={statusTone(readinessStatus)}>
+                                {labelize(readinessStatus)}
+                              </span>
+                            ) : null}
+                            {reinspectRequired ? (
+                              <span className="oh-pill oh-pill-bad">
+                                Reinspection required
+                              </span>
+                            ) : null}
+                          </div>
+
+                          <div className="mt-1 text-sm text-app-4">
+                            {[row.city, row.state].filter(Boolean).join(", ")}
+                            {row.county ? ` · ${row.county}` : ""}
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <span className="oh-pill oh-pill-warn">
+                              {row.current_stage_label ||
+                                row.current_stage ||
+                                "compliance"}
+                            </span>
+
+                            {row.compliance?.latest_inspection_passed ===
+                            true ? (
+                              <span className="oh-pill oh-pill-good">
+                                Latest inspection passed
+                              </span>
+                            ) : row.compliance?.latest_inspection_passed ===
+                              false ? (
+                              <span className="oh-pill oh-pill-bad">
+                                Latest inspection failed
+                              </span>
+                            ) : null}
+
+                            {row.jurisdiction?.is_stale ? (
+                              <span className="oh-pill oh-pill-bad">
+                                Jurisdiction stale
+                              </span>
+                            ) : null}
+
+                            {row.jurisdiction?.completeness_status &&
+                            row.jurisdiction?.completeness_status !==
+                              "complete" ? (
+                              <span className="oh-pill oh-pill-accent">
+                                {labelize(row.jurisdiction.completeness_status)}
+                              </span>
+                            ) : null}
+
+                            {row.blockers?.[0] ? (
+                              <span className="oh-pill oh-pill-warn">
+                                {labelize(row.blockers[0])}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          {row.next_actions?.[0] ? (
+                            <div className="mt-3 text-sm text-app-2">
+                              Next action:{" "}
+                              <span className="text-app-1">
+                                {row.next_actions[0]}
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="grid gap-2 text-right">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                              Completion
+                            </div>
+                            <div className="text-sm font-semibold text-app-0">
+                              {row.compliance?.completion_pct != null
+                                ? `${Number(row.compliance.completion_pct).toFixed(1)}%`
+                                : "—"}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                              Failed / blocked
+                            </div>
+                            <div className="text-sm font-semibold text-app-0">
+                              {Number(row.compliance?.failed_count || 0)} /{" "}
+                              {Number(row.compliance?.blocked_count || 0)}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                              Open failed items
+                            </div>
+                            <div className="text-sm font-semibold text-app-0">
+                              {Number(row.compliance?.open_failed_items || 0)}
+                            </div>
+                          </div>
+
+                          <div className="pt-1 text-xs text-app-4">
+                            <span className="inline-flex items-center gap-1">
+                              <Eye className="h-3.5 w-3.5" />
+                              {isSelected
+                                ? "Viewing details"
+                                : "Select to inspect"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </Surface>
+
+          <div className="space-y-4">
+            {!selectedProperty ? (
+              <Surface
+                title="Selected property"
+                subtitle="Choose a property from the compliance queue."
+              >
+                <EmptyState
+                  compact
+                  icon={ClipboardCheck}
+                  title="No property selected"
+                  description="Select a property to inspect readiness, checklist state, inspection history, and remediation guidance."
+                />
+              </Surface>
+            ) : detailError ? (
+              <Surface
+                tone="danger"
+                title="Selected property"
+                subtitle="Could not load details"
+              >
+                <div className="text-sm text-red-300">{detailError}</div>
+              </Surface>
+            ) : detailLoading && !selectedReadiness && !selectedBrief ? (
+              <Surface
+                title="Selected property"
+                subtitle="Loading property-scoped inspection state"
+              >
+                <div className="grid gap-3">
+                  <div className="oh-skeleton h-[120px] rounded-2xl" />
+                  <div className="oh-skeleton h-[180px] rounded-2xl" />
+                  <div className="oh-skeleton h-[240px] rounded-2xl" />
+                </div>
+              </Surface>
+            ) : (
+              <>
+                <Surface
+                  title="Selected property"
+                  subtitle="Latest inspection, unresolved failures, and readiness summary for the active property."
+                  actions={
+                    <Link
+                      to={`/properties/${selectedProperty.id}`}
+                      className="oh-btn oh-btn-secondary"
+                    >
+                      Open property
+                    </Link>
+                  }
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-base font-semibold text-app-0">
-                          {row.address || `Property #${row.property_id}`}
-                        </div>
-                        {row.urgency ? (
-                          <span className={urgencyTone(row.urgency)}>
-                            {labelize(row.urgency)}
-                          </span>
-                        ) : null}
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        Property
                       </div>
-
+                      <div className="mt-2 text-sm font-semibold text-app-0">
+                        {selectedProperty.address ||
+                          `Property #${selectedProperty.id}`}
+                      </div>
                       <div className="mt-1 text-sm text-app-4">
-                        {[row.city, row.state].filter(Boolean).join(", ")}
-                        {row.county ? ` · ${row.county}` : ""}
+                        {[selectedProperty.city, selectedProperty.state]
+                          .filter(Boolean)
+                          .join(", ")}
+                        {selectedProperty.county
+                          ? ` · ${selectedProperty.county}`
+                          : ""}
                       </div>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="oh-pill oh-pill-warn">
-                          {row.current_stage_label ||
-                            row.current_stage ||
-                            "compliance"}
-                        </span>
-
-                        {row.jurisdiction?.is_stale ? (
-                          <span className="oh-pill oh-pill-bad">
-                            jurisdiction stale
-                          </span>
-                        ) : null}
-
-                        {row.jurisdiction?.completeness_status &&
-                        row.jurisdiction?.completeness_status !== "complete" ? (
-                          <span className="oh-pill oh-pill-accent">
-                            {labelize(row.jurisdiction.completeness_status)}
-                          </span>
-                        ) : null}
-
-                        {row.blockers?.[0] ? (
-                          <span className="oh-pill oh-pill-warn">
-                            {labelize(row.blockers[0])}
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {row.next_actions?.[0] ? (
-                        <div className="mt-3 text-sm text-app-2">
-                          Next action:{" "}
-                          <span className="text-app-1">
-                            {row.next_actions[0]}
-                          </span>
-                        </div>
-                      ) : null}
                     </div>
 
-                    <div className="grid gap-2 text-right">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                          Completion
-                        </div>
-                        <div className="text-sm font-semibold text-app-0">
-                          {row.compliance?.completion_pct != null
-                            ? `${Math.round(Number(row.compliance.completion_pct) * 100)}%`
-                            : "—"}
-                        </div>
+                    <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        Inspection posture
                       </div>
-
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                          Failed / blocked
-                        </div>
-                        <div className="text-sm font-semibold text-app-0">
-                          {Number(row.compliance?.failed_count || 0)} /{" "}
-                          {Number(row.compliance?.blocked_count || 0)}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                          Open failed items
-                        </div>
-                        <div className="text-sm font-semibold text-app-0">
-                          {Number(row.compliance?.open_failed_items || 0)}
-                        </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedReadiness?.latest_inspection?.passed ===
+                        true ? (
+                          <span className="oh-pill oh-pill-good">
+                            <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+                            Passed
+                          </span>
+                        ) : selectedReadiness?.latest_inspection?.passed ===
+                          false ? (
+                          <span className="oh-pill oh-pill-bad">
+                            <ShieldAlert className="mr-1 h-3.5 w-3.5" />
+                            Failed
+                          </span>
+                        ) : (
+                          <span className="oh-pill">No result</span>
+                        )}
+                        {selectedReadiness?.readiness?.reinspect_required ? (
+                          <span className="oh-pill oh-pill-bad">
+                            Reinspection required
+                          </span>
+                        ) : null}
+                        {selectedReadiness?.latest_inspection
+                          ?.inspection_date ? (
+                          <span className="oh-pill">
+                            {String(
+                              selectedReadiness.latest_inspection
+                                .inspection_date,
+                            )}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </Surface>
+                </Surface>
+
+                <InspectionReadiness
+                  readiness={selectedReadiness}
+                  brief={selectedBrief}
+                  status={selectedReadiness?.latest_inspection}
+                  summary={selectedReadiness?.run_summary}
+                />
+
+                <PropertyCompliancePanel
+                  property={selectedProperty}
+                  compliance={selectedBrief}
+                />
+              </>
+            )}
+          </div>
+        </div>
 
         <Surface
           title="Stale / follow-up items"
@@ -482,6 +791,93 @@ export default function CompliancePane() {
             </div>
           )}
         </Surface>
+
+        {(
+          selectedReadiness?.inspection_failure_actions?.recommended_actions ||
+          []
+        ).length > 0 ? (
+          <Surface
+            title="Failure-driven actions"
+            subtitle="Actionable remediation items generated from failed, blocked, or inconclusive inspection findings."
+          >
+            <div className="grid gap-3">
+              {(
+                selectedReadiness?.inspection_failure_actions
+                  ?.recommended_actions || []
+              )
+                .slice(0, 8)
+                .map((item: any, idx: number) => (
+                  <div
+                    key={`${item?.code || item?.title || idx}`}
+                    className="rounded-2xl border border-app bg-app-muted px-4 py-4"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-sm font-semibold text-app-0">
+                        {item?.title || item?.code || "Untitled action"}
+                      </div>
+                      {item?.priority ? (
+                        <span className={statusTone(item.priority)}>
+                          {labelize(item.priority)}
+                        </span>
+                      ) : null}
+                      {item?.result_status ? (
+                        <span className={statusTone(item.result_status)}>
+                          {labelize(item.result_status)}
+                        </span>
+                      ) : null}
+                      {item?.requires_reinspection ? (
+                        <span className="oh-pill oh-pill-bad">
+                          Reinspection
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {item?.notes ? (
+                      <div className="mt-2 text-sm leading-6 text-app-3 whitespace-pre-wrap">
+                        {item.notes}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+            </div>
+          </Surface>
+        ) : null}
+
+        {!selectedReadiness?.inspection_failure_actions?.recommended_actions
+          ?.length && selectedProperty ? (
+          <Surface
+            title="Failure-driven actions"
+            subtitle="No failure-driven remediation actions were returned for the selected property."
+          >
+            <div className="text-sm text-app-4">
+              No active failed, blocked, or inconclusive inspection items are
+              currently driving tasks.
+            </div>
+          </Surface>
+        ) : null}
+
+        {selectedReadiness?.readiness?.reinspect_required ? (
+          <Surface
+            tone="danger"
+            title="Reinspection workflow"
+            subtitle="Latest inspection plus unresolved failures still block readiness."
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 text-red-300" />
+              <div className="space-y-2 text-sm text-red-100/90">
+                <div>
+                  This property still requires reinspection. Latest readiness
+                  combines the most recent inspection with unresolved failures,
+                  blocked items, and critical findings.
+                </div>
+                <div>
+                  Resolve the failure-driven actions above, update evidence and
+                  photos on each line item, then rerun the inspection workflow.
+                </div>
+              </div>
+            </div>
+          </Surface>
+        ) : null}
       </div>
     </PageShell>
   );
