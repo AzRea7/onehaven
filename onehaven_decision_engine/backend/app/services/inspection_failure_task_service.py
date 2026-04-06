@@ -1,10 +1,9 @@
-# backend/app/services/inspection_failure_task_service.py
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -144,7 +143,7 @@ def _task_notes_from_item(
     if standard_citation:
         lines.append(f"Citation: {standard_citation}")
 
-    return "\n".join(lines).strip()
+    return "".join(lines).strip()
 
 
 def _task_exists(db: Session, *, org_id: int, property_id: int, title: str) -> bool:
@@ -255,50 +254,34 @@ def collect_failure_task_blueprints(
                 Inspection.id == inspection_id,
             )
         )
-    else:
+    if inspection is None:
         inspection = _latest_inspection(db, org_id=org_id, property_id=property_id)
-
     if inspection is None:
         return {
-            "ok": True,
+            "ok": False,
+            "property_id": int(property_id),
             "inspection_id": None,
-            "property_id": property_id,
-            "blueprints": [],
-            "counts": {
-                "total_items": 0,
-                "failure_like_items": 0,
-            },
+            "items": [],
+            "code": "no_inspection",
         }
 
     property_obj = _get_property(db, org_id=org_id, property_id=property_id)
     items = _inspection_items(db, inspection_id=int(inspection.id))
-
-    blueprints: list[FailureTaskBlueprint] = []
-    for item in items:
-        bp = _blueprint_from_item(item=item, inspection=inspection, property_obj=property_obj)
-        if bp is not None:
-            blueprints.append(bp)
-
-    blueprints = sorted(
-        blueprints,
-        key=lambda b: (
-            0 if b.priority == "high" else 1 if b.priority == "med" else 2,
-            0 if (b.severity or 0) >= 4 else 1,
-            b.category,
-            b.code,
-            b.title,
-        ),
-    )
+    blueprints = [
+        bp
+        for bp in (
+            _blueprint_from_item(item=item, inspection=inspection, property_obj=property_obj)
+            for item in items
+        )
+        if bp is not None
+    ]
 
     return {
         "ok": True,
+        "property_id": int(property_id),
         "inspection_id": int(inspection.id),
-        "property_id": property_id,
-        "blueprints": blueprints,
-        "counts": {
-            "total_items": len(items),
-            "failure_like_items": len(blueprints),
-        },
+        "items": [bp.__dict__.copy() for bp in blueprints],
+        "count": len(blueprints),
     }
 
 
@@ -309,63 +292,45 @@ def create_failure_tasks_from_inspection(
     property_id: int,
     inspection_id: int | None = None,
 ) -> dict[str, Any]:
-    collected = collect_failure_task_blueprints(
+    payload = collect_failure_task_blueprints(
         db,
         org_id=org_id,
         property_id=property_id,
         inspection_id=inspection_id,
     )
+    if not payload.get("ok"):
+        return payload
 
     created = 0
-    skipped_existing = 0
-    created_titles: list[str] = []
-
-    for bp in collected["blueprints"]:
-        if _task_exists(db, org_id=org_id, property_id=property_id, title=bp.title):
-            skipped_existing += 1
+    created_task_ids: list[int] = []
+    for item in payload.get("items", []):
+        title = str(item.get("title") or "").strip()
+        if not title or _task_exists(db, org_id=org_id, property_id=property_id, title=title):
             continue
 
         row = RehabTask(
             org_id=org_id,
             property_id=property_id,
-            title=bp.title,
-            category=bp.category or "compliance_repair",
-            inspection_relevant=bool(bp.inspection_relevant),
-            status="todo",
-            notes=bp.notes,
+            title=title,
+            category=str(item.get("category") or item.get("rehab_category") or "compliance_repair"),
+            inspection_relevant=bool(item.get("inspection_relevant", True)),
+            status="blocked" if str(item.get("priority") or "").lower() == "high" else "todo",
+            cost_estimate=0.0,
+            vendor=None,
+            deadline=None,
+            notes=str(item.get("notes") or ""),
             created_at=_now(),
         )
-
-        if hasattr(row, "updated_at"):
-            row.updated_at = _now()
-        if hasattr(row, "cost_estimate"):
-            row.cost_estimate = None
-        if hasattr(row, "priority"):
-            row.priority = bp.priority
-        if hasattr(row, "metadata_json"):
-            row.metadata_json = _j(
-                {
-                    "inspection_item_id": bp.inspection_item_id,
-                    "inspection_id": collected["inspection_id"],
-                    "result_status": bp.result_status,
-                    "severity": bp.severity,
-                    "requires_reinspection": bp.requires_reinspection,
-                    "rehab_category": bp.rehab_category,
-                }
-            )
-
         db.add(row)
+        db.flush()
         created += 1
-        created_titles.append(bp.title)
+        created_task_ids.append(int(row.id))
 
+    db.commit()
     return {
-        "ok": True,
-        "inspection_id": collected["inspection_id"],
-        "property_id": property_id,
+        **payload,
         "created": created,
-        "skipped_existing": skipped_existing,
-        "titles": created_titles,
-        "counts": collected["counts"],
+        "created_task_ids": created_task_ids,
     }
 
 
@@ -375,39 +340,91 @@ def build_failure_next_actions(
     org_id: int,
     property_id: int,
     inspection_id: int | None = None,
-    limit: int = 10,
-) -> dict[str, Any]:
-    collected = collect_failure_task_blueprints(
+    limit: int = 5,
+) -> list[str]:
+    payload = collect_failure_task_blueprints(
         db,
         org_id=org_id,
         property_id=property_id,
         inspection_id=inspection_id,
     )
+    if not payload.get("ok"):
+        return []
+    out: list[str] = []
+    for row in payload.get("items", [])[: max(0, int(limit))]:
+        title = str(row.get("title") or "").strip()
+        if title:
+            out.append(title)
+    return out
 
-    fail_point_rows = [{"code": bp.code, "count": 1} for bp in collected["blueprints"]]
-    ranked_fail_points = top_fail_points(fail_point_rows, limit=max(1, int(limit)))
 
-    actions: list[dict[str, Any]] = []
-    for bp in collected["blueprints"][: max(1, int(limit))]:
-        actions.append(
+def summarize_fail_points(rows: Iterable[Any], limit: int = 10) -> list[dict[str, Any]]:
+    return top_fail_points(rows, limit=limit)
+
+
+def create_tasks_from_photo_findings(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    findings: Iterable[dict[str, Any]],
+    mark_blocking: bool = False,
+) -> dict[str, Any]:
+    created = 0
+    created_task_ids: list[int] = []
+    rows = list(findings or [])
+
+    for finding in rows:
+        title = str(
+            finding.get("title")
+            or finding.get("probable_failed_inspection_item")
+            or finding.get("observed_issue")
+            or "Resolve compliance photo finding"
+        ).strip()
+        if not title:
+            continue
+        if not title.lower().startswith("resolve") and not title.lower().startswith("fix"):
+            title = f"Resolve: {title}"
+        if _task_exists(db, org_id=org_id, property_id=property_id, title=title):
+            continue
+
+        priority_high = str(finding.get("severity") or "").strip().lower() in {"critical", "high"}
+        blocker = bool(mark_blocking and (finding.get("hard_blocker_candidate") or priority_high))
+        notes = _j(
             {
-                "code": bp.code,
-                "title": bp.title,
-                "category": bp.category,
-                "priority": bp.priority,
-                "severity": bp.severity,
-                "result_status": bp.result_status,
-                "requires_reinspection": bp.requires_reinspection,
-                "rehab_category": bp.rehab_category,
-                "notes": bp.notes,
+                "source": "photo_compliance_finding",
+                "observed_issue": finding.get("observed_issue"),
+                "probable_failed_inspection_item": finding.get("probable_failed_inspection_item"),
+                "recommended_fix": finding.get("recommended_fix"),
+                "requires_reinspection": finding.get("requires_reinspection"),
+                "confidence": finding.get("confidence"),
+                "rule_mapping": finding.get("rule_mapping"),
+                "evidence_photo_ids": finding.get("evidence_photo_ids", []),
             }
         )
+        row = RehabTask(
+            org_id=org_id,
+            property_id=property_id,
+            title=title,
+            category=str(finding.get("rehab_category") or "compliance_repair"),
+            inspection_relevant=True,
+            status="blocked" if blocker else "todo",
+            cost_estimate=0.0,
+            vendor=None,
+            deadline=None,
+            notes=notes,
+            created_at=_now(),
+        )
+        db.add(row)
+        db.flush()
+        created += 1
+        created_task_ids.append(int(row.id))
 
+    db.commit()
     return {
         "ok": True,
-        "inspection_id": collected["inspection_id"],
-        "property_id": property_id,
-        "top_fail_points": ranked_fail_points,
-        "recommended_actions": actions,
-        "counts": collected["counts"],
+        "property_id": int(property_id),
+        "created": created,
+        "created_task_ids": created_task_ids,
+        "rows": rows,
     }

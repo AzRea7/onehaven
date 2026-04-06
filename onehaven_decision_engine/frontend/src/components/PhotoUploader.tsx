@@ -1,5 +1,5 @@
 import React from "react";
-import { Upload, Loader2, Camera, FilePlus2 } from "lucide-react";
+import { Upload, Loader2, Camera, FilePlus2, Sparkles } from "lucide-react";
 import { api } from "../lib/api";
 import Surface from "./Surface";
 import AppSelect from "./AppSelect";
@@ -9,7 +9,8 @@ type Props = {
   inspectionId?: number | null;
   checklistItemId?: number | null;
   attachToComplianceByDefault?: boolean;
-  onUploaded?: () => void | Promise<void>;
+  autoAnalyzeByDefault?: boolean;
+  onUploaded?: (payload?: any) => void | Promise<void>;
 };
 
 const KIND_OPTIONS = [
@@ -34,6 +35,7 @@ export default function PhotoUploader({
   inspectionId,
   checklistItemId,
   attachToComplianceByDefault = true,
+  autoAnalyzeByDefault = true,
   onUploaded,
 }: Props) {
   const [busy, setBusy] = React.useState(false);
@@ -42,6 +44,7 @@ export default function PhotoUploader({
   const [attachToCompliance, setAttachToCompliance] = React.useState(
     attachToComplianceByDefault,
   );
+  const [autoAnalyze, setAutoAnalyze] = React.useState(autoAnalyzeByDefault);
   const [evidenceCategory, setEvidenceCategory] =
     React.useState("photo_evidence");
 
@@ -59,6 +62,7 @@ export default function PhotoUploader({
       form.append("label", file.name);
       form.append("attach_to_compliance", String(attachToCompliance));
       form.append("evidence_category", evidenceCategory);
+      form.append("auto_analyze_for_compliance", String(autoAnalyze));
       if (inspectionId != null)
         form.append("inspection_id", String(inspectionId));
       if (checklistItemId != null) {
@@ -66,8 +70,8 @@ export default function PhotoUploader({
       }
       form.append("file", file);
 
-      await api.post("/photos/upload", form);
-      await onUploaded?.();
+      const response = await api.post("/photos/upload", form);
+      await onUploaded?.(response);
       e.target.value = "";
     } catch (err: any) {
       setError(err?.message || "Upload failed");
@@ -79,7 +83,7 @@ export default function PhotoUploader({
   return (
     <Surface
       title="Attach photos"
-      subtitle="Zillow photos are auto-attached during import. This uploader is for manual add-ons and compliance evidence."
+      subtitle="Upload room, safety, and exterior evidence. You can mirror the file into compliance documents and immediately run AI finding extraction."
     >
       <div className="grid gap-3">
         <div className="grid gap-3 md:grid-cols-2">
@@ -102,15 +106,27 @@ export default function PhotoUploader({
           </div>
         </div>
 
-        <label className="inline-flex items-center gap-2 text-sm text-app-2">
-          <input
-            type="checkbox"
-            checked={attachToCompliance}
-            onChange={(e) => setAttachToCompliance(e.target.checked)}
-            className="h-4 w-4 rounded border-app bg-app-panel"
-          />
-          Mirror this upload into compliance evidence documents
-        </label>
+        <div className="grid gap-2 md:grid-cols-2">
+          <label className="inline-flex items-center gap-2 text-sm text-app-2">
+            <input
+              type="checkbox"
+              checked={attachToCompliance}
+              onChange={(e) => setAttachToCompliance(e.target.checked)}
+              className="h-4 w-4 rounded border-app bg-app-panel"
+            />
+            Mirror this upload into compliance evidence documents
+          </label>
+
+          <label className="inline-flex items-center gap-2 text-sm text-app-2">
+            <input
+              type="checkbox"
+              checked={autoAnalyze}
+              onChange={(e) => setAutoAnalyze(e.target.checked)}
+              className="h-4 w-4 rounded border-app bg-app-panel"
+            />
+            Run compliance photo analysis right after upload
+          </label>
+        </div>
 
         <label className="mt-1 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-app bg-app-panel px-4 py-3 text-sm text-app-1 hover:bg-app-muted">
           <input
@@ -129,9 +145,11 @@ export default function PhotoUploader({
           )}
           {busy
             ? "Uploading..."
-            : attachToCompliance
-              ? "Upload image + attach as evidence"
-              : "Upload image"}
+            : autoAnalyze
+              ? "Upload image + analyze for inspection findings"
+              : attachToCompliance
+                ? "Upload image + attach as evidence"
+                : "Upload image"}
         </label>
 
         <div className="flex flex-wrap gap-2 text-xs text-app-4">
@@ -139,6 +157,12 @@ export default function PhotoUploader({
             <Camera className="h-3.5 w-3.5" />
             Property photos
           </span>
+          {autoAnalyze ? (
+            <span className="inline-flex items-center gap-1">
+              <Sparkles className="h-3.5 w-3.5" />
+              AI inspection preview enabled
+            </span>
+          ) : null}
           {inspectionId != null ? (
             <span className="oh-pill">Inspection #{inspectionId}</span>
           ) : null}

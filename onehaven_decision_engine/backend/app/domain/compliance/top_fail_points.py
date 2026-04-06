@@ -9,7 +9,7 @@ from .inspection_rules import normalize_inspection_item_status, normalize_rule_c
 
 def _extract_fail_points(row: Any) -> list[str]:
     """
-    Flexible extractor for inspection/compliance fail points.
+    Flexible extractor for inspection, compliance, and photo-analysis fail points.
 
     Supported shapes:
       1) {"fail_items_json": "[...json list...]"}
@@ -17,7 +17,9 @@ def _extract_fail_points(row: Any) -> list[str]:
       3) {"items": [{"code": "...", "failed": true}, ...]}
       4) {"code": "...", "failed": true}
       5) {"code": "...", "result_status": "fail"}
-      6) bare string
+      6) {"findings": [{"code": "..."}, ...]}
+      7) {"probable_failed_inspection_item": "...", "rule_mapping": {"code": "..."}}
+      8) bare string
     """
     if row is None:
         return []
@@ -37,6 +39,13 @@ def _extract_fail_points(row: Any) -> list[str]:
         if code and status == "fail":
             out.append(code)
 
+    probable = row.get("probable_failed_inspection_item")
+    rule_mapping = row.get("rule_mapping")
+    if probable and isinstance(rule_mapping, dict):
+        mapped_code = normalize_rule_code(rule_mapping.get("code"))
+        if mapped_code:
+            out.append(mapped_code)
+
     items = row.get("items")
     if isinstance(items, list):
         for it in items:
@@ -48,6 +57,18 @@ def _extract_fail_points(row: Any) -> list[str]:
                 failed=it.get("failed"),
             )
             if code and status == "fail":
+                out.append(code)
+
+    findings = row.get("findings")
+    if isinstance(findings, list):
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            code = normalize_rule_code(
+                finding.get("code")
+                or ((finding.get("rule_mapping") or {}).get("code") if isinstance(finding.get("rule_mapping"), dict) else None)
+            )
+            if code:
                 out.append(code)
 
     for k in ("fail_items_json", "typical_fail_points_json"):
@@ -72,7 +93,7 @@ def _extract_fail_points(row: Any) -> list[str]:
                         v.get("result_status") or v.get("status"),
                         failed=v.get("failed"),
                     )
-                    if code and (status == "fail" or "typical_fail_points_json" in k):
+                    if code and (status == "fail" or k == "typical_fail_points_json"):
                         out.append(code)
 
     return out

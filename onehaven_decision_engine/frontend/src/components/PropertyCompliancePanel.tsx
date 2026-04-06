@@ -22,6 +22,7 @@ import Surface from "./Surface";
 import EmptyState from "./EmptyState";
 import ComplianceDocumentUploader from "./ComplianceDocumentUploader";
 import ComplianceDocumentStack from "./ComplianceDocumentStack";
+import CompliancePhotoFindingsPanel from "./CompliancePhotoFindingsPanel";
 
 type PropertyLike = {
   id?: number;
@@ -491,9 +492,11 @@ function ChecklistExecutionCard({ item }: { item: any }) {
 export default function PropertyCompliancePanel({
   property,
   compliance,
+  photoAnalysis,
 }: {
   property?: PropertyLike;
   compliance?: any;
+  photoAnalysis?: any;
 }) {
   const [brief, setBrief] = React.useState<Brief | null>(compliance || null);
   const [readiness, setReadiness] = React.useState<any | null>(null);
@@ -910,6 +913,53 @@ export default function PropertyCompliancePanel({
               onDeleted={refreshDocuments}
             />
           </div>
+
+          {photoAnalysis ? (
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-app-0">
+                <ImageIcon className="h-4 w-4 text-app-4" />
+                Photo-based inspection summary
+              </div>
+
+              <div className="mb-4 grid gap-3 md:grid-cols-4">
+                <Field
+                  label="Findings"
+                  value={
+                    Array.isArray(photoAnalysis?.findings)
+                      ? photoAnalysis.findings.length
+                      : 0
+                  }
+                />
+                <Field
+                  label="Photos scanned"
+                  value={photoAnalysis?.photo_count ?? "—"}
+                />
+                <Field
+                  label="Estimated blockers"
+                  value={photoAnalysis?.estimated_blockers ?? "—"}
+                />
+                <Field
+                  label="Jurisdiction"
+                  value={photoAnalysis?.jurisdiction || "—"}
+                />
+              </div>
+
+              <CompliancePhotoFindingsPanel
+                analysis={photoAnalysis}
+                selectedCodes={(Array.isArray(photoAnalysis?.findings)
+                  ? photoAnalysis.findings
+                  : []
+                )
+                  .map((item: any) =>
+                    String(
+                      item?.code || item?.rule_mapping?.code || "",
+                    ).toUpperCase(),
+                  )
+                  .filter(Boolean)}
+                markBlocking={false}
+              />
+            </div>
+          ) : null}
 
           {coverage.is_stale ||
           (coverage.missing_categories || []).length > 0 ? (

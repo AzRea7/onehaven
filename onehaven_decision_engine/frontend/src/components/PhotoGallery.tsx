@@ -1,4 +1,5 @@
 import React from "react";
+import { Camera, Image as ImageIcon, Trash2 } from "lucide-react";
 import Surface from "./Surface";
 import EmptyState from "./EmptyState";
 
@@ -8,6 +9,7 @@ type Photo = {
   label?: string | null;
   kind?: string | null;
   source?: string | null;
+  created_at?: string | null;
 };
 
 function kindTone(kind?: string | null) {
@@ -17,6 +19,13 @@ function kindTone(kind?: string | null) {
   if (k === "damage" || k === "issue") return "oh-pill oh-pill-bad";
   if (k === "smoke_detector") return "oh-pill oh-pill-warn";
   return "oh-pill";
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString();
 }
 
 export default function PhotoGallery({
@@ -50,23 +59,52 @@ export default function PhotoGallery({
   return (
     <Surface
       title="Photo gallery"
-      subtitle="Zillow import + manual uploads both land here."
+      subtitle="Review room and exterior images before running compliance finding extraction."
       actions={<div className="text-xs text-app-4">{rows.length} photos</div>}
     >
       <div className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
-        <div className="min-h-[320px] overflow-hidden rounded-2xl border border-app bg-app-muted">
+        <div className="space-y-3">
+          <div className="min-h-[320px] overflow-hidden rounded-2xl border border-app bg-app-muted">
+            {selected ? (
+              <img
+                src={selected.url}
+                alt={selected.label || `Photo ${selected.id}`}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="p-8 text-app-4">Select a photo</div>
+            )}
+          </div>
+
           {selected ? (
-            <img
-              src={selected.url}
-              alt={selected.label || `Photo ${selected.id}`}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="p-8 text-app-4">Select a photo</div>
-          )}
+            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={kindTone(selected.kind)}>
+                  {selected.kind || "unknown"}
+                </span>
+                <span className="oh-pill">
+                  {selected.source || "unknown source"}
+                </span>
+              </div>
+
+              <div className="mt-3 text-sm font-semibold text-app-0">
+                {selected.label || `Photo #${selected.id}`}
+              </div>
+
+              <div className="mt-2 break-all text-xs text-app-4">
+                {selected.url}
+              </div>
+
+              {selected.created_at ? (
+                <div className="mt-2 text-xs text-app-4">
+                  Added {formatDate(selected.created_at)}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
-        <div className="grid max-h-[420px] grid-cols-2 gap-3 overflow-auto pr-1">
+        <div className="grid max-h-[520px] grid-cols-2 gap-3 overflow-auto pr-1">
           {rows.map((photo) => (
             <button
               key={photo.id}
@@ -97,21 +135,35 @@ export default function PhotoGallery({
                   {photo.label || photo.url}
                 </div>
 
-                {onDelete && photo.source === "upload" ? (
-                  <button
-                    className="mt-3 text-[11px] text-red-300 hover:text-red-200"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await onDelete(photo.id);
-                    }}
-                  >
-                    Delete
-                  </button>
-                ) : null}
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1 text-[11px] text-app-4">
+                    <ImageIcon className="h-3.5 w-3.5" />#{photo.id}
+                  </span>
+
+                  {onDelete && photo.source === "upload" ? (
+                    <button
+                      className="inline-flex items-center gap-1 text-[11px] text-red-300 hover:text-red-200"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await onDelete(photo.id);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 text-xs text-app-4">
+        <span className="inline-flex items-center gap-1">
+          <Camera className="h-3.5 w-3.5" />
+          Uploaded and imported property imagery
+        </span>
       </div>
     </Surface>
   );

@@ -1,4 +1,3 @@
-# backend/app/services/photo_rehab_agent.py
 from __future__ import annotations
 
 import json
@@ -9,6 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Property, PropertyPhoto, RehabTask
+from app.services.compliance_photo_analysis_service import (
+    analyze_property_photos_for_compliance as analyze_compliance_photo_findings,
+    create_compliance_tasks_from_photo_analysis,
+)
 
 
 def _now() -> datetime:
@@ -32,9 +35,10 @@ def _task_status_for_blocker(is_blocker: bool) -> str:
 
 def _deterministic_issue_bank(photos: list[PropertyPhoto]) -> list[dict[str, Any]]:
     """
-    Deterministic placeholder analysis for now.
-    This gives you a stable contract for UI + workflow + tests.
-    Later you swap the internals with a real vision model and keep the output schema.
+    Deterministic placeholder analysis for rehab workflow.
+    The compliance chunk now remaps the same photo inventory into HQS-specific
+    findings through compliance_photo_analysis_service, but we keep the rehab
+    contract stable for existing tests and UI.
     """
     has_interior = any((p.kind or "").lower() == "interior" for p in photos)
     has_exterior = any((p.kind or "").lower() == "exterior" for p in photos)
@@ -60,7 +64,7 @@ def _deterministic_issue_bank(photos: list[PropertyPhoto]) -> list[dict[str, Any
                 "severity": "high",
                 "estimated_cost": 1600.0,
                 "blocker": True,
-                "notes": "Exterior photos suggest windows/trim should be validated before lease-up and compliance.",
+                "notes": "Exterior photos suggest windows or trim should be validated before lease-up and compliance.",
                 "evidence_photo_ids": [int(p.id) for p in photos if (p.kind or "").lower() == "exterior"][:2],
             }
         )
@@ -84,7 +88,7 @@ def _deterministic_issue_bank(photos: list[PropertyPhoto]) -> list[dict[str, Any
                 "severity": "critical",
                 "estimated_cost": 1200.0,
                 "blocker": True,
-                "notes": "Interior review should confirm stairs, railings, GFCI, smoke/CO alarms, and trip hazards.",
+                "notes": "Interior review should confirm stairs, railings, GFCI, smoke or CO alarms, and trip hazards.",
                 "evidence_photo_ids": [int(p.id) for p in photos if (p.kind or "").lower() == "interior"][:4],
             }
         )
@@ -245,4 +249,48 @@ def analyze_and_create_rehab_tasks(
         org_id=org_id,
         property_id=property_id,
         analysis=analysis,
+    )
+
+
+def analyze_property_photos_for_compliance(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int | None = None,
+    checklist_item_id: int | None = None,
+) -> dict[str, Any]:
+    return analyze_compliance_photo_findings(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+        checklist_item_id=checklist_item_id,
+    )
+
+
+def analyze_and_create_compliance_tasks(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int | None = None,
+    checklist_item_id: int | None = None,
+    confirmed_codes: list[str] | None = None,
+    mark_blocking: bool = False,
+) -> dict[str, Any]:
+    analysis = analyze_compliance_photo_findings(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+        checklist_item_id=checklist_item_id,
+    )
+    return create_compliance_tasks_from_photo_analysis(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        analysis=analysis,
+        confirmed_codes=confirmed_codes,
+        mark_blocking=mark_blocking,
     )

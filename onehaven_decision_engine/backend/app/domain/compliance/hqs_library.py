@@ -435,3 +435,42 @@ def build_property_inspection_packet(
             "warn_items": sum(1 for row in checklist_rows if str(row.get("severity")).lower() == "warn"),
         },
     }
+
+
+
+def hqs_items_lookup(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+    profile_summary: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    effective = get_effective_hqs_items(
+        db,
+        org_id=org_id,
+        prop=prop,
+        profile_summary=profile_summary,
+    )
+    return {
+        normalize_rule_code(item.get("code") or ""): item
+        for item in (effective.get("items") or [])
+        if normalize_rule_code(item.get("code") or "")
+    }
+
+
+
+def explain_hqs_rule(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+    code: str,
+    profile_summary: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    lookup = hqs_items_lookup(
+        db,
+        org_id=org_id,
+        prop=prop,
+        profile_summary=profile_summary,
+    )
+    return lookup.get(normalize_rule_code(code))

@@ -22,6 +22,9 @@ import ComplianceReminderPanel from "../components/ComplianceReminderPanel";
 import ComplianceDocumentUploader from "../components/ComplianceDocumentUploader";
 import ComplianceDocumentStack from "../components/ComplianceDocumentStack";
 import PhotoUploader from "../components/PhotoUploader";
+import PhotoGallery from "../components/PhotoGallery";
+import RehabFromPhotosCTA from "../components/RehabFromPhotosCTA";
+import CompliancePhotoFindingsPanel from "../components/CompliancePhotoFindingsPanel";
 import { api } from "../lib/api";
 
 type ComplianceRow = {
@@ -198,6 +201,13 @@ export default function CompliancePane() {
   const [photos, setPhotos] = React.useState<any[]>([]);
   const [scheduleLoading, setScheduleLoading] = React.useState(false);
   const [schedulerOpen, setSchedulerOpen] = React.useState(false);
+  const [photoAnalysis, setPhotoAnalysis] = React.useState<any | null>(null);
+  const [photoBusy, setPhotoBusy] = React.useState(false);
+  const [selectedFindingCodes, setSelectedFindingCodes] = React.useState<
+    string[]
+  >([]);
+  const [markPhotoTasksBlocking, setMarkPhotoTasksBlocking] =
+    React.useState(false);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -298,6 +308,9 @@ export default function CompliancePane() {
       setReminderRows([]);
       setDocumentStack(null);
       setPhotos([]);
+      setPhotoAnalysis(null);
+      setSelectedFindingCodes([]);
+      setMarkPhotoTasksBlocking(false);
       return;
     }
 
@@ -359,6 +372,74 @@ export default function CompliancePane() {
 
   const selectedAppointment =
     scheduleSummary?.appointment || scheduleSummary?.latest_appointment || null;
+
+  function syncSelectedFindings(analysis: any) {
+    setPhotoAnalysis(analysis);
+    const codes = (Array.isArray(analysis?.findings) ? analysis.findings : [])
+      .map((item: any) =>
+        String(item?.code || item?.rule_mapping?.code || "").toUpperCase(),
+      )
+      .filter(Boolean);
+    setSelectedFindingCodes(codes);
+  }
+
+  function toggleFindingCode(code: string) {
+    const normalized = String(code || "").toUpperCase();
+    setSelectedFindingCodes((prev) =>
+      prev.includes(normalized)
+        ? prev.filter((item) => item !== normalized)
+        : [...prev, normalized],
+    );
+  }
+
+  async function previewCompliancePhotoFindings() {
+    if (!selectedProperty?.id) return;
+    try {
+      setPhotoBusy(true);
+      const form = new FormData();
+      if (selectedInspectionId != null) {
+        form.append("inspection_id", String(selectedInspectionId));
+      }
+      const result = await api.post(
+        `/photos/${selectedProperty.id}/compliance-preview`,
+        form,
+      );
+      syncSelectedFindings(result);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  async function createComplianceTasksFromPhotos() {
+    if (!selectedProperty?.id || !selectedFindingCodes.length) return;
+    try {
+      setPhotoBusy(true);
+      const form = new FormData();
+      form.append("confirmed_codes", selectedFindingCodes.join(","));
+      form.append("mark_blocking", String(markPhotoTasksBlocking));
+      if (selectedInspectionId != null) {
+        form.append("inspection_id", String(selectedInspectionId));
+      }
+      const result = await api.post(
+        `/photos/${selectedProperty.id}/compliance-tasks`,
+        form,
+      );
+      if (result?.findings) {
+        syncSelectedFindings({
+          ...(photoAnalysis || {}),
+          ...result,
+          findings: result.findings,
+          issues: result.findings,
+        });
+      }
+      api
+        .complianceInspectionReadiness(selectedProperty.id)
+        .then(setSelectedReadiness)
+        .catch(() => {});
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
 
   async function deletePhoto(photoId: number) {
     await api.delete(`/photos/${photoId}`);
@@ -887,9 +968,13 @@ export default function CompliancePane() {
                     propertyId={selectedProperty.id}
                     inspectionId={selectedInspectionId}
                     attachToComplianceByDefault
-                    onUploaded={() =>
-                      refreshPropertyArtifacts(selectedProperty.id)
-                    }
+                    autoAnalyzeByDefault
+                    onUploaded={async (payload) => {
+                      await refreshPropertyArtifacts(selectedProperty.id);
+                      if (payload?.compliance_preview) {
+                        syncSelectedFindings(payload.compliance_preview);
+                      }
+                    }}
                   />
                 </div>
 
@@ -900,11 +985,45 @@ export default function CompliancePane() {
                       refreshPropertyArtifacts(selectedProperty.id)
                     }
                   />
+                  <PhotoGallery photos={photos} onDelete={deletePhoto} />
                 </div>
+
+                <RehabFromPhotosCTA
+                  busy={photoBusy}
+                  analysis={photoAnalysis}
+                  selectedCount={selectedFindingCodes.length}
+                  onPreview={previewCompliancePhotoFindings}
+                  onGenerate={createComplianceTasksFromPhotos}
+                />
+
+                <CompliancePhotoFindingsPanel
+                  analysis={photoAnalysis}
+                  busy={photoBusy}
+                  selectedCodes={selectedFindingCodes}
+                  markBlocking={markPhotoTasksBlocking}
+                  onToggleCode={toggleFindingCode}
+                  onSelectAll={() => {
+                    const codes = (
+                      Array.isArray(photoAnalysis?.findings)
+                        ? photoAnalysis.findings
+                        : []
+                    )
+                      .map((item: any) =>
+                        String(
+                          item?.code || item?.rule_mapping?.code || "",
+                        ).toUpperCase(),
+                      )
+                      .filter(Boolean);
+                    setSelectedFindingCodes(codes);
+                  }}
+                  onClear={() => setSelectedFindingCodes([])}
+                  onMarkBlockingChange={setMarkPhotoTasksBlocking}
+                />
 
                 <PropertyCompliancePanel
                   property={selectedProperty}
                   compliance={selectedBrief}
+                  photoAnalysis={photoAnalysis}
                 />
               </>
             )}

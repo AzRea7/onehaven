@@ -1,8 +1,8 @@
-# backend/app/services/property_photo_service.py
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,6 +46,48 @@ def ensure_property_exists(db: Session, *, org_id: int, property_id: int) -> Pro
     if not prop:
         raise ValueError("property not found")
     return prop
+
+
+def summarize_property_photo_inventory(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    ensure_property_exists(db, org_id=org_id, property_id=property_id)
+    rows = list_property_photos(db, org_id=org_id, property_id=property_id)
+    by_kind: Counter[str] = Counter()
+    by_source: Counter[str] = Counter()
+
+    for row in rows:
+        by_kind[str(getattr(row, "kind", None) or "unknown").strip().lower() or "unknown"] += 1
+        by_source[str(getattr(row, "source", None) or "unknown").strip().lower() or "unknown"] += 1
+
+    return {
+        "property_id": int(property_id),
+        "count": len(rows),
+        "by_kind": dict(sorted(by_kind.items())),
+        "by_source": dict(sorted(by_source.items())),
+        "has_interior": by_kind.get("interior", 0) > 0,
+        "has_exterior": by_kind.get("exterior", 0) > 0,
+        "rows": [serialize_property_photo(row) for row in rows],
+    }
+
+
+def serialize_property_photo(row: PropertyPhoto) -> dict[str, Any]:
+    return {
+        "id": int(getattr(row, "id", 0) or 0),
+        "property_id": int(getattr(row, "property_id", 0) or 0),
+        "source": getattr(row, "source", None),
+        "kind": getattr(row, "kind", None),
+        "label": getattr(row, "label", None),
+        "url": getattr(row, "url", None),
+        "storage_key": getattr(row, "storage_key", None),
+        "content_type": getattr(row, "content_type", None),
+        "sort_order": getattr(row, "sort_order", None),
+        "created_at": getattr(row, "created_at", None),
+        "updated_at": getattr(row, "updated_at", None),
+    }
 
 
 def upsert_zillow_photos(

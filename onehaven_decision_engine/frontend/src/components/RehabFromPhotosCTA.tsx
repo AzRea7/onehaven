@@ -1,16 +1,18 @@
 import React from "react";
-import { Sparkles, Wrench } from "lucide-react";
+import { Camera, ShieldAlert, Sparkles } from "lucide-react";
 import Surface from "./Surface";
 import EmptyState from "./EmptyState";
 
 export default function RehabFromPhotosCTA({
   busy,
   analysis,
+  selectedCount = 0,
   onPreview,
   onGenerate,
 }: {
   busy?: boolean;
   analysis?: any;
+  selectedCount?: number;
   onPreview?: () => void | Promise<void>;
   onGenerate?: () => void | Promise<void>;
 }) {
@@ -22,8 +24,8 @@ export default function RehabFromPhotosCTA({
 
   return (
     <Surface
-      title="Rehab from photos"
-      subtitle="Turn photo evidence into structured issues and then into rehab tasks."
+      title="Inspection findings from photos"
+      subtitle="Run photo analysis first, then confirm the likely HQS and local inspection fail points you actually want converted into tasks."
       actions={
         <div className="flex gap-2">
           <button
@@ -31,14 +33,16 @@ export default function RehabFromPhotosCTA({
             disabled={busy}
             className="oh-btn oh-btn-secondary"
           >
-            {busy ? "working…" : "preview"}
+            {busy ? "working…" : "preview findings"}
           </button>
           <button
             onClick={() => onGenerate?.()}
-            disabled={busy}
+            disabled={busy || !selectedCount}
             className="oh-btn oh-btn-primary"
           >
-            {busy ? "working…" : "generate tasks"}
+            {busy
+              ? "working…"
+              : `create ${selectedCount || ""} task${selectedCount === 1 ? "" : "s"}`}
           </button>
         </div>
       }
@@ -47,15 +51,15 @@ export default function RehabFromPhotosCTA({
         <EmptyState
           compact
           icon={Sparkles}
-          title="No photo analysis yet"
-          description="Preview first to inspect extracted issues. Generate only when the output looks sane and not like a caffeinated raccoon guessed at drywall."
+          title="No compliance photo analysis yet"
+          description="Upload room or exterior photos, then preview likely fail points before you turn them into actionable inspection tasks."
         />
       ) : (
         <div className="space-y-3">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
               <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                Issues
+                Findings
               </div>
               <div className="mt-2 text-xl font-semibold text-app-0">
                 {findings.length}
@@ -64,47 +68,54 @@ export default function RehabFromPhotosCTA({
 
             <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
               <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                Estimated total
+                Photos scanned
               </div>
               <div className="mt-2 text-xl font-semibold text-app-0">
-                {analysis?.estimated_total_cost != null
-                  ? `$${Math.round(Number(analysis.estimated_total_cost)).toLocaleString()}`
-                  : "—"}
+                {analysis?.photo_count ?? "—"}
               </div>
             </div>
 
             <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
               <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                Status
+                Estimated blockers
               </div>
               <div className="mt-2 text-xl font-semibold text-app-0">
-                {analysis?.created_count != null
-                  ? `${analysis.created_count} task${analysis.created_count === 1 ? "" : "s"}`
-                  : "preview"}
+                {analysis?.estimated_blockers ?? "—"}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                Selected for tasks
+              </div>
+              <div className="mt-2 text-xl font-semibold text-app-0">
+                {selectedCount}
               </div>
             </div>
           </div>
 
           {findings.length ? (
-            <div className="space-y-2">
-              {findings.slice(0, 8).map((issue: any, i: number) => (
+            <div className="grid gap-2 md:grid-cols-2">
+              {findings.slice(0, 4).map((issue: any, i: number) => (
                 <div
                   key={i}
                   className="rounded-2xl border border-app bg-app-panel px-4 py-3"
                 >
                   <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                    <Wrench className="h-4 w-4 text-app-4" />
-                    {issue?.title || issue?.issue || `Issue ${i + 1}`}
+                    <ShieldAlert className="h-4 w-4 text-app-4" />
+                    {issue?.probable_failed_inspection_item ||
+                      issue?.title ||
+                      `Finding ${i + 1}`}
                   </div>
-                  {issue?.notes || issue?.description ? (
+                  {issue?.observed_issue ? (
                     <div className="mt-2 text-sm text-app-3">
-                      {issue?.notes || issue?.description}
+                      {issue.observed_issue}
                     </div>
                   ) : null}
                   <div className="mt-2 text-xs text-app-4">
-                    {issue?.estimated_cost != null
-                      ? `Est. $${Math.round(Number(issue.estimated_cost)).toLocaleString()}`
-                      : "No cost estimate"}
+                    {issue?.severity
+                      ? `Severity ${issue.severity}`
+                      : "Severity unknown"}
                     {issue?.confidence != null
                       ? ` · confidence ${issue.confidence}`
                       : ""}
@@ -115,8 +126,9 @@ export default function RehabFromPhotosCTA({
           ) : (
             <EmptyState
               compact
-              title="No issues returned"
-              description="The analysis payload came back but did not include issue rows."
+              icon={Camera}
+              title="No findings returned"
+              description="The preview request succeeded but did not return any compliance-specific finding rows."
             />
           )}
         </div>

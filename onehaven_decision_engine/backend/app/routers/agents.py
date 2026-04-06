@@ -1,4 +1,3 @@
-# backend/app/routers/agents.py
 from __future__ import annotations
 
 import json
@@ -11,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_principal
 from ..db import get_db
-from ..models import AgentMessage, AgentRun, AgentSlotAssignment, WorkflowEvent, Property
+from ..models import AgentMessage, AgentRun, AgentSlotAssignment, Property, WorkflowEvent
 from ..schemas import (
     AgentMessageCreate,
     AgentMessageOut,
@@ -22,8 +21,12 @@ from ..schemas import (
     AgentSlotSpecOut,
     AgentSpecOut,
 )
-from ..domain.agents.registry import AGENTS, SLOTS, AGENT_SPECS
+from ..domain.agents.registry import AGENTS, AGENT_SPECS, SLOTS
 from ..services.agent_engine import create_and_execute_run
+from ..services.compliance_photo_analysis_service import (
+    analyze_property_photos_for_compliance,
+    create_compliance_tasks_from_photo_analysis,
+)
 
 try:
     from ..services.trust_service import record_signal, recompute_and_persist  # type: ignore
@@ -188,13 +191,37 @@ def list_agents(p=Depends(get_principal)):
                 sidebar_slots=[],
             )
         )
+
+    if not any(getattr(a, "agent_key", None) == "compliance_photo_reviewer" for a in out):
+        out.append(
+            AgentSpecOut(
+                agent_key="compliance_photo_reviewer",
+                title="Compliance photo reviewer",
+                description="Turns property photos into HQS or Section 8 fail-point candidates and recommended remediation tasks.",
+                needs_human=True,
+                category="compliance",
+                sidebar_slots=[],
+            )
+        )
     return out
 
 
 @router.get("/registry", response_model=dict)
 def registry(p=Depends(get_principal)):
+    agents = list(AGENT_SPECS.values())
+    if not any(str(a.get("agent_key") or "") == "compliance_photo_reviewer" for a in agents):
+        agents.append(
+            {
+                "agent_key": "compliance_photo_reviewer",
+                "title": "Compliance photo reviewer",
+                "description": "Turns property photos into likely inspection failures, rule mappings, and repair tasks.",
+                "needs_human": True,
+                "category": "compliance",
+            }
+        )
+
     return {
-        "agents": list(AGENT_SPECS.values()),
+        "agents": agents,
         "slots": [
             {
                 "slot_key": s.slot_key,
@@ -433,3 +460,49 @@ def upsert_slot_assignment(payload: AgentSlotAssignmentUpsert, db: Session = Dep
     db.commit()
     db.refresh(row)
     return row
+
+
+@router.post("/compliance-photo/preview", response_model=dict)
+def preview_compliance_photo_agent(
+    property_id: int,
+    inspection_id: int | None = None,
+    checklist_item_id: int | None = None,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _assert_property_access(db, org_id=p.org_id, property_id=property_id)
+    return analyze_property_photos_for_compliance(
+        db,
+        org_id=int(p.org_id),
+        property_id=int(property_id),
+        inspection_id=int(inspection_id) if inspection_id is not None else None,
+        checklist_item_id=int(checklist_item_id) if checklist_item_id is not None else None,
+    )
+
+
+@router.post("/compliance-photo/commit", response_model=dict)
+def commit_compliance_photo_agent(
+    property_id: int,
+    confirmed_codes: list[str] | None = None,
+    inspection_id: int | None = None,
+    checklist_item_id: int | None = None,
+    mark_blocking: bool = False,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _assert_property_access(db, org_id=p.org_id, property_id=property_id)
+    analysis = analyze_property_photos_for_compliance(
+        db,
+        org_id=int(p.org_id),
+        property_id=int(property_id),
+        inspection_id=int(inspection_id) if inspection_id is not None else None,
+        checklist_item_id=int(checklist_item_id) if checklist_item_id is not None else None,
+    )
+    return create_compliance_tasks_from_photo_analysis(
+        db,
+        org_id=int(p.org_id),
+        property_id=int(property_id),
+        analysis=analysis,
+        confirmed_codes=confirmed_codes,
+        mark_blocking=bool(mark_blocking),
+    )
