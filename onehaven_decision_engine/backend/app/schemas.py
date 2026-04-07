@@ -69,35 +69,206 @@ class AcquisitionDocumentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     status: str | None = "received"
     source_url: str | None = None
-    extracted_text: str | None = None
-    extracted_fields: dict[str, Any] | None = None
     notes: str | None = None
 
-    @field_validator("name", "status", "notes", "source_url", "extracted_text", mode="before")
-    @classmethod
-    def normalize_text(cls, value: Any) -> str | None:
-        if value is None:
-            return None
-        text = str(value).strip()
-        return text or None
 
-
-class AcquisitionUploadResponse(BaseModel):
-    ok: bool = True
-    document: dict[str, Any]
-
-
-class ImportSnapshotOut(BaseModel):
+class AcquisitionDocumentOut(BaseModel):
     id: int
-    org_id: Optional[int] = None
-    source: str
-    notes: Optional[str] = None
-    created_at: Optional[datetime] = None
+    property_id: int
+    acquisition_id: int
+    kind: str
+    name: str
+    status: str | None = None
+    source_url: str | None = None
+    storage_path: str | None = None
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    uploaded_by_user_id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    notes: str | None = None
+    extracted_text: str | None = None
+    extracted_json: dict[str, Any] | None = None
+
     model_config = ConfigDict(from_attributes=True)
+
+
+class AcquisitionFieldFactOut(BaseModel):
+    id: int
+    property_id: int
+    acquisition_id: int
+    field_name: str
+    field_value: str | None = None
+    normalized_json: dict[str, Any] | None = None
+    source_document_id: int | None = None
+    confidence: float | None = None
+    review_state: str | None = None
+    extraction_version: str | None = None
+    manually_overridden: bool = False
+    active: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AcquisitionParticipantOut(BaseModel):
+    id: int
+    property_id: int
+    acquisition_id: int
+    role: str
+    name: str
+    email: str | None = None
+    phone: str | None = None
+    company: str | None = None
+    notes: str | None = None
+    source_document_id: int | None = None
+    confidence: float | None = None
+    extraction_version: str | None = None
+    manually_overridden: bool = False
+    is_primary: bool = False
+    waiting_on: bool = False
+    source_type: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AcquisitionDeadlineOut(BaseModel):
+    id: int
+    property_id: int
+    acquisition_id: int
+    due_at: str
+    label: str | None = None
+    status: str | None = None
+    notes: str | None = None
+    source_document_id: int | None = None
+    confidence: float | None = None
+    extraction_version: str | None = None
+    manually_overridden: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AcquisitionQueueRowOut(BaseModel):
+    property_id: int
+    acquisition_id: int | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip: str | None = None
+    status: str | None = None
+    stage: str | None = None
+    waiting_on: str | None = None
+    next_step: str | None = None
+    target_close_date: str | None = None
+    contract_date: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    participants: list[AcquisitionParticipantOut] = Field(default_factory=list)
+    upcoming_deadlines: list[AcquisitionDeadlineOut] = Field(default_factory=list)
+    document_count: int = 0
+    missing_document_kinds: list[str] = Field(default_factory=list)
+    latest_activity_at: datetime | None = None
+
+
+class AcquisitionQueueOut(BaseModel):
+    ok: bool = True
+    rows: list[AcquisitionQueueRowOut] = Field(default_factory=list)
+
+
+class AcquisitionWorkspaceOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    acquisition_id: int | None = None
+    record: dict[str, Any] | None = None
+    documents: list[AcquisitionDocumentOut] = Field(default_factory=list)
+    field_facts: list[AcquisitionFieldFactOut] = Field(default_factory=list)
+    participants: list[AcquisitionParticipantOut] = Field(default_factory=list)
+    deadlines: list[AcquisitionDeadlineOut] = Field(default_factory=list)
+    notes: list[dict[str, Any]] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class AcquisitionDocumentPreviewOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    document: AcquisitionDocumentOut
+    preview_text: str | None = None
+    parsed: dict[str, Any] = Field(default_factory=dict)
+
+
+class AcquisitionDocumentDeleteOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    document_id: int
+    deleted: bool = True
+    hard_delete_file: bool = False
+
+
+class AcquisitionWorkspaceResetOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    removed: bool = True
+    moved_to_investor: bool = True
+    deleted_document_ids: list[int] = Field(default_factory=list)
+    deleted_deadline_ids: list[int] = Field(default_factory=list)
+    deleted_participant_ids: list[int] = Field(default_factory=list)
+
+
+class ImportRowBase(BaseModel):
+    address: str
+    city: str
+    state: str
+    zip: Optional[str] = None
+    list_price: Optional[float] = None
+    estimated_rent: Optional[float] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[float] = None
+    area_sqft: Optional[int] = None
+    source_url: Optional[HttpUrl] = None
+
+
+class ImportRowCreate(ImportRowBase):
+    pass
+
+
+class ImportRowOut(ImportRowBase):
+    id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ImportSnapshotBase(BaseModel):
+    source_name: str = Field(min_length=1, max_length=120)
+    source_type: str = Field(default="csv", min_length=1, max_length=40)
+    rows_ingested: int = 0
+    notes: Optional[str] = None
+
+
+class ImportSnapshotCreate(ImportSnapshotBase):
+    pass
+
+
+class ImportSnapshotOut(ImportSnapshotBase):
+    id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --------------------
+# Compliance documents
+# --------------------
 
 class ComplianceDocumentUploadOut(BaseModel):
     ok: bool = True
-    document: ComplianceDocumentOut
+    document: "ComplianceDocumentOut"
+
 
 ComplianceDocumentCategory = Literal[
     "inspection_report",
@@ -163,784 +334,896 @@ class ComplianceDocumentOut(BaseModel):
 class ComplianceDocumentStackOut(BaseModel):
     ok: bool = True
     property_id: int
-    count: int = 0
-    rows: List[ComplianceDocumentOut] = Field(default_factory=list)
-    by_category: Dict[str, List[ComplianceDocumentOut]] = Field(default_factory=dict)
-    by_inspection: Dict[str, List[ComplianceDocumentOut]] = Field(default_factory=dict)
-    by_checklist_item: Dict[str, List[ComplianceDocumentOut]] = Field(default_factory=dict)
-
-class ImportErrorRow(BaseModel):
-    row: int
-    error: str
+    documents: list[ComplianceDocumentOut] = Field(default_factory=list)
+    counts_by_category: dict[str, int] = Field(default_factory=dict)
+    latest_by_category: dict[str, ComplianceDocumentOut | None] = Field(default_factory=dict)
 
 
-class ImportResultOut(BaseModel):
-    snapshot_id: int
-    source: str
-    imported: int
-    skipped_duplicates: int
-    errors: list[ImportErrorRow]
+# --------------------
+# Auth / RBAC / SaaS
+# --------------------
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
 
 
+class RegisterIn(BaseModel):
+    email: str
+    password: str
+    org_slug: Optional[str] = None
+    org_name: Optional[str] = None
+    role: str = "owner"
 
-class IngestionSourceBase(BaseModel):
-    provider: str
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    is_active: bool = True
+    is_verified: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrgOut(BaseModel):
+    id: int
     slug: str
-    display_name: str
-    source_type: str = "api"
-    is_enabled: bool = True
-    base_url: Optional[str] = None
-    schedule_cron: Optional[str] = None
-    sync_interval_minutes: Optional[int] = 60
-    config_json: dict[str, Any] = Field(default_factory=dict)
-    credentials_json: dict[str, Any] = Field(default_factory=dict)
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
 
 
-class IngestionSourceCreate(IngestionSourceBase):
+class MembershipOut(BaseModel):
+    org_id: int
+    user_id: int
+    role: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PlanOut(BaseModel):
+    code: str
+    name: str
+    price_cents: int
+    billing_interval: str
+    is_active: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    scopes: list[str] = Field(default_factory=list)
+    expires_at: Optional[datetime] = None
+
+
+class ApiKeyOut(BaseModel):
+    id: int
+    org_id: int
+    name: str
+    key_prefix: str
+    scopes: list[str] = Field(default_factory=list)
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ApiKeyCreateOut(BaseModel):
+    api_key: str
+    meta: ApiKeyOut
+
+
+# --------------------
+# Properties / Core
+# --------------------
+
+class PropertyBase(BaseModel):
+    address: str
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
+
+    purchase_price: Optional[float] = None
+    estimated_rent: Optional[float] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[float] = None
+    sqft: Optional[int] = None
+
+    strategy: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class PropertyCreate(PropertyBase):
     pass
 
 
-class IngestionSourceUpdate(BaseModel):
-    display_name: Optional[str] = None
-    is_enabled: Optional[bool] = None
-    status: Optional[str] = None
-    base_url: Optional[str] = None
-    schedule_cron: Optional[str] = None
-    sync_interval_minutes: Optional[int] = None
-    config_json: Optional[dict[str, Any]] = None
-    credentials_json: Optional[dict[str, Any]] = None
+class PropertyUpdate(BaseModel):
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
+
+    purchase_price: Optional[float] = None
+    estimated_rent: Optional[float] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[float] = None
+    sqft: Optional[int] = None
+
+    strategy: Optional[str] = None
+    notes: Optional[str] = None
 
 
-class IngestionSourceOut(BaseModel):
+class PropertyOut(PropertyBase):
     id: int
-    org_id: int
-    provider: str
-    slug: str
-    display_name: str
-    source_type: str
-    status: str
-    is_enabled: bool
-    base_url: Optional[str] = None
-    webhook_secret_hint: Optional[str] = None
-    schedule_cron: Optional[str] = None
-    sync_interval_minutes: Optional[int] = None
-    config_json: dict[str, Any] = Field(default_factory=dict)
-    cursor_json: dict[str, Any] = Field(default_factory=dict)
-    last_synced_at: Optional[datetime] = None
-    last_success_at: Optional[datetime] = None
-    last_failure_at: Optional[datetime] = None
-    next_scheduled_at: Optional[datetime] = None
-    last_error_summary: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    org_id: Optional[int] = None
 
-    model_config = {"from_attributes": True}
-
-
-class IngestionRunOut(BaseModel):
-    id: int
-    org_id: int
-    source_id: int
-    trigger_type: str
-    status: str
-    started_at: datetime
-    finished_at: Optional[datetime] = None
-    records_seen: int
-    records_imported: int
-    properties_created: int
-    properties_updated: int
-    deals_created: int
-    deals_updated: int
-    rent_rows_upserted: int
-    photos_upserted: int
-    duplicates_skipped: int
-    invalid_rows: int
-    retry_count: int
-    error_summary: Optional[str] = None
-    error_json: Optional[dict[str, Any]] = None
-    summary_json: Optional[dict[str, Any]] = None
-
-    model_config = {"from_attributes": True}
-
-
-class IngestionRunListItem(BaseModel):
-    id: int
-    source_id: int
-    source_label: str
-    provider: str
-    trigger_type: str
-    status: str
-    started_at: datetime
-    finished_at: Optional[datetime] = None
-    records_seen: int
-    records_imported: int
-    duplicates_skipped: int
-    invalid_rows: int
-    error_summary: Optional[str] = None
-
-
-class IngestionSyncRequest(BaseModel):
-    trigger_type: str = "manual"
-
-
-class IngestionWebhookIn(BaseModel):
-    external_record_id: Optional[str] = None
-    event_type: Optional[str] = None
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-
-class IngestionOverviewOut(BaseModel):
-    sources_connected: int
-    sources_enabled: int
-    last_sync_at: Optional[datetime] = None
-    success_runs_24h: int
-    failed_runs_24h: int
-    records_imported_24h: int
-    duplicates_skipped_24h: int
-# --------------------
-# Evaluation / Survivors
-# --------------------
-class BatchEvalOut(BaseModel):
-    snapshot_id: int
-    total_deals: int
-    pass_count: int
-    review_count: int
-    reject_count: int
-    errors: List[str] = Field(default_factory=list)
-
-
-class SurvivorOut(BaseModel):
-    deal_id: int
-    property_id: int
-    address: str
-    city: str
-    zip: str
-
-    decision: str
-    score: int
-    reasons: list[str]
-
-    dscr: float
-    cash_flow: float
-    gross_rent_used: float
-    asking_price: float
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# --------------------
-# Properties / Deals
-# --------------------
-class PropertyCreate(BaseModel):
-    address: str
-    city: str
-    state: str = "MI"
-    zip: str
-    bedrooms: int
-    bathrooms: float = 1.0
-    square_feet: Optional[int] = None
-    year_built: Optional[int] = None
-    has_garage: bool = False
-    property_type: str = "single_family"
-
-    # optional on create; typically computed later
+    county: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
-    county: Optional[str] = None
-
-    # risk metadata
-    is_red_zone: bool = False
+    is_red_zone: Optional[bool] = None
     crime_density: Optional[float] = None
     crime_score: Optional[float] = None
     offender_count: Optional[int] = None
-    crime_band: Optional[str] = None
-    crime_source: Optional[str] = None
-    crime_method: Optional[str] = None
-    crime_radius_miles: Optional[float] = None
-    crime_area_sq_miles: Optional[float] = None
-    crime_area_type: Optional[str] = None
-    crime_incident_count: Optional[int] = None
-    crime_weighted_incident_count: Optional[float] = None
-    crime_nearest_incident_miles: Optional[float] = None
-    crime_dataset_version: Optional[str] = None
-    crime_confidence: Optional[float] = None
-    investment_area_band: Optional[str] = None
-    offender_band: Optional[str] = None
-    offender_source: Optional[str] = None
-    offender_radius_miles: Optional[float] = None
-    nearest_offender_miles: Optional[float] = None
-    risk_score: Optional[float] = None
-    risk_band: Optional[str] = None
-    risk_summary: Optional[str] = None
-    risk_confidence: Optional[float] = None
-    risk_last_computed_at: Optional[datetime] = None
 
-
-class DealCreate(BaseModel):
-    property_id: int
-    asking_price: float
-    estimated_purchase_price: Optional[float] = None
-    rehab_estimate: float = 0.0
-
-    strategy: str = "section8"
-
-    financing_type: str = "dscr"
-    interest_rate: float = 0.07
-    term_years: int = 30
-    down_payment_pct: float = 0.20
-
-    snapshot_id: Optional[int] = None
-    source_fingerprint: Optional[str] = None
-    source_raw_json: Optional[str] = None
-    source: Optional[str] = None
-
-    # pipeline gating fields (decision + acquisition)
-    decision: Optional[Literal["buy", "pass", "watch"]] = None
-    purchase_price: Optional[float] = None
-    closing_date: Optional[datetime] = None
-    loan_amount: Optional[float] = None
-
-
-class DealOut(DealCreate):
-    id: int
-    org_id: Optional[int] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    model_config = ConfigDict(from_attributes=True)
-
-
-class DealIntakeIn(BaseModel):
-    address: str
-    city: str
-    state: str = "MI"
-    zip: str
-    bedrooms: int
-    bathrooms: float = 1.0
-    square_feet: Optional[int] = None
-    year_built: Optional[int] = None
-    has_garage: bool = False
-    property_type: str = "single_family"
-
-    purchase_price: float
-    est_rehab: float = 0.0
-    strategy: str = Field(default="section8", description="section8|market")
-
-    financing_type: str = "dscr"
-    interest_rate: float = 0.07
-    term_years: int = 30
-    down_payment_pct: float = 0.20
-
-    snapshot_id: Optional[int] = None
-
-
-class DealIntakeOut(BaseModel):
-    property: "PropertyOut"
-    deal: DealOut
-
-
-# --------------------
-# Rent Assumptions / Jurisdiction (rules)
-# --------------------
-class RentAssumptionUpsert(BaseModel):
-    market_rent_estimate: Optional[float] = None
-    section8_fmr: Optional[float] = None
-    approved_rent_ceiling: Optional[float] = None
-    rent_reasonableness_comp: Optional[float] = None
-
-    inventory_count: Optional[int] = None
-    starbucks_minutes: Optional[int] = None
-
-
-class RentAssumptionOut(RentAssumptionUpsert):
-    id: int
-    property_id: int
-    org_id: Optional[int] = None
-    created_at: Optional[datetime] = None
-
-    rent_used: Optional[float] = None
-    model_config = ConfigDict(from_attributes=True)
-
-class PropertyTaxEnrichmentOut(BaseModel):
-    ok: bool
-    property_id: int
-    resolved_price: float | None = None
-    monthly_taxes: float | None = None
-    annual_amount: float | None = None
-    annual_rate: float | None = None
-    source: str | None = None
-    confidence: float | None = None
-    year: int | None = None
-    cached: bool = False
-    status: str | None = None
-    provider: str | None = None
-    reason: str | None = None
-    lookup_url: str | None = None
-    parcel_id: str | None = None
-    jurisdiction: str | None = None
-
-
-class FinancialEnrichmentBatchOut(BaseModel):
-    ok: bool
-    requested: int
-    processed: int
-    results: list[PropertyTaxEnrichmentOut]
-
-
-class FinancialEnrichmentOut(BaseModel):
-    ok: bool
-    property_id: int
-    annual_amount: float | None = None
-    annual_rate: float | None = None
-    source: str | None = None
-    confidence: float | None = None
-    year: int | None = None
-    cached: bool = False
-
-    resolved_price: float | None = None
-    monthly_taxes: float | None = None
-    reason: str | None = None
-
-    lookup_url: str | None = None
-    parcel_id: str | None = None
-    jurisdiction: str | None = None
-
-
-class FinancialEnrichmentBatchIn(BaseModel):
-    property_ids: List[int] = Field(default_factory=list)
-    force: bool = False
-
-class JurisdictionRuleUpsert(BaseModel):
-    city: str
-    state: str = "MI"
-    rental_license_required: bool = False
-
-    inspection_frequency: Optional[str] = Field(default=None, description="annual|biennial|complaint")
-    inspection_authority: Optional[str] = None
-
-    typical_fail_points: Optional[List[str]] = None
-
-    registration_fee: Optional[float] = None
-    processing_days: Optional[int] = None
-    tenant_waitlist_depth: Optional[str] = None
-
-    jurisdiction_type: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class JurisdictionRuleOut(JurisdictionRuleUpsert):
-    id: int
-    org_id: Optional[int] = None
-    updated_at: Optional[datetime] = None
-    model_config = ConfigDict(from_attributes=True)
-
-
-# --------------------
-# Rent Comps + Observations + Calibration
-# --------------------
-class RentCompCreate(BaseModel):
-    rent: float
-    source: str = "manual"
-    address: Optional[str] = None
-    url: Optional[str] = None
-    bedrooms: Optional[int] = None
-    bathrooms: Optional[float] = None
-    square_feet: Optional[int] = None
-    notes: Optional[str] = None
-
-
-class RentCompOut(RentCompCreate):
-    id: int
-    property_id: int
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class RentCompsBatchIn(BaseModel):
-    comps: List[RentCompCreate] = Field(..., min_length=1)
-
-
-class RentCompsSummaryOut(BaseModel):
-    property_id: int
-    count: int
-    median_rent: float
-    mean_rent: float
-    min_rent: float
-    max_rent: float
-
-
-class RentObservationCreate(BaseModel):
-    property_id: int
-    strategy: str = Field(..., description="section8 | market")
-    achieved_rent: float
-
-    tenant_portion: Optional[float] = None
-    hap_portion: Optional[float] = None
-
-    lease_start: Optional[datetime] = None
-    lease_end: Optional[datetime] = None
-    notes: Optional[str] = None
-
-
-class RentObservationOut(RentObservationCreate):
-    id: int
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class CeilingCandidate(BaseModel):
-    type: Literal["payment_standard", "rent_reasonableness", "fmr", "manual", "other"]
-    value: float
-
-
-class RentExplainOut(BaseModel):
-    property_id: int
-    strategy: str
-
-    payment_standard_pct: float
-    fmr_adjusted: Optional[float] = None
-
-    market_rent_estimate: Optional[float] = None
-    section8_fmr: Optional[float] = None
-    rent_reasonableness_comp: Optional[float] = None
-    approved_rent_ceiling: Optional[float] = None
-
-    calibrated_market_rent: Optional[float] = None
-    rent_used: Optional[float] = None
-
-    ceiling_candidates: List[CeilingCandidate] = Field(default_factory=list)
-
-    cap_reason: Optional[str] = None  # fmr|comps|override|none
-    explanation: Optional[str] = None
-
-    run_id: Optional[int] = None
-    created_at: Optional[datetime] = None
-
-
-class RentExplainBatchOut(BaseModel):
-    snapshot_id: int
-    strategy: str
-    attempted: int
-    explained: int
-    errors: List[dict] = Field(default_factory=list)
-    model_config = ConfigDict(from_attributes=True)
-
-
-class RentCalibrationOut(BaseModel):
-    zip: str
-    bedrooms: int
-    strategy: str
-    multiplier: float
-    samples: int
-    mape: Optional[float] = None
-    updated_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class RentRecomputeOut(BaseModel):
-    property_id: int
-    market_rent_estimate: Optional[float]
-    section8_fmr: Optional[float]
-    rent_reasonableness_comp: Optional[float]
-    approved_rent_ceiling: Optional[float]
-    calibrated_market_rent: Optional[float]
-    strategy: str
-    rent_used: Optional[float]
-
-class PropertyListingMetadataOut(BaseModel):
     listing_status: Optional[str] = None
-    listing_hidden: bool = False
-    listing_hidden_reason: Optional[str] = None
-
+    listing_price: Optional[float] = None
+    listing_days_on_market: Optional[int] = None
+    listing_listed_at: Optional[datetime] = None
     listing_last_seen_at: Optional[datetime] = None
     listing_removed_at: Optional[datetime] = None
-    listing_listed_at: Optional[datetime] = None
     listing_created_at: Optional[datetime] = None
-
-    listing_days_on_market: Optional[int] = None
-    listing_price: Optional[float] = None
-
+    listing_type: Optional[str] = None
     listing_mls_name: Optional[str] = None
     listing_mls_number: Optional[str] = None
-    listing_type: Optional[str] = None
-
     listing_zillow_url: Optional[str] = None
-
+    listing_hidden: Optional[bool] = None
+    hidden_reason: Optional[str] = None
     listing_agent_name: Optional[str] = None
     listing_agent_phone: Optional[str] = None
     listing_agent_email: Optional[str] = None
     listing_agent_website: Optional[str] = None
-
     listing_office_name: Optional[str] = None
     listing_office_phone: Optional[str] = None
     listing_office_email: Optional[str] = None
 
-class PropertyOut(PropertyCreate, PropertyListingMetadataOut):
-    id: int
-    org_id: Optional[int] = None
-
-    asking_price: Optional[float] = None
-
     market_rent_estimate: Optional[float] = None
     rent_reasonableness_comp: Optional[float] = None
-    market_reference_rent: Optional[float] = None
     section8_fmr: Optional[float] = None
     approved_rent_ceiling: Optional[float] = None
     rent_used: Optional[float] = None
-    rent_cap_reason: Optional[str] = None
+    rent_reason: Optional[str] = None
 
-    loan_amount: Optional[float] = None
     monthly_debt_service: Optional[float] = None
     monthly_taxes: Optional[float] = None
     monthly_insurance: Optional[float] = None
     monthly_housing_cost: Optional[float] = None
+    projected_monthly_cashflow: Optional[float] = None
+    d_scr: Optional[float] = Field(default=None, alias="dscr")
+    rent_gap: Optional[float] = None
+
     property_tax_annual: Optional[float] = None
     property_tax_rate_annual: Optional[float] = None
     property_tax_source: Optional[str] = None
     property_tax_confidence: Optional[float] = None
     property_tax_year: Optional[int] = None
-    insurance_annual: Optional[float] = None
-    insurance_source: Optional[str] = None
-    insurance_confidence: Optional[float] = None
-    projected_monthly_cashflow: Optional[float] = None
-    rent_gap: Optional[float] = None
-    dscr: Optional[float] = None
+    parcel_id: Optional[str] = None
+    tax_lookup_status: Optional[str] = None
+    tax_lookup_provider: Optional[str] = None
+    tax_lookup_url: Optional[str] = None
+    tax_last_verified_at: Optional[datetime] = None
 
-    normalized_decision: Optional[str] = None
-    current_workflow_stage: Optional[str] = None
-    current_workflow_stage_label: Optional[str] = None
-    gate_status: Optional[str] = None
-
-    crime_label: Optional[str] = None
-    normalized_address: str | None = None
-    geocode_source: str | None = None
-    geocode_confidence: float | None = None
-    geocode_last_refreshed: datetime | None = None
-    lat: float | None = None
-    lng: float | None = None
-    county: str | None = None
-    crime_score: Optional[float] = None
-    crime_band: Optional[str] = None
-    crime_source: Optional[str] = None
-    crime_method: Optional[str] = None
-    crime_radius_miles: Optional[float] = None
-    crime_area_sq_miles: Optional[float] = None
-    crime_area_type: Optional[str] = None
-    crime_incident_count: Optional[int] = None
-    crime_weighted_incident_count: Optional[float] = None
-    crime_nearest_incident_miles: Optional[float] = None
-    crime_dataset_version: Optional[str] = None
-    crime_confidence: Optional[float] = None
-    investment_area_band: Optional[str] = None
-    offender_count: Optional[int] = None
-    offender_band: Optional[str] = None
-    offender_source: Optional[str] = None
-    offender_radius_miles: Optional[float] = None
-    nearest_offender_miles: Optional[float] = None
-    risk_score: Optional[float] = None
-    risk_band: Optional[str] = None
-    risk_summary: Optional[str] = None
-    risk_confidence: Optional[float] = None
-    risk_last_computed_at: Optional[datetime] = None
-    is_red_zone: Optional[bool] = None
-
-    next_actions: List[Any] = Field(default_factory=list)
-    blockers: List[Any] = Field(default_factory=list)
-
-    rent_assumption: Optional[RentAssumptionOut] = None
-    rent_comps: List[RentCompOut] = Field(default_factory=list)
+    geocode_source: Optional[str] = None
+    geocode_confidence: Optional[float] = None
+    geocode_last_refreshed: Optional[datetime] = None
 
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    model_config = ConfigDict(from_attributes=True, extra="allow")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-class PropertyListQuery(BaseModel):
-    q: Optional[str] = None
-    city: Optional[str] = None
-    county: Optional[str] = None
-    state: Optional[str] = None
 
-    listing_hidden: Optional[bool] = None
-    listing_status: Optional[str] = None
-    exclude_hidden: bool = True
+class DealIntakeCreate(BaseModel):
+    property_id: int
+    strategy: Optional[str] = None
+    notes: Optional[str] = None
+    targets_json: dict[str, Any] = Field(default_factory=dict)
 
-# --------------------
-# Underwriting Results
-# --------------------
+
+class DealIntakeOut(BaseModel):
+    id: int
+    property_id: int
+    strategy: Optional[str] = None
+    notes: Optional[str] = None
+    targets_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UnderwritingRequest(BaseModel):
+    arv: Optional[float] = None
+    rehab_cost: Optional[float] = None
+    holding_months: int = 6
+    rate: Optional[float] = None
+    down_pct: Optional[float] = None
+    insurance_monthly: Optional[float] = None
+    taxes_monthly: Optional[float] = None
+
+
 class UnderwritingResultOut(BaseModel):
     id: int
-    deal_id: int
-    org_id: Optional[int] = None
+    property_id: int
 
-    decision: str
-    score: int
-    reasons: List[str] = Field(default_factory=list)
+    arv: Optional[float] = None
+    rehab_cost: Optional[float] = None
+    holding_months: Optional[int] = None
+    rate: Optional[float] = None
+    down_pct: Optional[float] = None
+    insurance_monthly: Optional[float] = None
+    taxes_monthly: Optional[float] = None
 
-    gross_rent_used: float
-    mortgage_payment: float
-    operating_expenses: float
-    noi: float
-    cash_flow: float
-    dscr: float
-    cash_on_cash: float
-
-    break_even_rent: float
-    min_rent_for_target_roi: float
+    all_in_cost: Optional[float] = None
+    monthly_pi: Optional[float] = None
+    monthly_cashflow: Optional[float] = None
+    decision: Optional[str] = None
+    score: Optional[float] = None
 
     decision_version: Optional[str] = None
     payment_standard_pct_used: Optional[float] = None
     jurisdiction_multiplier: Optional[float] = None
-    jurisdiction_reasons: Optional[List[str]] = None
+    jurisdiction_reasons_json: Optional[str] = None
     rent_cap_reason: Optional[str] = None
     fmr_adjusted: Optional[float] = None
 
-    bedrooms: Optional[int] = None
-    bathrooms: Optional[float] = None
-
-    rent_explain_run_id: Optional[int] = None
+    created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_reasons(cls, data: Any) -> Any:
-        def _load_list(s: Any) -> List[str]:
-            if s is None:
-                return []
-            if isinstance(s, list):
-                return [str(x) for x in s]
-            if isinstance(s, str):
-                try:
-                    v = json.loads(s)
-                    if isinstance(v, list):
-                        return [str(x) for x in v]
-                except Exception:
-                    pass
-            return [str(s)]
-
-        if isinstance(data, dict):
-            rj = data.get("reasons_json")
-            if "reasons" not in data:
-                data["reasons"] = _load_list(rj)
-
-            if "jurisdiction_reasons" not in data:
-                data["jurisdiction_reasons"] = _load_list(data.get("jurisdiction_reasons_json"))
-
-            data["jurisdiction_reasons"] = data.get("jurisdiction_reasons") or _load_list(
-                data.get("jurisdiction_reasons_json")
-            )
-            return data
-
-        rj = getattr(data, "reasons_json", "[]")
-        jurj = getattr(data, "jurisdiction_reasons_json", None)
-
-        payload = {
-            "id": getattr(data, "id"),
-            "deal_id": getattr(data, "deal_id"),
-            "org_id": getattr(data, "org_id", None),
-            "decision": getattr(data, "decision"),
-            "score": getattr(data, "score"),
-            "reasons": _load_list(rj),
-            "gross_rent_used": getattr(data, "gross_rent_used"),
-            "mortgage_payment": getattr(data, "mortgage_payment"),
-            "operating_expenses": getattr(data, "operating_expenses"),
-            "noi": getattr(data, "noi"),
-            "cash_flow": getattr(data, "cash_flow"),
-            "dscr": getattr(data, "dscr"),
-            "cash_on_cash": getattr(data, "cash_on_cash"),
-            "break_even_rent": getattr(data, "break_even_rent"),
-            "min_rent_for_target_roi": getattr(data, "min_rent_for_target_roi"),
-            "decision_version": getattr(data, "decision_version", None),
-            "payment_standard_pct_used": getattr(data, "payment_standard_pct_used", None),
-            "jurisdiction_multiplier": getattr(data, "jurisdiction_multiplier", None),
-            "jurisdiction_reasons": _load_list(jurj),
-            "rent_cap_reason": getattr(data, "rent_cap_reason", None),
-            "fmr_adjusted": getattr(data, "fmr_adjusted", None),
-        }
-        if hasattr(data, "rent_explain_run_id"):
-            payload["rent_explain_run_id"] = getattr(data, "rent_explain_run_id")
-        return payload
-
 
 # --------------------
-# Compliance (Checklist)
+# Tenants / Leases / Cash
 # --------------------
-class ChecklistItemOut(BaseModel):
-    item_code: str
-    category: str
-    description: str
-    severity: int = Field(default=2, ge=1, le=5)
-    common_fail: bool = False
-    applies_if: Optional[Dict[str, Any]] = None
 
-    status: str = "todo"
-    marked_at: Optional[datetime] = None
-    marked_by: Optional[str] = None
-    proof_url: Optional[str] = None
+class TenantCreate(BaseModel):
+    property_id: int
+    full_name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
     notes: Optional[str] = None
 
 
-class ChecklistOut(BaseModel):
+class TenantUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TenantOut(BaseModel):
+    id: int
     property_id: int
-    city: Optional[str] = None
-    state: Optional[str] = None
+    full_name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
 
-    checklist_name: str = "section8_hqs_precheck"
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
-
-    strategy: str = "section8"
-    items: List[ChecklistItemOut] = Field(default_factory=list)
+    model_config = ConfigDict(from_attributes=True)
 
 
-class ChecklistTemplateItemUpsert(BaseModel):
-    strategy: str = "section8"
-    version: str = "v1"
+class LeaseCreate(BaseModel):
+    property_id: int
+    tenant_id: Optional[int] = None
+    start_date: str
+    end_date: str
+    monthly_rent: float
+    deposit: Optional[float] = None
+    status: str = "active"
+    notes: Optional[str] = None
+
+
+class LeaseUpdate(BaseModel):
+    tenant_id: Optional[int] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    monthly_rent: Optional[float] = None
+    deposit: Optional[float] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class LeaseOut(BaseModel):
+    id: int
+    property_id: int
+    tenant_id: Optional[int] = None
+    start_date: str
+    end_date: str
+    monthly_rent: float
+    deposit: Optional[float] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TransactionCreate(BaseModel):
+    property_id: int
+    category: str
+    amount: float
+    occurred_at: datetime
+    notes: Optional[str] = None
+
+
+class TransactionOut(BaseModel):
+    id: int
+    property_id: int
+    category: str
+    amount: float
+    occurred_at: datetime
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --------------------
+# Rehab / Tasks / Inspections
+# --------------------
+
+class RehabTaskCreate(BaseModel):
+    property_id: int
+    title: str
+    category: str = "general"
+    status: str = "todo"
+    priority: Optional[str] = None
+    notes: Optional[str] = None
+    cost_estimate: Optional[float] = None
+    inspection_relevant: Optional[bool] = None
+    vendor: Optional[str] = None
+    deadline: Optional[datetime] = None
+
+
+class RehabTaskUpdate(BaseModel):
+    title: Optional[str] = None
+    category: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    notes: Optional[str] = None
+    cost_estimate: Optional[float] = None
+    inspection_relevant: Optional[bool] = None
+    vendor: Optional[str] = None
+    deadline: Optional[datetime] = None
+
+
+class RehabTaskOut(BaseModel):
+    id: int
+    property_id: int
+    title: str
+    category: str
+    status: str
+    priority: Optional[str] = None
+    notes: Optional[str] = None
+    cost_estimate: Optional[float] = None
+    inspection_relevant: Optional[bool] = None
+    vendor: Optional[str] = None
+    deadline: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InspectionCreate(BaseModel):
+    property_id: int
+    inspection_date: Optional[datetime] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+    template_key: Optional[str] = None
+    template_version: Optional[str] = None
+    result_status: Optional[str] = None
+    reinspect_required: Optional[bool] = None
+    score_pct: Optional[float] = None
+    blocked_count: Optional[int] = None
+    fail_count: Optional[int] = None
+    na_count: Optional[int] = None
+    raw_payload_json: Optional[dict[str, Any] | list[Any] | str] = None
+
+    scheduled_for: Optional[datetime] = None
+    inspector_name: Optional[str] = None
+    inspector_company: Optional[str] = None
+    inspector_email: Optional[str] = None
+    inspector_phone: Optional[str] = None
+    calendar_event_id: Optional[str] = None
+    reminder_offsets_json: Optional[list[int] | dict[str, Any] | str] = None
+    appointment_status: Optional[str] = None
+    appointment_notes: Optional[str] = None
+    last_reminder_sent_at: Optional[datetime] = None
+    next_reminder_due_at: Optional[datetime] = None
+    ics_uid: Optional[str] = None
+    ics_text: Optional[str] = None
+
+    @field_validator("reminder_offsets_json", mode="before")
+    @classmethod
+    def normalize_reminder_offsets(cls, value: Any) -> Any:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                return json.loads(text)
+            except Exception:
+                return value
+        return value
+
+    @field_validator("raw_payload_json", mode="before")
+    @classmethod
+    def normalize_raw_payload(cls, value: Any) -> Any:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                return json.loads(text)
+            except Exception:
+                return value
+        return value
+
+
+class InspectionUpdate(BaseModel):
+    inspection_date: Optional[datetime] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+    template_key: Optional[str] = None
+    template_version: Optional[str] = None
+    result_status: Optional[str] = None
+    reinspect_required: Optional[bool] = None
+    score_pct: Optional[float] = None
+    blocked_count: Optional[int] = None
+    fail_count: Optional[int] = None
+    na_count: Optional[int] = None
+    raw_payload_json: Optional[dict[str, Any] | list[Any] | str] = None
+
+    scheduled_for: Optional[datetime] = None
+    inspector_name: Optional[str] = None
+    inspector_company: Optional[str] = None
+    inspector_email: Optional[str] = None
+    inspector_phone: Optional[str] = None
+    calendar_event_id: Optional[str] = None
+    reminder_offsets_json: Optional[list[int] | dict[str, Any] | str] = None
+    appointment_status: Optional[str] = None
+    appointment_notes: Optional[str] = None
+    last_reminder_sent_at: Optional[datetime] = None
+    next_reminder_due_at: Optional[datetime] = None
+    ics_uid: Optional[str] = None
+    ics_text: Optional[str] = None
+
+    @field_validator("reminder_offsets_json", mode="before")
+    @classmethod
+    def normalize_reminder_offsets(cls, value: Any) -> Any:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                return json.loads(text)
+            except Exception:
+                return value
+        return value
+
+    @field_validator("raw_payload_json", mode="before")
+    @classmethod
+    def normalize_raw_payload(cls, value: Any) -> Any:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                return json.loads(text)
+            except Exception:
+                return value
+        return value
+
+
+class InspectionItemCreate(BaseModel):
+    code: str
+    category: Optional[str] = None
+    status: str
+    notes: Optional[str] = None
+    severity: Optional[str] = None
+    evidence_json: Optional[dict[str, Any] | list[Any] | str] = None
+
+
+class InspectionItemOut(BaseModel):
+    id: int
+    inspection_id: int
+    code: str
+    category: Optional[str] = None
+    status: str
+    notes: Optional[str] = None
+    severity: Optional[str] = None
+    evidence_json: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InspectionOut(BaseModel):
+    id: int
+    property_id: int
+    inspection_date: Optional[datetime] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+    template_key: Optional[str] = None
+    template_version: Optional[str] = None
+    result_status: Optional[str] = None
+    reinspect_required: Optional[bool] = None
+    score_pct: Optional[float] = None
+    blocked_count: Optional[int] = None
+    fail_count: Optional[int] = None
+    na_count: Optional[int] = None
+    raw_payload_json: Optional[str] = None
+
+    scheduled_for: Optional[datetime] = None
+    inspector_name: Optional[str] = None
+    inspector_company: Optional[str] = None
+    inspector_email: Optional[str] = None
+    inspector_phone: Optional[str] = None
+    calendar_event_id: Optional[str] = None
+    reminder_offsets_json: Optional[str] = None
+    appointment_status: Optional[str] = None
+    appointment_notes: Optional[str] = None
+    last_reminder_sent_at: Optional[datetime] = None
+    next_reminder_due_at: Optional[datetime] = None
+    ics_uid: Optional[str] = None
+    ics_text: Optional[str] = None
+
+    created_at: Optional[datetime] = None
+    items: list[InspectionItemOut] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PropertyChecklistItemOut(BaseModel):
+    id: int
+    property_id: int
+    code: str
+    category: Optional[str] = None
+    status: Optional[str] = None
+    severity: Optional[str] = None
+    description: Optional[str] = None
+    is_completed: bool = False
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InspectionScheduleSummaryOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    appointment: dict[str, Any] | None = None
+    reminders: list[dict[str, Any]] = Field(default_factory=list)
+    timeline: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class InspectionReminderPreviewOut(BaseModel):
+    inspection_id: int
+    property_id: int
+    reminder_offset_minutes: int
+    email: dict[str, Any] = Field(default_factory=dict)
+    sms: dict[str, Any] = Field(default_factory=dict)
+
+
+# --------------------
+# Compliance / Policy
+# --------------------
+
+class HqsRuleOut(BaseModel):
+    id: int
     code: str
     category: str
+    severity: str
     description: str
-    applies_if: Optional[Dict[str, Any]] = None
-    severity: int = 2
-    common_fail: bool = True
+    template_key: Optional[str] = None
+    template_version: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+    evidence_json: Optional[str] = None
+    remediation_hints_json: Optional[str] = None
+    source_urls_json: Optional[str] = None
+    effective_date: Optional[datetime] = None
 
-
-class ChecklistTemplateItemOut(ChecklistTemplateItemUpsert):
-    id: int
-    created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 
-class PropertyChecklistOut(BaseModel):
+class HqsAddendumOut(BaseModel):
+    id: int
+    org_id: int
+    jurisdiction_profile_id: int
+    code: str
+    category: Optional[str] = None
+    severity: Optional[str] = None
+    description: Optional[str] = None
+    template_key: Optional[str] = None
+    template_version: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+    evidence_json: Optional[str] = None
+    remediation_hints_json: Optional[str] = None
+    effective_date: Optional[datetime] = None
+    source_urls_json: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HudFmrRecordOut(BaseModel):
+    id: int
+    state: str
+    area_name: str
+    year: int
+    bedrooms: int
+    fmr: float
+    source: str
+    fetched_at: datetime
+    raw_json: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PolicyCatalogEntryCreate(BaseModel):
+    state: str = "MI"
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    program_type: Optional[str] = None
+
+    url: str
+    publisher: Optional[str] = None
+    title: Optional[str] = None
+    notes: Optional[str] = None
+    source_kind: Optional[str] = None
+
+    is_authoritative: bool = True
+    priority: int = 100
+    is_active: bool = True
+    is_override: bool = True
+    baseline_url: Optional[str] = None
+
+
+class PolicyCatalogEntryOut(BaseModel):
     id: int
     org_id: Optional[int] = None
-    property_id: int
-    strategy: str
-    version: str
-    generated_at: datetime
-    items: List[ChecklistItemOut]
+    state: str
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    program_type: Optional[str] = None
+
+    url: str
+    publisher: Optional[str] = None
+    title: Optional[str] = None
+    notes: Optional[str] = None
+    source_kind: Optional[str] = None
+
+    is_authoritative: bool
+    priority: int
+    is_active: bool
+    is_override: bool
+    baseline_url: Optional[str] = None
+
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
-class ChecklistItemUpdateIn(BaseModel):
-    status: Optional[str] = Field(default=None, description="todo|in_progress|done|failed|blocked")
-    proof_url: Optional[str] = None
+class PolicySourceCreate(BaseModel):
+    state: Optional[str] = None
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    program_type: Optional[str] = None
+
+    publisher: Optional[str] = None
+    title: Optional[str] = None
+    url: str
+    content_type: Optional[str] = None
+    http_status: Optional[int] = None
+    retrieved_at: Optional[datetime] = None
+    content_sha256: Optional[str] = None
+    raw_path: Optional[str] = None
+    extracted_text: Optional[str] = None
     notes: Optional[str] = None
+    is_authoritative: bool = True
+    normalized_categories_json: Optional[list[str] | str] = None
+    freshness_status: Optional[str] = None
+    freshness_reason: Optional[str] = None
+    freshness_checked_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
+    effective_date: Optional[datetime] = None
+    last_verified_at: Optional[datetime] = None
 
 
-# --------------------
-# Phase 4: Single Property View
-# --------------------
-class PropertyViewOut(BaseModel):
-    property: PropertyOut
-    deal: Optional[DealOut] = None
-    rent_explain: Optional[RentExplainOut] = None
-    jurisdiction_rule: Optional[JurisdictionRuleOut] = None
-    jurisdiction_friction: dict
-    last_underwriting_result: Optional[UnderwritingResultOut] = None
-    checklist: Optional[ChecklistOut] = None
-    inventory_snapshot: Optional[Dict[str, Any]] = None
-# --------------------
-# Jurisdiction Profiles (policy playbooks / overrides)
-# --------------------
+class PolicySourceOut(BaseModel):
+    id: int
+    org_id: Optional[int] = None
+
+    state: Optional[str] = None
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    program_type: Optional[str] = None
+
+    publisher: Optional[str] = None
+    title: Optional[str] = None
+
+    url: str
+    content_type: Optional[str] = None
+    http_status: Optional[int] = None
+    retrieved_at: datetime
+    content_sha256: Optional[str] = None
+    raw_path: Optional[str] = None
+    extracted_text: Optional[str] = None
+    notes: Optional[str] = None
+    is_authoritative: bool = True
+    normalized_categories_json: Optional[str] = None
+    freshness_status: Optional[str] = None
+    freshness_reason: Optional[str] = None
+    freshness_checked_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
+    effective_date: Optional[datetime] = None
+    last_verified_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PolicySourceVersionOut(BaseModel):
+    id: int
+    source_id: int
+    retrieved_at: datetime
+    http_status: Optional[int] = None
+    content_sha256: Optional[str] = None
+    raw_path: Optional[str] = None
+    content_type: Optional[str] = None
+    fetch_error: Optional[str] = None
+    extracted_text: Optional[str] = None
+    is_current: bool = False
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PolicyAssertionCreate(BaseModel):
+    source_id: Optional[int] = None
+
+    state: Optional[str] = None
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    program_type: Optional[str] = None
+
+    rule_key: str
+    rule_family: Optional[str] = None
+    assertion_type: str = "document_reference"
+    value_json: Optional[dict[str, Any] | list[Any] | str] = None
+
+    effective_date: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+    confidence: float = 0.25
+    priority: int = 100
+    source_rank: int = 100
+
+    review_status: str = "extracted"
+    review_notes: Optional[str] = None
+    reviewed_by_user_id: Optional[int] = None
+    verification_reason: Optional[str] = None
+    stale_after: Optional[datetime] = None
+    superseded_by_assertion_id: Optional[int] = None
+
+    normalized_category: Optional[str] = None
+    coverage_status: str = "candidate"
+    source_freshness_status: Optional[str] = None
+
+    extracted_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
+
+
+class PolicyAssertionOut(BaseModel):
+    id: int
+    org_id: Optional[int] = None
+    source_id: Optional[int] = None
+
+    state: Optional[str] = None
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    program_type: Optional[str] = None
+
+    rule_key: str
+    rule_family: Optional[str] = None
+    assertion_type: str
+    value_json: Optional[str] = None
+
+    effective_date: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+    confidence: float
+    priority: int
+    source_rank: int
+
+    review_status: str
+    review_notes: Optional[str] = None
+    reviewed_by_user_id: Optional[int] = None
+    verification_reason: Optional[str] = None
+    stale_after: Optional[datetime] = None
+    superseded_by_assertion_id: Optional[int] = None
+
+    normalized_category: Optional[str] = None
+    coverage_status: str
+    source_freshness_status: Optional[str] = None
+
+    extracted_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PolicyCoverageStatusOut(BaseModel):
+    id: int
+    org_id: Optional[int] = None
+    state: str
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+
+    coverage_status: str
+    production_readiness: str
+
+    last_reviewed_at: Optional[datetime] = None
+    last_source_refresh_at: Optional[datetime] = None
+    verified_rule_count: int
+    source_count: int
+    fetch_failure_count: int
+    stale_warning_count: int
+
+    completeness_score: Optional[float] = None
+    completeness_status: Optional[str] = None
+    required_categories_json: Optional[str] = None
+    covered_categories_json: Optional[str] = None
+    missing_categories_json: Optional[str] = None
+    category_norm_version: Optional[str] = None
+    last_verified_at: Optional[datetime] = None
+    is_stale: Optional[bool] = None
+    stale_reason: Optional[str] = None
+    freshest_source_at: Optional[datetime] = None
+    oldest_source_at: Optional[datetime] = None
+    source_freshness_json: Optional[str] = None
+
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class JurisdictionProfileIn(BaseModel):
     state: str = "MI"
     county: Optional[str] = None
@@ -988,558 +1271,346 @@ class JurisdictionProfileResolveOut(BaseModel):
 PaneKey = Literal[
     "acquisition",
     "investor",
-    "compliance",
-    "tenants",
     "management",
-    "admin",
+    "tenants",
+    "ops",
 ]
 
-WorkflowStage = Literal[
-    "discovered",
-    "shortlisted",
-    "underwritten",
+StageKey = Literal[
+    "new",
+    "screening",
+    "analyzing",
     "offer",
-    "acquired",
-    "rehab",
-    "compliance_readying",
-    "inspection_pending",
-    "tenant_marketing",
-    "tenant_screening",
-    "leased",
-    "occupied",
-    "turnover",
-    "maintenance",
+    "under_contract",
+    "owned",
+    "stabilized",
+    "archived",
+    "pursuing",
+    "offer_prep",
+    "offer_ready",
+    "offer_submitted",
+    "negotiating",
+    "due_diligence",
+    "closing",
 ]
 
 
-class WorkflowStateOut(BaseModel):
+class PropertyStateCreate(BaseModel):
     property_id: int
-    current_stage: WorkflowStage
-    suggested_stage: WorkflowStage
-    current_stage_label: str
-
-    current_pane: PaneKey
-    current_pane_label: str
-    suggested_pane: PaneKey
-    suggested_pane_label: str
-    route_reason: Optional[str] = None
-
-    normalized_decision: Literal["GOOD", "REVIEW", "REJECT"]
-    gate_status: Literal["OPEN", "BLOCKED"]
-    gate: Dict[str, Any] = Field(default_factory=dict)
-
-    constraints: Dict[str, Any] = Field(default_factory=dict)
-    outstanding_tasks: Dict[str, Any] = Field(default_factory=dict)
-    next_actions: List[str] = Field(default_factory=list)
-    stage_completion_summary: Dict[str, Any] = Field(default_factory=dict)
-
-    allowed_panes: List[PaneKey] = Field(default_factory=list)
-    allowed_pane_labels: List[str] = Field(default_factory=list)
-
-    updated_at: Optional[str] = None
-    last_transitioned_at: Optional[str] = None
-    stage_order: List[str] = Field(default_factory=lambda: [
-        "discovered",
-        "shortlisted",
-        "underwritten",
-        "offer",
-        "acquired",
-        "rehab",
-        "compliance_readying",
-        "inspection_pending",
-        "tenant_marketing",
-        "tenant_screening",
-        "leased",
-        "occupied",
-        "turnover",
-        "maintenance",
-    ])
+    current_stage: StageKey = "new"
+    constraints_json: Optional[str] = None
+    outstanding_tasks_json: Optional[str] = None
 
 
-class WorkflowDecisionIn(BaseModel):
-    decision: Literal["buy", "pass", "watch"]
+class PropertyStateUpdate(BaseModel):
+    current_stage: Optional[StageKey] = None
+    constraints_json: Optional[str] = None
+    outstanding_tasks_json: Optional[str] = None
 
 
-class WorkflowAcquisitionIn(BaseModel):
-    purchase_price: float = Field(ge=0)
-    closing_date: datetime
-    financing_type: Optional[str] = None
-    loan_amount: Optional[float] = Field(default=None, ge=0)
-    interest_rate: Optional[float] = Field(default=None, ge=0)
-    term_years: Optional[int] = Field(default=None, ge=1, le=50)
-    down_payment_pct: Optional[float] = Field(default=None, ge=0, le=1)
+class WorkflowTransitionIn(BaseModel):
+    next_stage: StageKey
+    note: Optional[str] = None
+    actor: Optional[str] = None
 
 
-class WorkflowEventCreate(BaseModel):
-    property_id: Optional[int] = None
-    event_type: str
-    payload: Optional[dict[str, Any]] = None
+class WorkflowGateOut(BaseModel):
+    property_id: int
+    current_stage: Optional[str] = None
+    next_stage: Optional[str] = None
+    allowed: bool
+    blocking_reasons: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    required_actions: list[str] = Field(default_factory=list)
+
+
+class WorkflowSummaryOut(BaseModel):
+    property_id: int
+    current_stage: Optional[str] = None
+    pane: Optional[str] = None
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    readiness_score: Optional[float] = None
+    updated_at: Optional[datetime] = None
 
 
 class WorkflowEventOut(BaseModel):
     id: int
-    org_id: int
-    property_id: Optional[int] = None
+    property_id: int
+    event_type: str
+    from_stage: Optional[str] = None
+    to_stage: Optional[str] = None
+    payload_json: Optional[str] = None
     actor_user_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InspectionTimelineRowOut(BaseModel):
+    inspection_id: Optional[int] = None
+    event_type: Optional[str] = None
+    created_at: Optional[datetime] = None
+    scheduled_for: Optional[datetime] = None
+    status: Optional[str] = None
+    inspector_name: Optional[str] = None
+    inspector_company: Optional[str] = None
+    note: Optional[str] = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class PropertyChecklistSummaryOut(BaseModel):
+    property_id: int
+    total_items: int
+    completed_items: int
+    blocked_items: int
+    failed_items: int
+    unknown_items: int
+    percent_complete: float
+    items: list[PropertyChecklistItemOut] = Field(default_factory=list)
+
+
+class PropertyComplianceBriefOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    property: dict[str, Any] = Field(default_factory=dict)
+    compliance: dict[str, Any] = Field(default_factory=dict)
+    resolved_profile: dict[str, Any] = Field(default_factory=dict)
+    coverage: dict[str, Any] = Field(default_factory=dict)
+    source_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    resolved_layers: list[dict[str, Any]] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class ComplianceQueueRowOut(BaseModel):
+    property_id: int
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    county: Optional[str] = None
+    stage: Optional[str] = None
+    pane: Optional[str] = None
+    jurisdiction: dict[str, Any] = Field(default_factory=dict)
+    compliance: dict[str, Any] = Field(default_factory=dict)
+    blockers: list[str] = Field(default_factory=list)
+
+
+class ComplianceQueueOut(BaseModel):
+    ok: bool = True
+    rows: list[ComplianceQueueRowOut] = Field(default_factory=list)
+
+
+class InspectionReadinessOut(BaseModel):
+    property_id: int
+    latest_inspection_id: Optional[int] = None
+    template_key: Optional[str] = None
+    template_version: Optional[str] = None
+
+    completion_pct: float = 0.0
+    readiness_score: float = 0.0
+    readiness_status: str = "unknown"
+    result_status: str = "unknown"
+
+    total_items: int = 0
+    scored_items: int = 0
+    passed_items: int = 0
+    failed_items: int = 0
+    blocked_items: int = 0
+    na_items: int = 0
+    unknown_items: int = 0
+    failed_critical_items: int = 0
+
+    latest_inspection_passed: bool = False
+    checklist_failed_count: int = 0
+    checklist_blocked_count: int = 0
+    unresolved_failure_count: int = 0
+    unresolved_blocked_count: int = 0
+    unresolved_critical_count: int = 0
+
+    hqs_ready: bool = False
+    local_ready: bool = False
+    voucher_ready: bool = False
+    lease_up_ready: bool = False
+    is_compliant: bool = False
+    reinspect_required: bool = False
+
+    posture: str = "unknown"
+    completion_projection_pct: float = 0.0
+
+
+class CompliancePhotoFindingOut(BaseModel):
+    code: str
+    label: str
+    severity: str
+    confidence: float | None = None
+    rule_mapping: dict[str, Any] | None = None
+    evidence_photo_ids: list[int] = Field(default_factory=list)
+
+
+class CompliancePhotoAnalysisOut(BaseModel):
+    ok: bool
+    property_id: int
+    photo_count: int
+    findings: list[CompliancePhotoFindingOut] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class PhotoUploadOut(BaseModel):
+    ok: bool = True
+    photo_id: int
+    property_id: int
+    url: str
+    kind: Optional[str] = None
+    label: Optional[str] = None
+
+
+# --------------------
+# Ingestion / Markets / Sources
+# --------------------
+
+class IngestionSourceOut(BaseModel):
+    id: int
+    provider: str
+    name: str
+    source_type: str
+    is_enabled: bool = True
+    config_json: dict[str, Any] | str | None = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SupportedMarketOut(BaseModel):
+    slug: str
+    city: Optional[str] = None
+    county: Optional[str] = None
+    state: Optional[str] = None
+    is_supported: bool = True
+    enabled_source_count: int = 0
+    source_ids: list[int] = Field(default_factory=list)
+
+
+class IngestionRunOut(BaseModel):
+    id: int
+    source_id: int
+    trigger_type: Optional[str] = None
+    status: str
+    dataset_key: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    runtime_config_json: Optional[str] = None
+    summary_json: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MarketSyncLaunchOut(BaseModel):
+    ok: bool = True
+    queued: bool = True
+    city: Optional[str] = None
+    state: Optional[str] = None
+    market: dict[str, Any] = Field(default_factory=dict)
+    task_ids: list[str] = Field(default_factory=list)
+    queued_count: int = 0
+
+
+# --------------------
+# Agents / Audit / Misc
+# --------------------
+
+class AuditEventOut(BaseModel):
+    id: int
+    property_id: Optional[int] = None
     event_type: str
     payload_json: Optional[str] = None
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
+    actor_user_id: Optional[int] = None
+    created_at: Optional[datetime] = None
 
-
-class PropertyStateUpsert(BaseModel):
-    property_id: int
-    current_stage: Optional[str] = None
-    constraints: Optional[dict[str, Any]] = None
-    outstanding_tasks: Optional[dict[str, Any]] = None
-
-
-class WorkflowTransitionOut(BaseModel):
-    property_id: int
-    current_stage: str
-    current_stage_label: str
-    next_stage: Optional[str] = None
-    next_stage_label: Optional[str] = None
-    current_pane: str
-    current_pane_label: str
-    suggested_next_pane: Optional[str] = None
-    suggested_next_pane_label: Optional[str] = None
-    route_reason: Optional[str] = None
-    transition_reason: Optional[str] = None
-    transition_at: Optional[datetime] = None
-    is_auto_routed: bool = True
-    decision_bucket: str
-    gate: dict[str, Any] = Field(default_factory=dict)
-    gate_status: str
-    constraints: dict[str, Any] = Field(default_factory=dict)
-    next_actions: list[str] = Field(default_factory=list)
-    stage_completion_summary: dict[str, Any] = Field(default_factory=dict)
-
-
-class PropertyStateOut(BaseModel):
-    property_id: int
-    current_stage: str
-    suggested_stage: str
-    current_stage_label: str
-    current_pane: str
-    current_pane_label: str
-    suggested_pane: str
-    suggested_pane_label: str
-    suggested_next_pane: Optional[str] = None
-    suggested_next_pane_label: Optional[str] = None
-    route_reason: Optional[str] = None
-    transition_reason: Optional[str] = None
-    transition_at: Optional[datetime] = None
-    is_auto_routed: bool = True
-    allowed_panes: list[str] = Field(default_factory=list)
-    allowed_pane_labels: list[str] = Field(default_factory=list)
-    normalized_decision: str
-    decision_bucket: str
-    gate: dict[str, Any] = Field(default_factory=dict)
-    gate_status: str
-    constraints: dict[str, Any] = Field(default_factory=dict)
-    outstanding_tasks: dict[str, Any] = Field(default_factory=dict)
-    next_actions: list[str] = Field(default_factory=list)
-    stage_completion_summary: dict[str, Any] = Field(default_factory=dict)
-    updated_at: Optional[str] = None
-    last_transitioned_at: Optional[str] = None
-    stage_order: list[str] = Field(default_factory=list)
-
-# --------------------
-# Rehab
-# --------------------
-class RehabTaskCreate(BaseModel):
-    property_id: int
-    title: str
-    category: str = "rehab"
-    inspection_relevant: bool = True
-    status: str = "todo"
-    cost_estimate: float | None = None
-    vendor: str | None = None
-    deadline: datetime | None = None
-    notes: str | None = None
-
-
-class RehabTaskOut(RehabTaskCreate):
-    id: int
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-# --------------------
-# Tenants + Leases
-# --------------------
-class TenantCreate(BaseModel):
-    full_name: str
-    phone: str | None = None
-    email: str | None = None
-    voucher_status: str | None = None
-    notes: str | None = None
-
-
-class TenantOut(TenantCreate):
-    id: int
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class LeaseCreate(BaseModel):
-    property_id: int
-    tenant_id: int
-    start_date: datetime
-    end_date: datetime | None = None
-    total_rent: float = 0.0
-    tenant_portion: float | None = None
-    housing_authority_portion: float | None = None
-    hap_contract_status: str | None = None
-    notes: str | None = None
-
-
-class LeaseOut(LeaseCreate):
-    id: int
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-# --------------------
-# Cash (Transactions)
-# --------------------
-class TransactionCreate(BaseModel):
-    property_id: int
-    txn_date: datetime | None = None
-    txn_type: str | None = None
-    type: str | None = None
-    amount: float
-    memo: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_type(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if not data.get("txn_type") and data.get("type"):
-                data["txn_type"] = data["type"]
-        return data
-
-
-class TransactionOut(BaseModel):
-    id: int
-    property_id: int
-    txn_date: datetime
-    txn_type: str
-    amount: float
-    memo: str | None
-    created_at: datetime
-    type: str = Field(default="")
-
-    model_config = ConfigDict(from_attributes=True)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _fill_type(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if not data.get("type") and data.get("txn_type"):
-                data["type"] = data["txn_type"]
-        else:
-            if not getattr(data, "type", "") and getattr(data, "txn_type", None):
-                setattr(data, "type", getattr(data, "txn_type"))
-        return data
-
-
-# --------------------
-# Equity (Valuations)
-# --------------------
-class ValuationCreate(BaseModel):
-    property_id: int
-    as_of: datetime | None = None
-    estimated_value: float
-    loan_balance: float | None = None
-    notes: str | None = None
-
-
-class ValuationOut(BaseModel):
-    id: int
-    property_id: int
-    as_of: datetime
-    estimated_value: float
-    loan_balance: float | None
-    notes: str | None
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-# --------------------
-# Inspections
-# --------------------
-class InspectorUpsert(BaseModel):
-    name: str
-    agency: str | None = None
-
-
-class InspectorOut(BaseModel):
-    id: int
-    name: str
-    agency: str | None
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class InspectionItemCreate(BaseModel):
-    code: str
-    failed: bool = True
-    severity: int = 1
-    location: str | None = None
-    details: str | None = None
-    resolved_at: datetime | None = None
-    resolution_notes: str | None = None
-
-
-class InspectionItemOut(InspectionItemCreate):
-    id: int
-    inspection_id: int
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class InspectionCreate(BaseModel):
-    property_id: int
-    inspector_id: int | None = None
-    inspection_date: datetime | None = None
-    passed: bool = False
-    reinspect_required: bool = False
-    notes: str | None = None
-    items: List[InspectionItemCreate] = Field(default_factory=list)
-
-
-class InspectionOut(BaseModel):
-    id: int
-    property_id: int
-    inspector_id: int | None
-    inspection_date: datetime
-    passed: bool
-    reinspect_required: bool
-    notes: str | None
-    created_at: datetime
-    items: List[InspectionItemOut] = Field(default_factory=list)
-    model_config = ConfigDict(from_attributes=True)
-
-
-# --------------------
-# Agents
-# --------------------
-class AgentRunCreate(BaseModel):
-    property_id: int | None = None
-    agent_key: str
-    status: str = "queued"
-    input_json: str | None = None
-
-
-class AgentSlotOut(BaseModel):
-    key: str
-    title: str
-    description: str | None = None
-    needs_human: bool = False
-
-
-class AgentSpecOut(BaseModel):
-    agent_key: str
-    title: str
-    description: str | None = None
-    needs_human: bool = False
-    category: str | None = None
-    sidebar_slots: list[AgentSlotOut] = Field(default_factory=list)
     model_config = ConfigDict(from_attributes=True)
 
 
 class AgentRunOut(BaseModel):
     id: int
-    org_id: Optional[int] = None
-    property_id: int | None
-    agent_key: str
+    property_id: Optional[int] = None
+    agent_name: str
     status: str
-    input_json: str | None
-    output_json: str | None
-    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    input_json: Optional[str] = None
+    output_json: Optional[str] = None
+    error_text: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
-class AgentMessageCreate(BaseModel):
-    thread_key: str
-    sender: str
-    message: str
-    recipient: str | None = None
-
-
-class AgentMessageOut(BaseModel):
-    id: int
-    org_id: Optional[int] = None
-    thread_key: str
-    sender: str
-    message: str
-    recipient: str | None
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-# --------------------
-# Inspection Analytics / Prediction
-# --------------------
-class InspectionItemResolve(BaseModel):
-    resolution_notes: str | None = None
-    resolved_at: datetime | None = None
-
-
-class FailPointStat(BaseModel):
-    code: str
-    count: int
-    severity: int | None = None
-
-
-class PredictFailPointsOut(BaseModel):
-    city: str
-    inspector: str | None = None
-    window_inspections: int
-    top_fail_points: List[FailPointStat] = Field(default_factory=list)
-
-
-class ComplianceStatsOut(BaseModel):
-    city: str
-    inspections: int
-    pass_rate: float
-    reinspect_rate: float
-    top_fail_points: List[FailPointStat] = Field(default_factory=list)
-
-
-# --------------------
-# Agent Slots (assignment layer)
-# --------------------
-class AgentSlotSpecOut(BaseModel):
-    slot_key: str
-    title: str
-    description: str
-    owner_type: str
-    default_status: str
-
-
-class AgentSlotAssignmentUpsert(BaseModel):
-    slot_key: str
-    property_id: int | None = None
-    owner_type: str | None = None
-    assignee: str | None = None
-    status: str | None = None
-    notes: str | None = None
-
-
-class AgentSlotAssignmentOut(BaseModel):
-    id: int
-    org_id: Optional[int] = None
-    slot_key: str
-    property_id: int | None
-    owner_type: str
-    assignee: str | None
-    status: str
-    notes: str | None
-    updated_at: datetime
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-# --------------------
-# Principal / RBAC / Audit / Workflow
-# --------------------
-class PrincipalOut(BaseModel):
-    org_id: int
-    org_slug: str
-    user_id: int
-    email: str
-    role: str
-
-
-class OrganizationOut(BaseModel):
-    id: int
-    slug: str
-    name: str
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class AppUserOut(BaseModel):
-    id: int
-    email: str
-    display_name: Optional[str] = None
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class OrgMembershipOut(BaseModel):
-    id: int
-    org_id: int
-    user_id: int
-    role: str
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class AuditEventOut(BaseModel):
-    id: int
-    org_id: int
-    actor_user_id: Optional[int] = None
-    action: str
-    entity_type: str
-    entity_id: str
-    before_json: Optional[str] = None
-    after_json: Optional[str] = None
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
-
-
-class PropertyUpdate(BaseModel):
-    address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip: Optional[str] = None
-    bedrooms: Optional[int] = None
-    bathrooms: Optional[float] = None
-    square_feet: Optional[int] = None
-    year_built: Optional[int] = None
-    has_garage: Optional[bool] = None
-    property_type: Optional[str] = None
-
-    lat: Optional[float] = None
-    lng: Optional[float] = None
-    county: Optional[str] = None
-
-    is_red_zone: Optional[bool] = None
-    crime_density: Optional[float] = None
-    crime_score: Optional[float] = None
-    offender_count: Optional[int] = None
-
-class PropertyPhotoCreate(BaseModel):
-    url: str
-    source: str = "upload"
-    kind: str = "unknown"
-    label: str | None = None
-
-
-class PropertyPhotoOut(BaseModel):
-    id: int
-    org_id: int | None = None
+class NextActionsOut(BaseModel):
     property_id: int
-    source: str
-    kind: str
-    label: str | None = None
-    url: str
-    storage_key: str | None = None
-    content_type: str | None = None
-    sort_order: int = 0
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    actions: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
-    model_config = ConfigDict(from_attributes=True)
+
+class DashboardPaneCardOut(BaseModel):
+    key: str
+    label: str
+    count: int
+    subtitle: Optional[str] = None
+
+
+class DashboardPanesOut(BaseModel):
+    ok: bool = True
+    cards: list[DashboardPaneCardOut] = Field(default_factory=list)
+
+
+class RentExplainOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    market_rent_estimate: Optional[float] = None
+    section8_fmr: Optional[float] = None
+    approved_rent_ceiling: Optional[float] = None
+    rent_used: Optional[float] = None
+    rent_reason: Optional[str] = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class ValuationOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    estimate: Optional[float] = None
+    method: Optional[str] = None
+    confidence: Optional[float] = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class EquitySummaryOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    estimated_value: Optional[float] = None
+    mortgage_balance: Optional[float] = None
+    equity: Optional[float] = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class RiskScoreOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    risk_score: Optional[float] = None
+    risk_band: Optional[str] = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConstitutionOut(BaseModel):
+    ok: bool = True
+    content: str
 
 
 class RehabPhotoAnalysisIssueOut(BaseModel):
-    title: str
-    category: str
+    code: str
+    label: str
     severity: str
     estimated_cost: float | None = None
     blocker: bool = False
@@ -1658,3 +1729,171 @@ class AcquisitionDeadlineUpsert(BaseModel):
             return None
         text = str(value).strip()
         return text or None
+
+
+# --------------------
+# Compliance rule engine foundation (Phase 1)
+# --------------------
+
+ComplianceTrustState = Literal["confirmed", "inferred", "unknown", "stale", "conflicting"]
+ComplianceGovernanceState = Literal["draft", "approved", "active", "replaced"]
+ComplianceRuleStatus = Literal["candidate", "active", "inactive", "superseded"]
+
+
+class PolicySourceRegistryOut(BaseModel):
+    id: int
+    org_id: int | None = None
+    state: str | None = None
+    county: str | None = None
+    city: str | None = None
+    pha_name: str | None = None
+    program_type: str | None = None
+    url: str
+    title: str | None = None
+    publisher: str | None = None
+    is_authoritative: bool = True
+
+    source_name: str | None = None
+    source_type: str = "local"
+    jurisdiction_slug: str | None = None
+    fetch_method: str = "manual"
+    trust_level: float = 0.5
+    refresh_interval_days: int = 30
+    last_fetched_at: datetime | None = None
+    last_verified_at: datetime | None = None
+    registry_status: str = "active"
+    fetch_config_json: str = "{}"
+    registry_meta_json: str = "{}"
+    fingerprint_algo: str = "sha256"
+    current_fingerprint: str | None = None
+    last_changed_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PolicyAssertionRuleOut(BaseModel):
+    id: int
+    org_id: int | None = None
+    source_id: int | None = None
+    state: str | None = None
+    county: str | None = None
+    city: str | None = None
+    pha_name: str | None = None
+    program_type: str | None = None
+
+    jurisdiction_slug: str | None = None
+    source_level: str = "local"
+    property_type: str | None = None
+
+    rule_key: str
+    rule_family: str | None = None
+    rule_category: str | None = None
+    assertion_type: str
+    value_json: str | None = None
+    required: bool = True
+    blocking: bool = False
+
+    confidence: float = 0.25
+    source_citation: str | None = None
+    raw_excerpt: str | None = None
+    normalized_version: str = "v1"
+    rule_status: ComplianceRuleStatus | str = "candidate"
+    governance_state: ComplianceGovernanceState | str = "draft"
+    version_group: str | None = None
+    version_number: int = 1
+
+    effective_date: datetime | None = None
+    expires_at: datetime | None = None
+    stale_after: datetime | None = None
+    created_at: datetime | None = None
+    reviewed_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PropertyComplianceProjectionItemOut(BaseModel):
+    id: int
+    org_id: int
+    projection_id: int
+    property_id: int
+    policy_assertion_id: int | None = None
+
+    jurisdiction_slug: str | None = None
+    program_type: str | None = None
+    property_type: str | None = None
+    source_level: str | None = None
+
+    rule_key: str
+    rule_category: str | None = None
+    required: bool = True
+    blocking: bool = False
+
+    evaluation_status: ComplianceTrustState | str = "unknown"
+    evidence_status: ComplianceTrustState | str = "unknown"
+    confidence: float = 0.0
+    estimated_cost: float | None = None
+    estimated_days: int | None = None
+    evidence_summary: str | None = None
+    evidence_gap: str | None = None
+    resolution_detail_json: str = "{}"
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PropertyComplianceProjectionOut(BaseModel):
+    id: int
+    org_id: int
+    property_id: int
+    jurisdiction_slug: str | None = None
+    program_type: str | None = None
+    rules_version: str = "v1"
+    projection_status: str = "pending"
+    projection_basis_json: str = "{}"
+
+    blocking_count: int = 0
+    unknown_count: int = 0
+    stale_count: int = 0
+    conflicting_count: int = 0
+    readiness_score: float = 0.0
+    projected_compliance_cost: float | None = None
+    projected_days_to_rent: int | None = None
+    confidence_score: float = 0.0
+    impacted_rules_json: str = "[]"
+    unresolved_evidence_gaps_json: str = "[]"
+    last_projected_at: datetime | None = None
+    superseded_at: datetime | None = None
+    is_current: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    items: list[PropertyComplianceProjectionItemOut] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PropertyComplianceEvidenceOut(BaseModel):
+    id: int
+    org_id: int
+    property_id: int
+    projection_item_id: int | None = None
+    policy_assertion_id: int | None = None
+    compliance_document_id: int | None = None
+    inspection_id: int | None = None
+    checklist_item_id: int | None = None
+
+    evidence_source_type: str = "document"
+    evidence_key: str | None = None
+    evidence_name: str | None = None
+    evidence_status: ComplianceTrustState | str = "unknown"
+    proof_state: ComplianceTrustState | str = "inferred"
+    satisfies_rule: bool | None = None
+    observed_at: datetime | None = None
+    expires_at: datetime | None = None
+    resolved_at: datetime | None = None
+    source_details_json: str = "{}"
+    notes: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
