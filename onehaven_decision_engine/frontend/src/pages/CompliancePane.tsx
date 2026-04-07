@@ -53,8 +53,19 @@ type ComplianceRow = {
   };
   jurisdiction?: {
     completeness_status?: string;
+    completeness_score?: number | null;
     is_stale?: boolean;
     gate_ok?: boolean;
+    stale_reason?: string | null;
+    coverage_confidence?: string | null;
+    confidence_label?: string | null;
+    production_readiness?: string | null;
+    missing_categories?: string[] | null;
+    covered_categories?: string[] | null;
+    required_categories?: string[] | null;
+    resolved_rule_version?: string | null;
+    last_refreshed?: string | null;
+    last_refreshed_at?: string | null;
   };
 };
 
@@ -132,8 +143,9 @@ function urgencyTone(urgency?: string | null) {
 
 function statusTone(value?: string | boolean | null) {
   const v = String(value ?? "").toLowerCase();
-  if (v === "true" || v === "pass" || v === "ready" || v === "confirmed")
+  if (v === "true" || v === "pass" || v === "ready" || v === "confirmed") {
     return "oh-pill oh-pill-good";
+  }
   if (
     [
       "false",
@@ -168,6 +180,15 @@ function statusTone(value?: string | boolean | null) {
   return "oh-pill";
 }
 
+function confidenceTone(value?: string | null) {
+  const v = String(value || "").toLowerCase();
+  if (["high", "strong", "verified"].includes(v)) return "oh-pill oh-pill-good";
+  if (["medium", "partial", "unknown"].includes(v))
+    return "oh-pill oh-pill-warn";
+  if (["low", "weak"].includes(v)) return "oh-pill oh-pill-bad";
+  return "oh-pill";
+}
+
 function toPropertyLite(row?: ComplianceRow | null): PropertyLite | null {
   if (!row?.property_id) return null;
   return {
@@ -177,6 +198,13 @@ function toPropertyLite(row?: ComplianceRow | null): PropertyLite | null {
     state: row.state,
     county: row.county,
   };
+}
+
+function formatDate(v: any) {
+  if (!v) return "—";
+  const d = new Date(String(v));
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString();
 }
 
 export default function CompliancePane() {
@@ -324,21 +352,16 @@ export default function CompliancePane() {
     ])
       .then((results) => {
         if (cancelled) return;
-
         const briefRes = results[0];
         const readinessRes = results[1];
 
-        if (briefRes.status === "fulfilled") {
+        if (briefRes.status === "fulfilled")
           setSelectedBrief((briefRes.value as any) || null);
-        } else {
-          setSelectedBrief(null);
-        }
+        else setSelectedBrief(null);
 
-        if (readinessRes.status === "fulfilled") {
+        if (readinessRes.status === "fulfilled")
           setSelectedReadiness((readinessRes.value as any) || null);
-        } else {
-          setSelectedReadiness(null);
-        }
+        else setSelectedReadiness(null);
 
         if (
           briefRes.status === "rejected" &&
@@ -348,12 +371,10 @@ export default function CompliancePane() {
         }
       })
       .catch((e: any) => {
-        if (cancelled) return;
-        setDetailError(String(e?.message || e));
+        if (!cancelled) setDetailError(String(e?.message || e));
       })
       .finally(() => {
-        if (cancelled) return;
-        setDetailLoading(false);
+        if (!cancelled) setDetailLoading(false);
       });
 
     refreshScheduling(selectedProperty.id);
@@ -383,23 +404,13 @@ export default function CompliancePane() {
     setSelectedFindingCodes(codes);
   }
 
-  function toggleFindingCode(code: string) {
-    const normalized = String(code || "").toUpperCase();
-    setSelectedFindingCodes((prev) =>
-      prev.includes(normalized)
-        ? prev.filter((item) => item !== normalized)
-        : [...prev, normalized],
-    );
-  }
-
   async function previewCompliancePhotoFindings() {
     if (!selectedProperty?.id) return;
     try {
       setPhotoBusy(true);
       const form = new FormData();
-      if (selectedInspectionId != null) {
+      if (selectedInspectionId != null)
         form.append("inspection_id", String(selectedInspectionId));
-      }
       const result = await api.post(
         `/photos/${selectedProperty.id}/compliance-preview`,
         form,
@@ -417,9 +428,8 @@ export default function CompliancePane() {
       const form = new FormData();
       form.append("confirmed_codes", selectedFindingCodes.join(","));
       form.append("mark_blocking", String(markPhotoTasksBlocking));
-      if (selectedInspectionId != null) {
+      if (selectedInspectionId != null)
         form.append("inspection_id", String(selectedInspectionId));
-      }
       const result = await api.post(
         `/photos/${selectedProperty.id}/compliance-tasks`,
         form,
@@ -447,13 +457,23 @@ export default function CompliancePane() {
       await refreshPropertyArtifacts(selectedProperty.id);
   }
 
+  const weakCoverageCount = rows.filter((row) =>
+    ["low", "partial", "medium", "unknown"].includes(
+      String(
+        row.jurisdiction?.coverage_confidence ||
+          row.jurisdiction?.confidence_label ||
+          "",
+      ).toLowerCase(),
+    ),
+  ).length;
+
   return (
     <PageShell>
       <div className="space-y-6">
         <PageHero
           eyebrow="Lifecycle pane"
           title="Compliance / S8 pane"
-          subtitle="Property-scoped compliance, inspection history, readiness posture, scheduling, reminders, document evidence, and remediation now flow through one pane."
+          subtitle="Property-scoped compliance, inspection history, scheduling, reminders, local rule coverage, stale alerts, and remediation now flow through one pane."
           actions={
             <div className="flex flex-wrap gap-3">
               {selectedProperty?.id ? (
@@ -479,7 +499,7 @@ export default function CompliancePane() {
           </Surface>
         ) : null}
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           <Surface
             title="Visible properties"
             subtitle="Properties currently routed here"
@@ -513,6 +533,15 @@ export default function CompliancePane() {
           >
             <div className="text-3xl font-semibold text-app-0">
               {Number(data?.kpis?.critical_items || 0)}
+            </div>
+          </Surface>
+
+          <Surface
+            title="Weak coverage"
+            subtitle="Low confidence or partial rules"
+          >
+            <div className="text-3xl font-semibold text-app-0">
+              {weakCoverageCount}
             </div>
           </Surface>
         </div>
@@ -651,7 +680,7 @@ export default function CompliancePane() {
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Surface
             title="Compliance queue"
-            subtitle="Select a property to inspect its current readiness, scheduling state, document stack, and failure-driven actions."
+            subtitle="Select a property to inspect readiness, scheduling state, local rule coverage, document stack, and failure-driven actions."
           >
             {loading ? (
               <div className="grid gap-3">
@@ -676,6 +705,10 @@ export default function CompliancePane() {
                   const reinspectRequired = Boolean(
                     row.compliance?.reinspect_required,
                   );
+                  const confidence =
+                    row.jurisdiction?.coverage_confidence ||
+                    row.jurisdiction?.confidence_label ||
+                    undefined;
 
                   return (
                     <button
@@ -750,6 +783,12 @@ export default function CompliancePane() {
                               </span>
                             ) : null}
 
+                            {confidence ? (
+                              <span className={confidenceTone(confidence)}>
+                                Coverage: {labelize(confidence)}
+                              </span>
+                            ) : null}
+
                             {row.blockers?.[0] ? (
                               <span className="oh-pill oh-pill-warn">
                                 {labelize(row.blockers[0])}
@@ -757,55 +796,24 @@ export default function CompliancePane() {
                             ) : null}
                           </div>
 
-                          {row.next_actions?.[0] ? (
-                            <div className="mt-3 text-sm text-app-2">
-                              Next action:{" "}
-                              <span className="text-app-1">
-                                {row.next_actions[0]}
-                              </span>
+                          {!!row.jurisdiction?.missing_categories?.length ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {row.jurisdiction?.missing_categories
+                                ?.slice(0, 3)
+                                .map((reason) => (
+                                  <span
+                                    key={reason}
+                                    className="oh-pill oh-pill-warn"
+                                  >
+                                    missing: {labelize(reason)}
+                                  </span>
+                                ))}
                             </div>
                           ) : null}
                         </div>
 
-                        <div className="grid gap-2 text-right">
-                          <div>
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                              Completion
-                            </div>
-                            <div className="text-sm font-semibold text-app-0">
-                              {row.compliance?.completion_pct != null
-                                ? `${Number(row.compliance.completion_pct).toFixed(1)}%`
-                                : "—"}
-                            </div>
-                          </div>
-
-                          <div>
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                              Failed / blocked
-                            </div>
-                            <div className="text-sm font-semibold text-app-0">
-                              {Number(row.compliance?.failed_count || 0)} /{" "}
-                              {Number(row.compliance?.blocked_count || 0)}
-                            </div>
-                          </div>
-
-                          <div>
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                              Open failed items
-                            </div>
-                            <div className="text-sm font-semibold text-app-0">
-                              {Number(row.compliance?.open_failed_items || 0)}
-                            </div>
-                          </div>
-
-                          <div className="pt-1 text-xs text-app-4">
-                            <span className="inline-flex items-center gap-1">
-                              <Eye className="h-3.5 w-3.5" />
-                              {isSelected
-                                ? "Viewing details"
-                                : "Select to inspect"}
-                            </span>
-                          </div>
+                        <div className="shrink-0 text-app-4">
+                          <Eye className="h-4 w-4" />
                         </div>
                       </div>
                     </button>
@@ -825,7 +833,7 @@ export default function CompliancePane() {
                   compact
                   icon={ClipboardCheck}
                   title="No property selected"
-                  description="Select a property to inspect readiness, checklist state, inspection history, scheduling, compliance documents, and remediation guidance."
+                  description="Select a property to inspect readiness, checklist state, inspection history, scheduling, compliance documents, and local rule coverage."
                 />
               </Surface>
             ) : detailError ? (
@@ -851,7 +859,7 @@ export default function CompliancePane() {
               <>
                 <Surface
                   title="Selected property"
-                  subtitle="Latest inspection, unresolved failures, readiness summary, scheduling state, and evidence uploads for the active property."
+                  subtitle="Latest inspection, unresolved failures, readiness summary, jurisdiction coverage, scheduling state, and evidence uploads for the active property."
                   actions={
                     <div className="flex flex-wrap gap-3">
                       <button
@@ -872,7 +880,7 @@ export default function CompliancePane() {
                     </div>
                   }
                 >
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
                         Property
@@ -909,84 +917,216 @@ export default function CompliancePane() {
                             Failed
                           </span>
                         ) : (
-                          <span className="oh-pill">No result</span>
+                          <span className="oh-pill">Pending</span>
                         )}
-                        {selectedReadiness?.readiness?.reinspect_required ? (
+                        {selectedReadiness?.latest_inspection
+                          ?.reinspect_required ? (
                           <span className="oh-pill oh-pill-bad">
                             Reinspection required
                           </span>
                         ) : null}
-                        {selectedReadiness?.latest_inspection
-                          ?.inspection_date ? (
-                          <span className="oh-pill">
-                            {String(
-                              selectedReadiness.latest_inspection
-                                .inspection_date,
-                            )}
-                          </span>
-                        ) : null}
-                        {selectedAppointment?.status ? (
-                          <span
-                            className={statusTone(selectedAppointment.status)}
-                          >
-                            {labelize(selectedAppointment.status)}
-                          </span>
-                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        Coverage confidence
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span
+                          className={confidenceTone(
+                            selectedBrief?.coverage?.coverage_confidence ||
+                              selectedBrief?.coverage?.confidence_label ||
+                              selectedRow?.jurisdiction?.coverage_confidence ||
+                              selectedRow?.jurisdiction?.confidence_label ||
+                              "unknown",
+                          )}
+                        >
+                          {labelize(
+                            selectedBrief?.coverage?.coverage_confidence ||
+                              selectedBrief?.coverage?.confidence_label ||
+                              selectedRow?.jurisdiction?.coverage_confidence ||
+                              selectedRow?.jurisdiction?.confidence_label ||
+                              "unknown",
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        Rule version
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-app-0">
+                        {selectedBrief?.coverage?.resolved_rule_version ||
+                          selectedRow?.jurisdiction?.resolved_rule_version ||
+                          "—"}
+                      </div>
+                      <div className="mt-1 text-xs text-app-4">
+                        Refreshed{" "}
+                        {formatDate(
+                          selectedBrief?.coverage?.last_refreshed ||
+                            selectedRow?.jurisdiction?.last_refreshed ||
+                            selectedRow?.jurisdiction?.last_refreshed_at,
+                        )}
                       </div>
                     </div>
                   </div>
+
+                  {selectedBrief?.coverage?.is_stale ||
+                  selectedRow?.jurisdiction?.is_stale ? (
+                    <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] px-4 py-3">
+                      <div className="flex items-start gap-2 text-sm text-amber-100">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div>
+                          {selectedBrief?.coverage?.stale_reason ||
+                            selectedRow?.jurisdiction?.stale_reason ||
+                            "Local rule data is stale and needs review."}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {!!selectedBrief?.coverage ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                          Completeness
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-app-0">
+                          {labelize(
+                            selectedBrief.coverage.completeness_status ||
+                              "unknown",
+                          )}
+                        </div>
+                        <div className="mt-1 text-xs text-app-4">
+                          Score{" "}
+                          {Math.round(
+                            Number(
+                              selectedBrief.coverage.completeness_score || 0,
+                            ) * 100,
+                          )}
+                          %
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                          Covered categories
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(selectedBrief.coverage.covered_categories || [])
+                            .slice(0, 5)
+                            .map((item: string) => (
+                              <span key={item} className="oh-pill oh-pill-good">
+                                {labelize(item)}
+                              </span>
+                            ))}
+                          {!(selectedBrief.coverage.covered_categories || [])
+                            .length ? (
+                            <span className="text-sm text-app-4">
+                              None listed
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                          Missing local rule areas
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(selectedBrief.coverage.missing_categories || [])
+                            .slice(0, 6)
+                            .map((item: string) => (
+                              <span key={item} className="oh-pill oh-pill-warn">
+                                {labelize(item)}
+                              </span>
+                            ))}
+                          {!(selectedBrief.coverage.missing_categories || [])
+                            .length ? (
+                            <span className="oh-pill oh-pill-good">
+                              No known gaps
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </Surface>
 
-                <InspectionReadiness
-                  readiness={selectedReadiness}
-                  brief={selectedBrief}
-                  status={selectedReadiness?.latest_inspection}
-                  summary={selectedReadiness?.run_summary}
+                <CompliancePhotoFindingsPanel
+                  analysis={photoAnalysis}
+                  busy={photoBusy}
+                  selectedCodes={selectedFindingCodes}
+                  onToggleCode={(code) =>
+                    setSelectedFindingCodes((prev) =>
+                      prev.includes(code)
+                        ? prev.filter((c) => c !== code)
+                        : [...prev, code],
+                    )
+                  }
+                  onSelectAll={() => {
+                    const codes =
+                      photoAnalysis?.findings?.map((f: any, i: number) =>
+                        (f.code || `FINDING_${i + 1}`).toUpperCase(),
+                      ) || [];
+                    setSelectedFindingCodes(codes);
+                  }}
+                  onClear={() => setSelectedFindingCodes([])}
+                  onMarkBlockingChange={setMarkPhotoTasksBlocking}
+                  markBlocking={markPhotoTasksBlocking}
                 />
+
+                <PropertyCompliancePanel
+                  property={selectedProperty}
+                  compliance={selectedBrief}
+                  photoAnalysis={photoAnalysis}
+                />
+
+                <InspectionReadiness readiness={selectedReadiness} />
 
                 <InspectionTimelineCard
                   rows={timelineRows}
                   loading={scheduleLoading}
                 />
 
-                <ComplianceReminderPanel
-                  propertyId={selectedProperty.id}
-                  rows={reminderRows}
-                  loading={scheduleLoading}
-                  onSent={() => refreshScheduling(selectedProperty.id)}
-                />
+                <ComplianceReminderPanel rows={reminderRows} />
 
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <ComplianceDocumentUploader
-                    propertyId={selectedProperty.id}
-                    inspectionId={selectedInspectionId}
-                    onUploaded={() =>
-                      refreshPropertyArtifacts(selectedProperty.id)
-                    }
-                  />
-                  <PhotoUploader
-                    propertyId={selectedProperty.id}
-                    inspectionId={selectedInspectionId}
-                    attachToComplianceByDefault
-                    autoAnalyzeByDefault
-                    onUploaded={async (payload) => {
-                      await refreshPropertyArtifacts(selectedProperty.id);
-                      if (payload?.compliance_preview) {
-                        syncSelectedFindings(payload.compliance_preview);
+                <Surface
+                  title="Compliance documents"
+                  subtitle="Documents and document-derived evidence linked to the active property."
+                  actions={
+                    <ComplianceDocumentUploader
+                      propertyId={selectedProperty.id}
+                      onUploaded={() =>
+                        refreshPropertyArtifacts(selectedProperty.id)
                       }
-                    }}
-                  />
-                </div>
-
-                <div className="grid gap-4 xl:grid-cols-2">
+                    />
+                  }
+                >
                   <ComplianceDocumentStack
                     data={documentStack}
                     onDeleted={() =>
                       refreshPropertyArtifacts(selectedProperty.id)
                     }
                   />
+                </Surface>
+
+                <Surface
+                  title="Property photos"
+                  subtitle="Operational property photos, deletion, and rehab/compliance follow-up."
+                  actions={
+                    <PhotoUploader
+                      propertyId={selectedProperty.id}
+                      onUploaded={() =>
+                        refreshPropertyArtifacts(selectedProperty.id)
+                      }
+                    />
+                  }
+                >
                   <PhotoGallery photos={photos} onDelete={deletePhoto} />
-                </div>
+                </Surface>
 
                 <RehabFromPhotosCTA
                   busy={photoBusy}
@@ -994,36 +1134,6 @@ export default function CompliancePane() {
                   selectedCount={selectedFindingCodes.length}
                   onPreview={previewCompliancePhotoFindings}
                   onGenerate={createComplianceTasksFromPhotos}
-                />
-
-                <CompliancePhotoFindingsPanel
-                  analysis={photoAnalysis}
-                  busy={photoBusy}
-                  selectedCodes={selectedFindingCodes}
-                  markBlocking={markPhotoTasksBlocking}
-                  onToggleCode={toggleFindingCode}
-                  onSelectAll={() => {
-                    const codes = (
-                      Array.isArray(photoAnalysis?.findings)
-                        ? photoAnalysis.findings
-                        : []
-                    )
-                      .map((item: any) =>
-                        String(
-                          item?.code || item?.rule_mapping?.code || "",
-                        ).toUpperCase(),
-                      )
-                      .filter(Boolean);
-                    setSelectedFindingCodes(codes);
-                  }}
-                  onClear={() => setSelectedFindingCodes([])}
-                  onMarkBlockingChange={setMarkPhotoTasksBlocking}
-                />
-
-                <PropertyCompliancePanel
-                  property={selectedProperty}
-                  compliance={selectedBrief}
-                  photoAnalysis={photoAnalysis}
                 />
               </>
             )}
@@ -1115,7 +1225,7 @@ export default function CompliancePane() {
                     </div>
 
                     {item?.notes ? (
-                      <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-app-3">
+                      <div className="mt-2 text-sm leading-6 text-app-3">
                         {item.notes}
                       </div>
                     ) : null}
@@ -1125,64 +1235,23 @@ export default function CompliancePane() {
           </Surface>
         ) : null}
 
-        {!selectedReadiness?.inspection_failure_actions?.recommended_actions
-          ?.length && selectedProperty ? (
-          <Surface
-            title="Failure-driven actions"
-            subtitle="No failure-driven remediation actions were returned for the selected property."
-          >
-            <div className="text-sm text-app-4">
-              No active failed, blocked, or inconclusive inspection items are
-              currently driving tasks.
-            </div>
-          </Surface>
-        ) : null}
-
-        {selectedReadiness?.readiness?.reinspect_required ? (
-          <Surface
-            tone="danger"
-            title="Reinspection workflow"
-            subtitle="Latest inspection plus unresolved failures still block readiness."
-          >
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 h-5 w-5 text-red-300" />
-              <div className="space-y-2 text-sm text-red-100/90">
-                <div>
-                  This property still requires reinspection. Latest readiness
-                  combines the most recent inspection with unresolved failures,
-                  blocked items, and critical findings.
-                </div>
-                <div>
-                  Resolve the failure-driven actions above, update evidence and
-                  photos on each line item, then rerun the inspection workflow.
-                </div>
-              </div>
-            </div>
-          </Surface>
+        {selectedProperty?.id ? (
+          <InspectionSchedulerModal
+            inspectionId={selectedAppointment?.inspection_id ?? null}
+            propertyLabel={
+              selectedProperty.address || `Property #${selectedProperty.id}`
+            }
+            existing={selectedAppointment}
+            open={schedulerOpen}
+            onClose={() => setSchedulerOpen(false)}
+            onSaved={async () => {
+              setSchedulerOpen(false);
+              await refreshScheduling(selectedProperty.id);
+              await refresh();
+            }}
+          />
         ) : null}
       </div>
-
-      <InspectionSchedulerModal
-        open={schedulerOpen}
-        onClose={() => setSchedulerOpen(false)}
-        inspectionId={selectedInspectionId}
-        propertyLabel={
-          selectedProperty?.address ||
-          (selectedProperty?.id
-            ? `Property #${selectedProperty.id}`
-            : undefined)
-        }
-        existing={selectedAppointment}
-        onSaved={() => {
-          if (selectedProperty?.id) {
-            refreshScheduling(selectedProperty.id);
-            api
-              .complianceInspectionReadiness(selectedProperty.id)
-              .then(setSelectedReadiness)
-              .catch(() => {});
-          }
-        }}
-      />
     </PageShell>
   );
 }

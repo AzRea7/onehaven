@@ -49,10 +49,16 @@ type Brief = {
     pha_specific_workflow?: boolean | null;
     coverage_confidence?: string | null;
     production_readiness?: string | null;
+    resolved_rule_version?: string | null;
+    last_refreshed?: string | null;
   };
   explanation?: string | null;
   required_actions?: any[];
   blocking_items?: any[];
+  resolved_profile?: any;
+  jurisdiction_profile?: any;
+  source_evidence?: any[];
+  resolved_layers?: any[];
   coverage?: {
     completeness_status?: string | null;
     completeness_score?: number | null;
@@ -61,6 +67,15 @@ type Brief = {
     missing_categories?: string[] | null;
     covered_categories?: string[] | null;
     required_categories?: string[] | null;
+    coverage_confidence?: string | null;
+    confidence_label?: string | null;
+    production_readiness?: string | null;
+    resolved_rule_version?: string | null;
+    last_refreshed?: string | null;
+    source_evidence?: any[];
+    evidence?: any[];
+    resolved_layers?: any[];
+    layers?: any[];
   };
 };
 
@@ -102,6 +117,7 @@ function badgeTone(v: any) {
       "scheduled",
       "clean",
       "parsed",
+      "strong",
     ].includes(s)
   ) {
     return "oh-pill oh-pill-good";
@@ -127,6 +143,7 @@ function badgeTone(v: any) {
   if (
     [
       "low",
+      "weak",
       "needs_review",
       "no",
       "missing",
@@ -312,6 +329,13 @@ function photoList(item: any): any[] {
   return [];
 }
 
+function formatDate(v: any) {
+  if (!v) return "—";
+  const d = new Date(String(v));
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString();
+}
+
 function FindingCard({ item, tone }: { item: any; tone: "bad" | "warn" }) {
   const outer =
     tone === "bad"
@@ -431,7 +455,6 @@ function ChecklistExecutionCard({ item }: { item: any }) {
           {titleCase(item.category)}
         </div>
       ) : null}
-
       {notes ? (
         <div className="mt-3 text-sm leading-6 text-app-3">{notes}</div>
       ) : null}
@@ -489,6 +512,43 @@ function ChecklistExecutionCard({ item }: { item: any }) {
   );
 }
 
+function buildCoverage(brief: Brief | null) {
+  const coverage = brief?.coverage || {};
+  const compliance = brief?.compliance || {};
+  const profile = brief?.resolved_profile || brief?.jurisdiction_profile || {};
+  return {
+    ...profile,
+    ...coverage,
+    coverage_confidence:
+      coverage?.coverage_confidence ||
+      coverage?.confidence_label ||
+      compliance?.coverage_confidence,
+    production_readiness:
+      coverage?.production_readiness || compliance?.production_readiness,
+    resolved_rule_version:
+      coverage?.resolved_rule_version ||
+      profile?.resolved_rule_version ||
+      compliance?.resolved_rule_version,
+    last_refreshed:
+      coverage?.last_refreshed ||
+      profile?.last_refreshed ||
+      compliance?.last_refreshed,
+    source_evidence:
+      coverage?.source_evidence ||
+      coverage?.evidence ||
+      brief?.source_evidence ||
+      profile?.source_evidence ||
+      [],
+    resolved_layers:
+      coverage?.resolved_layers ||
+      coverage?.layers ||
+      brief?.resolved_layers ||
+      profile?.resolved_layers ||
+      profile?.layers ||
+      [],
+  };
+}
+
 export default function PropertyCompliancePanel({
   property,
   compliance,
@@ -506,18 +566,6 @@ export default function PropertyCompliancePanel({
   const [documentStack, setDocumentStack] = React.useState<any | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-
-  const refreshDocuments = React.useCallback(async () => {
-    if (!property?.id) return;
-    try {
-      const out = await api.get(
-        `/compliance/properties/${property.id}/document-stack`,
-      );
-      setDocumentStack(out?.documents || out || null);
-    } catch {
-      setDocumentStack(null);
-    }
-  }, [property?.id]);
 
   React.useEffect(() => {
     if (!property?.id) return;
@@ -548,12 +596,13 @@ export default function PropertyCompliancePanel({
           setReadiness((readinessRes.value as any) || null);
         if (scheduleRes.status === "fulfilled")
           setScheduleSummary((scheduleRes.value as any) || null);
-        if (documentRes.status === "fulfilled")
+        if (documentRes.status === "fulfilled") {
           setDocumentStack(
             (documentRes.value as any)?.documents ||
               (documentRes.value as any) ||
               null,
           );
+        }
 
         if (
           briefRes.status === "rejected" &&
@@ -570,12 +619,10 @@ export default function PropertyCompliancePanel({
         }
       })
       .catch((e: any) => {
-        if (cancelled) return;
-        setError(String(e?.message || e));
+        if (!cancelled) setError(String(e?.message || e));
       })
       .finally(() => {
-        if (cancelled) return;
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       });
 
     return () => {
@@ -585,7 +632,7 @@ export default function PropertyCompliancePanel({
 
   const c = brief?.compliance || {};
   const m = brief?.market || {};
-  const coverage = brief?.coverage || {};
+  const coverage = buildCoverage(brief || null);
   const requiredActions = toArray(brief?.required_actions);
   const blockingItems = toArray(brief?.blocking_items);
 
@@ -623,11 +670,13 @@ export default function PropertyCompliancePanel({
   const documents = Array.isArray(documentStack?.rows)
     ? documentStack.rows
     : [];
+  const evidenceRows = toArray(coverage?.source_evidence);
+  const layerRows = toArray(coverage?.resolved_layers);
 
   return (
     <Surface
       title="Compliance posture"
-      subtitle="Property-scoped compliance now merges inspection history, checklist execution state, unresolved failures, remediation actions, appointment scheduling, and evidence documents."
+      subtitle="Property-scoped compliance merges inspection history, checklist execution state, unresolved failures, layered jurisdiction coverage, scheduling, and evidence documents."
       actions={
         readiness?.posture ? (
           <span className={badgeTone(readiness.posture)}>
@@ -816,425 +865,461 @@ export default function PropertyCompliancePanel({
             />
           </div>
 
-          <div className="grid gap-3 md:grid-cols-4">
-            <Field
-              label="Failed items"
-              value={
-                readinessCounts?.inspection_failed_items ??
-                failedChecklistItems.length ??
-                "—"
-              }
-            />
-            <Field
-              label="Blocked items"
-              value={
-                readinessCounts?.inspection_blocked_items ??
-                blockedChecklistItems.length ??
-                "—"
-              }
-            />
-            <Field
-              label="Critical items"
-              value={
-                readinessCounts?.inspection_failed_critical_items ??
-                criticalChecklistItems.length ??
-                "—"
-              }
-            />
-            <Field
-              label="Documents"
-              value={`${documents.length} file${documents.length === 1 ? "" : "s"}`}
-            />
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <Field
-              label="Appointment status"
-              value={
-                appointment?.status ? (
-                  <span className={badgeTone(appointment.status)}>
-                    {titleCase(appointment.status)}
-                  </span>
-                ) : (
-                  "—"
-                )
-              }
-            />
-            <Field
-              label="Scheduled for"
-              value={
-                appointment?.scheduled_for ? (
-                  <span className="inline-flex items-center gap-2">
-                    <CalendarClock className="h-4 w-4 text-app-4" />
-                    {appointment.scheduled_for}
-                  </span>
-                ) : (
-                  "—"
-                )
-              }
-            />
-            <Field
-              label="Inspector contact"
-              value={
-                appointment?.inspector_name || appointment?.inspector_email ? (
-                  <div className="space-y-1">
-                    <div>{appointment?.inspector_name || "—"}</div>
-                    {appointment?.inspector_email ? (
-                      <div className="inline-flex items-center gap-2 text-app-3">
-                        <Mail className="h-4 w-4 text-app-4" />
-                        {appointment.inspector_email}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  "—"
-                )
-              }
-            />
-            <Field
-              label="Document stack"
-              value={
-                <span className="inline-flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-app-4" />
-                  {documents.length ? `${documents.length} uploaded` : "Empty"}
+          <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-app-0">
+                Jurisdiction coverage
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <span
+                  className={badgeTone(
+                    coverage?.coverage_confidence || coverage?.confidence_label,
+                  )}
+                >
+                  {titleCase(
+                    coverage?.coverage_confidence ||
+                      coverage?.confidence_label ||
+                      "unknown",
+                  )}
                 </span>
-              }
-            />
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <ComplianceDocumentUploader
-              propertyId={property?.id || 0}
-              inspectionId={latestInspection?.id || null}
-              onUploaded={refreshDocuments}
-            />
-            <ComplianceDocumentStack
-              data={documentStack}
-              onDeleted={refreshDocuments}
-            />
-          </div>
-
-          {photoAnalysis ? (
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-app-0">
-                <ImageIcon className="h-4 w-4 text-app-4" />
-                Photo-based inspection summary
+                <span className={badgeTone(coverage?.completeness_status)}>
+                  {titleCase(coverage?.completeness_status || "unknown")}
+                </span>
+                {coverage?.production_readiness ? (
+                  <span className={badgeTone(coverage.production_readiness)}>
+                    {titleCase(coverage.production_readiness)}
+                  </span>
+                ) : null}
               </div>
+            </div>
 
-              <div className="mb-4 grid gap-3 md:grid-cols-4">
-                <Field
-                  label="Findings"
-                  value={
-                    Array.isArray(photoAnalysis?.findings)
-                      ? photoAnalysis.findings.length
-                      : 0
-                  }
-                />
-                <Field
-                  label="Photos scanned"
-                  value={photoAnalysis?.photo_count ?? "—"}
-                />
-                <Field
-                  label="Estimated blockers"
-                  value={photoAnalysis?.estimated_blockers ?? "—"}
-                />
-                <Field
-                  label="Jurisdiction"
-                  value={photoAnalysis?.jurisdiction || "—"}
-                />
-              </div>
-
-              <CompliancePhotoFindingsPanel
-                analysis={photoAnalysis}
-                selectedCodes={(Array.isArray(photoAnalysis?.findings)
-                  ? photoAnalysis.findings
-                  : []
-                )
-                  .map((item: any) =>
-                    String(
-                      item?.code || item?.rule_mapping?.code || "",
-                    ).toUpperCase(),
-                  )
-                  .filter(Boolean)}
-                markBlocking={false}
+            <div className="mt-3 grid gap-3 md:grid-cols-4">
+              <Field
+                label="Completeness score"
+                value={`${Math.round(Number(coverage?.completeness_score || 0) * 100)}%`}
+              />
+              <Field
+                label="Rule version"
+                value={coverage?.resolved_rule_version || "—"}
+              />
+              <Field
+                label="Last refreshed"
+                value={formatDate(coverage?.last_refreshed)}
+              />
+              <Field
+                label="PHA / overlay"
+                value={m?.pha_name || coverage?.pha_name || "—"}
               />
             </div>
-          ) : null}
 
-          {coverage.is_stale ||
-          (coverage.missing_categories || []).length > 0 ? (
-            <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-amber-100">
-                <AlertTriangle className="h-4 w-4" />
-                Jurisdiction warning
-              </div>
-              <div className="mt-2 text-sm leading-6 text-amber-50/90">
-                {coverage.is_stale
-                  ? `Jurisdiction data is stale${coverage.stale_reason ? `: ${coverage.stale_reason}` : "."}`
-                  : "Jurisdiction data is present but not fully complete."}
-              </div>
-
-              {Array.isArray(coverage.missing_categories) &&
-              coverage.missing_categories.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {coverage.missing_categories.map((item) => (
-                    <span key={item} className="oh-pill oh-pill-warn">
-                      {item}
-                    </span>
-                  ))}
+            {coverage?.is_stale ? (
+              <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-500/[0.08] px-4 py-3 text-sm text-amber-100">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    {coverage?.stale_reason ||
+                      "This rule set is stale and needs review."}
+                  </div>
                 </div>
-              ) : null}
-            </div>
-          ) : null}
+              </div>
+            ) : null}
 
-          {brief?.explanation ? (
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <FileCheck2 className="h-4 w-4" />
-                Explanation
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-app-4">
+                  Covered categories
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {toArray(coverage?.covered_categories).length ? (
+                    toArray(coverage?.covered_categories).map(
+                      (item: string) => (
+                        <span key={item} className="oh-pill oh-pill-good">
+                          {titleCase(item)}
+                        </span>
+                      ),
+                    )
+                  ) : (
+                    <span className="text-sm text-app-4">None listed</span>
+                  )}
+                </div>
               </div>
-              <div className="mt-2 text-sm leading-6 text-app-3">
-                {brief.explanation}
+
+              <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-app-4">
+                  Missing local rule areas
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {toArray(coverage?.missing_categories).length ? (
+                    toArray(coverage?.missing_categories).map(
+                      (item: string) => (
+                        <span key={item} className="oh-pill oh-pill-warn">
+                          {titleCase(item)}
+                        </span>
+                      ),
+                    )
+                  ) : (
+                    <span className="oh-pill oh-pill-good">No known gaps</span>
+                  )}
+                </div>
               </div>
             </div>
-          ) : null}
+          </div>
 
-          {inspectionHistory.length > 0 ? (
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <BadgeCheck className="h-4 w-4 text-app-4" />
-                Inspection history
+          {layerRows.length ? (
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+              <div className="text-sm font-semibold text-app-0">
+                Resolved rule layers
               </div>
-              <div className="mt-3 grid gap-3">
-                {inspectionHistory.map((inspection, idx) => (
-                  <InspectionHistoryCard
-                    key={`${inspection?.id || inspection?.inspection_date || idx}`}
-                    inspection={inspection}
-                    active={idx === 0}
-                  />
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {layerRows.map((row: any, idx: number) => (
+                  <div
+                    key={`${row?.layer || row?.scope || "layer"}-${idx}`}
+                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-app-0">
+                        {titleCase(
+                          row?.layer || row?.scope || row?.label || "layer",
+                        )}
+                      </div>
+                      <span
+                        className={badgeTone(
+                          row?.confidence ||
+                            row?.status ||
+                            (row?.applied ? "applied" : "available"),
+                        )}
+                      >
+                        {titleCase(
+                          row?.confidence ||
+                            row?.status ||
+                            (row?.applied ? "applied" : "available"),
+                        )}
+                      </span>
+                    </div>
+                    <div className="mt-3 space-y-2 text-sm text-app-3">
+                      <div>
+                        Authority: {row?.authority || row?.source || "—"}
+                      </div>
+                      <div>Version: {row?.version || "—"}</div>
+                      <div>Applied: {row?.applied ? "Yes" : "No"}</div>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
           ) : null}
 
-          {latestInspection?.reinspect_required ? (
-            <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.06] px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-red-200">
-                <ShieldAlert className="h-4 w-4" />
-                Reinspection required
+          {evidenceRows.length ? (
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+              <div className="text-sm font-semibold text-app-0">
+                Source evidence
               </div>
-              <div className="mt-2 text-sm leading-6 text-red-100/90">
-                The latest inspection plus unresolved failed or blocked
-                checklist items still prevent this property from reaching a
-                ready state.
-              </div>
-            </div>
-          ) : null}
-
-          {mergedBlockingItems.length > 0 ? (
-            <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.06] px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-red-200">
-                <ClipboardX className="h-4 w-4" />
-                Blocking findings
-              </div>
-
-              <div className="mt-3 space-y-2">
-                {mergedBlockingItems
-                  .slice(0, 6)
-                  .map((item: any, idx: number) => (
-                    <FindingCard
-                      key={`${item?.rule_key || item?.code || item?.key || item?.title || idx}`}
-                      item={item}
-                      tone="bad"
-                    />
-                  ))}
-              </div>
-            </div>
-          ) : null}
-
-          {readinessWarningItems.length > 0 ? (
-            <div className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-amber-100">
-                <ShieldAlert className="h-4 w-4" />
-                Warning findings
-              </div>
-
-              <div className="mt-3 space-y-2">
-                {readinessWarningItems
-                  .slice(0, 4)
-                  .map((item: any, idx: number) => (
-                    <FindingCard
-                      key={`${item?.rule_key || item?.code || item?.key || item?.title || idx}`}
-                      item={item}
-                      tone="warn"
-                    />
-                  ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                Required actions
-              </div>
-
-              {requiredActions.length === 0 ? (
-                <div className="mt-3 text-sm text-app-4">
-                  No required actions returned.
-                </div>
-              ) : (
-                <div className="mt-3 space-y-2">
-                  {requiredActions.map((item: any, idx: number) => (
-                    <div
-                      key={`${item?.code || item?.key || item?.title || idx}`}
-                      className="rounded-2xl border border-app bg-app-muted px-3 py-3"
-                    >
-                      <div className="text-sm font-medium text-app-0">
-                        {item?.title ||
-                          item?.description ||
-                          item?.code ||
-                          item?.key ||
-                          "Untitled action"}
+              <div className="mt-3 grid gap-3">
+                {evidenceRows.slice(0, 6).map((row: any, idx: number) => (
+                  <div
+                    key={`${row?.title || row?.label || row?.url || "evidence"}-${idx}`}
+                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-app-0">
+                        {row?.title ||
+                          row?.label ||
+                          row?.source_name ||
+                          "Evidence"}
                       </div>
-                      <div className="mt-1 text-xs text-app-4">
-                        {(
-                          item?.category ||
-                          item?.severity ||
-                          "uncategorized"
-                        ).toString()}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <Wrench className="h-4 w-4 text-app-4" />
-                Remediation actions
-              </div>
-
-              {recommendedActions.length === 0 &&
-              failureActions.length === 0 ? (
-                <div className="mt-3 text-sm text-app-4">
-                  No remediation actions returned.
-                </div>
-              ) : (
-                <div className="mt-3 space-y-2">
-                  {(recommendedActions.length > 0
-                    ? recommendedActions
-                    : failureActions
-                  )
-                    .slice(0, 6)
-                    .map((item: any, idx: number) => (
-                      <div
-                        key={`${item?.rule_key || item?.code || item?.title || idx}`}
-                        className="rounded-2xl border border-app bg-app-muted px-3 py-3"
+                      <span
+                        className={
+                          row?.is_authoritative
+                            ? "oh-pill oh-pill-good"
+                            : "oh-pill"
+                        }
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-sm font-medium text-app-0">
-                            {item?.label ||
-                              item?.title ||
-                              item?.description ||
-                              item?.code ||
-                              "Untitled remediation"}
-                          </div>
-                          {item?.priority ? (
-                            <span className={statusTone(item.priority)}>
-                              {titleCase(item.priority)}
-                            </span>
-                          ) : null}
-                          {item?.severity ? (
-                            <span className={statusTone(item.severity)}>
-                              {titleCase(item.severity)}
-                            </span>
-                          ) : null}
-                          {item?.requires_reinspection ? (
-                            <span className="oh-pill oh-pill-bad">
-                              Reinspection
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="mt-1 text-xs text-app-4">
-                          {(
-                            item?.rehab_category ||
-                            item?.category ||
-                            "uncategorized"
-                          ).toString()}
-                        </div>
-                        {item?.suggested_fix || item?.notes ? (
-                          <div className="mt-2 text-sm leading-6 text-app-3">
-                            {item?.suggested_fix || item?.notes}
-                          </div>
-                        ) : null}
+                        {row?.is_authoritative ? "Authoritative" : "Supporting"}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-sm text-app-3">
+                      {row?.source_name || row?.source || "Unknown source"}
+                    </div>
+                    {row?.excerpt ? (
+                      <div className="mt-3 rounded-2xl border border-app bg-app-muted px-3 py-3 text-sm text-app-2">
+                        {row.excerpt}
                       </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {brief?.explanation ? (
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4 text-sm leading-6 text-app-2">
+              {brief.explanation}
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+            <div className="space-y-4">
+              <Surface
+                title="Required actions"
+                subtitle="Actions from compliance brief and readiness projections"
+              >
+                {!requiredActions.length &&
+                !recommendedActions.length &&
+                !failureActions.length ? (
+                  <EmptyState
+                    compact
+                    title="No actions generated"
+                    description="No required or recommended actions were returned for this property."
+                  />
+                ) : (
+                  <div className="grid gap-3">
+                    {[
+                      ...requiredActions,
+                      ...recommendedActions,
+                      ...failureActions,
+                    ]
+                      .slice(0, 10)
+                      .map((item: any, idx: number) => (
+                        <div
+                          key={`${item?.title || item?.label || idx}`}
+                          className="rounded-2xl border border-app bg-app-muted px-4 py-4"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="text-sm font-semibold text-app-0">
+                              {item?.title ||
+                                item?.label ||
+                                item?.action ||
+                                item?.code ||
+                                "Untitled action"}
+                            </div>
+                            {item?.priority ? (
+                              <span className={badgeTone(item.priority)}>
+                                {titleCase(item.priority)}
+                              </span>
+                            ) : null}
+                          </div>
+                          {item?.notes || item?.detail ? (
+                            <div className="mt-2 text-sm text-app-3">
+                              {item?.notes || item?.detail}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </Surface>
+
+              <Surface
+                title="Blocking and warning items"
+                subtitle="Unresolved blockers from the latest readiness and brief outputs"
+              >
+                {!mergedBlockingItems.length &&
+                !readinessWarningItems.length ? (
+                  <EmptyState
+                    compact
+                    title="No active blockers"
+                    description="No blocking or warning items were returned."
+                  />
+                ) : (
+                  <div className="grid gap-3">
+                    {mergedBlockingItems
+                      .slice(0, 6)
+                      .map((item: any, idx: number) => (
+                        <FindingCard
+                          key={`blocking-${idx}`}
+                          item={item}
+                          tone="bad"
+                        />
+                      ))}
+                    {readinessWarningItems
+                      .slice(0, 4)
+                      .map((item: any, idx: number) => (
+                        <FindingCard
+                          key={`warn-${idx}`}
+                          item={item}
+                          tone="warn"
+                        />
+                      ))}
+                  </div>
+                )}
+              </Surface>
+            </div>
+
+            <div className="space-y-4">
+              <Surface
+                title="Inspection history"
+                subtitle="Historical inspection attempts and latest execution context"
+              >
+                {!inspectionHistory.length ? (
+                  <EmptyState
+                    compact
+                    title="No inspection history yet"
+                    description="Historical inspection attempts will show here once inspections are created."
+                  />
+                ) : (
+                  <div className="grid gap-3">
+                    {inspectionHistory.map((inspection, idx) => (
+                      <InspectionHistoryCard
+                        key={`${inspection.id || idx}`}
+                        inspection={inspection}
+                        active={idx === 0}
+                      />
                     ))}
+                  </div>
+                )}
+              </Surface>
+
+              <Surface
+                title="Appointment and documents"
+                subtitle="Scheduling state plus uploaded document evidence"
+              >
+                <div className="grid gap-3">
+                  <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-app-4">
+                      Appointment
+                    </div>
+                    {appointment ? (
+                      <div className="mt-2 space-y-2 text-sm text-app-3">
+                        <div>
+                          Date:{" "}
+                          {appointment?.scheduled_for ||
+                            appointment?.inspection_date ||
+                            "—"}
+                        </div>
+                        <div>
+                          Inspector:{" "}
+                          {appointment?.inspector_name ||
+                            appointment?.inspector ||
+                            "—"}
+                        </div>
+                        <div>Status: {appointment?.status || "—"}</div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-sm text-app-4">
+                        No appointment scheduled.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-app-4">
+                      Documents
+                    </div>
+                    {documents.length ? (
+                      <div className="mt-2 space-y-2 text-sm text-app-3">
+                        {documents.slice(0, 6).map((doc: any, idx: number) => (
+                          <div
+                            key={`${doc?.id || idx}`}
+                            className="rounded-xl border border-app bg-app-panel px-3 py-3"
+                          >
+                            {doc?.label ||
+                              doc?.filename ||
+                              doc?.title ||
+                              `Document #${idx + 1}`}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-sm text-app-4">
+                        No compliance documents uploaded.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
+              </Surface>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-              <ClipboardList className="h-4 w-4 text-app-4" />
-              Inspection-driven checklist execution
-            </div>
-
+          <Surface
+            title="Checklist execution"
+            subtitle="Latest property-scoped checklist items, results, evidence, and photo references"
+          >
             {!displayedChecklist.length ? (
-              <div className="mt-3 text-sm text-app-4">
-                No checklist execution rows were returned for this property.
-              </div>
+              <EmptyState
+                compact
+                title="No checklist items"
+                description="Checklist execution items will show here once inspection templates are applied to this property."
+              />
             ) : (
-              <div className="mt-3 grid gap-3">
+              <div className="grid gap-3">
                 {displayedChecklist
                   .slice(0, 12)
                   .map((item: any, idx: number) => (
                     <ChecklistExecutionCard
-                      key={`${item?.rule_key || item?.code || item?.item_code || item?.title || idx}`}
+                      key={`${item?.code || item?.item_code || idx}`}
                       item={item}
                     />
                   ))}
               </div>
             )}
-          </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <ShieldCheck className="h-4 w-4 text-app-4" />
-                Property-scoped compliance
+            {!!criticalChecklistItems.length ||
+            !!failedChecklistItems.length ||
+            !!blockedChecklistItems.length ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {!!criticalChecklistItems.length ? (
+                  <span className="oh-pill oh-pill-bad">
+                    Critical: {criticalChecklistItems.length}
+                  </span>
+                ) : null}
+                {!!failedChecklistItems.length ? (
+                  <span className="oh-pill oh-pill-bad">
+                    Failed: {failedChecklistItems.length}
+                  </span>
+                ) : null}
+                {!!blockedChecklistItems.length ? (
+                  <span className="oh-pill oh-pill-warn">
+                    Blocked: {blockedChecklistItems.length}
+                  </span>
+                ) : null}
               </div>
-              <div className="mt-2 text-sm leading-6 text-app-3">
-                This panel now reflects the latest inspection, inspection
-                history, checklist execution state, unresolved failures, blocked
-                items, failure-driven remediation actions, appointment
-                scheduling, and compliance evidence documents directly on the
-                property.
-              </div>
-            </div>
+            ) : null}
+          </Surface>
 
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-              {m?.pha_name ? (
-                <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                  <TriangleAlert className="h-4 w-4 text-app-4" />
-                  PHA: {m.pha_name}
+          {photoAnalysis ? (
+            <CompliancePhotoFindingsPanel
+              analysis={photoAnalysis}
+            />
+          ) : null}
+
+          {property?.id ? (
+            <div className="grid gap-4 xl:grid-cols-2">
+              <Surface
+                title="Compliance documents"
+                subtitle="Upload and review compliance packet documents."
+                actions={
+                  <ComplianceDocumentUploader
+                    propertyId={property.id}
+                    onUploaded={() => {}}
+                  />
+                }
+              >
+                <ComplianceDocumentStack
+                  data={documentStack}
+                  onDeleted={() => {}}
+                />
+              </Surface>
+
+              <Surface
+                title="Photo-driven evidence"
+                subtitle="Photo-linked evidence and checklist support."
+              >
+                <div className="grid gap-3">
+                  <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                      <ImageIcon className="h-4 w-4" />
+                      Photo analysis linked
+                    </div>
+                    <div className="mt-2 text-sm text-app-3">
+                      {photoAnalysis
+                        ? "Photo findings loaded for this property."
+                        : "No photo analysis loaded."}
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                  <ImageIcon className="h-4 w-4 text-app-4" />
-                  No specific PHA override shown in this brief
-                </div>
-              )}
-              <div className="mt-2 text-sm leading-6 text-app-3">
-                Inspection notes, evidence, photo references, remediation
-                guidance, and uploaded compliance documents are treated as
-                execution data, not just template defaults.
-              </div>
+              </Surface>
             </div>
-          </div>
+          ) : null}
         </div>
       )}
     </Surface>

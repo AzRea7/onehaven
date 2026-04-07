@@ -16,6 +16,17 @@ type ProfileRow = {
   notes?: string | null;
   policy?: Record<string, any> | null;
   policy_json?: Record<string, any> | string | null;
+  coverage_confidence?: string | null;
+  confidence_label?: string | null;
+  production_readiness?: string | null;
+  resolved_rule_version?: string | null;
+  rule_version?: string | null;
+  last_refreshed?: string | null;
+  last_refreshed_at?: string | null;
+  source_evidence?: any[] | null;
+  evidence?: any[] | null;
+  resolved_layers?: any[] | null;
+  layers?: any[] | null;
   completeness?: {
     completeness_status?: string | null;
     completeness_score?: number | null;
@@ -49,6 +60,12 @@ function norm(v: any) {
     .toLowerCase();
 }
 
+function titleize(v: any) {
+  return String(v ?? "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
 function inferScope(row: ProfileRow): "org" | "global" {
   if (row.scope === "org" || row.org_id) return "org";
   return "global";
@@ -56,8 +73,9 @@ function inferScope(row: ProfileRow): "org" | "global" {
 
 function policyObject(row: ProfileRow): Record<string, any> {
   if (row.policy && typeof row.policy === "object") return row.policy;
-  if (row.policy_json && typeof row.policy_json === "object")
+  if (row.policy_json && typeof row.policy_json === "object") {
     return row.policy_json as Record<string, any>;
+  }
   if (typeof row.policy_json === "string") {
     try {
       const parsed = JSON.parse(row.policy_json);
@@ -91,6 +109,13 @@ function scorePct(v: any) {
   const n = Number(v ?? 0);
   if (!Number.isFinite(n)) return "0%";
   return `${Math.round(n * 100)}%`;
+}
+
+function formatDate(v: any) {
+  if (!v) return "—";
+  const d = new Date(String(v));
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString();
 }
 
 function Badge({
@@ -155,6 +180,24 @@ function completenessTone(v?: string | null) {
   return "bad";
 }
 
+function confidenceTone(v?: string | null) {
+  const s = norm(v);
+  if (s === "high" || s === "strong" || s === "verified") return "good";
+  if (s === "medium" || s === "partial" || s === "unknown") return "warn";
+  if (s === "low" || s === "weak") return "bad";
+  return "neutral";
+}
+
+function toneForLayer(layer: any) {
+  const s = norm(
+    layer?.confidence || layer?.status || (layer?.applied ? "applied" : ""),
+  );
+  if (["applied", "verified", "high", "strong"].includes(s)) return "good";
+  if (["partial", "medium", "unknown"].includes(s)) return "warn";
+  if (["low", "missing", "stale"].includes(s)) return "bad";
+  return "neutral";
+}
+
 export default function JurisdictionProfiles() {
   const [includeGlobal, setIncludeGlobal] = React.useState(true);
   const [state, setState] = React.useState("MI");
@@ -216,6 +259,8 @@ export default function JurisdictionProfiles() {
         r.city,
         r.pha_name,
         r.notes,
+        r.coverage_confidence,
+        r.confidence_label,
         completeness.completeness_status,
         completeness.stale_reason,
         ...(completeness.missing_categories || []),
@@ -236,7 +281,12 @@ export default function JurisdictionProfiles() {
       (r) => completenessFromRow(r).completeness_status !== "complete",
     ).length;
     const stale = rows.filter((r) => completenessFromRow(r).is_stale).length;
-    return { total, org, global, city, county, incomplete, stale };
+    const weak = rows.filter((r) =>
+      ["low", "partial", "medium", "unknown"].includes(
+        norm(r.coverage_confidence || r.confidence_label),
+      ),
+    ).length;
+    return { total, org, global, city, county, incomplete, stale, weak };
   }, [rows]);
 
   async function refresh() {
@@ -246,7 +296,6 @@ export default function JurisdictionProfiles() {
       const data = await api.listJurisdictionProfiles(includeGlobal, state);
       const list = Array.isArray(data) ? data : [];
       setRows(list);
-
       if (list.length > 0) {
         const stillExists = selectedId && list.some((r) => r.id === selectedId);
         setSelectedId(stillExists ? selectedId : list[0].id);
@@ -316,7 +365,6 @@ export default function JurisdictionProfiles() {
 
   async function saveProfile() {
     setError(null);
-
     let policy: any = {};
     try {
       policy = policyJson ? JSON.parse(policyJson) : {};
@@ -376,14 +424,25 @@ export default function JurisdictionProfiles() {
   }, [includeGlobal, state]);
 
   const selectedCompleteness = selected ? completenessFromRow(selected) : null;
-  const selectedTasks = Array.isArray(selected?.tasks) ? selected?.tasks : [];
+  const selectedTasks = Array.isArray(selected?.tasks) ? selected.tasks : [];
+  const selectedLayers = Array.isArray(selected?.resolved_layers)
+    ? selected?.resolved_layers
+    : Array.isArray(selected?.layers)
+      ? selected?.layers
+      : [];
+  const selectedEvidence = Array.isArray(selected?.source_evidence)
+    ? selected?.source_evidence
+    : Array.isArray(selected?.evidence)
+      ? selected?.evidence
+      : [];
+  const selectedPolicy = selected ? policyObject(selected) : {};
 
   return (
     <PageShell className="space-y-6">
       <PageHero
         eyebrow="Operational modeling"
         title="Jurisdiction Profiles"
-        subtitle="Profiles are the modeled output layer. Pipeline actions like source refresh, run pipeline, cleanup stale, and repair market live on the Jurisdictions page."
+        subtitle="Profiles are the modeled output layer for layered statewide, county, city, housing authority, and org override rules."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -407,13 +466,12 @@ export default function JurisdictionProfiles() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-sm font-semibold text-white">
-              Looking for the pipeline buttons?
+              Coverage and governance
             </div>
             <div className="mt-1 text-sm text-white/65">
-              Use the <span className="text-white">Jurisdictions</span> page
-              for: Repair market, Run pipeline, Refresh sources, Refresh
-              coverage, Resolve stale items, Refresh jurisdiction, and Notify
-              stale.
+              Profiles surface completeness, confidence, stale warnings, missing
+              categories, rule versioning, and evidence so operators know where
+              local coverage is strong versus partial.
             </div>
           </div>
           <div>
@@ -433,7 +491,7 @@ export default function JurisdictionProfiles() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-7">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-8">
         <GlassCard>
           <div className="text-xs uppercase tracking-wider text-white/45">
             Profiles
@@ -442,7 +500,6 @@ export default function JurisdictionProfiles() {
             {stats.total}
           </div>
         </GlassCard>
-
         <GlassCard>
           <div className="text-xs uppercase tracking-wider text-white/45">
             Org overrides
@@ -451,7 +508,6 @@ export default function JurisdictionProfiles() {
             {stats.org}
           </div>
         </GlassCard>
-
         <GlassCard>
           <div className="text-xs uppercase tracking-wider text-white/45">
             Global defaults
@@ -460,7 +516,6 @@ export default function JurisdictionProfiles() {
             {stats.global}
           </div>
         </GlassCard>
-
         <GlassCard>
           <div className="text-xs uppercase tracking-wider text-white/45">
             City scoped
@@ -469,7 +524,6 @@ export default function JurisdictionProfiles() {
             {stats.city}
           </div>
         </GlassCard>
-
         <GlassCard>
           <div className="text-xs uppercase tracking-wider text-white/45">
             County scoped
@@ -478,7 +532,6 @@ export default function JurisdictionProfiles() {
             {stats.county}
           </div>
         </GlassCard>
-
         <GlassCard>
           <div className="text-xs uppercase tracking-wider text-white/45">
             Incomplete
@@ -487,13 +540,20 @@ export default function JurisdictionProfiles() {
             {stats.incomplete}
           </div>
         </GlassCard>
-
         <GlassCard>
           <div className="text-xs uppercase tracking-wider text-white/45">
             Stale
           </div>
           <div className="mt-2 text-2xl font-semibold text-amber-100">
             {stats.stale}
+          </div>
+        </GlassCard>
+        <GlassCard>
+          <div className="text-xs uppercase tracking-wider text-white/45">
+            Weak / partial
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-amber-100">
+            {stats.weak}
           </div>
         </GlassCard>
       </div>
@@ -530,7 +590,7 @@ export default function JurisdictionProfiles() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search city, county, scope, PHA, notes, completeness, stale reason…"
+              placeholder="Search city, county, scope, confidence, notes, completeness, stale reason…"
               className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/35"
             />
           </div>
@@ -574,6 +634,20 @@ export default function JurisdictionProfiles() {
                   </Badge>
                   <Badge>{resolved?.scope || "—"} scope</Badge>
                   <Badge>{resolved?.match_level || "—"} level</Badge>
+                  {resolved?.coverage_confidence ||
+                  resolved?.confidence_label ? (
+                    <Badge
+                      tone={confidenceTone(
+                        resolved?.coverage_confidence ||
+                          resolved?.confidence_label,
+                      )}
+                    >
+                      {titleize(
+                        resolved?.coverage_confidence ||
+                          resolved?.confidence_label,
+                      )}
+                    </Badge>
+                  ) : null}
                 </div>
 
                 <div className="rounded-xl border border-white/10 bg-black/30 p-3">
@@ -587,6 +661,20 @@ export default function JurisdictionProfiles() {
                       value={resolved?.friction_multiplier ?? 1.0}
                     />
                     <Row label="PHA" value={resolved?.pha_name || "—"} />
+                    <Row
+                      label="Rule version"
+                      value={
+                        resolved?.resolved_rule_version ||
+                        resolved?.rule_version ||
+                        "—"
+                      }
+                    />
+                    <Row
+                      label="Last refreshed"
+                      value={formatDate(
+                        resolved?.last_refreshed || resolved?.last_refreshed_at,
+                      )}
+                    />
                   </div>
                 </div>
 
@@ -617,7 +705,6 @@ export default function JurisdictionProfiles() {
                   const scope = inferScope(r);
                   const active = selectedId === r.id;
                   const completeness = completenessFromRow(r);
-
                   return (
                     <button
                       key={profileKey(r)}
@@ -647,36 +734,42 @@ export default function JurisdictionProfiles() {
                           <Badge tone={scope === "org" ? "warn" : "neutral"}>
                             {scope}
                           </Badge>
-                          <Badge>friction {r.friction_multiplier ?? 1.0}</Badge>
                           <Badge
                             tone={completenessTone(
                               completeness.completeness_status,
                             )}
                           >
-                            {completeness.completeness_status}
+                            {titleize(completeness.completeness_status)}
                           </Badge>
                         </div>
                       </div>
 
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <Badge>
-                          {scorePct(completeness.completeness_score)}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge
+                          tone={confidenceTone(
+                            r.coverage_confidence || r.confidence_label,
+                          )}
+                        >
+                          {titleize(
+                            r.coverage_confidence ||
+                              r.confidence_label ||
+                              "unknown",
+                          )}
                         </Badge>
                         {completeness.is_stale ? (
                           <Badge tone="warn">stale</Badge>
-                        ) : null}
-                        {!!completeness.missing_categories.length && (
-                          <Badge tone="bad">
-                            missing {completeness.missing_categories.length}
+                        ) : (
+                          <Badge tone="good">fresh</Badge>
+                        )}
+                        {Array.isArray(completeness.missing_categories) &&
+                        completeness.missing_categories.length > 0 ? (
+                          <Badge tone="warn">
+                            {completeness.missing_categories.length} gaps
                           </Badge>
+                        ) : (
+                          <Badge tone="good">no known gaps</Badge>
                         )}
                       </div>
-
-                      {r.notes ? (
-                        <div className="mt-2 line-clamp-2 text-sm text-white/65">
-                          {r.notes}
-                        </div>
-                      ) : null}
                     </button>
                   );
                 })
@@ -688,279 +781,380 @@ export default function JurisdictionProfiles() {
         <div className="space-y-4">
           <GlassCard>
             <SectionTitle
-              title="Selected profile"
-              right={
-                selected ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Badge
-                      tone={inferScope(selected) === "org" ? "warn" : "neutral"}
-                    >
-                      {inferScope(selected)}
-                    </Badge>
-                    <Badge>id {selected.id}</Badge>
-                    {selectedCompleteness ? (
-                      <Badge
-                        tone={completenessTone(
-                          selectedCompleteness.completeness_status,
-                        )}
-                      >
-                        {selectedCompleteness.completeness_status}
-                      </Badge>
-                    ) : null}
-                  </div>
-                ) : null
-              }
-            />
-
-            {!selected ? (
-              <div className="mt-3 text-sm text-white/60">
-                Select a profile to inspect its current operational model.
-              </div>
-            ) : (
-              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="space-y-2">
-                    <Row label="State" value={selected.state} />
-                    <Row label="County" value={selected.county || "—"} />
-                    <Row label="City" value={selected.city || "—"} />
-                    <Row label="PHA" value={selected.pha_name || "—"} />
-                    <Row
-                      label="Friction multiplier"
-                      value={selected.friction_multiplier ?? 1.0}
-                    />
-                    <Row
-                      label="Completeness score"
-                      value={scorePct(selectedCompleteness?.completeness_score)}
-                    />
-                    <Row
-                      label="Freshness"
-                      value={selectedCompleteness?.is_stale ? "stale" : "fresh"}
-                    />
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                      onClick={() => recomputeOne(selected)}
-                      disabled={recomputeBusyId === selected.id}
-                      className="rounded-xl border border-cyan-400/25 bg-cyan-500/15 px-3 py-2 text-xs text-white hover:bg-cyan-500/20 disabled:opacity-60"
-                    >
-                      {recomputeBusyId === selected.id
-                        ? "Recomputing…"
-                        : "Recompute completeness"}
-                    </button>
-
-                    {inferScope(selected) === "org" ? (
-                      <button
-                        onClick={() => loadIntoForm(selected)}
-                        className="rounded-xl border border-emerald-400/25 bg-emerald-500/15 px-3 py-2 text-xs text-white hover:bg-emerald-500/20"
-                      >
-                        Load into editor
-                      </button>
-                    ) : null}
-
-                    {inferScope(selected) === "org" ? (
-                      <button
-                        onClick={() => deleteOne(selected)}
-                        className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-100 hover:bg-red-500/15"
-                      >
-                        Delete override
-                      </button>
-                    ) : (
-                      <span className="text-xs text-white/45">
-                        Global rows cannot be deleted here.
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="text-xs uppercase tracking-wider text-white/45">
-                    Notes
-                  </div>
-                  <div className="mt-2 text-sm text-white/75">
-                    {selected.notes || "No notes recorded."}
-                  </div>
-
-                  {selectedCompleteness?.stale_reason ? (
-                    <>
-                      <div className="mt-4 text-xs uppercase tracking-wider text-white/45">
-                        Stale reason
-                      </div>
-                      <div className="mt-2 text-sm text-white/75">
-                        {selectedCompleteness.stale_reason}
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="text-xs uppercase tracking-wider text-white/45">
-                    Covered categories
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {(selectedCompleteness?.covered_categories || []).length ? (
-                      (selectedCompleteness?.covered_categories || []).map(
-                        (c) => (
-                          <Badge key={`covered-${c}`} tone="good">
-                            {c}
-                          </Badge>
-                        ),
-                      )
-                    ) : (
-                      <span className="text-sm text-white/55">
-                        None recorded
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="text-xs uppercase tracking-wider text-white/45">
-                    Missing categories
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {(selectedCompleteness?.missing_categories || []).length ? (
-                      (selectedCompleteness?.missing_categories || []).map(
-                        (c) => (
-                          <Badge key={`missing-${c}`} tone="bad">
-                            {c}
-                          </Badge>
-                        ),
-                      )
-                    ) : (
-                      <span className="text-sm text-white/55">
-                        No missing categories
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="text-xs uppercase tracking-wider text-white/45">
-                    Jurisdiction tasks
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {!selectedTasks.length ? (
-                      <div className="text-sm text-white/55">
-                        No jurisdiction tasks surfaced for this profile.
-                      </div>
-                    ) : (
-                      selectedTasks.map((task: any, idx: number) => (
-                        <div
-                          key={`${task?.code || task?.key || task?.title || idx}`}
-                          className="rounded-xl border border-white/10 bg-black/20 p-3"
-                        >
-                          <div className="text-sm font-medium text-white">
-                            {task?.title || task?.label || "Untitled task"}
-                          </div>
-                          <div className="mt-1 text-xs text-white/50">
-                            {(
-                              task?.category ||
-                              task?.kind ||
-                              "jurisdiction"
-                            ).toString()}{" "}
-                            • {(task?.priority || "normal").toString()}
-                          </div>
-                          {task?.detail || task?.description ? (
-                            <div className="mt-2 text-sm text-white/70">
-                              {task?.detail || task?.description}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-black/30 p-4">
-                  <div className="text-xs uppercase tracking-wider text-white/45">
-                    Policy JSON
-                  </div>
-                  <pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs text-white/80">
-                    {pretty(policyObject(selected))}
-                  </pre>
-                </div>
-              </div>
-            )}
-          </GlassCard>
-
-          <GlassCard>
-            <SectionTitle
               title="Create / update org override"
               right={
-                <div className="flex flex-wrap gap-2">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={clearForm}
-                    className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white/75 hover:bg-white/[0.08]"
+                    className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/75 hover:bg-white/[0.08]"
                   >
-                    Clear form
+                    Clear
+                  </button>
+                  <button
+                    onClick={saveProfile}
+                    disabled={saveBusy}
+                    className="rounded-xl border border-emerald-400/30 bg-emerald-500/20 px-3 py-2 text-sm text-white hover:bg-emerald-500/25 disabled:opacity-60"
+                  >
+                    {saveBusy ? "Saving…" : "Save"}
                   </button>
                 </div>
               }
             />
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
               <input
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                placeholder="City (optional)"
+                placeholder="City"
                 className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
               />
               <input
                 value={county}
                 onChange={(e) => setCounty(e.target.value)}
-                placeholder="County (optional)"
-                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
-              />
-              <input
-                value={String(friction)}
-                onChange={(e) => setFriction(Number(e.target.value))}
-                placeholder="Friction (e.g. 1.25)"
+                placeholder="County"
                 className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
               />
               <input
                 value={phaName}
                 onChange={(e) => setPhaName(e.target.value)}
-                placeholder="PHA name (optional)"
+                placeholder="PHA / local program"
+                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+              />
+              <input
+                type="number"
+                step="0.01"
+                value={friction}
+                onChange={(e) => setFriction(Number(e.target.value || 1))}
+                placeholder="Friction multiplier"
                 className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
               />
             </div>
 
             <textarea
-              value={policyJson}
-              onChange={(e) => setPolicyJson(e.target.value)}
-              rows={14}
-              className="mt-3 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-white"
-            />
-
-            <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Notes (optional)"
-              className="mt-3 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+              placeholder="Notes / operational reality"
+              className="mt-3 h-24 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
             />
 
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <button
-                onClick={saveProfile}
-                disabled={saveBusy}
-                className="rounded-xl border border-emerald-400/25 bg-emerald-500/15 px-3 py-2 text-sm text-white transition hover:bg-emerald-500/20 disabled:opacity-50"
-              >
-                {saveBusy ? "Saving…" : "Save override"}
-              </button>
-
-              <div className="text-xs text-white/60">
-                Tip: leave city and county blank to override the state baseline
-                for your org.
-              </div>
-            </div>
+            <textarea
+              value={policyJson}
+              onChange={(e) => setPolicyJson(e.target.value)}
+              placeholder="policy json"
+              className="mt-3 h-64 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-white"
+            />
           </GlassCard>
-        </div>
-      </div>
 
-      <div className="text-xs text-white/50">
-        Docs:{" "}
-        <span className="text-white/70">/meta/docs/michigan_jurisdictions</span>
+          {!selected ? (
+            <GlassCard>
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+                Select a jurisdiction profile to inspect coverage, evidence,
+                rules, and tasks.
+              </div>
+            </GlassCard>
+          ) : (
+            <>
+              <GlassCard>
+                <SectionTitle
+                  title="Selected profile"
+                  right={
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => loadIntoForm(selected)}
+                        className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/75 hover:bg-white/[0.08]"
+                      >
+                        Load into form
+                      </button>
+                      <button
+                        onClick={() => recomputeOne(selected)}
+                        disabled={recomputeBusyId === selected.id}
+                        className="rounded-xl border border-indigo-400/30 bg-indigo-500/20 px-3 py-2 text-sm text-white hover:bg-indigo-500/25 disabled:opacity-60"
+                      >
+                        {recomputeBusyId === selected.id
+                          ? "Recomputing…"
+                          : "Recompute"}
+                      </button>
+                      <button
+                        onClick={() => deleteOne(selected)}
+                        className="rounded-xl border border-red-400/30 bg-red-500/15 px-3 py-2 text-sm text-red-100 hover:bg-red-500/20"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  }
+                />
+
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                    <div className="space-y-2">
+                      <Row label="ID" value={selected.id} />
+                      <Row label="Scope" value={inferScope(selected)} />
+                      <Row label="State" value={selected.state} />
+                      <Row label="County" value={selected.county || "—"} />
+                      <Row label="City" value={selected.city || "—"} />
+                      <Row label="PHA" value={selected.pha_name || "—"} />
+                      <Row
+                        label="Friction"
+                        value={selected.friction_multiplier ?? 1.0}
+                      />
+                      <Row
+                        label="Coverage confidence"
+                        value={
+                          <Badge
+                            tone={confidenceTone(
+                              selected.coverage_confidence ||
+                                selected.confidence_label,
+                            )}
+                          >
+                            {titleize(
+                              selected.coverage_confidence ||
+                                selected.confidence_label ||
+                                "unknown",
+                            )}
+                          </Badge>
+                        }
+                      />
+                      <Row
+                        label="Completeness"
+                        value={
+                          <Badge
+                            tone={completenessTone(
+                              selectedCompleteness?.completeness_status,
+                            )}
+                          >
+                            {titleize(
+                              selectedCompleteness?.completeness_status,
+                            )}
+                          </Badge>
+                        }
+                      />
+                      <Row
+                        label="Completeness score"
+                        value={scorePct(
+                          selectedCompleteness?.completeness_score,
+                        )}
+                      />
+                      <Row
+                        label="Rule version"
+                        value={
+                          selected.resolved_rule_version ||
+                          selected.rule_version ||
+                          "—"
+                        }
+                      />
+                      <Row
+                        label="Last refreshed"
+                        value={formatDate(
+                          selected.last_refreshed || selected.last_refreshed_at,
+                        )}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                    <div className="text-sm font-semibold text-white">
+                      Coverage breakdown
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-xs uppercase tracking-wider text-white/45">
+                        Covered categories
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedCompleteness?.covered_categories?.length ? (
+                          selectedCompleteness.covered_categories.map(
+                            (item: string) => (
+                              <Badge key={item} tone="good">
+                                {titleize(item)}
+                              </Badge>
+                            ),
+                          )
+                        ) : (
+                          <span className="text-sm text-white/55">
+                            None listed
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4">
+                      <div className="text-xs uppercase tracking-wider text-white/45">
+                        Missing categories
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedCompleteness?.missing_categories?.length ? (
+                          selectedCompleteness.missing_categories.map(
+                            (item: string) => (
+                              <Badge key={item} tone="warn">
+                                {titleize(item)}
+                              </Badge>
+                            ),
+                          )
+                        ) : (
+                          <Badge tone="good">No known gaps</Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    {selectedCompleteness?.is_stale ? (
+                      <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-100">
+                        {selectedCompleteness.stale_reason ||
+                          "This profile is stale and should be refreshed."}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                {selected.notes ? (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/75">
+                    {selected.notes}
+                  </div>
+                ) : null}
+              </GlassCard>
+
+              <GlassCard>
+                <SectionTitle title="Resolved layers" />
+                {!selectedLayers.length ? (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+                    No explicit layer rows returned for this profile.
+                  </div>
+                ) : (
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {selectedLayers.map((layer: any, idx: number) => (
+                      <div
+                        key={`${layer?.layer || layer?.scope || "layer"}-${idx}`}
+                        className="rounded-xl border border-white/10 bg-black/30 p-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-white">
+                            {titleize(
+                              layer?.layer ||
+                                layer?.scope ||
+                                layer?.label ||
+                                "layer",
+                            )}
+                          </div>
+                          <Badge tone={toneForLayer(layer)}>
+                            {titleize(
+                              layer?.confidence ||
+                                layer?.status ||
+                                (layer?.applied ? "applied" : "available"),
+                            )}
+                          </Badge>
+                        </div>
+                        <div className="mt-3 space-y-2 text-sm text-white/75">
+                          <Row
+                            label="Authority"
+                            value={layer?.authority || layer?.source || "—"}
+                          />
+                          <Row label="Version" value={layer?.version || "—"} />
+                          <Row
+                            label="Applied"
+                            value={layer?.applied ? "yes" : "no"}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </GlassCard>
+
+              <GlassCard>
+                <SectionTitle title="Source evidence" />
+                {!selectedEvidence.length ? (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+                    No evidence rows returned.
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {selectedEvidence.map((e: any, idx: number) => (
+                      <div
+                        key={`${e?.title || e?.label || e?.url || "evidence"}-${idx}`}
+                        className="rounded-xl border border-white/10 bg-black/30 p-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-white">
+                            {e?.title ||
+                              e?.label ||
+                              e?.source_name ||
+                              "Evidence"}
+                          </div>
+                          <Badge
+                            tone={e?.is_authoritative ? "good" : "neutral"}
+                          >
+                            {e?.is_authoritative
+                              ? "authoritative"
+                              : "supporting"}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 text-sm text-white/70">
+                          {e?.source_name || e?.source || "Unknown source"}
+                        </div>
+                        {e?.excerpt ? (
+                          <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-white/75">
+                            {e.excerpt}
+                          </div>
+                        ) : null}
+                        {e?.url ? (
+                          <a
+                            href={e.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-3 inline-flex text-sm text-cyan-200 hover:text-cyan-100"
+                          >
+                            Open source
+                          </a>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </GlassCard>
+
+              <GlassCard>
+                <SectionTitle title="Tasks" />
+                {!selectedTasks.length ? (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+                    No tasks linked to this profile.
+                  </div>
+                ) : (
+                  <div className="mt-3 grid gap-3">
+                    {selectedTasks.map((task: any, idx: number) => (
+                      <div
+                        key={`${task?.title || task?.code || idx}`}
+                        className="rounded-xl border border-white/10 bg-black/30 p-4"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-semibold text-white">
+                            {task?.title || task?.code || "Untitled task"}
+                          </div>
+                          {task?.priority ? (
+                            <Badge tone="warn">{titleize(task.priority)}</Badge>
+                          ) : null}
+                          {task?.kind ? (
+                            <Badge>{titleize(task.kind)}</Badge>
+                          ) : null}
+                        </div>
+                        {task?.detail ? (
+                          <div className="mt-2 text-sm text-white/75">
+                            {task.detail}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </GlassCard>
+
+              <GlassCard>
+                <SectionTitle title="Policy JSON" />
+                <pre className="mt-3 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-white/80 whitespace-pre-wrap">
+                  {pretty(selectedPolicy)}
+                </pre>
+              </GlassCard>
+            </>
+          )}
+        </div>
       </div>
     </PageShell>
   );
