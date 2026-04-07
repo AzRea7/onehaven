@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_principal, require_owner
 from app.db import get_db
-from app.policy_models import PolicyAssertion, PolicySource
+from app.models import Property
+from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
 from app.services.jurisdiction_completeness_service import profile_completeness_payload
 from app.services.policy_catalog import (
     catalog_for_market,
@@ -1276,3 +1277,142 @@ def repair_market_route(
         focus=payload.focus,
         archive_extracted_duplicates=payload.archive_extracted_duplicates,
     )
+
+
+
+def _policy_meta_from_profile(profile: JurisdictionProfile | None) -> dict[str, Any]:
+    if profile is None:
+        return {}
+    payload = _loads(getattr(profile, "policy_json", None), {})
+    if not isinstance(payload, dict):
+        return {}
+    meta = payload.get("meta") or {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _profile_summary_payload(db: Session, profile: JurisdictionProfile | None) -> dict[str, Any] | None:
+    if profile is None:
+        return None
+    completeness = profile_completeness_payload(db, profile)
+    meta = _policy_meta_from_profile(profile)
+    return {
+        "id": profile.id,
+        "state": profile.state,
+        "county": profile.county,
+        "city": profile.city,
+        "pha_name": profile.pha_name,
+        "policy": _loads(profile.policy_json, {}),
+        "resolved_rule_version": meta.get("resolved_rule_version") or meta.get("rule_version") or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
+        "coverage_confidence": completeness.get("coverage_confidence") or meta.get("coverage_confidence") or ("high" if completeness.get("completeness_score", 0) >= 0.85 else "medium" if completeness.get("completeness_score", 0) >= 0.6 else "low"),
+        "missing_local_rule_areas": completeness.get("missing_local_rule_areas") or completeness.get("missing_categories") or meta.get("missing_local_rule_areas") or [],
+        "source_evidence": meta.get("source_evidence") or meta.get("evidence") or [],
+        "last_refreshed": meta.get("last_refreshed") or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
+        "is_stale": bool(completeness.get("is_stale")),
+        "stale_reason": completeness.get("stale_reason") or meta.get("stale_reason"),
+        "completeness": completeness,
+        "resolved_layers": meta.get("resolved_layers") or meta.get("layers") or [],
+    }
+
+
+@router.post("/market/coverage")
+def get_market_coverage(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+    coverage = compute_coverage_status(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+    )
+
+    profile = db.query(JurisdictionProfile).filter(
+        JurisdictionProfile.state == _norm_state(payload.state),
+        JurisdictionProfile.county == _norm_lower(payload.county),
+        JurisdictionProfile.city == _norm_lower(payload.city),
+        JurisdictionProfile.pha_name == _norm_text(payload.pha_name),
+        (JurisdictionProfile.org_id == target_org_id) if target_org_id is not None else JurisdictionProfile.org_id.is_(None),
+    ).order_by(JurisdictionProfile.id.desc()).first()
+
+    profile_payload = _profile_summary_payload(db, profile)
+    return {
+        "ok": True,
+        "market": {
+            "state": _norm_state(payload.state),
+            "county": _norm_lower(payload.county),
+            "city": _norm_lower(payload.city),
+            "pha_name": _norm_text(payload.pha_name),
+        },
+        "coverage": coverage,
+        "profile": profile_payload,
+        "coverage_confidence": (profile_payload or {}).get("coverage_confidence") or (coverage or {}).get("coverage_confidence"),
+        "missing_local_rule_areas": (profile_payload or {}).get("missing_local_rule_areas") or (coverage or {}).get("missing_local_rule_areas") or [],
+    }
+
+
+@router.get("/property/{property_id}/resolved-rules")
+def get_property_resolved_rules(
+    property_id: int,
+    recompute_coverage: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    prop = db.get(Property, int(property_id))
+    if not prop or getattr(prop, "org_id", None) != principal.org_id:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    target_org_id = principal.org_id
+    state = _norm_state(getattr(prop, "state", None) or "MI")
+    county = _norm_lower(getattr(prop, "county", None))
+    city = _norm_lower(getattr(prop, "city", None))
+
+    profile = db.query(JurisdictionProfile).filter(
+        JurisdictionProfile.state == state,
+        JurisdictionProfile.county == county,
+        JurisdictionProfile.city == city,
+        (JurisdictionProfile.org_id == target_org_id) | (JurisdictionProfile.org_id.is_(None)),
+    ).order_by(JurisdictionProfile.org_id.desc(), JurisdictionProfile.id.desc()).first()
+
+    if recompute_coverage:
+        upsert_coverage_status(
+            db,
+            org_id=target_org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=getattr(prop, "pha_name", None),
+            notes=f"Coverage refreshed for property {prop.id}",
+        )
+        if profile is not None:
+            db.refresh(profile)
+
+    brief = build_property_compliance_brief(
+        db,
+        org_id=target_org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=getattr(prop, "pha_name", None),
+    )
+
+    profile_payload = _profile_summary_payload(db, profile)
+    return {
+        "ok": True,
+        "property": {
+            "id": int(prop.id),
+            "address": getattr(prop, "address", None),
+            "state": getattr(prop, "state", None),
+            "county": getattr(prop, "county", None),
+            "city": getattr(prop, "city", None),
+        },
+        "profile": profile_payload,
+        "brief": brief,
+        "resolved_rule_version": (profile_payload or {}).get("resolved_rule_version"),
+        "coverage_confidence": (profile_payload or {}).get("coverage_confidence"),
+        "missing_local_rule_areas": (profile_payload or {}).get("missing_local_rule_areas") or [],
+        "stale_warning": bool((profile_payload or {}).get("is_stale")),
+    }

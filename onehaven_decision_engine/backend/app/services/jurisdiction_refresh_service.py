@@ -356,3 +356,52 @@ def list_stale_policy_sources(
         stmt = stmt.limit(max(1, int(batch_size)))
 
     return list(db.scalars(stmt).all())
+
+
+# ---- Chunk 5 refresh enrichments ----
+_base_refresh_jurisdiction_profile = refresh_jurisdiction_profile
+
+
+def refresh_jurisdiction_profile(
+    db: Session,
+    *,
+    jurisdiction_profile_id: int,
+    reviewer_user_id: int | None = None,
+    force: bool = False,
+    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
+    focus: str = 'se_mi_extended',
+) -> dict[str, Any]:
+    result = _base_refresh_jurisdiction_profile(
+        db,
+        jurisdiction_profile_id=jurisdiction_profile_id,
+        reviewer_user_id=reviewer_user_id,
+        force=force,
+        stale_days=stale_days,
+        focus=focus,
+    )
+    profile_payload = result.get('profile') or {}
+    if profile_payload:
+        confidence_score = 0.0
+        if profile_payload.get('completeness_score') is not None:
+            confidence_score += 0.5 * float(profile_payload.get('completeness_score') or 0.0)
+        if not profile_payload.get('is_stale'):
+            confidence_score += 0.25
+        if profile_payload.get('last_refresh_success_at'):
+            confidence_score += 0.25
+        confidence_score = max(0.0, min(1.0, round(confidence_score, 3)))
+        result['refresh_confidence'] = {
+            'coverage_confidence': 'high' if confidence_score >= 0.75 else ('medium' if confidence_score >= 0.45 else 'low'),
+            'confidence_score': confidence_score,
+        }
+    result['refresh_payload'] = build_jurisdiction_refresh_payload(
+        org_id=(profile_payload.get('org_id') if profile_payload else None),
+        jurisdiction_profile_id=jurisdiction_profile_id,
+        state=profile_payload.get('state') if profile_payload else None,
+        county=profile_payload.get('county') if profile_payload else None,
+        city=profile_payload.get('city') if profile_payload else None,
+        pha_name=profile_payload.get('pha_name') if profile_payload else None,
+        reason='chunk5_refresh',
+        force=force,
+        stale_days=stale_days,
+    )
+    return result

@@ -659,3 +659,101 @@ def delete_profile(
     db.delete(row)
     db.commit()
     return 1
+
+
+# ---- Chunk 5 layered profile helpers ----
+import hashlib
+
+_base_resolve_profile = resolve_profile
+_base_resolve_operational_policy = resolve_operational_policy
+_base_summarize_profile = summarize_profile
+
+
+def _policy_hash(payload: Any) -> str:
+    try:
+        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    except Exception:
+        raw = str(payload)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]
+
+
+def _layer_name_for_assertion(a: Any) -> str:
+    if getattr(a, 'org_id', None) is not None:
+        return 'org_override'
+    if getattr(a, 'pha_name', None):
+        return 'housing_authority'
+    if getattr(a, 'city', None):
+        return 'city'
+    if getattr(a, 'county', None):
+        return 'county'
+    return 'statewide_baseline'
+
+
+def _resolved_layers_from_policy(policy: dict[str, Any]) -> list[dict[str, Any]]:
+    assertions = list(policy.get('resolved_assertions') or [])
+    if not assertions:
+        return []
+    by_layer: dict[str, dict[str, Any]] = {}
+    for row in assertions:
+        layer = _layer_name_for_assertion(type('Obj', (), row)()) if isinstance(row, dict) else _layer_name_for_assertion(row)
+        item = by_layer.setdefault(layer, {'layer': layer, 'rule_keys': [], 'count': 0})
+        rule_key = row.get('rule_key') if isinstance(row, dict) else getattr(row, 'rule_key', None)
+        if rule_key and rule_key not in item['rule_keys']:
+            item['rule_keys'].append(rule_key)
+        item['count'] += 1
+    order = {'statewide_baseline': 0, 'county': 1, 'city': 2, 'housing_authority': 3, 'org_override': 4}
+    return sorted(by_layer.values(), key=lambda x: order.get(x['layer'], 99))
+
+
+def resolve_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    city: Optional[str] = None,
+    county: Optional[str] = None,
+    state: str = 'MI',
+):
+    out = _base_resolve_profile(db, org_id=org_id, city=city, county=county, state=state)
+    policy = dict(out.get('policy') or {})
+    layers = _resolved_layers_from_policy(policy)
+    out['resolved_layers'] = layers
+    out['resolved_rule_version'] = _policy_hash({
+        'state': out.get('state'),
+        'county': out.get('county'),
+        'city': out.get('city'),
+        'pha_name': out.get('pha_name'),
+        'policy': policy,
+        'layers': layers,
+    })
+    out['coverage_confidence'] = (policy.get('coverage_confidence') or 'medium')
+    out['missing_local_rule_areas'] = list(policy.get('missing_local_rule_areas') or policy.get('missing_categories') or [])
+    out['source_evidence'] = list(policy.get('source_evidence') or [])
+    return out
+
+
+def resolve_operational_policy(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    city: Optional[str] = None,
+    county: Optional[str] = None,
+    state: str = 'MI',
+):
+    policy = _base_resolve_operational_policy(db, org_id=org_id, city=city, county=county, state=state)
+    layers = _resolved_layers_from_policy(policy if isinstance(policy, dict) else {})
+    if isinstance(policy, dict):
+        policy['resolved_layers'] = layers
+        policy['resolved_rule_version'] = _policy_hash(policy)
+        policy['missing_local_rule_areas'] = list(policy.get('missing_local_rule_areas') or policy.get('missing_categories') or [])
+    return policy
+
+
+def summarize_profile(profile: JurisdictionProfile) -> dict[str, Any]:
+    out = _base_summarize_profile(profile)
+    policy = _loads(getattr(profile, 'policy_json', None), {})
+    out['resolved_layers'] = _resolved_layers_from_policy(policy)
+    out['resolved_rule_version'] = _policy_hash(policy)
+    out['coverage_confidence'] = policy.get('coverage_confidence') or 'medium'
+    out['missing_local_rule_areas'] = list(policy.get('missing_local_rule_areas') or policy.get('missing_categories') or [])
+    out['source_evidence'] = list(policy.get('source_evidence') or [])
+    return out

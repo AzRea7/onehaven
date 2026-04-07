@@ -323,3 +323,69 @@ def map_profile_jurisdiction_tasks(profile: Optional[JurisdictionProfile]) -> li
 
 def map_profile_jurisdiction_task_dicts(profile: Optional[JurisdictionProfile]) -> list[dict[str, Any]]:
     return [task.to_dict() for task in map_profile_jurisdiction_tasks(profile)]
+
+# ---- Chunk 5 task helpers ----
+
+def build_rule_gap_task(
+    *,
+    rule_key: str,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    jurisdiction_profile_id: int | None = None,
+) -> JurisdictionTask:
+    scope_label = _scope_label(state=state, county=county, city=city, pha_name=pha_name)
+    return JurisdictionTask(
+        task_key=f'jurisdiction_missing_rule:{rule_key}',
+        title=f'Verify rule: {rule_key.replace("_", " ")}',
+        category='jurisdiction',
+        status=TASK_STATUS_TODO,
+        priority=TASK_PRIORITY_HIGH,
+        reason=f'{scope_label} is missing direct evidence for rule {rule_key}.',
+        metadata={
+            'task_type': 'jurisdiction_missing_rule',
+            'rule_key': rule_key,
+            'state': state,
+            'county': county,
+            'city': city,
+            'pha_name': pha_name,
+            'jurisdiction_profile_id': jurisdiction_profile_id,
+        },
+    )
+
+
+_base_map_profile_jurisdiction_task_dicts = map_profile_jurisdiction_task_dicts
+
+
+def map_profile_jurisdiction_task_dicts(profile: Optional[JurisdictionProfile]) -> list[dict[str, Any]]:
+    rows = _base_map_profile_jurisdiction_task_dicts(profile)
+    if profile is None:
+        return rows
+    policy = {}
+    try:
+        policy = json.loads(getattr(profile, 'policy_json', None) or '{}')
+    except Exception:
+        policy = {}
+    missing_rule_keys = list(policy.get('missing_rule_keys') or [])
+    extra = [
+        build_rule_gap_task(
+            rule_key=rule_key,
+            state=getattr(profile, 'state', None),
+            county=getattr(profile, 'county', None),
+            city=getattr(profile, 'city', None),
+            pha_name=getattr(profile, 'pha_name', None),
+            jurisdiction_profile_id=getattr(profile, 'id', None),
+        ).to_dict()
+        for rule_key in missing_rule_keys
+    ]
+    combined = rows + extra
+    deduped = []
+    seen = set()
+    for row in combined:
+        key = row.get('task_key')
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped

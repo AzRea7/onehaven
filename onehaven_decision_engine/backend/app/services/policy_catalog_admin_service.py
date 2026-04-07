@@ -454,3 +454,43 @@ def source_kind_coverage_for_market(
         "missing_recommended": missing_recommended,
         "complete_core": len(missing_required) == 0,
     }
+
+
+# ---- Chunk 5 catalog enrichments ----
+_base_source_kind_coverage_for_market = source_kind_coverage_for_market
+
+
+def source_kind_coverage_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = 'se_mi_extended',
+) -> dict:
+    payload = _base_source_kind_coverage_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+    payload['resolution_order'] = [
+        'michigan_statewide_baseline',
+        'county_rules',
+        'city_rules',
+        'housing_authority_overlays',
+        'org_overrides',
+    ]
+    payload['recommended_source_layers'] = {
+        'statewide_baseline': ['state statute', 'state housing program guidance', 'federal anchors'],
+        'county_rules': ['county code', 'county health / building authorities'],
+        'city_rules': ['city ordinance', 'rental inspection program', 'certificate / occupancy pages'],
+        'housing_authority_overlays': ['PHA admin plan', 'landlord packet', 'program notices'],
+        'org_overrides': ['internal operations memo', 'approved exception handling'],
+    }
+    return payload

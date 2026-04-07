@@ -284,3 +284,26 @@ def create_inspection_reminder_audit_event(
     )
     row = create_notification_audit_event(db, notification=notification)
     return row
+
+
+# ---- Chunk 5 notification enrichments ----
+_base_build_stale_jurisdiction_notification = build_stale_jurisdiction_notification
+
+
+def build_stale_jurisdiction_notification(
+    db: Session,
+    *,
+    profile: JurisdictionProfile,
+) -> JurisdictionNotification:
+    note = _base_build_stale_jurisdiction_notification(db, profile=profile)
+    payload = dict(note.payload)
+    payload['coverage_confidence'] = payload.get('coverage_confidence') or ('low' if payload.get('is_stale') else 'medium')
+    payload['missing_local_rule_areas'] = list(payload.get('missing_local_rule_areas') or payload.get('missing_categories') or [])
+    payload['stale_warning'] = True
+    return JurisdictionNotification(
+        action=note.action,
+        org_id=note.org_id,
+        entity_id=note.entity_id,
+        message=note.message,
+        payload=payload,
+    )

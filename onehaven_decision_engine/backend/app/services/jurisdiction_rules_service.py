@@ -221,3 +221,126 @@ def delete_rule(
         after=None,
         commit=True,
     )
+
+# ---- Chunk 5 layered jurisdiction helpers ----
+from typing import Iterable
+from sqlalchemy import or_
+from ..policy_models import PolicyAssertion
+
+
+def _norm_rule_scope_value(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    s = v.strip().lower()
+    return s or None
+
+
+def list_rules_for_scope(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+) -> list[JurisdictionRule]:
+    st = _norm_state(state)
+    cty = _norm_rule_scope_value(city)
+    cnty = _norm_rule_scope_value(county)
+
+    q = select(JurisdictionRule).where(JurisdictionRule.state == st)
+    if org_id is None:
+        q = q.where(JurisdictionRule.org_id.is_(None))
+    else:
+        q = q.where(or_(JurisdictionRule.org_id == int(org_id), JurisdictionRule.org_id.is_(None)))
+
+    rows = list(db.scalars(q).all())
+    out: list[JurisdictionRule] = []
+    for row in rows:
+        row_city = _norm_rule_scope_value(getattr(row, 'city', None))
+        row_county = _norm_rule_scope_value(getattr(row, 'county', None))
+        if row_city is not None and row_city != cty:
+            continue
+        if row_county is not None and row_county != cnty:
+            continue
+        out.append(row)
+    return out
+
+
+def resolve_layered_rules(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    pha_name: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Lightweight resolver used by Chunk 5 routers/services.
+    It combines legacy JurisdictionRule rows with extracted PolicyAssertion signals
+    so the UI can show the effective layer stack and source provenance.
+    """
+    st = _norm_state(state)
+    cnty = _norm_rule_scope_value(county)
+    cty = _norm_rule_scope_value(city)
+    pha = (pha_name or '').strip() or None
+
+    rules = list_rules_for_scope(db, org_id=org_id, state=st, county=cnty, city=cty)
+    assertions_q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
+    if org_id is None:
+        assertions_q = assertions_q.filter(PolicyAssertion.org_id.is_(None))
+    else:
+        assertions_q = assertions_q.filter(or_(PolicyAssertion.org_id == int(org_id), PolicyAssertion.org_id.is_(None)))
+    assertions = []
+    for a in assertions_q.all():
+        if getattr(a, 'county', None) is not None and _norm_rule_scope_value(a.county) != cnty:
+            continue
+        if getattr(a, 'city', None) is not None and _norm_rule_scope_value(a.city) != cty:
+            continue
+        if getattr(a, 'pha_name', None) is not None and (a.pha_name or '').strip() != (pha or ''):
+            continue
+        assertions.append(a)
+
+    layers = []
+    if st == 'MI':
+        layers.append({'layer': 'statewide_baseline', 'scope': {'state': st}, 'strength': 'baseline'})
+    if cnty:
+        layers.append({'layer': 'county', 'scope': {'state': st, 'county': cnty}, 'strength': 'local'})
+    if cty:
+        layers.append({'layer': 'city', 'scope': {'state': st, 'county': cnty, 'city': cty}, 'strength': 'local'})
+    if pha:
+        layers.append({'layer': 'housing_authority', 'scope': {'state': st, 'county': cnty, 'city': cty, 'pha_name': pha}, 'strength': 'program'})
+    if org_id is not None:
+        layers.append({'layer': 'org_override', 'scope': {'org_id': int(org_id), 'state': st, 'county': cnty, 'city': cty, 'pha_name': pha}, 'strength': 'override'})
+
+    source_evidence = []
+    for rule in rules:
+        source_evidence.append({
+            'kind': 'jurisdiction_rule',
+            'id': int(rule.id),
+            'scope': 'org' if getattr(rule, 'org_id', None) is not None else 'global',
+            'city': getattr(rule, 'city', None),
+            'state': getattr(rule, 'state', None),
+            'updated_at': getattr(rule, 'updated_at', None).isoformat() if getattr(rule, 'updated_at', None) else None,
+        })
+    for a in assertions:
+        source_evidence.append({
+            'kind': 'policy_assertion',
+            'id': int(a.id),
+            'rule_key': getattr(a, 'rule_key', None),
+            'review_status': getattr(a, 'review_status', None),
+            'normalized_category': getattr(a, 'normalized_category', None),
+            'source_id': getattr(a, 'source_id', None),
+        })
+
+    return {
+        'state': st,
+        'county': cnty,
+        'city': cty,
+        'pha_name': pha,
+        'layers': layers,
+        'source_evidence': source_evidence,
+        'rule_count': len(rules),
+        'assertion_count': len(assertions),
+        'resolved_rule_version': f"jr:{st}:{cnty or '-'}:{cty or '-'}:{pha or '-'}:{len(rules)}:{len(assertions)}",
+    }

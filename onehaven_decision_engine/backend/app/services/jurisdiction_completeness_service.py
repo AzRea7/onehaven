@@ -561,3 +561,40 @@ def profile_completeness_payload(
         "stale_reason": freshness.stale_reason,
         "stale_days": stale_days,
     }
+
+
+# ---- Chunk 5 completeness enrichments ----
+_base_profile_completeness_payload = profile_completeness_payload
+
+
+def _confidence_from_payload(payload: dict[str, Any]) -> tuple[str, float]:
+    source_count = int(payload.get('source_count') or 0)
+    authoritative = int(payload.get('authoritative_source_count') or 0)
+    completeness_score = float(payload.get('completeness_score') or 0.0)
+    is_stale = bool(payload.get('is_stale'))
+    missing_count = len(payload.get('missing_categories') or [])
+
+    score = 0.0
+    if source_count > 0:
+        score += min(0.35, 0.1 * source_count)
+    if authoritative > 0 and source_count > 0:
+        score += min(0.35, 0.35 * (authoritative / max(1, source_count)))
+    score += min(0.25, 0.25 * completeness_score)
+    if missing_count:
+        score -= min(0.20, 0.05 * missing_count)
+    if is_stale:
+        score -= 0.20
+    score = max(0.0, min(1.0, round(score, 3)))
+    label = 'high' if score >= 0.75 else ('medium' if score >= 0.45 else 'low')
+    return label, score
+
+
+def profile_completeness_payload(db: Session, profile: JurisdictionProfile) -> dict[str, Any]:
+    payload = _base_profile_completeness_payload(db, profile)
+    confidence_label, confidence_score = _confidence_from_payload(payload)
+    payload['coverage_confidence'] = confidence_label
+    payload['coverage_confidence_score'] = confidence_score
+    payload['missing_local_rule_areas'] = list(payload.get('missing_categories') or [])
+    payload['resolved_rule_version'] = f"jp:{getattr(profile, 'id', 'new')}:{payload.get('completeness_status')}:{payload.get('source_count', 0)}:{payload.get('authoritative_source_count', 0)}"
+    payload['stale_warning'] = bool(payload.get('is_stale'))
+    return payload

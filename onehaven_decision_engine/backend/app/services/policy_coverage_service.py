@@ -513,3 +513,122 @@ def upsert_coverage_status(
     db.commit()
     db.refresh(row)
     return row
+
+
+# ---- Chunk 5 coverage enrichments ----
+_base_compute_coverage_status = compute_coverage_status
+_base_upsert_coverage_status = upsert_coverage_status
+
+
+def _coverage_confidence_label(score: float) -> str:
+    return 'high' if score >= 0.75 else ('medium' if score >= 0.45 else 'low')
+
+
+def compute_coverage_status(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = 'se_mi_extended',
+) -> dict:
+    payload = _base_compute_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+
+    verified_rule_keys = list(payload.get('verified_rule_keys') or [])
+    required_categories = list(payload.get('required_categories') or [])
+    missing_categories = list(payload.get('missing_categories') or [])
+    source_count = int(payload.get('source_count') or 0)
+    authoritative_count = int(payload.get('authoritative_source_count') or 0)
+    verified_count = int(payload.get('verified_rule_count') or len(verified_rule_keys))
+    stale_warning_count = int(payload.get('stale_warning_count') or 0)
+    fetch_failure_count = int(payload.get('fetch_failure_count') or 0)
+    completeness_score = float(payload.get('completeness_score') or 0.0)
+
+    confidence_score = 0.0
+    if source_count:
+        confidence_score += min(0.25, 0.05 * source_count)
+    if authoritative_count and source_count:
+        confidence_score += min(0.25, 0.25 * (authoritative_count / max(1, source_count)))
+    if verified_count:
+        confidence_score += min(0.25, 0.03 * verified_count)
+    confidence_score += min(0.25, completeness_score * 0.25)
+    confidence_score -= min(0.20, stale_warning_count * 0.05)
+    confidence_score -= min(0.20, fetch_failure_count * 0.05)
+    confidence_score = max(0.0, min(1.0, round(confidence_score, 3)))
+
+    important_missing = []
+    if 'rental_registration_required' not in verified_rule_keys:
+        important_missing.append('rental_registration_required')
+    if 'inspection_program_exists' not in verified_rule_keys:
+        important_missing.append('inspection_program_exists')
+    if city and 'certificate_required_before_occupancy' not in verified_rule_keys:
+        important_missing.append('certificate_required_before_occupancy')
+    if pha_name:
+        if 'pha_landlord_packet_required' not in verified_rule_keys:
+            important_missing.append('pha_landlord_packet_required')
+        if 'hap_contract_and_tenancy_addendum_required' not in verified_rule_keys:
+            important_missing.append('hap_contract_and_tenancy_addendum_required')
+
+    payload['coverage_confidence'] = _coverage_confidence_label(confidence_score)
+    payload['confidence_score'] = confidence_score
+    payload['authoritative_ratio'] = round(authoritative_count / max(1, source_count), 3) if source_count else 0.0
+    payload['verified_ratio'] = round(verified_count / max(1, max(len(verified_rule_keys), len(required_categories), 1)), 3)
+    payload['missing_rule_keys'] = important_missing
+    payload['missing_local_rule_areas'] = missing_categories
+    payload['stale_warning'] = bool(payload.get('is_stale')) or stale_warning_count > 0
+    payload['resolution_order'] = [
+        'michigan_statewide_baseline',
+        'county_rules',
+        'city_rules',
+        'housing_authority_overlays',
+        'org_overrides',
+    ]
+    return payload
+
+
+def upsert_coverage_status(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = 'se_mi_extended',
+    notes: Optional[str] = None,
+):
+    row = _base_upsert_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        notes=notes,
+    )
+    payload = compute_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+    if hasattr(row, 'notes'):
+        suffix = f" | coverage_confidence={payload.get('coverage_confidence')} score={payload.get('confidence_score')}"
+        row.notes = ((row.notes or '') + suffix).strip()
+        db.commit()
+        db.refresh(row)
+    return row

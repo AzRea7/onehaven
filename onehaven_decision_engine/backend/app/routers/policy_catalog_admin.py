@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -117,9 +117,7 @@ def get_market_catalog(
         focus=payload.focus,
     )
 
-    return {
-        "ok": True,
-        "merged_items": [
+    merged_items = [
             {
                 "url": item.url,
                 "state": item.state,
@@ -135,9 +133,17 @@ def get_market_catalog(
                 "priority": int(item.priority or 100),
             }
             for item in merged
-        ],
-        "editable_items": [_serialize_row(r) for r in db_rows],
+        ]
+    editable_items = [_serialize_row(r) for r in db_rows]
+    return {
+        "ok": True,
+        "merged_items": merged_items,
+        "editable_items": editable_items,
+        "layers": _group_catalog_layers(merged_items),
         "coverage": coverage,
+        "coverage_confidence": _coverage_confidence_from_coverage(coverage),
+        "missing_local_rule_areas": (coverage or {}).get("missing_local_rule_areas") or (coverage or {}).get("missing_source_kinds") or [],
+        "source_evidence_count": len([item for item in merged_items if item.get("url")]),
     }
 
 
@@ -251,3 +257,100 @@ def disable_market_item(
     if row is None:
         raise HTTPException(status_code=404, detail="Catalog entry not found")
     return {"ok": True, "item": _serialize_row(row)}
+
+
+def _group_catalog_layers(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    buckets = {
+        "state": [],
+        "county": [],
+        "city": [],
+        "housing_authority": [],
+        "org_override": [],
+        "other": [],
+    }
+    for item in items:
+        if item.get("org_id") is not None or item.get("is_override"):
+            buckets["org_override"].append(item)
+        elif item.get("pha_name"):
+            buckets["housing_authority"].append(item)
+        elif item.get("city"):
+            buckets["city"].append(item)
+        elif item.get("county"):
+            buckets["county"].append(item)
+        elif item.get("state"):
+            buckets["state"].append(item)
+        else:
+            buckets["other"].append(item)
+    return buckets
+
+
+def _coverage_confidence_from_coverage(coverage: dict[str, Any]) -> str:
+    raw = str((coverage or {}).get("coverage_confidence") or "").strip().lower()
+    if raw in {"high", "medium", "low"}:
+        return raw
+    score = coverage.get("coverage_score")
+    try:
+        score = float(score)
+    except Exception:
+        score = None
+    if score is None:
+        return "medium" if (coverage or {}).get("missing_source_kinds") else "high"
+    if score >= 0.85:
+        return "high"
+    if score >= 0.6:
+        return "medium"
+    return "low"
+
+
+@router.post("/market/summary")
+def get_market_catalog_summary(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    target_org_id = principal.org_id if payload.org_scope else None
+    merged = merged_catalog_for_market(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+    )
+    merged_items = [
+        {
+            "url": item.url,
+            "state": item.state,
+            "county": item.county,
+            "city": item.city,
+            "pha_name": item.pha_name,
+            "source_kind": item.source_kind,
+            "is_authoritative": bool(item.is_authoritative),
+            "priority": int(item.priority or 100),
+        }
+        for item in merged
+    ]
+    coverage = source_kind_coverage_for_market(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+    )
+    layers = _group_catalog_layers(merged_items)
+    return {
+        "ok": True,
+        "market": {
+            "state": payload.state,
+            "county": payload.county,
+            "city": payload.city,
+            "pha_name": payload.pha_name,
+        },
+        "layer_counts": {key: len(value) for key, value in layers.items()},
+        "coverage": coverage,
+        "coverage_confidence": _coverage_confidence_from_coverage(coverage),
+        "missing_local_rule_areas": (coverage or {}).get("missing_local_rule_areas") or (coverage or {}).get("missing_source_kinds") or [],
+    }

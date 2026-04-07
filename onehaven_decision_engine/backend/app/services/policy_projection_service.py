@@ -708,3 +708,171 @@ def build_property_compliance_brief(
         "verified_rule_count_local": summary["verified_rule_count_local"],
         "verified_rule_count_effective": summary["verified_rule_count_effective"],
     }
+
+
+# ---- Chunk 5 projection enrichments ----
+import hashlib
+
+_base_project_verified_assertions_to_profile = project_verified_assertions_to_profile
+_base_build_property_compliance_brief = build_property_compliance_brief
+
+
+def _stable_projection_hash(payload: Any) -> str:
+    try:
+        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    except Exception:
+        raw = str(payload)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:20]
+
+
+def _layer_for_assertion(a: PolicyAssertion) -> str:
+    if getattr(a, 'org_id', None) is not None:
+        return 'org_override'
+    if getattr(a, 'pha_name', None):
+        return 'housing_authority'
+    if getattr(a, 'city', None):
+        return 'city'
+    if getattr(a, 'county', None):
+        return 'county'
+    return 'michigan_statewide_baseline'
+
+
+def _source_evidence_rows(db: Session, assertions: list[PolicyAssertion]) -> list[dict[str, Any]]:
+    source_map = _source_info_map(db, assertions)
+    rows: list[dict[str, Any]] = []
+    for a in assertions:
+        src = source_map.get(a.source_id) if a.source_id is not None else None
+        rows.append({
+            'assertion_id': int(a.id),
+            'rule_key': a.rule_key,
+            'rule_family': a.rule_family or _rule_family(a.rule_key),
+            'layer': _layer_for_assertion(a),
+            'source_id': a.source_id,
+            'source_url': getattr(src, 'url', None),
+            'publisher': getattr(src, 'publisher', None),
+            'title': getattr(src, 'title', None),
+            'review_status': a.review_status,
+            'confidence': float(a.confidence or 0.0),
+        })
+    return rows
+
+
+def _resolved_layer_summary(assertions: list[PolicyAssertion]) -> list[dict[str, Any]]:
+    order = {
+        'michigan_statewide_baseline': 0,
+        'county': 1,
+        'city': 2,
+        'housing_authority': 3,
+        'org_override': 4,
+    }
+    bucket: dict[str, dict[str, Any]] = {}
+    for a in assertions:
+        layer = _layer_for_assertion(a)
+        row = bucket.setdefault(layer, {'layer': layer, 'assertion_count': 0, 'rule_keys': []})
+        row['assertion_count'] += 1
+        if a.rule_key and a.rule_key not in row['rule_keys']:
+            row['rule_keys'].append(a.rule_key)
+    return sorted(bucket.values(), key=lambda x: order.get(x['layer'], 99))
+
+
+def project_verified_assertions_to_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    notes: Optional[str] = None,
+):
+    profile = _base_project_verified_assertions_to_profile(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        notes=notes,
+    )
+    assertions = _query_inherited_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        statuses=['verified'],
+    )
+    winners = _pick_winners(
+        db,
+        assertions,
+        target_county=_norm_lower(county),
+        target_city=_norm_lower(city),
+        target_pha_name=pha_name.strip() if pha_name else None,
+    )
+    coverage = compute_coverage_status(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name)
+    policy = _loads(getattr(profile, 'policy_json', None), {})
+    policy['resolved_layers'] = _resolved_layer_summary(winners)
+    policy['source_evidence'] = _source_evidence_rows(db, winners)
+    policy['coverage_confidence'] = coverage.get('coverage_confidence')
+    policy['confidence_score'] = coverage.get('confidence_score')
+    policy['missing_local_rule_areas'] = coverage.get('missing_local_rule_areas') or coverage.get('missing_categories') or []
+    policy['missing_rule_keys'] = coverage.get('missing_rule_keys') or []
+    policy['resolved_rule_version'] = _stable_projection_hash({
+        'scope': {'state': state, 'county': county, 'city': city, 'pha_name': pha_name, 'org_id': org_id},
+        'rules': [{k: row[k] for k in ['rule_key', 'rule_family', 'layer', 'source_id', 'review_status']} for row in policy['source_evidence']],
+        'confidence': coverage.get('confidence_score'),
+    })
+    profile.policy_json = _dumps(policy)
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+def build_property_compliance_brief(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+):
+    brief = _base_build_property_compliance_brief(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    assertions = _query_inherited_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        statuses=['verified'],
+    )
+    winners = _pick_winners(
+        db,
+        assertions,
+        target_county=_norm_lower(county),
+        target_city=_norm_lower(city),
+        target_pha_name=pha_name.strip() if pha_name else None,
+    )
+    coverage = compute_coverage_status(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name)
+    brief['resolved_layers'] = _resolved_layer_summary(winners)
+    brief['source_evidence'] = _source_evidence_rows(db, winners)
+    brief['coverage_confidence'] = coverage.get('coverage_confidence')
+    brief['confidence_score'] = coverage.get('confidence_score')
+    brief['missing_local_rule_areas'] = coverage.get('missing_local_rule_areas') or coverage.get('missing_categories') or []
+    brief['missing_rule_keys'] = coverage.get('missing_rule_keys') or []
+    brief['resolved_rule_version'] = _stable_projection_hash({
+        'scope': {'state': state, 'county': county, 'city': city, 'pha_name': pha_name, 'org_id': org_id},
+        'source_evidence': brief['source_evidence'],
+        'confidence': coverage.get('confidence_score'),
+    })
+    return brief

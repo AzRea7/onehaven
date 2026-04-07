@@ -666,3 +666,88 @@ def repair_market(
         "unresolved_rule_gaps": unresolved_rule_gaps,
         "issues_remaining": issues_remaining,
     }
+
+
+# ---- Chunk 5 pipeline enrichments ----
+_base_run_market_pipeline = run_market_pipeline
+_base_repair_market = repair_market
+
+
+def run_market_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    reviewer_user_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = 'se_mi_extended',
+) -> dict:
+    result = _base_run_market_pipeline(
+        db,
+        org_id=org_id,
+        reviewer_user_id=reviewer_user_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+    coverage = dict(result.get('coverage') or {})
+    result['jurisdiction_rule_engine'] = {
+        'resolution_order': [
+            'michigan_statewide_baseline',
+            'county_rules',
+            'city_rules',
+            'housing_authority_overlays',
+            'org_overrides',
+        ],
+        'coverage_confidence': coverage.get('coverage_confidence'),
+        'confidence_score': coverage.get('confidence_score'),
+        'missing_local_rule_areas': coverage.get('missing_local_rule_areas') or coverage.get('missing_categories') or [],
+        'missing_rule_keys': coverage.get('missing_rule_keys') or [],
+        'stale_warning': coverage.get('stale_warning', coverage.get('is_stale')),
+    }
+    return result
+
+
+def repair_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    reviewer_user_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = 'se_mi_extended',
+    archive_extracted_duplicates: bool = True,
+) -> dict:
+    result = _base_repair_market(
+        db,
+        org_id=org_id,
+        reviewer_user_id=reviewer_user_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        archive_extracted_duplicates=archive_extracted_duplicates,
+    )
+    coverage = dict(result.get('coverage') or {})
+    result['jurisdiction_rule_engine'] = {
+        'resolution_order': [
+            'michigan_statewide_baseline',
+            'county_rules',
+            'city_rules',
+            'housing_authority_overlays',
+            'org_overrides',
+        ],
+        'coverage_confidence': coverage.get('coverage_confidence'),
+        'confidence_score': coverage.get('confidence_score'),
+        'missing_local_rule_areas': coverage.get('missing_local_rule_areas') or coverage.get('missing_categories') or [],
+        'missing_rule_keys': coverage.get('missing_rule_keys') or [],
+        'stale_warning': coverage.get('stale_warning', coverage.get('is_stale')),
+    }
+    return result

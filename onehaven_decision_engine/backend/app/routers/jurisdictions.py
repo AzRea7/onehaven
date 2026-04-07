@@ -1,6 +1,7 @@
 # backend/app/routers/jurisdictions.py
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Optional
 
@@ -22,6 +23,73 @@ from ..services.jurisdiction_notification_service import notify_if_jurisdiction_
 from ..services.jurisdiction_refresh_service import refresh_jurisdiction_profile
 
 router = APIRouter(prefix="/jurisdictions", tags=["jurisdictions"])
+
+
+def _json_loads(value, default=None):
+    if default is None:
+        default = {}
+    if value in (None, "", [], {}):
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+
+def _profile_policy_meta(profile: JurisdictionProfile | None) -> dict:
+    if profile is None:
+        return {}
+    payload = _json_loads(getattr(profile, "policy_json", None), {})
+    if not isinstance(payload, dict):
+        return {}
+    meta = payload.get("meta") or {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _profile_layers_payload(profile: JurisdictionProfile | None) -> list[dict]:
+    if profile is None:
+        return []
+    meta = _profile_policy_meta(profile)
+    layers = meta.get("resolved_layers") or meta.get("layers") or []
+    if isinstance(layers, list) and layers:
+        return [row for row in layers if isinstance(row, dict)]
+
+    rows = [{"layer": "state", "label": f"{profile.state or 'MI'} statewide baseline", "matched": True}]
+    if getattr(profile, "county", None):
+        rows.append({"layer": "county", "label": f"{profile.county} county overlay", "matched": True})
+    if getattr(profile, "city", None):
+        rows.append({"layer": "city", "label": f"{profile.city} city overlay", "matched": True})
+    if getattr(profile, "pha_name", None):
+        rows.append({"layer": "housing_authority", "label": f"{profile.pha_name} overlay", "matched": True})
+    if getattr(profile, "org_id", None) is not None:
+        rows.append({"layer": "org_override", "label": "Org override", "matched": True})
+    return rows
+
+
+def _profile_resolution_payload(db: Session, profile: JurisdictionProfile | None) -> dict | None:
+    if profile is None:
+        return None
+    completeness = profile_completeness_payload(db, profile)
+    meta = _profile_policy_meta(profile)
+    return {
+        "profile_id": int(profile.id),
+        "state": profile.state,
+        "county": profile.county,
+        "city": profile.city,
+        "pha_name": getattr(profile, "pha_name", None),
+        "resolved_rule_version": meta.get("resolved_rule_version") or meta.get("rule_version") or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
+        "coverage_confidence": completeness.get("coverage_confidence") or meta.get("coverage_confidence") or ("high" if completeness.get("completeness_score", 0) >= 0.85 else "medium" if completeness.get("completeness_score", 0) >= 0.6 else "low"),
+        "completeness_score": completeness.get("completeness_score"),
+        "completeness_status": completeness.get("completeness_status"),
+        "missing_local_rule_areas": completeness.get("missing_local_rule_areas") or completeness.get("missing_categories") or meta.get("missing_local_rule_areas") or [],
+        "source_evidence": meta.get("source_evidence") or meta.get("evidence") or [],
+        "last_refreshed": meta.get("last_refreshed") or completeness.get("last_refreshed") or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
+        "is_stale": bool(completeness.get("is_stale")),
+        "stale_reason": completeness.get("stale_reason") or meta.get("stale_reason"),
+        "resolved_layers": _profile_layers_payload(profile),
+    }
 
 
 def _norm_city(v: str) -> str:
@@ -535,3 +603,98 @@ def notify_stale_jurisdiction(
         profile=profile,
         force=bool(force),
     )
+
+
+@router.get("/resolve/property/{property_id}", response_model=dict)
+def resolve_property_jurisdiction(
+    property_id: int,
+    recompute: bool = Query(False),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = db.get(Property, int(property_id))
+    if not prop or getattr(prop, "org_id", None) != p.org_id:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    state = _norm_state(getattr(prop, "state", None) or "MI")
+    county = _norm_county(getattr(prop, "county", None))
+    city = _norm_text(getattr(prop, "city", None))
+
+    profile = _effective_profile(
+        db,
+        org_id=p.org_id,
+        state=state,
+        county=county,
+        city=(city.lower() if city else None),
+    )
+    if profile is None and city:
+        profile = _effective_profile(
+            db,
+            org_id=p.org_id,
+            state=state,
+            county=county,
+            city=city,
+        )
+
+    if profile is not None and recompute:
+        profile, _ = recompute_profile_and_coverage(db, profile, commit=True)
+
+    return {
+        "ok": True,
+        "property": {
+            "id": int(prop.id),
+            "address": getattr(prop, "address", None),
+            "city": getattr(prop, "city", None),
+            "county": getattr(prop, "county", None),
+            "state": getattr(prop, "state", None),
+        },
+        "resolved_profile": _profile_resolution_payload(db, profile),
+    }
+
+
+@router.get("/coverage/property/{property_id}", response_model=dict)
+def property_coverage_detail(
+    property_id: int,
+    recompute: bool = Query(False),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = db.get(Property, int(property_id))
+    if not prop or getattr(prop, "org_id", None) != p.org_id:
+        raise HTTPException(status_code=404, detail="property not found")
+
+    state = _norm_state(getattr(prop, "state", None) or "MI")
+    county = _norm_county(getattr(prop, "county", None))
+    city = _norm_text(getattr(prop, "city", None))
+    profile = _effective_profile(db, org_id=p.org_id, state=state, county=county, city=(city.lower() if city else None))
+    if profile is None and city:
+        profile = _effective_profile(db, org_id=p.org_id, state=state, county=county, city=city)
+    if profile is not None and recompute:
+        profile, _ = recompute_profile_and_coverage(db, profile, commit=True)
+
+    profile_payload = _profile_resolution_payload(db, profile)
+    if profile_payload is None:
+        return {
+            "ok": True,
+            "property_id": int(prop.id),
+            "coverage_status": "missing",
+            "coverage_confidence": "low",
+            "missing_local_rule_areas": ["statewide baseline", "county overlay", "city overlay"],
+            "stale_warning": False,
+            "resolved_layers": [],
+            "source_evidence": [],
+        }
+
+    return {
+        "ok": True,
+        "property_id": int(prop.id),
+        "coverage_status": profile_payload.get("completeness_status"),
+        "coverage_confidence": profile_payload.get("coverage_confidence"),
+        "missing_local_rule_areas": profile_payload.get("missing_local_rule_areas"),
+        "stale_warning": bool(profile_payload.get("is_stale")),
+        "stale_reason": profile_payload.get("stale_reason"),
+        "resolved_rule_version": profile_payload.get("resolved_rule_version"),
+        "resolved_layers": profile_payload.get("resolved_layers"),
+        "source_evidence": profile_payload.get("source_evidence"),
+        "last_refreshed": profile_payload.get("last_refreshed"),
+    }
