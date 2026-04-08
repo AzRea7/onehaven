@@ -13,6 +13,7 @@ from ..domain.compliance.inspection_rules import (
     score_readiness,
 )
 from ..models import Inspection, InspectionItem, PropertyChecklistItem
+from ..services.policy_projection_service import build_property_projection_snapshot, rebuild_property_projection
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,10 @@ class InspectionReadinessScore:
     unresolved_failure_count: int
     unresolved_blocked_count: int
     unresolved_critical_count: int
+    evidence_blocking_count: int
+    evidence_unknown_count: int
+    evidence_conflicting_count: int
+    evidence_stale_count: int
 
     hqs_ready: bool
     local_ready: bool
@@ -283,6 +288,25 @@ def compute_property_readiness_score(
         if _status_from_checklist_row(row) in {"fail", "blocked"} and int(getattr(row, "severity", 0) or 0) >= 4
     )
 
+    evidence_blocking_count = 0
+    evidence_unknown_count = 0
+    evidence_conflicting_count = 0
+    evidence_stale_count = 0
+    try:
+        rebuild_property_projection(db, org_id=org_id, property_id=property_id)
+        projection = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
+        counts = projection.get("counts") or {}
+        evidence_blocking_count = int(counts.get("blocking") or 0)
+        evidence_unknown_count = int(counts.get("unknown") or 0)
+        evidence_conflicting_count = int(counts.get("conflicting") or 0)
+        evidence_stale_count = int(counts.get("stale") or 0)
+    except Exception:
+        projection = {"counts": {}}
+
+    unresolved_failure_count += evidence_blocking_count + evidence_conflicting_count
+    unresolved_blocked_count += evidence_stale_count
+    unresolved_critical_count += evidence_blocking_count
+
     combined_readiness_status, combined_result_status, combined_reinspect_required = _compute_combined_status(
         latest_result_status=result_status,
         latest_passed=latest_inspection_passed,
@@ -360,6 +384,10 @@ def compute_property_readiness_score(
         unresolved_failure_count=int(unresolved_failure_count),
         unresolved_blocked_count=int(unresolved_blocked_count),
         unresolved_critical_count=int(unresolved_critical_count),
+        evidence_blocking_count=int(evidence_blocking_count),
+        evidence_unknown_count=int(evidence_unknown_count),
+        evidence_conflicting_count=int(evidence_conflicting_count),
+        evidence_stale_count=int(evidence_stale_count),
         hqs_ready=bool(hqs_ready),
         local_ready=bool(local_ready),
         voucher_ready=bool(voucher_ready),
@@ -420,6 +448,10 @@ def build_property_readiness_summary(
             "unresolved_failure_count": score.unresolved_failure_count,
             "unresolved_blocked_count": score.unresolved_blocked_count,
             "unresolved_critical_count": score.unresolved_critical_count,
+            "evidence_blocking_count": score.evidence_blocking_count,
+            "evidence_unknown_count": score.evidence_unknown_count,
+            "evidence_conflicting_count": score.evidence_conflicting_count,
+            "evidence_stale_count": score.evidence_stale_count,
         },
         "raw": asdict(score),
     }

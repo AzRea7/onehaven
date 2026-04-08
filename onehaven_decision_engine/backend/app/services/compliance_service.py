@@ -33,7 +33,11 @@ from ..services.inspection_template_service import (
     ensure_template_backed_checklist,
 )
 from ..services.jurisdiction_profile_service import resolve_operational_policy
-from ..services.policy_projection_service import build_property_compliance_brief
+from ..services.policy_projection_service import (
+    build_property_compliance_brief,
+    build_property_projection_snapshot,
+    rebuild_property_projection,
+)
 from ..services.compliance_document_service import build_property_document_stack
 
 
@@ -731,6 +735,16 @@ def build_property_inspection_readiness(
         org_id=org_id,
         property_id=property_id,
     )
+    rebuild_property_projection(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    rebuild_property_projection(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
     readiness_summary = build_property_readiness_summary(
         db,
         org_id=org_id,
@@ -776,6 +790,10 @@ def build_property_inspection_readiness(
         )
 
     recommended_actions = _sorted_actions(recommended_actions, limit=10)
+
+    rebuild_property_projection(db, org_id=org_id, property_id=property_id)
+    projection = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
+    document_stack = build_property_document_stack(db, org_id=org_id, property_id=property_id)
 
     overall_status = "ready"
     if readiness_score.posture in {"critical_failures", "needs_remediation", "not_ready", "reinspection_required"}:
@@ -848,6 +866,11 @@ def build_property_inspection_readiness(
             "unresolved_failure_count": int(readiness_score.unresolved_failure_count),
             "unresolved_blocked_count": int(readiness_score.unresolved_blocked_count),
             "unresolved_critical_count": int(readiness_score.unresolved_critical_count),
+            "evidence_blocking_count": int(readiness_score.evidence_blocking_count),
+            "evidence_unknown_count": int(readiness_score.evidence_unknown_count),
+            "evidence_conflicting_count": int(readiness_score.evidence_conflicting_count),
+            "evidence_stale_count": int(readiness_score.evidence_stale_count),
+            "projection_items_total": int(len(projection.get("items") or [])),
         },
         "results": all_results,
         "blocking_items": blockers,
@@ -857,6 +880,8 @@ def build_property_inspection_readiness(
         "effective_hqs_sources": effective_hqs.get("sources") or [],
         "effective_hqs_counts": effective_hqs.get("counts") or {},
         "policy_brief": brief,
+        "projection": projection,
+        "documents": document_stack,
         "jurisdiction": profile_summary,
         "latest_inspection": latest_inspection_payload,
         "template": {
@@ -1277,3 +1302,5 @@ def build_property_document_stack_snapshot(
         "documents": documents,
         "readiness_summary": readiness,
     }
+
+

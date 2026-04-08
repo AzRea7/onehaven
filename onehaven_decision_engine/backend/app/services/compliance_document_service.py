@@ -11,6 +11,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .policy_projection_service import build_property_projection_snapshot, rebuild_property_projection, sync_document_evidence_for_property
 from .virus_scanning_service import scan_file
 
 
@@ -368,7 +369,20 @@ def create_compliance_document_from_path(
         params,
     ).fetchone()
     db.flush()
-    return _row_to_dict(row)
+
+    created = _row_to_dict(row)
+    sync_document_evidence_for_property(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        document_id=int(created["id"]),
+    )
+    rebuild_property_projection(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    return get_compliance_document(db, org_id=org_id, document_id=int(created["id"]))
 
 
 def delete_compliance_document(
@@ -404,6 +418,11 @@ def delete_compliance_document(
         except Exception:
             pass
     db.flush()
+    rebuild_property_projection(
+        db,
+        org_id=org_id,
+        property_id=int(row["property_id"]),
+    )
     return {"document_id": int(document_id), "deleted": True}
 
 
@@ -433,6 +452,26 @@ def build_property_document_stack(
         checklist_key = str(row.get("checklist_item_id")) if row.get("checklist_item_id") is not None else "unassigned"
         by_checklist_item.setdefault(checklist_key, []).append(row)
 
+    projection = build_property_projection_snapshot(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+
+    proof_summary: dict[str, list[dict[str, Any]]] = {}
+    for item in projection.get("items") or []:
+        rule_key = str(item.get("rule_key") or "")
+        if not rule_key:
+            continue
+        proof_summary.setdefault(rule_key, []).append(
+            {
+                "evaluation_status": item.get("evaluation_status"),
+                "evidence_status": item.get("evidence_status"),
+                "evidence_summary": item.get("evidence_summary"),
+                "evidence_gap": item.get("evidence_gap"),
+            }
+        )
+
     return {
         "ok": True,
         "property_id": int(property_id),
@@ -441,4 +480,10 @@ def build_property_document_stack(
         "by_category": by_category,
         "by_inspection": by_inspection,
         "by_checklist_item": by_checklist_item,
+        "proof_summary": proof_summary,
+        "projection": projection.get("projection"),
+        "projection_items": projection.get("items") or [],
+        "blockers": projection.get("blockers") or [],
     }
+
+
