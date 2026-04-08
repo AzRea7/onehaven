@@ -1,20 +1,41 @@
+# backend/app/services/policy_extractor_service.py
 from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import normalize_category, normalize_categories
 from app.policy_models import PolicyAssertion, PolicySource
+from app.services.policy_rule_normalizer import normalize_rule_candidate
 
 
 def _dumps(v: Any) -> str:
     try:
-        return json.dumps(v, ensure_ascii=False, sort_keys=True)
+        return json.dumps(v, ensure_ascii=False, sort_keys=True, default=str)
     except Exception:
         return "{}"
+
+
+def _norm_state(value: Optional[str]) -> str:
+    return (value or "MI").strip().upper()
+
+
+def _norm_lower(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    out = value.strip().lower()
+    return out or None
+
+
+def _norm_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    out = value.strip()
+    return out or None
 
 
 def _rule_family_for(rule_key: str) -> str:
@@ -109,7 +130,8 @@ def _stale_after_for(rule_key: str, source: PolicySource, now: datetime) -> date
     }:
         return now + timedelta(days=120)
 
-    return now + timedelta(days=180)
+    refresh_days = int(getattr(source, "refresh_interval_days", 30) or 30)
+    return now + timedelta(days=max(30, refresh_days))
 
 
 def _normalized_category_for(rule_key: str) -> str | None:
@@ -150,6 +172,7 @@ def _refresh_source_category_metadata(source: PolicySource, created: list[Policy
     source.normalized_categories_json = _dumps(categories)
     source.freshness_checked_at = now
     source.last_verified_at = now if bool(getattr(source, "is_authoritative", False)) else source.last_verified_at
+    source.last_fetched_at = getattr(source, "last_fetched_at", None) or now
 
     status_ok = source.http_status is not None and 200 <= int(source.http_status) < 400
     if not status_ok:
@@ -158,9 +181,9 @@ def _refresh_source_category_metadata(source: PolicySource, created: list[Policy
     elif not source.retrieved_at:
         source.freshness_status = "unknown"
         source.freshness_reason = "missing_retrieved_at"
-    elif source.retrieved_at < (now - timedelta(days=180)):
+    elif source.retrieved_at < (now - timedelta(days=max(30, int(getattr(source, "refresh_interval_days", 30) or 30) * 2))):
         source.freshness_status = "stale"
-        source.freshness_reason = "retrieved_at_older_than_180_days"
+        source.freshness_reason = "retrieved_at_older_than_refresh_window"
     else:
         source.freshness_status = "fresh"
         source.freshness_reason = None
@@ -232,7 +255,6 @@ def _maybe_add_warren_certificate_rule(
             },
             confidence=0.92,
         )
-        return
 
 
 def _haystack(source: PolicySource) -> str:
@@ -251,8 +273,101 @@ def _has_any(text: str, patterns: list[str]) -> bool:
     return any(p in text for p in patterns)
 
 
-def _already_added(created: list[PolicyAssertion], rule_key: str) -> bool:
-    return any(a.rule_key == rule_key for a in created)
+def _already_added(created: list[PolicyAssertion], rule_key: str, raw_excerpt: Optional[str] = None) -> bool:
+    for row in created:
+        if row.rule_key != rule_key:
+            continue
+        if raw_excerpt is None:
+            return True
+        if (getattr(row, "raw_excerpt", None) or "").strip() == raw_excerpt.strip():
+            return True
+    return False
+
+
+def _existing_candidate_for_source(
+    db: Session,
+    *,
+    source_id: int,
+    org_id: Optional[int],
+    version_group: Optional[str],
+    raw_excerpt: Optional[str],
+    rule_key: str,
+) -> PolicyAssertion | None:
+    stmt = select(PolicyAssertion).where(
+        PolicyAssertion.source_id == int(source_id),
+        PolicyAssertion.rule_key == rule_key,
+    )
+    if org_id is None:
+        stmt = stmt.where(PolicyAssertion.org_id.is_(None))
+    else:
+        stmt = stmt.where(PolicyAssertion.org_id == int(org_id))
+
+    rows = list(db.scalars(stmt).all())
+    excerpt = (raw_excerpt or "").strip()
+    for row in rows:
+        if version_group and (getattr(row, "version_group", None) or "") != version_group:
+            continue
+        if excerpt and (getattr(row, "raw_excerpt", None) or "").strip() == excerpt:
+            return row
+    for row in rows:
+        if version_group and (getattr(row, "version_group", None) or "") == version_group:
+            return row
+    return rows[0] if rows else None
+
+
+def _candidate_payload(
+    *,
+    source: PolicySource,
+    rule_key: str,
+    value: dict[str, Any],
+    confidence: float,
+) -> dict[str, Any]:
+    raw_text = value.get("summary") or value.get("text") or value.get("condition") or rule_key
+    candidate = normalize_rule_candidate(
+        str(raw_text),
+        hint=f"{source.title or ''} {source.publisher or ''}",
+        source_url=source.url,
+        property_type=_norm_text(getattr(source, "program_type", None)),
+        normalized_version="v2",
+    )
+    if candidate is None:
+        source_level = getattr(source, "source_type", None) or "local"
+        property_type = _norm_text(getattr(source, "program_type", None))
+        version_group = f"{source_level}:{rule_key}:{property_type or 'all'}"
+        return {
+            "rule_family": _rule_family_for(rule_key),
+            "rule_category": _normalized_category_for(rule_key),
+            "source_level": source_level,
+            "property_type": property_type,
+            "required": True,
+            "blocking": rule_key in {
+                "rental_registration_required",
+                "certificate_required_before_occupancy",
+                "inspection_program_exists",
+                "pha_landlord_packet_required",
+                "hap_contract_and_tenancy_addendum_required",
+            },
+            "source_citation": source.url,
+            "raw_excerpt": str(raw_text),
+            "normalized_version": "v2",
+            "version_group": version_group,
+            "confidence": confidence,
+        }
+
+    payload = {
+        "rule_family": candidate.rule_family,
+        "rule_category": candidate.rule_category,
+        "source_level": candidate.source_level,
+        "property_type": candidate.property_type,
+        "required": bool(candidate.required),
+        "blocking": bool(candidate.blocking),
+        "source_citation": candidate.source_citation or source.url,
+        "raw_excerpt": candidate.raw_excerpt or str(raw_text),
+        "normalized_version": candidate.normalized_version,
+        "version_group": candidate.version_group,
+        "confidence": max(float(candidate.confidence), float(confidence)),
+    }
+    return payload
 
 
 def _add_assertion(
@@ -265,31 +380,57 @@ def _add_assertion(
     value: dict[str, Any],
     confidence: float,
 ) -> None:
-    if _already_added(created, rule_key):
+    payload = _candidate_payload(
+        source=source,
+        rule_key=rule_key,
+        value=value,
+        confidence=confidence,
+    )
+    if _already_added(created, rule_key, payload.get("raw_excerpt")):
         return
 
     created.append(
         PolicyAssertion(
             org_id=target_org_id,
             source_id=source.id,
-            state=source.state,
-            county=source.county,
-            city=source.city,
-            pha_name=source.pha_name,
-            program_type=source.program_type,
+            state=_norm_state(source.state),
+            county=_norm_lower(source.county),
+            city=_norm_lower(source.city),
+            pha_name=_norm_text(source.pha_name),
+            program_type=_norm_text(source.program_type),
             rule_key=rule_key,
-            rule_family=_rule_family_for(rule_key),
+            rule_family=payload["rule_family"],
             assertion_type=_assertion_type_for(rule_key),
             value_json=_dumps(value),
-            confidence=confidence,
+            effective_date=getattr(source, "effective_date", None),
+            expires_at=None,
+            confidence=float(payload["confidence"]),
             priority=_priority_for(rule_key),
             source_rank=_source_rank_for(source),
             review_status="extracted",
-            normalized_category=_normalized_category_for(rule_key),
+            review_notes="auto_extracted_from_source_refresh",
+            reviewed_by_user_id=None,
+            verification_reason=None,
+            stale_after=_stale_after_for(rule_key, source, now),
+            superseded_by_assertion_id=None,
+            jurisdiction_slug=getattr(source, "jurisdiction_slug", None),
+            source_level=payload["source_level"],
+            property_type=payload["property_type"],
+            rule_category=payload["rule_category"],
+            required=bool(payload["required"]),
+            blocking=bool(payload["blocking"]),
+            source_citation=payload["source_citation"],
+            raw_excerpt=payload["raw_excerpt"],
+            normalized_version=payload["normalized_version"],
+            rule_status="candidate",
+            governance_state="draft",
+            version_group=payload["version_group"],
+            version_number=1,
+            normalized_category=payload["rule_category"],
             coverage_status=_coverage_status_for(rule_key),
             source_freshness_status=getattr(source, "freshness_status", None),
-            stale_after=_stale_after_for(rule_key, source, now),
             extracted_at=now,
+            reviewed_at=None,
         )
     )
 
@@ -303,10 +444,10 @@ def extract_assertions_for_source(
 ) -> list[PolicyAssertion]:
     """
     Conservative extraction:
-    - remove prior extracted assertions for this exact source + scope
-    - re-emit clean extracted suggestions
+    - preserve active/replaced assertions
+    - refresh extracted/draft candidates for this exact source + scope
     - inference is based on source metadata only (url/title/publisher/notes/text)
-    - attach normalized_category + coverage_status for downstream completeness
+    - attach normalized_category + Phase 1/2 governance fields for downstream review
     """
     target_org_id = org_id if org_scope else None
     now = datetime.utcnow()
@@ -317,7 +458,13 @@ def extract_assertions_for_source(
         q = q.filter(PolicyAssertion.org_id.is_(None))
     else:
         q = q.filter(PolicyAssertion.org_id == target_org_id)
-    q = q.filter(PolicyAssertion.review_status == "extracted")
+    q = q.filter(
+        or_(
+            PolicyAssertion.review_status == "extracted",
+            PolicyAssertion.governance_state == "draft",
+            PolicyAssertion.rule_status == "candidate",
+        )
+    )
     q.delete(synchronize_session=False)
     db.commit()
 
@@ -859,11 +1006,94 @@ def extract_assertions_for_source(
 
     _refresh_source_category_metadata(source, created, now)
 
+    persisted: list[PolicyAssertion] = []
+    for row in created:
+        existing = _existing_candidate_for_source(
+            db,
+            source_id=int(source.id),
+            org_id=target_org_id,
+            version_group=getattr(row, "version_group", None),
+            raw_excerpt=getattr(row, "raw_excerpt", None),
+            rule_key=row.rule_key,
+        )
+        if existing is None:
+            db.add(row)
+            persisted.append(row)
+            continue
+
+        existing.state = row.state
+        existing.county = row.county
+        existing.city = row.city
+        existing.pha_name = row.pha_name
+        existing.program_type = row.program_type
+        existing.rule_family = row.rule_family
+        existing.assertion_type = row.assertion_type
+        existing.value_json = row.value_json
+        existing.effective_date = row.effective_date
+        existing.confidence = max(float(existing.confidence or 0.0), float(row.confidence or 0.0))
+        existing.priority = row.priority
+        existing.source_rank = row.source_rank
+        existing.review_status = "extracted" if (existing.governance_state or "").lower() != "active" else existing.review_status
+        existing.review_notes = row.review_notes
+        existing.stale_after = row.stale_after
+        existing.jurisdiction_slug = row.jurisdiction_slug
+        existing.source_level = row.source_level
+        existing.property_type = row.property_type
+        existing.rule_category = row.rule_category
+        existing.required = row.required
+        existing.blocking = row.blocking
+        existing.source_citation = row.source_citation
+        existing.raw_excerpt = row.raw_excerpt
+        existing.normalized_version = row.normalized_version
+        existing.version_group = row.version_group
+        existing.normalized_category = row.normalized_category
+        existing.coverage_status = row.coverage_status if (existing.governance_state or "").lower() != "active" else existing.coverage_status
+        existing.source_freshness_status = row.source_freshness_status
+        existing.extracted_at = now
+        db.add(existing)
+        persisted.append(existing)
+
     db.add(source)
-    db.add_all(created)
     db.commit()
 
-    for a in created:
+    for a in persisted:
         db.refresh(a)
 
-    return created
+    return persisted
+
+
+def mark_assertions_stale_for_source(
+    db: Session,
+    *,
+    source_id: int,
+) -> dict[str, Any]:
+    rows = list(
+        db.scalars(
+            select(PolicyAssertion).where(
+                PolicyAssertion.source_id == int(source_id),
+                PolicyAssertion.superseded_by_assertion_id.is_(None),
+                or_(
+                    PolicyAssertion.governance_state.in_(["draft", "approved", "active"]),
+                    PolicyAssertion.review_status.in_(["extracted", "approved", "verified", "needs_recheck"]),
+                ),
+            )
+        ).all()
+    )
+
+    changed_ids: list[int] = []
+    for row in rows:
+        if (row.governance_state or "").lower() == "active":
+            row.review_status = "needs_recheck"
+            row.coverage_status = "stale"
+        else:
+            row.review_status = "stale"
+            row.coverage_status = "stale"
+        row.source_freshness_status = "stale"
+        db.add(row)
+        changed_ids.append(int(row.id))
+
+    db.commit()
+    return {
+        "updated_count": len(changed_ids),
+        "updated_ids": changed_ids,
+    }

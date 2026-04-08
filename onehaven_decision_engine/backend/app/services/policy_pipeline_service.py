@@ -1,6 +1,7 @@
+# backend/app/services/policy_pipeline_service.py
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from app.services.jurisdiction_completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
 )
+from app.services.jurisdiction_notification_service import build_review_queue_payload
 from app.services.policy_cleanup_service import (
     ARCHIVE_MARKER,
     archive_stale_market_sources,
@@ -17,16 +19,19 @@ from app.services.policy_coverage_service import (
     compute_coverage_status,
     upsert_coverage_status,
 )
-from app.services.policy_extractor_service import extract_assertions_for_source
+from app.services.policy_extractor_service import extract_assertions_for_source, mark_assertions_stale_for_source
 from app.services.policy_projection_service import (
     build_property_compliance_brief,
     project_verified_assertions_to_profile,
 )
 from app.services.policy_review_service import (
+    apply_governance_lifecycle,
     auto_verify_market_assertions,
     cleanup_market_stale_assertions,
+    normalize_market_assertions,
     supersede_replaced_assertions,
 )
+from app.services.policy_source_service import collect_catalog_for_market, fetch_policy_source
 
 
 def _norm_state(s: Optional[str]) -> str:
@@ -61,9 +66,7 @@ def _market_sources_from_catalog(
     pha_name: Optional[str],
     focus: str,
 ) -> list[PolicySource]:
-    from app.services.policy_catalog_admin_service import merged_catalog_for_market
-
-    items = merged_catalog_for_market(
+    source_rows = collect_catalog_for_market(
         db,
         org_id=org_id,
         state=state,
@@ -72,46 +75,16 @@ def _market_sources_from_catalog(
         pha_name=pha_name,
         focus=focus,
     )
-    urls = [i.url.strip() for i in items if i.url and i.url.strip()]
-    if not urls:
-        return []
-
-    q = db.query(PolicySource).filter(PolicySource.url.in_(urls))
-    if org_id is None:
-        q = q.filter(PolicySource.org_id.is_(None))
-    else:
-        q = q.filter(
-            (PolicySource.org_id == org_id) | (PolicySource.org_id.is_(None))
-        )
-
-    rows = q.order_by(PolicySource.id.asc()).all()
-
-    by_url: dict[str, PolicySource] = {}
-    for row in rows:
+    out: list[PolicySource] = []
+    seen: set[int] = set()
+    for row in source_rows:
         if _is_archived_source(row):
             continue
-        url = (row.url or "").strip()
-        if not url:
+        if int(row.id) in seen:
             continue
-
-        existing = by_url.get(url)
-        if existing is None:
-            by_url[url] = row
-            continue
-
-        existing_sort = (
-            existing.retrieved_at.isoformat() if existing.retrieved_at else "",
-            existing.id or 0,
-        )
-        row_sort = (
-            row.retrieved_at.isoformat() if row.retrieved_at else "",
-            row.id or 0,
-        )
-        if row_sort > existing_sort:
-            by_url[url] = row
-
-    ordered = [by_url[url] for url in urls if url in by_url]
-    return ordered
+        seen.add(int(row.id))
+        out.append(row)
+    return out
 
 
 def _market_assertions(
@@ -127,9 +100,7 @@ def _market_assertions(
     if org_id is None:
         q = q.filter(PolicyAssertion.org_id.is_(None))
     else:
-        q = q.filter(
-            (PolicyAssertion.org_id == org_id) | (PolicyAssertion.org_id.is_(None))
-        )
+        q = q.filter((PolicyAssertion.org_id == org_id) | (PolicyAssertion.org_id.is_(None)))
 
     rows = q.all()
     out: list[PolicyAssertion] = []
@@ -144,7 +115,7 @@ def _market_assertions(
     return out
 
 
-def _issues_remaining(coverage_payload: dict, brief: dict) -> list[str]:
+def _issues_remaining(coverage_payload: dict[str, Any], brief: dict[str, Any]) -> list[str]:
     issues: list[str] = []
 
     if not coverage_payload.get("municipal_core_ok"):
@@ -163,7 +134,7 @@ def _issues_remaining(coverage_payload: dict, brief: dict) -> list[str]:
     return issues
 
 
-def _unresolved_rule_gaps(coverage_payload: dict, brief: dict) -> list[str]:
+def _unresolved_rule_gaps(coverage_payload: dict[str, Any], brief: dict[str, Any]) -> list[str]:
     gaps: list[str] = []
     verified_keys = set(coverage_payload.get("verified_rule_keys") or [])
 
@@ -184,8 +155,8 @@ def _unresolved_rule_gaps(coverage_payload: dict, brief: dict) -> list[str]:
     for missing_category in coverage_payload.get("missing_categories") or []:
         gaps.append(f"category:{missing_category}")
 
-    seen: set[str] = set()
     out: list[str] = []
+    seen: set[str] = set()
     for gap in gaps:
         if gap in seen:
             continue
@@ -204,7 +175,15 @@ def _stabilize_review_state(
     city: Optional[str],
     pha_name: Optional[str],
     archive_extracted_duplicates: bool,
-) -> dict:
+) -> dict[str, Any]:
+    normalized = normalize_market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
     verify_1 = auto_verify_market_assertions(
         db,
         org_id=org_id,
@@ -214,7 +193,7 @@ def _stabilize_review_state(
         pha_name=pha_name,
         reviewer_user_id=reviewer_user_id,
     )
-    supersede_1 = supersede_replaced_assertions(
+    lifecycle_1 = apply_governance_lifecycle(
         db,
         org_id=org_id,
         state=state,
@@ -242,7 +221,16 @@ def _stabilize_review_state(
         pha_name=pha_name,
         reviewer_user_id=reviewer_user_id,
     )
-    supersede_2 = supersede_replaced_assertions(
+    lifecycle_2 = apply_governance_lifecycle(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        reviewer_user_id=reviewer_user_id,
+    )
+    supersede_legacy = supersede_replaced_assertions(
         db,
         org_id=org_id,
         state=state,
@@ -253,18 +241,20 @@ def _stabilize_review_state(
     )
 
     return {
+        "normalized_result": normalized,
         "verify_result": {
-            "updated_count": int(verify_1.get("updated_count", 0))
-            + int(verify_2.get("updated_count", 0)),
-            "updated_ids": (verify_1.get("updated_ids", []) or [])
-            + (verify_2.get("updated_ids", []) or []),
+            "updated_count": int(verify_1.get("updated_count", 0)) + int(verify_2.get("updated_count", 0)),
+            "updated_ids": (verify_1.get("updated_ids", []) or []) + (verify_2.get("updated_ids", []) or []),
         },
-        "supersede_result": {
-            "superseded_count": int(supersede_1.get("superseded_count", 0))
-            + int(supersede_2.get("superseded_count", 0)),
-            "superseded_ids": (supersede_1.get("superseded_ids", []) or [])
-            + (supersede_2.get("superseded_ids", []) or []),
+        "governance_result": {
+            "activated_count": int(lifecycle_1.get("activated_count", 0)) + int(lifecycle_2.get("activated_count", 0)),
+            "activated_ids": (lifecycle_1.get("activated_ids", []) or []) + (lifecycle_2.get("activated_ids", []) or []),
+            "approved_count": int(lifecycle_1.get("approved_count", 0)) + int(lifecycle_2.get("approved_count", 0)),
+            "approved_ids": (lifecycle_1.get("approved_ids", []) or []) + (lifecycle_2.get("approved_ids", []) or []),
+            "replaced_count": int(lifecycle_1.get("replaced_count", 0)) + int(lifecycle_2.get("replaced_count", 0)),
+            "replaced_ids": (lifecycle_1.get("replaced_ids", []) or []) + (lifecycle_2.get("replaced_ids", []) or []),
         },
+        "supersede_result": supersede_legacy,
         "cleanup_result": cleanup,
     }
 
@@ -279,22 +269,13 @@ def run_market_pipeline(
     city: Optional[str],
     pha_name: Optional[str] = None,
     focus: str = "se_mi_extended",
-) -> dict:
-    from app.services.policy_source_service import collect_catalog_for_market
-
+    force_refresh: bool = False,
+    publish_active: bool = True,
+) -> dict[str, Any]:
     st = _norm_state(state)
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
     pha = _norm_text(pha_name)
-
-    collect_results = collect_catalog_for_market(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        focus=focus,
-    )
 
     source_rows = _market_sources_from_catalog(
         db,
@@ -306,33 +287,77 @@ def run_market_pipeline(
         focus=focus,
     )
 
+    refresh_results: list[dict[str, Any]] = []
     extracted_ids: list[int] = []
-    extract_results: list[dict] = []
+    extract_results: list[dict[str, Any]] = []
 
     for src in source_rows:
-        created = extract_assertions_for_source(
+        refresh_result = fetch_policy_source(
             db,
             source=src,
-            org_id=org_id,
-            org_scope=(org_id is not None),
+            force=force_refresh,
         )
-        created_ids = [a.id for a in created]
-        extracted_ids.extend(created_ids)
-        extract_results.append(
+        refresh_results.append(
             {
-                "source_id": src.id,
+                "source_id": int(src.id),
                 "url": src.url,
-                "created": len(created_ids),
-                "assertion_ids": created_ids,
-                "normalized_categories": sorted(
-                    {
-                        a.normalized_category
-                        for a in created
-                        if getattr(a, "normalized_category", None)
-                    }
-                ),
+                **refresh_result,
             }
         )
+
+        if not refresh_result.get("ok"):
+            stale_update = mark_assertions_stale_for_source(db, source_id=int(src.id))
+            extract_results.append(
+                {
+                    "source_id": int(src.id),
+                    "url": src.url,
+                    "refresh_ok": False,
+                    "changed": False,
+                    "created": 0,
+                    "assertion_ids": [],
+                    "stale_update": stale_update,
+                }
+            )
+            continue
+
+        if bool(refresh_result.get("changed")) or force_refresh:
+            created = extract_assertions_for_source(
+                db,
+                source=src,
+                org_id=org_id,
+                org_scope=(org_id is not None),
+            )
+            created_ids = [int(a.id) for a in created]
+            extracted_ids.extend(created_ids)
+            extract_results.append(
+                {
+                    "source_id": int(src.id),
+                    "url": src.url,
+                    "refresh_ok": True,
+                    "changed": bool(refresh_result.get("changed")),
+                    "created": len(created_ids),
+                    "assertion_ids": created_ids,
+                    "normalized_categories": sorted(
+                        {
+                            getattr(a, "normalized_category", None) or getattr(a, "rule_category", None)
+                            for a in created
+                            if getattr(a, "normalized_category", None) or getattr(a, "rule_category", None)
+                        }
+                    ),
+                }
+            )
+        else:
+            extract_results.append(
+                {
+                    "source_id": int(src.id),
+                    "url": src.url,
+                    "refresh_ok": True,
+                    "changed": False,
+                    "created": 0,
+                    "assertion_ids": [],
+                    "normalized_categories": [],
+                }
+            )
 
     review_bundle = _stabilize_review_state(
         db,
@@ -344,8 +369,25 @@ def run_market_pipeline(
         pha_name=pha,
         archive_extracted_duplicates=True,
     )
-    verify_result = review_bundle["verify_result"]
-    supersede_result = review_bundle["supersede_result"]
+
+    if not publish_active:
+        review_bundle["governance_result"] = {
+            "activated_count": 0,
+            "activated_ids": [],
+            "approved_count": review_bundle.get("verify_result", {}).get("updated_count", 0),
+            "approved_ids": review_bundle.get("verify_result", {}).get("updated_ids", []),
+            "replaced_count": 0,
+            "replaced_ids": [],
+        }
+
+    archived_source_result = archive_stale_market_sources(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
 
     profile = project_verified_assertions_to_profile(
         db,
@@ -354,11 +396,36 @@ def run_market_pipeline(
         county=cnty,
         city=cty,
         pha_name=pha,
-        notes=f"Projected from verified assertions for {cty or cnty or st}.",
     )
-    profile, coverage = recompute_profile_and_coverage(db, profile, commit=True)
-
+    coverage_row = upsert_coverage_status(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        focus=focus,
+        notes="policy pipeline recompute",
+    )
     coverage_payload = compute_coverage_status(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        focus=focus,
+    )
+
+    recompute_payload = recompute_profile_and_coverage(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    completeness_payload = profile_completeness_payload(
         db,
         org_id=org_id,
         state=st,
@@ -370,15 +437,37 @@ def run_market_pipeline(
     brief = build_property_compliance_brief(
         db,
         org_id=org_id,
+        property_id=None,
+        property_row=None,
         state=st,
         county=cnty,
         city=cty,
         pha_name=pha,
     )
 
-    issues_remaining = _issues_remaining(coverage_payload, brief)
+    assertions = _market_assertions(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
 
-    return {
+    draft_count = sum(1 for a in assertions if (a.governance_state or "").lower() == "draft")
+    approved_count = sum(1 for a in assertions if (a.governance_state or "").lower() == "approved")
+    active_count = sum(1 for a in assertions if (a.governance_state or "").lower() == "active")
+    replaced_count = sum(1 for a in assertions if (a.governance_state or "").lower() == "replaced")
+
+    review_queue = build_review_queue_payload(
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        assertions=assertions,
+    )
+
+    result = {
         "ok": True,
         "market": {
             "state": st,
@@ -386,114 +475,31 @@ def run_market_pipeline(
             "city": cty,
             "pha_name": pha,
         },
-        "collect": {
-            "count": len(collect_results),
-            "ok_count": sum(1 for r in collect_results if r.fetch_ok),
-            "failed_count": sum(1 for r in collect_results if not r.fetch_ok),
-            "source_ids": [r.source.id for r in collect_results],
-        },
-        "extract": {
-            "source_count": len(source_rows),
-            "assertion_count_created": len(extracted_ids),
-            "results": extract_results,
-        },
-        "review": {
-            **verify_result,
-            **supersede_result,
-        },
-        "profile": {
-            "id": profile.id,
-            "org_id": profile.org_id,
-            "state": profile.state,
-            "county": profile.county,
-            "city": profile.city,
-            "pha_name": profile.pha_name,
-            "friction_multiplier": profile.friction_multiplier,
-            "notes": profile.notes,
-            "completeness": profile_completeness_payload(db, profile),
-        },
-        "coverage": {
-            "id": coverage.id,
-            **coverage_payload,
-        },
+        "source_count": len(source_rows),
+        "refresh_results": refresh_results,
+        "extract_results": extract_results,
+        "extracted_count": len(extracted_ids),
+        "extracted_ids": extracted_ids,
+        "review_bundle": review_bundle,
+        "review_queue": review_queue,
+        "archived_source_result": archived_source_result,
+        "profile_id": getattr(profile, "id", None),
+        "coverage_status_id": getattr(coverage_row, "id", None),
+        "coverage": coverage_payload,
+        "recompute_payload": recompute_payload,
+        "completeness_payload": completeness_payload,
         "brief": brief,
-        "issues_remaining": issues_remaining,
+        "governance_counts": {
+            "draft": draft_count,
+            "approved": approved_count,
+            "active": active_count,
+            "replaced": replaced_count,
+        },
+        "issues_remaining": _issues_remaining(coverage_payload, brief),
+        "unresolved_rule_gaps": _unresolved_rule_gaps(coverage_payload, brief),
     }
 
-
-def cleanup_market(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    reviewer_user_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str] = None,
-    archive_extracted_duplicates: bool = True,
-    focus: str = "se_mi_extended",
-) -> dict:
-    st = _norm_state(state)
-    cnty = _norm_lower(county)
-    cty = _norm_lower(city)
-    pha = _norm_text(pha_name)
-
-    review_bundle = _stabilize_review_state(
-        db,
-        org_id=org_id,
-        reviewer_user_id=reviewer_user_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        archive_extracted_duplicates=archive_extracted_duplicates,
-    )
-    cleanup = review_bundle["cleanup_result"]
-
-    source_cleanup = archive_stale_market_sources(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        focus=focus,
-    )
-
-    coverage = upsert_coverage_status(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        notes=f"Coverage refreshed after stale cleanup for {cty or cnty or st}.",
-    )
-
-    coverage_payload = compute_coverage_status(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-    )
-
-    return {
-        "ok": True,
-        "market": {
-            "state": st,
-            "county": cnty,
-            "city": cty,
-            "pha_name": pha,
-        },
-        "cleanup": cleanup,
-        "source_cleanup": source_cleanup,
-        "coverage": {
-            "id": coverage.id,
-            **coverage_payload,
-        },
-    }
+    return result
 
 
 def repair_market(
@@ -507,184 +513,9 @@ def repair_market(
     pha_name: Optional[str] = None,
     focus: str = "se_mi_extended",
     archive_extracted_duplicates: bool = True,
-) -> dict:
-    from app.services.policy_source_service import collect_catalog_for_market
-
-    st = _norm_state(state)
-    cnty = _norm_lower(county)
-    cty = _norm_lower(city)
-    pha = _norm_text(pha_name)
-
-    collect_results = collect_catalog_for_market(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        focus=focus,
-    )
-
-    source_rows = _market_sources_from_catalog(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        focus=focus,
-    )
-
-    extracted_ids: list[int] = []
-    extract_results: list[dict] = []
-
-    for src in source_rows:
-        created = extract_assertions_for_source(
-            db,
-            source=src,
-            org_id=org_id,
-            org_scope=(org_id is not None),
-        )
-        created_ids = [a.id for a in created]
-        extracted_ids.extend(created_ids)
-        extract_results.append(
-            {
-                "source_id": src.id,
-                "url": src.url,
-                "created": len(created_ids),
-                "assertion_ids": created_ids,
-                "normalized_categories": sorted(
-                    {
-                        a.normalized_category
-                        for a in created
-                        if getattr(a, "normalized_category", None)
-                    }
-                ),
-            }
-        )
-
-    review_bundle = _stabilize_review_state(
-        db,
-        org_id=org_id,
-        reviewer_user_id=reviewer_user_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        archive_extracted_duplicates=archive_extracted_duplicates,
-    )
-    verify_result = review_bundle["verify_result"]
-    supersede_result = review_bundle["supersede_result"]
-    cleanup_result = review_bundle["cleanup_result"]
-
-    source_cleanup = archive_stale_market_sources(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        focus=focus,
-    )
-
-    profile = project_verified_assertions_to_profile(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        notes=f"Repaired and projected from verified assertions for {cty or cnty or st}.",
-    )
-    profile, coverage = recompute_profile_and_coverage(db, profile, commit=True)
-
-    coverage_payload = compute_coverage_status(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-    )
-
-    brief = build_property_compliance_brief(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-    )
-
-    issues_remaining = _issues_remaining(coverage_payload, brief)
-    unresolved_rule_gaps = _unresolved_rule_gaps(coverage_payload, brief)
-
-    return {
-        "ok": True,
-        "market": {
-            "state": st,
-            "county": cnty,
-            "city": cty,
-            "pha_name": pha,
-        },
-        "sources_refreshed": {
-            "count": len(collect_results),
-            "ok_count": sum(1 for r in collect_results if r.fetch_ok),
-            "failed_count": sum(1 for r in collect_results if not r.fetch_ok),
-            "source_ids": [r.source.id for r in collect_results],
-        },
-        "assertions_created": {
-            "count": len(extracted_ids),
-            "results": extract_results,
-        },
-        "assertions_verified": {
-            "updated_count": int(verify_result.get("updated_count", 0)),
-            "updated_ids": verify_result.get("updated_ids", []),
-        },
-        "duplicates_superseded": {
-            "superseded_count": int(supersede_result.get("superseded_count", 0)),
-            "superseded_ids": supersede_result.get("superseded_ids", []),
-        },
-        "cleanup": cleanup_result,
-        "source_cleanup": source_cleanup,
-        "profile": {
-            "id": profile.id,
-            "org_id": profile.org_id,
-            "state": profile.state,
-            "county": profile.county,
-            "city": profile.city,
-            "pha_name": profile.pha_name,
-            "friction_multiplier": profile.friction_multiplier,
-            "notes": profile.notes,
-            "completeness": profile_completeness_payload(db, profile),
-        },
-        "coverage": {
-            "id": coverage.id,
-            **coverage_payload,
-        },
-        "brief": brief,
-        "stale_items_remaining": int(cleanup_result.get("stale_items_remaining", 0)),
-        "unresolved_rule_gaps": unresolved_rule_gaps,
-        "issues_remaining": issues_remaining,
-    }
-
-
-# ---- Chunk 5 pipeline enrichments ----
-_base_run_market_pipeline = run_market_pipeline
-_base_repair_market = repair_market
-
-
-def run_market_pipeline(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    reviewer_user_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str] = None,
-    focus: str = 'se_mi_extended',
-) -> dict:
-    result = _base_run_market_pipeline(
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    return run_market_pipeline(
         db,
         org_id=org_id,
         reviewer_user_id=reviewer_user_id,
@@ -693,61 +524,6 @@ def run_market_pipeline(
         city=city,
         pha_name=pha_name,
         focus=focus,
+        force_refresh=force_refresh,
+        publish_active=True,
     )
-    coverage = dict(result.get('coverage') or {})
-    result['jurisdiction_rule_engine'] = {
-        'resolution_order': [
-            'michigan_statewide_baseline',
-            'county_rules',
-            'city_rules',
-            'housing_authority_overlays',
-            'org_overrides',
-        ],
-        'coverage_confidence': coverage.get('coverage_confidence'),
-        'confidence_score': coverage.get('confidence_score'),
-        'missing_local_rule_areas': coverage.get('missing_local_rule_areas') or coverage.get('missing_categories') or [],
-        'missing_rule_keys': coverage.get('missing_rule_keys') or [],
-        'stale_warning': coverage.get('stale_warning', coverage.get('is_stale')),
-    }
-    return result
-
-
-def repair_market(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    reviewer_user_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str] = None,
-    focus: str = 'se_mi_extended',
-    archive_extracted_duplicates: bool = True,
-) -> dict:
-    result = _base_repair_market(
-        db,
-        org_id=org_id,
-        reviewer_user_id=reviewer_user_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-        focus=focus,
-        archive_extracted_duplicates=archive_extracted_duplicates,
-    )
-    coverage = dict(result.get('coverage') or {})
-    result['jurisdiction_rule_engine'] = {
-        'resolution_order': [
-            'michigan_statewide_baseline',
-            'county_rules',
-            'city_rules',
-            'housing_authority_overlays',
-            'org_overrides',
-        ],
-        'coverage_confidence': coverage.get('coverage_confidence'),
-        'confidence_score': coverage.get('confidence_score'),
-        'missing_local_rule_areas': coverage.get('missing_local_rule_areas') or coverage.get('missing_categories') or [],
-        'missing_rule_keys': coverage.get('missing_rule_keys') or [],
-        'stale_warning': coverage.get('stale_warning', coverage.get('is_stale')),
-    }
-    return result
