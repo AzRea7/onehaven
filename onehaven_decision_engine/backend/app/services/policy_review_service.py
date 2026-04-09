@@ -4,12 +4,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import normalize_category
 from app.policy_models import PolicyAssertion, PolicySource
 from app.services.policy_rule_normalizer import (
+    NormalizedRuleCandidate,
     assertion_fingerprint,
     candidate_matches_assertion,
     candidate_to_update_dict,
@@ -57,18 +58,6 @@ def _norm_text(s: Optional[str]) -> Optional[str]:
         return None
     v = s.strip()
     return v or None
-
-
-def _market_label(state: str, county: Optional[str], city: Optional[str], pha_name: Optional[str]) -> str:
-    if city:
-        if county:
-            return f"{city.title()}, {county.title()} County, {state}"
-        return f"{city.title()}, {state}"
-    if pha_name:
-        return f"{pha_name}, {state}"
-    if county:
-        return f"{county.title()} County, {state}"
-    return state
 
 
 def _query_market_assertions(
@@ -416,7 +405,6 @@ def normalize_market_assertions(
                 break
 
         if matched is not None:
-            # Refresh metadata but keep lifecycle stable.
             updates = candidate_to_update_dict(candidate, payload)
             for key, value in updates.items():
                 setattr(matched, key, value)
@@ -627,28 +615,6 @@ def apply_governance_lifecycle(
         for row in ordered[1:]:
             if row.id == keeper.id:
                 continue
-            if candidate_matches_assertion(
-                normalize_rule_candidate(
-                    {
-                        "rule_key": row.rule_key,
-                        "rule_category": row.rule_category or row.normalized_category,
-                        "source_level": row.source_level,
-                        "property_type": row.property_type,
-                        "required": row.required,
-                        "blocking": row.blocking,
-                        "confidence": row.confidence,
-                        "governance_state": row.governance_state,
-                        "rule_status": row.rule_status,
-                        "normalized_version": row.normalized_version,
-                        "version_group": row.version_group,
-                        "value_json": row.value_json,
-                        "source_citation": row.source_citation,
-                        "raw_excerpt": row.raw_excerpt,
-                    }
-                ) or {},
-                row,
-            ):
-                pass
             if (row.governance_state or "").lower() not in {"active", "replaced"}:
                 _set_lifecycle_state(row, governance_state="replaced", reviewer_user_id=reviewer_user_id, reviewed_at=now)
                 row.replaced_by_assertion_id = keeper.id
@@ -715,35 +681,21 @@ def cleanup_market_stale_assertions(
             row.rule_status = "superseded"
             row.superseded_by_assertion_id = keeper.id
             row.replaced_by_assertion_id = keeper.id
-            row.reviewed_by_user_id = reviewer_user_id
             row.reviewed_at = now
-            row.stale_after = None
-            row.coverage_status = "superseded"
+            row.reviewed_by_user_id = reviewer_user_id
             row.is_current = False
-            row.replaced_at = now
-            cleaned_ids.append(int(row.id))
-            if original_status in {"stale", "needs_recheck"}:
+            archived_duplicate_ids.append(int(row.id))
+            if original_status == "stale":
                 stale_resolved_ids.append(int(row.id))
-            else:
-                archived_duplicate_ids.append(int(row.id))
+            cleaned_ids.append(int(row.id))
 
-    db.commit()
-
-    remaining_rows = _market_assertions(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-    )
     stale_remaining = [
-        int(a.id)
-        for a in remaining_rows
-        if (a.review_status or "").lower() in {"stale", "needs_recheck"}
-        and a.superseded_by_assertion_id is None
+        int(row.id)
+        for row in rows
+        if (row.review_status or "").lower() == "stale"
     ]
 
+    db.commit()
     return {
         "cleaned_count": len(cleaned_ids),
         "cleaned_ids": cleaned_ids,

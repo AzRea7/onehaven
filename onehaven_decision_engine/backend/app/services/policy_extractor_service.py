@@ -1,3 +1,4 @@
+# backend/app/services/policy_extractor_service.py
 from __future__ import annotations
 
 import json
@@ -10,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.domain.jurisdiction_categories import normalize_category, normalize_categories
 from app.policy_models import PolicyAssertion, PolicySource, PolicySourceVersion
 from app.services.policy_rule_normalizer import normalize_rule_candidate
-
 
 DEFAULT_STALE_AFTER_DAYS = 90
 
@@ -224,74 +224,6 @@ def _refresh_source_category_metadata(source: PolicySource, created: list[Policy
         source.freshness_reason = None
 
 
-def _maybe_add_warren_certificate_rule(
-    created: list[PolicyAssertion],
-    *,
-    target_org_id: Optional[int],
-    source: PolicySource,
-    now: datetime,
-) -> None:
-    url = (source.url or "").lower()
-    title = (source.title or "").lower()
-
-    if "cityofwarren.org" not in url:
-        return
-
-    if (
-        "building_res_city_certification_app.pdf" in url
-        or "residential city certification" in title
-    ):
-        _add_assertion(
-            created,
-            target_org_id=target_org_id,
-            source=source,
-            now=now,
-            rule_key="certificate_required_before_occupancy",
-            value={
-                "summary": (
-                    "Warren requires residential city certification before occupancy "
-                    "for a vacant residential dwelling that has been posted 'no occupancy'."
-                ),
-                "status": "conditional",
-                "condition": (
-                    "Applies when a vacant residential dwelling has been posted "
-                    "'no occupancy' and is being reoccupied."
-                ),
-                "url": source.url,
-                "scope_hint": "city",
-            },
-            confidence=0.92,
-        )
-        return
-
-    if (
-        "building_certificate_of_compliance_application.pdf" in url
-        or "certificate of compliance application" in title
-    ):
-        _add_assertion(
-            created,
-            target_org_id=target_org_id,
-            source=source,
-            now=now,
-            rule_key="certificate_required_before_occupancy",
-            value={
-                "summary": (
-                    "Warren requires a certificate of compliance before occupancy "
-                    "where land, a building, or a structure is erected, altered, "
-                    "or changed in use."
-                ),
-                "status": "conditional",
-                "condition": (
-                    "Applies to erected, altered, or changed-in-use land/buildings/structures "
-                    "before occupancy or use."
-                ),
-                "url": source.url,
-                "scope_hint": "city",
-            },
-            confidence=0.92,
-        )
-
-
 def _haystack(source: PolicySource) -> str:
     return " ".join(
         [
@@ -319,37 +251,6 @@ def _already_added(created: list[PolicyAssertion], rule_key: str, raw_excerpt: O
     return False
 
 
-def _existing_candidate_for_source(
-    db: Session,
-    *,
-    source_id: int,
-    org_id: Optional[int],
-    version_group: Optional[str],
-    raw_excerpt: Optional[str],
-    rule_key: str,
-) -> PolicyAssertion | None:
-    stmt = select(PolicyAssertion).where(
-        PolicyAssertion.source_id == int(source_id),
-        PolicyAssertion.rule_key == rule_key,
-    )
-    if org_id is None:
-        stmt = stmt.where(PolicyAssertion.org_id.is_(None))
-    else:
-        stmt = stmt.where(PolicyAssertion.org_id == int(org_id))
-
-    rows = list(db.scalars(stmt).all())
-    excerpt = (raw_excerpt or "").strip()
-    for row in rows:
-        if version_group and (getattr(row, "version_group", None) or "") != version_group:
-            continue
-        if excerpt and (getattr(row, "raw_excerpt", None) or "").strip() == excerpt:
-            return row
-    for row in rows:
-        if version_group and (getattr(row, "version_group", None) or "") == version_group:
-            return row
-    return rows[0] if rows else None
-
-
 def _candidate_payload(
     *,
     source: PolicySource,
@@ -370,12 +271,25 @@ def _candidate_payload(
             "property_type": _norm_text(getattr(source, "program_type", None)),
             "normalized_version": "v2",
             "confidence": confidence,
+            "source_id": getattr(source, "id", None),
+            "source_version_id": None,
+            "jurisdiction_slug": getattr(source, "jurisdiction_slug", None),
+            "state": getattr(source, "state", None),
+            "county": getattr(source, "county", None),
+            "city": getattr(source, "city", None),
+            "pha_name": getattr(source, "pha_name", None),
+            "program_type": getattr(source, "program_type", None),
         }
     )
     if candidate is None:
         source_level = getattr(source, "source_type", None) or "local"
         property_type = _norm_text(getattr(source, "program_type", None))
-        version_group = f"{source_level}:{rule_key}:{property_type or 'all'}"
+        version_group = (
+            _norm_text(getattr(source, "jurisdiction_slug", None))
+            or _norm_text(getattr(source, "pha_name", None))
+            or "global"
+        )
+        version_group = f"{version_group}:{rule_key}:{source_level}"
         return {
             "rule_family": _rule_family_for(rule_key),
             "rule_category": _normalized_category_for(rule_key),
@@ -413,6 +327,7 @@ def _candidate_payload(
         "normalized_version": candidate.normalized_version,
         "version_group": candidate.version_group,
         "confidence": max(float(candidate.confidence), float(confidence)),
+        "value_hash": candidate.fingerprint,
     }
 
 
@@ -492,7 +407,7 @@ def _add_assertion(
                     "jurisdiction_slug": getattr(source, "jurisdiction_slug", None),
                 }
             ),
-            value_hash=None,
+            value_hash=payload.get("value_hash"),
             confidence_basis="inferred",
             change_summary="extracted_from_source_refresh",
             normalized_category=payload["rule_category"],
@@ -502,6 +417,77 @@ def _add_assertion(
             reviewed_at=None,
         )
     )
+
+
+def _maybe_add_warren_certificate_rule(
+    created: list[PolicyAssertion],
+    *,
+    target_org_id: Optional[int],
+    source: PolicySource,
+    source_version_id: Optional[int],
+    now: datetime,
+) -> None:
+    url = (source.url or "").lower()
+    title = (source.title or "").lower()
+
+    if "cityofwarren.org" not in url:
+        return
+
+    if (
+        "building_res_city_certification_app.pdf" in url
+        or "residential city certification" in title
+    ):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=source_version_id,
+            now=now,
+            rule_key="certificate_required_before_occupancy",
+            value={
+                "summary": (
+                    "Warren requires residential city certification before occupancy "
+                    "for a vacant residential dwelling that has been posted 'no occupancy'."
+                ),
+                "status": "conditional",
+                "condition": (
+                    "Applies when a vacant residential dwelling has been posted "
+                    "'no occupancy' and is being reoccupied."
+                ),
+                "url": source.url,
+                "scope_hint": "city",
+            },
+            confidence=0.92,
+        )
+        return
+
+    if (
+        "building_certificate_of_compliance_application.pdf" in url
+        or "certificate of compliance application" in title
+    ):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=source_version_id,
+            now=now,
+            rule_key="certificate_required_before_occupancy",
+            value={
+                "summary": (
+                    "Warren requires a certificate of compliance before occupancy "
+                    "where land, a building, or a structure is erected, altered, "
+                    "or changed in use."
+                ),
+                "status": "conditional",
+                "condition": (
+                    "Applies to erected, altered, or changed-in-use land/buildings/structures "
+                    "before occupancy or use."
+                ),
+                "url": source.url,
+                "scope_hint": "city",
+            },
+            confidence=0.92,
+        )
 
 
 def extract_assertions_for_source(
@@ -522,6 +508,7 @@ def extract_assertions_for_source(
     now = _utcnow()
     created: list[PolicyAssertion] = []
     source_version = _source_version_for_source(db, int(source.id))
+    source_version_id = int(source_version.id) if source_version is not None else None
 
     q = db.query(PolicyAssertion).filter(PolicyAssertion.source_id == source.id)
     if target_org_id is None:
@@ -545,7 +532,7 @@ def extract_assertions_for_source(
         created,
         target_org_id=target_org_id,
         source=source,
-        source_version_id=int(source_version.id) if source_version is not None else None,
+        source_version_id=source_version_id,
         now=now,
         rule_key="document_reference",
         value={
@@ -561,13 +548,12 @@ def extract_assertions_for_source(
         confidence=0.15,
     )
 
-    # Federal
     if "ecfr.gov" in url and "part-982" in url:
         _add_assertion(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="federal_hcv_regulations_anchor",
             value={
@@ -582,7 +568,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="federal_nspire_anchor",
             value={
@@ -597,7 +583,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="federal_notice_anchor",
             value={
@@ -607,13 +593,12 @@ def extract_assertions_for_source(
             confidence=0.60,
         )
 
-    # Michigan state
     if "legislature.mi.gov" in url:
         _add_assertion(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="mi_statute_anchor",
             value={
@@ -628,7 +613,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="mshda_program_anchor",
             value={
@@ -638,14 +623,13 @@ def extract_assertions_for_source(
             confidence=0.70,
         )
 
-    # Detroit
     if "detroitmi.gov" in url:
         if _has_any(text, ["landlord-rental", "tenant-rental-property", "rental requirements faq"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
                 source=source,
-                source_version_id=int(source_version.id) if source_version is not None else None,
+                source_version_id=source_version_id,
                 now=now,
                 rule_key="rental_registration_required",
                 value={
@@ -661,7 +645,7 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
-                source_version_id=int(source_version.id) if source_version is not None else None,
+                source_version_id=source_version_id,
                 now=now,
                 rule_key="certificate_required_before_occupancy",
                 value={
@@ -677,7 +661,7 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
-                source_version_id=int(source_version.id) if source_version is not None else None,
+                source_version_id=source_version_id,
                 now=now,
                 rule_key="inspection_program_exists",
                 value={
@@ -688,13 +672,12 @@ def extract_assertions_for_source(
                 confidence=0.55,
             )
 
-    # Dearborn
     if "dearborn.gov" in url and "rental-property-information" in text:
         _add_assertion(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="rental_registration_required",
             value={
@@ -708,7 +691,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="inspection_program_exists",
             value={
@@ -722,7 +705,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="certificate_required_before_occupancy",
             value={
@@ -733,12 +716,12 @@ def extract_assertions_for_source(
             confidence=0.60,
         )
 
-    # Warren
     if "cityofwarren.org" in url:
         _maybe_add_warren_certificate_rule(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=source_version_id,
             now=now,
         )
 
@@ -747,7 +730,7 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
-                source_version_id=int(source_version.id) if source_version is not None else None,
+                source_version_id=source_version_id,
                 now=now,
                 rule_key="rental_registration_required",
                 value={
@@ -761,7 +744,7 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
-                source_version_id=int(source_version.id) if source_version is not None else None,
+                source_version_id=source_version_id,
                 now=now,
                 rule_key="inspection_program_exists",
                 value={
@@ -777,7 +760,7 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
-                source_version_id=int(source_version.id) if source_version is not None else None,
+                source_version_id=source_version_id,
                 now=now,
                 rule_key="property_maintenance_enforcement_anchor",
                 value={
@@ -793,7 +776,7 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
-                source_version_id=int(source_version.id) if source_version is not None else None,
+                source_version_id=source_version_id,
                 now=now,
                 rule_key="building_division_anchor",
                 value={
@@ -804,13 +787,12 @@ def extract_assertions_for_source(
                 confidence=0.70,
             )
 
-    # PHA / program
     if _has_any(text, ["administrative plan", "admin plan"]):
         _add_assertion(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="pha_admin_plan_anchor",
             value={
@@ -825,7 +807,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="pha_landlord_packet_required",
             value={
@@ -840,178 +822,98 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="hap_contract_and_tenancy_addendum_required",
             value={
-                "summary": "HAP contract and/or tenancy addendum appears required for voucher execution.",
+                "summary": "HAP contract and tenancy addendum appear required for voucher-assisted leasing.",
                 "url": source.url,
             },
-            confidence=0.80,
+            confidence=0.78,
         )
 
-    if _has_any(text, ["payment timing", "housing assistance payment", "landlord payment"]):
+    if _has_any(text, ["payment timing", "landlord payment", "payments are made"]):
         _add_assertion(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="landlord_payment_timing_reference",
             value={
-                "summary": "Source contains timing/reference guidance for landlord payment processing.",
+                "summary": "Source includes landlord payment timing or administration references.",
                 "url": source.url,
             },
             confidence=0.65,
         )
 
-    if _has_any(text, ["administrator changed", "new pha administrator", "program administrator"]):
+    if _has_any(text, ["new administrator", "administrator change", "interim administrator"]):
         _add_assertion(
             created,
             target_org_id=target_org_id,
             source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
+            source_version_id=source_version_id,
             now=now,
             rule_key="pha_administrator_changed",
             value={
-                "summary": "Source indicates a change to PHA/program administrator handling.",
+                "summary": "Program administration appears to have changed based on notice/reference.",
                 "url": source.url,
             },
-            confidence=0.70,
+            confidence=0.80,
         )
 
-    if _has_any(text, ["lead affidavit", "lead paint affidavit"]):
-        _add_assertion(
-            created,
-            target_org_id=target_org_id,
-            source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
-            now=now,
-            rule_key="lead_paint_affidavit_required",
-            value={
-                "summary": "Lead paint affidavit requirement appears in local or program source.",
-                "url": source.url,
-            },
-            confidence=0.72,
-        )
+    for row in created:
+        db.add(row)
+    db.flush()
 
-    if _has_any(text, ["lead clearance"]):
-        _add_assertion(
-            created,
-            target_org_id=target_org_id,
-            source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
-            now=now,
-            rule_key="lead_clearance_required",
-            value={
-                "summary": "Lead clearance requirement appears in source.",
-                "url": source.url,
-            },
-            confidence=0.75,
-        )
-
-    if _has_any(text, ["lead inspection"]):
-        _add_assertion(
-            created,
-            target_org_id=target_org_id,
-            source=source,
-            source_version_id=int(source_version.id) if source_version is not None else None,
-            now=now,
-            rule_key="lead_inspection_required",
-            value={
-                "summary": "Lead inspection requirement appears in source.",
-                "url": source.url,
-            },
-            confidence=0.70,
-        )
-
-    persisted: list[PolicyAssertion] = []
-    for item in created:
-        existing = _existing_candidate_for_source(
-            db,
-            source_id=int(source.id),
-            org_id=target_org_id,
-            version_group=getattr(item, "version_group", None),
-            raw_excerpt=getattr(item, "raw_excerpt", None),
-            rule_key=item.rule_key,
-        )
-        if existing is not None:
-            existing.rule_family = item.rule_family
-            existing.assertion_type = item.assertion_type
-            existing.value_json = item.value_json
-            existing.effective_date = item.effective_date
-            existing.expires_at = item.expires_at
-            existing.confidence = item.confidence
-            existing.priority = item.priority
-            existing.source_rank = item.source_rank
-            existing.review_status = "extracted"
-            existing.review_notes = "auto_extracted_from_source_refresh"
-            existing.stale_after = item.stale_after
-            existing.jurisdiction_slug = item.jurisdiction_slug
-            existing.source_level = item.source_level
-            existing.property_type = item.property_type
-            existing.rule_category = item.rule_category
-            existing.required = item.required
-            existing.blocking = item.blocking
-            existing.source_citation = item.source_citation
-            existing.raw_excerpt = item.raw_excerpt
-            existing.normalized_version = item.normalized_version
-            existing.rule_status = "candidate"
-            existing.governance_state = "draft"
-            existing.normalized_category = item.normalized_category
-            existing.coverage_status = item.coverage_status
-            existing.source_freshness_status = item.source_freshness_status
-            existing.extracted_at = now
-            existing.source_version_id = int(source_version.id) if source_version is not None else getattr(existing, "source_version_id", None)
-            existing.citation_json = item.citation_json
-            existing.rule_provenance_json = item.rule_provenance_json
-            existing.is_current = False
-            db.add(existing)
-            persisted.append(existing)
-        else:
-            db.add(item)
-            persisted.append(item)
-
-    _refresh_source_category_metadata(source, persisted, now)
+    _refresh_source_category_metadata(source, created, now)
     db.add(source)
     db.commit()
 
-    for row in persisted:
-        if getattr(row, "id", None) is not None:
-            db.refresh(row)
-
-    return persisted
+    return created
 
 
 def mark_assertions_stale_for_source(
     db: Session,
     *,
     source_id: int,
-    reason: str = "source_changed",
+    reason: str = "source_refreshed",
 ) -> dict[str, Any]:
     rows = list(
         db.scalars(
             select(PolicyAssertion).where(PolicyAssertion.source_id == int(source_id))
         ).all()
     )
+    count = 0
+    now = _utcnow()
 
-    stale_ids: list[int] = []
     for row in rows:
-        if (row.governance_state or "").lower() in {"active", "approved", "replaced"}:
+        if (row.governance_state or "").lower() == "active":
+            row.source_freshness_status = "stale"
+            row.change_summary = reason
+            db.add(row)
+            count += 1
             continue
+
         row.review_status = "stale"
         row.rule_status = "stale"
         row.coverage_status = "stale"
-        row.is_current = False
+        row.source_freshness_status = "stale"
         row.change_summary = reason
+        row.reviewed_at = now
         db.add(row)
-        stale_ids.append(int(row.id))
+        count += 1
+
+    source = db.get(PolicySource, int(source_id))
+    if source is not None:
+        source.freshness_status = "stale"
+        source.freshness_reason = reason
+        source.freshness_checked_at = now
+        db.add(source)
 
     db.commit()
     return {
-        "ok": True,
         "source_id": int(source_id),
-        "stale_count": len(stale_ids),
-        "stale_ids": stale_ids,
+        "updated_count": count,
         "reason": reason,
     }

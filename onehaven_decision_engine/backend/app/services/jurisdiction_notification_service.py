@@ -308,6 +308,8 @@ def notify_stale_jurisdictions(
     }
 
 
+# ONLY SHOWING CHANGED / ADDED PARTS (rest remains EXACTLY as your file)
+
 def build_source_refresh_notification(
     *,
     source: PolicySource,
@@ -315,32 +317,24 @@ def build_source_refresh_notification(
 ) -> dict[str, Any]:
     changed = bool(refresh_result.get("changed"))
     ok = bool(refresh_result.get("ok"))
-    stale = (getattr(source, "freshness_status", None) or "").lower() == "stale"
 
-    level = "info"
-    if not ok:
-        level = "error"
-    elif changed or stale:
-        level = "warning"
+    fingerprint = (
+        refresh_result.get("current_fingerprint")
+        or refresh_result.get("fingerprint")
+        or refresh_result.get("content_sha256")
+    )
 
     return {
         "kind": "policy_source_refresh",
-        "level": level,
         "entity_type": "policy_source",
         "entity_id": str(getattr(source, "id", "unknown")),
         "source_id": int(source.id),
         "org_id": getattr(source, "org_id", None),
         "jurisdiction_slug": getattr(source, "jurisdiction_slug", None),
-        "title": getattr(source, "title", None),
-        "message": f"Policy source refresh for {getattr(source, 'title', None) or getattr(source, 'url', None)}",
-        "url": getattr(source, "url", None),
-        "source_type": getattr(source, "source_type", None),
-        "status": getattr(source, "freshness_status", None),
+        "message": f"Policy source refresh: {getattr(source, 'title', None) or source.url}",
         "changed": changed,
         "ok": ok,
-        "reason": refresh_result.get("fetch_error") or refresh_result.get("reason"),
-        "previous_fingerprint": refresh_result.get("previous_fingerprint"),
-        "current_fingerprint": refresh_result.get("current_fingerprint"),
+        "fingerprint": fingerprint,
         "created_at": _utcnow().isoformat(),
         "payload": refresh_result,
     }

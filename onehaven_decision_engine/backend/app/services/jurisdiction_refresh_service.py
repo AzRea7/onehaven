@@ -19,7 +19,7 @@ from app.services.jurisdiction_notification_service import (
     record_notification_event,
 )
 from app.services.policy_extractor_service import extract_assertions_for_source, mark_assertions_stale_for_source
-from app.services.policy_review_service import apply_governance_lifecycle
+from app.services.policy_review_service import apply_governance_lifecycle, diff_active_rules_for_source
 from app.services.policy_source_service import (
     collect_catalog_for_market,
     fetch_policy_source,
@@ -85,6 +85,33 @@ def _norm_text(value: Optional[str]) -> Optional[str]:
 
 def _stale_cutoff(stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS) -> datetime:
     return _utcnow() - timedelta(days=int(stale_days))
+
+
+def _assertion_to_candidate_payload(row: PolicyAssertion) -> dict[str, Any]:
+    return {
+        "rule_key": getattr(row, "rule_key", None),
+        "rule_category": getattr(row, "rule_category", None) or getattr(row, "normalized_category", None),
+        "source_level": getattr(row, "source_level", None),
+        "property_type": getattr(row, "property_type", None),
+        "required": getattr(row, "required", True),
+        "blocking": getattr(row, "blocking", False),
+        "confidence": getattr(row, "confidence", 0.0),
+        "governance_state": getattr(row, "governance_state", None),
+        "rule_status": getattr(row, "rule_status", None),
+        "normalized_version": getattr(row, "normalized_version", None),
+        "version_group": getattr(row, "version_group", None),
+        "value_json": getattr(row, "value_json", None),
+        "source_citation": getattr(row, "source_citation", None),
+        "raw_excerpt": getattr(row, "raw_excerpt", None),
+        "source_id": getattr(row, "source_id", None),
+        "source_version_id": getattr(row, "source_version_id", None),
+        "state": getattr(row, "state", None),
+        "county": getattr(row, "county", None),
+        "city": getattr(row, "city", None),
+        "pha_name": getattr(row, "pha_name", None),
+        "program_type": getattr(row, "program_type", None),
+        "source_freshness_status": getattr(row, "source_freshness_status", None),
+    }
 
 
 def list_jurisdictions_needing_refresh(
@@ -224,6 +251,27 @@ def _scope_assertions(
     return out
 
 
+def _scope_assertions_for_source(
+    db: Session,
+    *,
+    source_id: int,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> list[PolicyAssertion]:
+    rows = _scope_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    return [row for row in rows if int(getattr(row, "source_id", 0) or 0) == int(source_id)]
+
+
 def _refresh_confidence_from_profile(profile_payload: dict[str, Any]) -> dict[str, Any]:
     confidence_score = 0.0
     if profile_payload.get("completeness_score") is not None:
@@ -316,7 +364,7 @@ def refresh_jurisdiction_profile(
     db.add(profile)
     db.commit()
 
-    sources = collect_catalog_for_market(
+    collect_catalog_for_market(
         db,
         org_id=org_id,
         state=state,
@@ -336,7 +384,12 @@ def refresh_jurisdiction_profile(
 
     refresh_results: list[dict[str, Any]] = []
     extraction_results: list[dict[str, Any]] = []
+    diff_results: list[dict[str, Any]] = []
     notification_results: list[dict[str, Any]] = []
+
+    total_changed_rules = 0
+    total_new_rules = 0
+    total_missing_rules = 0
 
     for source in sources:
         if not policy_source_needs_refresh(source, force=force):
@@ -352,7 +405,7 @@ def refresh_jurisdiction_profile(
             )
             continue
 
-        refresh_result = fetch_policy_source(
+        fetch_result = fetch_policy_source(
             db,
             source=source,
             force=force,
@@ -361,17 +414,17 @@ def refresh_jurisdiction_profile(
             {
                 "source_id": int(source.id),
                 "url": source.url,
-                **refresh_result,
+                **fetch_result,
             }
         )
         notification_results.append(
             record_notification_event(
                 db,
-                payload=build_source_refresh_notification(source=source, refresh_result=refresh_result),
+                payload=build_source_refresh_notification(source=source, refresh_result=fetch_result),
             )
         )
 
-        if not refresh_result.get("ok"):
+        if not fetch_result.get("ok"):
             stale_update = mark_assertions_stale_for_source(
                 db,
                 source_id=int(source.id),
@@ -395,40 +448,69 @@ def refresh_jurisdiction_profile(
             )
             continue
 
-        if bool(refresh_result.get("changed")) or force:
+        created_rows: list[PolicyAssertion] = []
+        stale_update: dict[str, Any] | None = None
+
+        if bool(fetch_result.get("changed")) or force:
             stale_update = mark_assertions_stale_for_source(
                 db,
                 source_id=int(source.id),
                 reason="source_content_changed",
             )
-            created = extract_assertions_for_source(
+            created_rows = extract_assertions_for_source(
                 db,
                 source=source,
                 org_id=org_id,
                 org_scope=(org_id is not None),
             )
-            extraction_results.append(
-                {
-                    "source_id": int(source.id),
-                    "url": source.url,
-                    "refresh_ok": True,
-                    "changed": bool(refresh_result.get("changed")),
-                    "stale_update": stale_update,
-                    "extracted_count": len(created),
-                    "assertion_ids": [int(a.id) for a in created],
-                }
+
+        extraction_results.append(
+            {
+                "source_id": int(source.id),
+                "url": source.url,
+                "refresh_ok": True,
+                "changed": bool(fetch_result.get("changed")),
+                "stale_update": stale_update,
+                "extracted_count": len(created_rows),
+                "assertion_ids": [int(a.id) for a in created_rows],
+            }
+        )
+
+        candidate_rows = [
+            row
+            for row in _scope_assertions_for_source(
+                db,
+                source_id=int(source.id),
+                org_id=org_id,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
             )
-        else:
-            extraction_results.append(
-                {
-                    "source_id": int(source.id),
-                    "url": source.url,
-                    "refresh_ok": True,
-                    "changed": False,
-                    "extracted_count": 0,
-                    "assertion_ids": [],
-                }
-            )
+            if (getattr(row, "governance_state", None) or "").lower() in {"draft", "approved"}
+        ]
+
+        diff_result = diff_active_rules_for_source(
+            db,
+            org_id=org_id,
+            source_id=int(source.id),
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            raw_candidates=[_assertion_to_candidate_payload(row) for row in candidate_rows],
+        )
+        diff_results.append(
+            {
+                "source_id": int(source.id),
+                "url": source.url,
+                **diff_result,
+            }
+        )
+
+        total_changed_rules += int(diff_result.get("changed_count") or 0)
+        total_new_rules += int(diff_result.get("new_count") or 0)
+        total_missing_rules += int(diff_result.get("missing_count") or 0)
 
     governance_result = apply_governance_lifecycle(
         db,
@@ -440,7 +522,13 @@ def refresh_jurisdiction_profile(
         reviewer_user_id=reviewer_user_id,
     )
 
-    if governance_result.get("active_count", 0) or governance_result.get("replaced_count", 0):
+    if (
+        governance_result.get("active_count", 0)
+        or governance_result.get("replaced_count", 0)
+        or total_changed_rules
+        or total_new_rules
+        or total_missing_rules
+    ):
         for source in sources:
             notification_results.append(
                 record_notification_event(
@@ -489,6 +577,11 @@ def refresh_jurisdiction_profile(
         )
     )
 
+    stale_profile_notice = notify_if_jurisdiction_stale(
+        db,
+        profile=refreshed_profile,
+    )
+
     profile_payload = {
         "id": int(refreshed_profile.id),
         "org_id": refreshed_profile.org_id,
@@ -531,9 +624,16 @@ def refresh_jurisdiction_profile(
         "sources_total": len(sources),
         "refresh_results": refresh_results,
         "extraction_results": extraction_results,
+        "diff_results": diff_results,
         "governance_result": governance_result,
         "review_queue": review_queue,
         "notification_results": notification_results,
+        "stale_profile_notification": stale_profile_notice,
+        "summary": {
+            "changed_rule_count": total_changed_rules,
+            "new_rule_count": total_new_rules,
+            "missing_rule_count": total_missing_rules,
+        },
     }
 
 

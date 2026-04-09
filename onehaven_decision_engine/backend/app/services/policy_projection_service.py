@@ -25,20 +25,25 @@ RULE_KEY_TO_CATEGORY = {
     "inspection_program_exists": "inspection",
     "certificate_required_before_occupancy": "occupancy",
     "certificate_of_occupancy_required": "occupancy",
+    "certificate_of_compliance_required": "occupancy",
     "local_registration_certificate_required": "registration",
     "lead_based_paint_paperwork_required": "safety",
+    "lead_clearance_required": "safety",
     "smoke_detector_required": "safety",
     "smoke_detectors_required": "safety",
+    "carbon_monoxide_detector_required": "safety",
     "utility_service_required_before_inspection": "utilities",
     "utility_confirmation_required": "utilities",
     "local_jurisdiction_document_required": "permits",
     "pass_inspection_required": "inspection",
+    "fire_safety_inspection_required": "inspection",
+    "reinspection_required": "inspection",
 }
 
 DOCUMENT_CATEGORY_RULE_MAP = {
     "inspection_report": ["pass_inspection_required", "inspection_required"],
     "pass_certificate": ["certificate_required_before_occupancy", "pass_inspection_required"],
-    "reinspection_notice": ["inspection_required"],
+    "reinspection_notice": ["inspection_required", "reinspection_required"],
     "repair_invoice": ["inspection_required"],
     "utility_confirmation": ["utility_confirmation_required"],
     "smoke_detector_proof": ["smoke_detector_required"],
@@ -47,6 +52,9 @@ DOCUMENT_CATEGORY_RULE_MAP = {
     "approval_letter": ["certificate_required_before_occupancy"],
     "denial_letter": ["inspection_required"],
     "photo_evidence": ["inspection_required"],
+    "registration_certificate": ["rental_registration_required"],
+    "certificate_of_occupancy": ["certificate_of_occupancy_required", "certificate_required_before_occupancy"],
+    "certificate_of_compliance": ["certificate_of_compliance_required", "certificate_required_before_occupancy"],
     "other_evidence": [],
 }
 
@@ -54,11 +62,13 @@ INSPECTION_CODE_RULE_HINTS = {
     "SMOKE": "smoke_detector_required",
     "GFCI": "inspection_required",
     "HANDRAIL": "inspection_required",
-    "CO_DETECTOR": "inspection_required",
+    "CO_DETECTOR": "carbon_monoxide_detector_required",
     "COOKING": "inspection_required",
     "EGRESS": "inspection_required",
     "LEAD": "lead_based_paint_paperwork_required",
     "CERTIFICATE": "certificate_required_before_occupancy",
+    "FIRE": "fire_safety_inspection_required",
+    "REINSPECTION": "reinspection_required",
 }
 
 ACTIVE_GOVERNANCE = {"active", "approved"}
@@ -144,6 +154,24 @@ def _norm_text(value: Optional[str]) -> Optional[str]:
         return None
     raw = str(value).strip()
     return raw or None
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except Exception:
+        return default
 
 
 @dataclass(frozen=True)
@@ -611,13 +639,21 @@ def _document_rule_keys(category: str, metadata: dict[str, Any] | None = None, e
     if "registration" in joined:
         out.append("rental_registration_required")
     if "certificate" in joined or "occupancy" in joined:
-        out.append("certificate_required_before_occupancy")
+        out.extend(
+            [
+                "certificate_required_before_occupancy",
+                "certificate_of_occupancy_required",
+                "certificate_of_compliance_required",
+            ]
+        )
     if "utility" in joined:
         out.append("utility_confirmation_required")
     if "lead" in joined:
-        out.append("lead_based_paint_paperwork_required")
+        out.extend(["lead_based_paint_paperwork_required", "lead_clearance_required"])
     if "smoke" in joined:
         out.append("smoke_detector_required")
+    if "carbon monoxide" in joined or "co detector" in joined:
+        out.append("carbon_monoxide_detector_required")
     if "inspect" in joined:
         out.append("inspection_required")
     return sorted({key for key in out if key})
@@ -632,6 +668,45 @@ def _inspection_rule_keys(code: str, category: str | None = None, fail_reason: s
     if not out:
         out.append("inspection_required")
     return sorted(set(out))
+
+
+def _document_reference_number(row: Any, metadata: dict[str, Any], parser_meta: dict[str, Any]) -> str | None:
+    for raw in [
+        metadata.get("reference_number"),
+        metadata.get("registration_number"),
+        metadata.get("certificate_number"),
+        parser_meta.get("reference_number"),
+        parser_meta.get("registration_number"),
+        parser_meta.get("certificate_number"),
+    ]:
+        if raw:
+            return str(raw).strip()
+    return None
+
+
+def _document_expires_at(row: Any, metadata: dict[str, Any], parser_meta: dict[str, Any]) -> datetime | None:
+    for raw in [
+        metadata.get("expires_at"),
+        metadata.get("expiration_date"),
+        parser_meta.get("expires_at"),
+        parser_meta.get("expiration_date"),
+        row.get("expires_at") if hasattr(row, "get") else None,
+    ]:
+        if not raw:
+            continue
+        if isinstance(raw, datetime):
+            return raw
+        text_value = str(raw).strip()
+        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+            try:
+                return datetime.strptime(text_value[:19], fmt)
+            except Exception:
+                continue
+        try:
+            return datetime.fromisoformat(text_value.replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            continue
+    return None
 
 
 def _upsert_evidence(
@@ -651,9 +726,25 @@ def _upsert_evidence(
     compliance_document_id: int | None = None,
     inspection_id: int | None = None,
     checklist_item_id: int | None = None,
+    jurisdiction_slug: str | None = None,
+    program_type: str | None = None,
+    rule_key: str | None = None,
+    rule_category: str | None = None,
+    document_kind: str | None = None,
+    evidence_category: str | None = None,
+    issuing_authority: str | None = None,
+    reference_number: str | None = None,
+    line_item_key: str | None = None,
+    line_item_label: str | None = None,
+    line_item_status: str | None = None,
+    severity: str | None = None,
+    remediation_status: str | None = None,
+    remediation_due_at: datetime | None = None,
     observed_at: datetime | None = None,
     expires_at: datetime | None = None,
+    confidence: float | None = None,
     source_details: dict[str, Any] | None = None,
+    metadata_json: dict[str, Any] | None = None,
 ) -> PropertyComplianceEvidence:
     row = db.scalar(
         select(PropertyComplianceEvidence).where(
@@ -671,6 +762,8 @@ def _upsert_evidence(
             evidence_key=evidence_key,
             evidence_name=evidence_name,
             observed_at=observed_at,
+            created_at=_utcnow(),
+            is_current=True,
         )
         db.add(row)
 
@@ -679,14 +772,33 @@ def _upsert_evidence(
     row.compliance_document_id = compliance_document_id
     row.inspection_id = inspection_id
     row.checklist_item_id = checklist_item_id
+    row.jurisdiction_slug = jurisdiction_slug
+    row.program_type = program_type
+    row.rule_key = rule_key
+    row.rule_category = rule_category
+    row.evidence_category = evidence_category
+    row.document_kind = document_kind
+    row.issuing_authority = issuing_authority
+    row.reference_number = reference_number
+    row.line_item_key = line_item_key
+    row.line_item_label = line_item_label
+    row.line_item_status = line_item_status
+    row.severity = severity
+    row.remediation_status = remediation_status
+    row.remediation_due_at = remediation_due_at
     row.evidence_name = evidence_name
     row.evidence_status = evidence_status
     row.proof_state = proof_state
     row.satisfies_rule = satisfies_rule
+    row.confidence = float(confidence if confidence is not None else getattr(row, "confidence", 0.0) or 0.0)
     row.observed_at = observed_at or row.observed_at
     row.expires_at = expires_at
     row.notes = notes
     row.source_details_json = _dumps(source_details or {})
+    row.metadata_json = _dumps(metadata_json or {})
+    row.invalidated_at = None
+    row.invalidated_reason = None
+    row.is_current = True
     row.updated_at = _utcnow()
     db.flush()
     return row
@@ -699,6 +811,8 @@ def sync_document_evidence_for_property(
     property_id: int,
     document_id: int | None = None,
 ) -> dict[str, Any]:
+    scope = _build_property_scope(db, org_id=org_id, property_id=property_id)
+
     where = ["org_id = :org_id", "property_id = :property_id", "deleted_at IS NULL"]
     params: dict[str, Any] = {"org_id": int(org_id), "property_id": int(property_id)}
     if document_id is not None:
@@ -722,18 +836,44 @@ def sync_document_evidence_for_property(
     for row in rows:
         metadata = _loads(row.get("metadata_json"), {})
         parser_meta = _loads(row.get("parser_meta_json"), {})
+        category = str(row.get("category") or "other_evidence")
         rule_keys = _document_rule_keys(
-            str(row.get("category") or "other_evidence"),
+            category,
             metadata={**metadata, "label": row.get("label")},
             extracted_text=row.get("extracted_text_preview"),
         )
         scan_status = str(row.get("scan_status") or "unknown").lower()
         parse_status = str(row.get("parse_status") or "unknown").lower()
-        status = "verified" if scan_status in {"clean", "ok", "unknown"} else "blocked"
+
+        if scan_status in {"infected", "blocked"}:
+            status = "blocked"
+            satisfies_rule = False
+        elif scan_status in {"clean", "ok", "unknown"}:
+            status = "verified"
+            satisfies_rule = True
+        else:
+            status = "unknown"
+            satisfies_rule = None
+
         proof_state = "confirmed" if parse_status in {"parsed", "queued", "skipped"} else "inferred"
-        satisfies_rule = False if status == "blocked" else True
+
         if not rule_keys:
-            rule_keys = [f"document_category::{str(row.get('category') or 'other_evidence')}"]
+            rule_keys = [f"document_category::{category}"]
+
+        document_kind = category
+        issuing_authority = str(
+            metadata.get("issuing_authority")
+            or parser_meta.get("issuing_authority")
+            or metadata.get("authority_name")
+            or ""
+        ).strip() or None
+        reference_number = _document_reference_number(row, metadata, parser_meta)
+        expires_at = _document_expires_at(row, metadata, parser_meta)
+        remediation_due_at = _document_expires_at(
+            {"expires_at": metadata.get("remediation_due_at") or parser_meta.get("remediation_due_at")},
+            metadata,
+            parser_meta,
+        )
 
         for rule_key in rule_keys:
             evidence_key = f"document:{int(row['id'])}:{rule_key}"
@@ -750,12 +890,29 @@ def sync_document_evidence_for_property(
                 compliance_document_id=int(row["id"]),
                 inspection_id=int(row["inspection_id"]) if row.get("inspection_id") is not None else None,
                 checklist_item_id=int(row["checklist_item_id"]) if row.get("checklist_item_id") is not None else None,
+                jurisdiction_slug=scope.jurisdiction_slug,
+                program_type=scope.pha_name,
+                rule_key=rule_key,
+                rule_category=RULE_KEY_TO_CATEGORY.get(rule_key, "other"),
+                document_kind=document_kind,
+                evidence_category=category,
+                issuing_authority=issuing_authority,
+                reference_number=reference_number,
                 observed_at=row.get("created_at"),
+                expires_at=expires_at,
+                remediation_due_at=remediation_due_at,
+                confidence=0.9 if proof_state == "confirmed" else 0.65,
+                notes=row.get("extracted_text_preview"),
                 source_details={
                     "rule_key": rule_key,
-                    "category": row.get("category"),
+                    "category": category,
                     "metadata": metadata,
                     "parser_meta": parser_meta,
+                    "parse_status": parse_status,
+                    "scan_status": scan_status,
+                },
+                metadata_json={
+                    "document_id": int(row["id"]),
                     "parse_status": parse_status,
                     "scan_status": scan_status,
                 },
@@ -763,6 +920,7 @@ def sync_document_evidence_for_property(
             created_or_updated += 1
             linked_rule_keys.add(rule_key)
 
+    db.commit()
     return {
         "ok": True,
         "property_id": int(property_id),
@@ -779,6 +937,8 @@ def sync_inspection_evidence_for_property(
     property_id: int,
     inspection_id: int | None = None,
 ) -> dict[str, Any]:
+    scope = _build_property_scope(db, org_id=org_id, property_id=property_id)
+
     where = ["i.org_id = :org_id", "i.property_id = :property_id"]
     params: dict[str, Any] = {"org_id": int(org_id), "property_id": int(property_id)}
     if inspection_id is not None:
@@ -825,9 +985,19 @@ def sync_inspection_evidence_for_property(
         if not item_status:
             item_status = "fail" if bool(row.get("details")) and bool(row.get("severity", 0) or 0) >= 3 else "pass"
 
-        evidence_status = "failed" if item_status in {"fail", "blocked", "inconclusive"} else "verified"
-        satisfies_rule = evidence_status == "verified"
-        proof_state = "confirmed"
+        if item_status in {"fail", "blocked", "inconclusive"}:
+            evidence_status = "failed"
+            satisfies_rule = False
+        elif item_status in {"pass", "passed", "verified"}:
+            evidence_status = "verified"
+            satisfies_rule = True
+        else:
+            evidence_status = "unknown"
+            satisfies_rule = None
+
+        severity_raw = row.get("severity")
+        severity = str(severity_raw).lower() if severity_raw is not None else None
+        remediation_status = "required" if evidence_status == "failed" else "not_required"
 
         for rule_key in rule_keys:
             evidence_key = f"inspection_item:{int(row['inspection_item_id'])}:{rule_key}"
@@ -839,10 +1009,22 @@ def sync_inspection_evidence_for_property(
                 evidence_key=evidence_key,
                 evidence_name=f"Inspection {row.get('code') or row.get('inspection_item_id')}",
                 evidence_status=evidence_status,
-                proof_state=proof_state,
+                proof_state="confirmed",
                 satisfies_rule=satisfies_rule,
                 inspection_id=int(row["inspection_id"]),
+                jurisdiction_slug=scope.jurisdiction_slug,
+                program_type=scope.pha_name,
+                rule_key=rule_key,
+                rule_category=RULE_KEY_TO_CATEGORY.get(rule_key, "inspection"),
+                evidence_category=str(row.get("category") or "inspection_item"),
+                line_item_key=str(row.get("code") or row.get("inspection_item_id")),
+                line_item_label=str(row.get("category") or row.get("code") or ""),
+                line_item_status=item_status,
+                severity=severity,
+                remediation_status=remediation_status,
                 observed_at=row.get("inspection_date"),
+                confidence=0.95,
+                notes=row.get("fail_reason") or row.get("details"),
                 source_details={
                     "inspection_item_id": row.get("inspection_item_id"),
                     "rule_key": rule_key,
@@ -853,10 +1035,16 @@ def sync_inspection_evidence_for_property(
                     "severity": row.get("severity"),
                     "requires_reinspection": row.get("requires_reinspection"),
                 },
+                metadata_json={
+                    "inspection_id": int(row["inspection_id"]),
+                    "inspection_item_id": int(row["inspection_item_id"]),
+                    "passed": bool(row.get("passed")) if row.get("passed") is not None else None,
+                },
             )
             created_or_updated += 1
             linked_rule_keys.add(rule_key)
 
+    db.commit()
     return {
         "ok": True,
         "property_id": int(property_id),
@@ -908,8 +1096,10 @@ def _evidence_rows(db: Session, *, org_id: int, property_id: int) -> list[Proper
 def _build_evidence_index(rows: list[PropertyComplianceEvidence]) -> dict[str, list[PropertyComplianceEvidence]]:
     out: dict[str, list[PropertyComplianceEvidence]] = {}
     for row in rows:
-        details = _loads(getattr(row, "source_details_json", None), {})
-        rule_key = str(details.get("rule_key") or "").strip()
+        rule_key = str(getattr(row, "rule_key", None) or "").strip()
+        if not rule_key:
+            details = _loads(getattr(row, "source_details_json", None), {})
+            rule_key = str(details.get("rule_key") or "").strip()
         if not rule_key:
             continue
         out.setdefault(rule_key, []).append(row)
@@ -1038,6 +1228,7 @@ def _evaluate_rule(
     status_reason: str | None = None
     estimated_cost: float | None = None
     estimated_days: int | None = None
+    required_document_kind: str | None = None
 
     if not evidence_rows:
         evaluation_status = "unknown"
@@ -1085,8 +1276,16 @@ def _evaluate_rule(
 
         for row in evidence_rows:
             details = _loads(getattr(row, "source_details_json", None), {})
-            label = getattr(row, "evidence_name", None) or details.get("code") or details.get("category") or rule_key
+            label = (
+                getattr(row, "evidence_name", None)
+                or getattr(row, "line_item_label", None)
+                or details.get("code")
+                or details.get("category")
+                or rule_key
+            )
             evidence_summary_parts.append(str(label))
+            if not required_document_kind and getattr(row, "document_kind", None):
+                required_document_kind = str(getattr(row, "document_kind"))
 
     if evaluation_status == "pass":
         blocking = False
@@ -1117,7 +1316,7 @@ def _evaluate_rule(
         "raw_excerpt": getattr(assertion, "raw_excerpt", None) if assertion is not None else None,
         "rule_value_json": getattr(assertion, "value_json", None) if assertion is not None else None,
         "conflicting_evidence_count": len(evidence_rows) if evaluation_status == "conflicting" else 0,
-        "required_document_kind": None,
+        "required_document_kind": required_document_kind,
         "evidence_updated_at": latest_evidence_updated_at,
         "resolution_detail": {
             "label": _rule_label(assertion) if assertion is not None else rule_key.replace("_", " ").title(),
@@ -1127,6 +1326,33 @@ def _evaluate_rule(
             "status_reason": status_reason,
         },
     }
+
+
+def _link_evidence_to_projection_items(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    item_rows: list[PropertyComplianceProjectionItem],
+    evidence_rows: list[PropertyComplianceEvidence],
+    effective_assertions: dict[str, PolicyAssertion],
+) -> None:
+    item_by_rule = {str(item.rule_key or "").strip(): item for item in item_rows if getattr(item, "rule_key", None)}
+    for evidence in evidence_rows:
+        rule_key = str(getattr(evidence, "rule_key", None) or "").strip()
+        if not rule_key:
+            details = _loads(getattr(evidence, "source_details_json", None), {})
+            rule_key = str(details.get("rule_key") or "").strip()
+        if not rule_key:
+            continue
+        item = item_by_rule.get(rule_key)
+        if item is None:
+            continue
+        evidence.projection_item_id = int(item.id)
+        evidence.policy_assertion_id = int(effective_assertions[rule_key].id) if rule_key in effective_assertions else evidence.policy_assertion_id
+        evidence.updated_at = _utcnow()
+        db.add(evidence)
+    db.flush()
 
 
 def rebuild_property_projection(
@@ -1206,6 +1432,8 @@ def rebuild_property_projection(
         last_rule_change_at=last_rule_change_at,
         last_projected_at=_utcnow(),
         is_current=True,
+        created_at=_utcnow(),
+        updated_at=_utcnow(),
     )
     db.add(projection)
     db.flush()
@@ -1264,18 +1492,19 @@ def rebuild_property_projection(
             resolution_detail_json=_dumps(evaluation["resolution_detail"]),
             conflicting_evidence_count=int(evaluation["conflicting_evidence_count"]),
             required_document_kind=evaluation["required_document_kind"],
+            required_evidence_type="document_or_inspection" if evaluation["required"] else None,
+            required_evidence_key=rule_key,
+            required_evidence_group=evaluation["rule_category"],
+            proof_requirement_level="strict" if evaluation["blocking"] else "standard",
+            proof_validity_days=365 if evaluation["required_document_kind"] else None,
             last_evaluated_at=_utcnow(),
             evidence_updated_at=evaluation["evidence_updated_at"],
+            created_at=_utcnow(),
         )
         db.add(item)
         db.flush()
         item_rows.append(item)
         confidence_values.append(float(item.confidence or 0.0))
-
-        for evidence in evidence_index.get(rule_key, []):
-            evidence.projection_item_id = int(item.id)
-            evidence.policy_assertion_id = int(assertion.id) if assertion is not None else evidence.policy_assertion_id
-            evidence.updated_at = _utcnow()
 
         if item.proof_state == "confirmed":
             confirmed_count += 1
@@ -1322,6 +1551,15 @@ def rebuild_property_projection(
             cost_total += float(item.estimated_cost)
         if item.estimated_days:
             days_total += int(item.estimated_days)
+
+    _link_evidence_to_projection_items(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        item_rows=item_rows,
+        evidence_rows=evidence_rows,
+        effective_assertions=effective_assertions,
+    )
 
     total_items = max(1, len(item_rows))
     passing_items = sum(1 for row in item_rows if row.evaluation_status == "pass")
@@ -1383,6 +1621,7 @@ def rebuild_property_projection(
     projection.projection_reason_json = _dumps(projection_reason)
     projection.updated_at = _utcnow()
     db.flush()
+    db.commit()
 
     return build_property_projection_snapshot(db, org_id=org_id, property_id=property_id, projection=projection)
 
@@ -1471,6 +1710,11 @@ def build_property_projection_snapshot(
                 "resolution_detail": _loads(item.resolution_detail_json, {}),
                 "conflicting_evidence_count": int(item.conflicting_evidence_count or 0),
                 "required_document_kind": item.required_document_kind,
+                "required_evidence_type": getattr(item, "required_evidence_type", None),
+                "required_evidence_key": getattr(item, "required_evidence_key", None),
+                "required_evidence_group": getattr(item, "required_evidence_group", None),
+                "proof_requirement_level": getattr(item, "proof_requirement_level", None),
+                "proof_validity_days": getattr(item, "proof_validity_days", None),
                 "evidence_updated_at": item.evidence_updated_at,
                 "last_evaluated_at": item.last_evaluated_at,
             }

@@ -69,10 +69,6 @@ def _first_url(text: str) -> str | None:
     return match.group(0) if match else None
 
 
-def _has_any(text: str, phrases: list[str]) -> bool:
-    return any(p in text for p in phrases)
-
-
 def _bounded_confidence(value: Any, default: float = 0.35) -> float:
     try:
         f = float(value)
@@ -126,7 +122,7 @@ def _category_for(rule_key: str) -> str | None:
         "all_fees_must_be_paid": "fees",
         "property_maintenance_enforcement_anchor": "safety",
         "building_safety_division_anchor": "safety",
-        "building_division_anchor": "safety",
+        "building_division_anchor": "permits",
         "lead_paint_affidavit_required": "lead",
         "lead_clearance_required": "lead",
         "lead_inspection_required": "lead",
@@ -251,6 +247,8 @@ def _blocking_for(rule_key: str, candidate: dict[str, Any]) -> bool:
         "certificate_of_occupancy_required",
         "certificate_of_compliance_required",
         "lead_clearance_required",
+        "pha_landlord_packet_required",
+        "hap_contract_and_tenancy_addendum_required",
     }
     return rule_key in blocking_defaults
 
@@ -368,7 +366,10 @@ def candidate_provenance_payload(candidate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def candidate_citation_payload(candidate: dict[str, Any], normalized: NormalizedRuleCandidate | None = None) -> dict[str, Any]:
+def candidate_citation_payload(
+    candidate: dict[str, Any],
+    normalized: NormalizedRuleCandidate | None = None,
+) -> dict[str, Any]:
     return {
         "citation_text": normalized.source_citation if normalized else _citation_text(candidate),
         "url": candidate.get("url"),
@@ -387,12 +388,14 @@ def normalize_rule_candidate(candidate: dict[str, Any]) -> NormalizedRuleCandida
     raw_excerpt = _clean_excerpt(candidate.get("raw_excerpt") or candidate.get("excerpt") or candidate.get("text"))
     hint = _norm_text(candidate.get("rule_key")) or _norm_text(candidate.get("hint")) or _norm_text(candidate.get("title"))
     body = " ".join(
-        p for p in [
+        p
+        for p in [
             _norm_text(candidate.get("title")),
             _norm_text(candidate.get("description")),
             _norm_text(candidate.get("text")),
             raw_excerpt,
-        ] if p
+        ]
+        if p
     )
 
     rule_key = _norm_text(candidate.get("rule_key"))
@@ -493,7 +496,7 @@ def candidate_to_update_dict(candidate: NormalizedRuleCandidate, raw_candidate: 
         "normalized_version": candidate.normalized_version,
         "version_group": candidate.version_group,
         "value_json": _dumps(candidate.value_json),
-        "value_hash": sha256(_dumps(candidate.value_json).encode("utf-8")).hexdigest(),
+        "value_hash": candidate.fingerprint,
         "source_citation": candidate.source_citation,
         "raw_excerpt": candidate.raw_excerpt,
         "citation_json": _dumps(citation_payload),
@@ -513,11 +516,15 @@ def assertion_fingerprint(assertion: Any) -> str:
         "property_type": getattr(assertion, "property_type", None),
         "required": bool(getattr(assertion, "required", False)),
         "blocking": bool(getattr(assertion, "blocking", False)),
+        "confidence": float(getattr(assertion, "confidence", 0.0) or 0.0),
+        "governance_state": getattr(assertion, "governance_state", None),
+        "rule_status": getattr(assertion, "rule_status", None),
         "normalized_version": getattr(assertion, "normalized_version", None),
         "version_group": getattr(assertion, "version_group", None),
         "value_json": _json_dict(getattr(assertion, "value_json", None)),
         "source_citation": getattr(assertion, "source_citation", None),
         "raw_excerpt": _clean_excerpt(getattr(assertion, "raw_excerpt", None)),
+        "confidence_basis": getattr(assertion, "confidence_basis", None),
     }
     return sha256(_dumps(payload).encode("utf-8")).hexdigest()
 
@@ -535,6 +542,9 @@ def diff_reason(candidate: NormalizedRuleCandidate, assertion: Any) -> str:
         ("property_type", candidate.property_type, getattr(assertion, "property_type", None)),
         ("required", candidate.required, bool(getattr(assertion, "required", False))),
         ("blocking", candidate.blocking, bool(getattr(assertion, "blocking", False))),
+        ("confidence", round(candidate.confidence, 6), round(float(getattr(assertion, "confidence", 0.0) or 0.0), 6)),
+        ("governance_state", candidate.governance_state, getattr(assertion, "governance_state", None)),
+        ("rule_status", candidate.rule_status, getattr(assertion, "rule_status", None)),
         ("normalized_version", candidate.normalized_version, getattr(assertion, "normalized_version", None)),
         ("source_citation", candidate.source_citation, getattr(assertion, "source_citation", None)),
     ]

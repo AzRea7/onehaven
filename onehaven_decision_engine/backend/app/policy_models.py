@@ -427,33 +427,47 @@ class JurisdictionCoverageStatus(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    org_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    org_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id"),
+        index=True,
+        nullable=True,
+    )
 
     state: Mapped[str] = mapped_column(String(2), nullable=False, default="MI")
     county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    pha_name: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
 
+    jurisdiction_slug: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    coverage_version: Mapped[str] = mapped_column(String(64), nullable=False, default="v1")
     completeness_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
     completeness_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    covered_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    missing_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    source_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    source_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
     is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     stale_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    missing_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    unresolved_items_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    latest_rule_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    stale_since: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_computed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_source_change_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_refresh_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_refresh_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_refresh_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    projection_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
+        server_default=sa.text("now()"),
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        onupdate=datetime.utcnow,
     )
 
 
@@ -461,10 +475,9 @@ class PropertyComplianceProjection(Base):
     __tablename__ = "property_compliance_projections"
     __table_args__ = (
         Index("ix_property_compliance_projections_org_property", "org_id", "property_id"),
-        Index("ix_property_compliance_projections_rules_version", "rules_version"),
-        Index("ix_property_compliance_projections_is_current", "is_current"),
-        Index("ix_property_compliance_projections_jurisdiction_slug", "jurisdiction_slug"),
-        Index("ix_property_compliance_projections_last_rule_change_at", "last_rule_change_at"),
+        Index("ix_property_compliance_projections_status", "projection_status"),
+        Index("ix_property_compliance_projections_current", "is_current"),
+        Index("ix_property_compliance_projections_last_projected_at", "last_projected_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -586,6 +599,11 @@ class PropertyComplianceProjectionItem(Base):
     resolution_detail_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     conflicting_evidence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     required_document_kind: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    required_evidence_type: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    required_evidence_key: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    required_evidence_group: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    proof_requirement_level: Mapped[str] = mapped_column(String(40), nullable=False, default="standard")
+    proof_validity_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_evaluated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     evidence_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -605,6 +623,9 @@ class PropertyComplianceEvidence(Base):
         Index("ix_property_compliance_evidence_status", "evidence_status", "proof_state"),
         Index("ix_property_compliance_evidence_expires_at", "expires_at"),
         Index("ix_property_compliance_evidence_verified_at", "verified_at"),
+        Index("ix_property_compliance_evidence_rule_key", "rule_key"),
+        Index("ix_property_compliance_evidence_reference_number", "reference_number"),
+        Index("ix_property_compliance_evidence_current", "is_current", "invalidated_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -646,10 +667,24 @@ class PropertyComplianceEvidence(Base):
         nullable=True,
     )
 
+    jurisdiction_slug: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    program_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    rule_key: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    rule_category: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
     evidence_source_type: Mapped[str] = mapped_column(String(40), nullable=False, default="document")
     evidence_category: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     evidence_key: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     evidence_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    document_kind: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    issuing_authority: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    reference_number: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    line_item_key: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    line_item_label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    line_item_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    severity: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    remediation_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    remediation_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     evidence_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
     proof_state: Mapped[str] = mapped_column(String(40), nullable=False, default="inferred")
@@ -663,6 +698,12 @@ class PropertyComplianceEvidence(Base):
     verified_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     invalidated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     invalidated_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    superseded_by_evidence_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("property_compliance_evidence.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     source_details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
@@ -677,6 +718,74 @@ class PropertyComplianceEvidence(Base):
         DateTime,
         nullable=True,
         onupdate=datetime.utcnow,
+    )
+
+
+class PropertyComplianceEvidenceFact(Base):
+    __tablename__ = "property_compliance_evidence_facts"
+    __table_args__ = (
+        Index("ix_property_compliance_evidence_facts_evidence", "evidence_id"),
+        Index("ix_property_compliance_evidence_facts_projection_item", "projection_item_id"),
+        Index("ix_property_compliance_evidence_facts_org_property", "org_id", "property_id"),
+        Index("ix_property_compliance_evidence_facts_rule_key", "rule_key"),
+        Index("ix_property_compliance_evidence_facts_status", "fact_status", "proof_state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id"),
+        nullable=False,
+        index=True,
+    )
+    property_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    evidence_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("property_compliance_evidence.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    projection_item_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("property_compliance_projection_items.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    inspection_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("inspections.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    checklist_item_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("property_checklist_items.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    rule_key: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    fact_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    fact_label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    fact_type: Mapped[str] = mapped_column(String(40), nullable=False, default="status")
+    fact_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    fact_status: Mapped[str] = mapped_column(String(40), nullable=False, default="observed")
+    proof_state: Mapped[str] = mapped_column(String(40), nullable=False, default="inferred")
+    severity: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    satisfies_rule: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+
+    observed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    source_details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=sa.text("now()"),
     )
 
 

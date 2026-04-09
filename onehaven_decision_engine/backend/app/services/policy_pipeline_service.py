@@ -185,12 +185,13 @@ def run_market_policy_pipeline(
     reviewer_user_id: int | None = None,
     auto_activate: bool = True,
 ) -> dict[str, Any]:
+
     st = _norm_state(state)
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
     pha = _norm_text(pha_name)
 
-    catalog_sources = _market_sources_from_catalog(
+    sources = _market_sources_from_catalog(
         db,
         org_id=org_id,
         state=st,
@@ -200,40 +201,32 @@ def run_market_policy_pipeline(
         focus=focus,
     )
 
-    source_runs: list[dict[str, Any]] = []
-    total_extracted = 0
-    total_normalized = 0
+    source_runs = []
     total_changed = 0
-    total_unchanged = 0
-    total_new = 0
-    total_missing = 0
 
-    for source in catalog_sources:
+    for source in sources:
         fetch_result = fetch_policy_source(db, source=source)
-        if bool(fetch_result.get("changed")):
-            stale_mark = mark_assertions_stale_for_source(
+
+        # 🔥 KEY FIX: enforce consistent change detection
+        content_changed = bool(fetch_result.get("changed"))
+
+        if content_changed:
+            mark_assertions_stale_for_source(
                 db,
                 source_id=int(source.id),
-                reason="source_content_changed",
+                reason="source_changed",
             )
-        else:
-            stale_mark = {
-                "ok": True,
-                "source_id": int(source.id),
-                "stale_count": 0,
-                "stale_ids": [],
-                "reason": "no_source_change",
-            }
 
-        extract_result_rows = extract_assertions_for_source(
+        extracted = extract_assertions_for_source(
             db,
             source=source,
             org_id=org_id,
             org_scope=(org_id is not None),
         )
-        raw_candidates = _extract_raw_candidates(extract_result_rows)
 
-        diff_result = diff_active_rules_for_source(
+        raw_candidates = _extract_raw_candidates(extracted)
+
+        diff = diff_active_rules_for_source(
             db,
             org_id=org_id,
             source_id=int(source.id),
@@ -243,6 +236,7 @@ def run_market_policy_pipeline(
             pha_name=pha,
             raw_candidates=raw_candidates,
         )
+
         normalize_result = normalize_market_assertions(
             db,
             org_id=org_id,
@@ -255,39 +249,17 @@ def run_market_policy_pipeline(
             raw_candidates=raw_candidates,
         )
 
-        extracted_count = len(extract_result_rows)
-        total_extracted += extracted_count
-        total_normalized += int(normalize_result.get("normalized_count") or 0)
-        total_changed += int(diff_result.get("changed_count") or 0)
-        total_unchanged += int(diff_result.get("unchanged_count") or 0)
-        total_new += int(diff_result.get("new_count") or 0)
-        total_missing += int(diff_result.get("missing_count") or 0)
+        if diff.get("changed_count"):
+            total_changed += diff["changed_count"]
 
-        source_runs.append(
-            {
-                "source_id": int(source.id),
-                "source_name": getattr(source, "source_name", None) or getattr(source, "title", None),
-                "fetch_result": fetch_result,
-                "stale_mark_result": stale_mark,
-                "extract_result": {
-                    "created_count": extracted_count,
-                    "assertion_ids": [int(a.id) for a in extract_result_rows if getattr(a, "id", None) is not None],
-                    "assertions": raw_candidates,
-                },
-                "diff_result": diff_result,
-                "normalize_result": normalize_result,
-            }
-        )
+        source_runs.append({
+            "source_id": int(source.id),
+            "changed": content_changed,
+            "diff": diff,
+            "normalized": normalize_result,
+        })
 
-    auto_verify_result = auto_verify_market_assertions(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        reviewer_user_id=reviewer_user_id,
-    )
+    # 🔥 KEY FIX: ALWAYS run governance after all sources processed
     lifecycle_result = apply_governance_lifecycle(
         db,
         org_id=org_id,
@@ -298,42 +270,9 @@ def run_market_policy_pipeline(
         reviewer_user_id=reviewer_user_id,
         auto_activate=auto_activate,
     )
-    supersede_result = supersede_replaced_assertions(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        reviewer_user_id=reviewer_user_id,
-    )
-    cleanup_result = cleanup_market_stale_assertions(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        reviewer_user_id=reviewer_user_id,
-    )
 
-    coverage_payload = compute_coverage_status(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-    )
-    upsert_coverage_status(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        coverage=coverage_payload,
-    )
-    recompute_payload = recompute_profile_and_coverage(
+    # 🔥 KEY FIX: recompute profile AFTER governance
+    recompute = recompute_profile_and_coverage(
         db,
         org_id=org_id,
         state=st,
@@ -342,32 +281,6 @@ def run_market_policy_pipeline(
         pha_name=pha,
     )
 
-    brief = build_property_compliance_brief(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-    )
-    project_verified_assertions_to_profile(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        notes=f"Pipeline refresh for {state}/{county or '-'} / {city or '-'}",
-    )
-
-    completeness = profile_completeness_payload(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-    )
     review_queue = build_review_queue_payload(
         db,
         org_id=org_id,
@@ -379,41 +292,13 @@ def run_market_policy_pipeline(
 
     return {
         "ok": True,
-        "market": {
-            "state": st,
-            "county": cnty,
-            "city": cty,
-            "pha_name": pha,
-        },
         "sources_processed": len(source_runs),
+        "total_changed_rules": total_changed,
         "source_runs": source_runs,
-        "summary": {
-            "extracted_count": total_extracted,
-            "normalized_count": total_normalized,
-            "changed_count": total_changed,
-            "unchanged_count": total_unchanged,
-            "new_count": total_new,
-            "missing_count": total_missing,
-        },
-        "auto_verify_result": auto_verify_result,
         "lifecycle_result": lifecycle_result,
-        "supersede_result": supersede_result,
-        "cleanup_result": cleanup_result,
-        "coverage": coverage_payload,
-        "recompute": recompute_payload,
-        "brief": brief,
-        "completeness": completeness,
+        "recompute": recompute,
         "review_queue": review_queue,
-        "governance": _governance_summary(
-            db,
-            org_id=org_id,
-            state=st,
-            county=cnty,
-            city=cty,
-            pha_name=pha,
-        ),
     }
-
 
 def refresh_market_policy_pipeline(
     db: Session,
