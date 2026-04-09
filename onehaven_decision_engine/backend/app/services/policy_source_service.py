@@ -1,4 +1,3 @@
-# backend/app/services/policy_source_service.py
 from __future__ import annotations
 
 import hashlib
@@ -15,6 +14,10 @@ from app.policy_models import PolicyCatalogEntry, PolicySource, PolicySourceVers
 
 
 DEFAULT_TIMEOUT_SECONDS = 20.0
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
 
 
 def _norm_state(value: Optional[str]) -> str:
@@ -79,26 +82,26 @@ def _jurisdiction_slug(
     pha_name: Optional[str],
     program_type: Optional[str],
 ) -> str:
+    st = state.lower()
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+    program = _norm_text(program_type)
+
     if source_type == "federal":
-        return "federal"
+        return f"federal:{st}"
     if source_type == "state":
-        return state.lower()
-    if source_type == "county" and county:
-        return f"{state.lower()}-{county.lower()}"
-    if source_type == "city" and city:
-        if county:
-            return f"{state.lower()}-{county.lower()}-{city.lower()}"
-        return f"{state.lower()}-{city.lower()}"
+        return f"state:{st}"
+    if source_type == "county":
+        return f"county:{st}:{cnty or 'unknown'}"
+    if source_type == "city":
+        return f"city:{st}:{cnty or 'unknown'}:{cty or 'unknown'}"
     if source_type == "program":
-        base = pha_name or program_type or "program"
-        return f"{state.lower()}-{base.strip().lower().replace(' ', '-')}"
-    if city:
-        if county:
-            return f"{state.lower()}-{county.lower()}-{city.lower()}"
-        return f"{state.lower()}-{city.lower()}"
-    if county:
-        return f"{state.lower()}-{county.lower()}"
-    return state.lower()
+        base = (pha or program or "program").strip().lower().replace(" ", "-")
+        return f"program:{st}:{base}"
+    if cty or cty:
+        return f"local:{st}:{cnty or '-'}:{cty or '-'}"
+    return st
 
 
 def _source_type_from_entry(entry: PolicyCatalogEntry) -> str:
@@ -153,13 +156,28 @@ def _trust_level(entry: PolicyCatalogEntry) -> float:
 
 def _refresh_interval_days(entry: PolicyCatalogEntry) -> int:
     kind = (entry.source_kind or "").lower()
-    if "federal" in kind or "pha" in kind:
+    if "federal" in kind or "pha" in kind or "voucher" in kind:
         return 14
     if "municipal" in kind or "inspection" in kind or "registration" in kind:
         return 21
     if "state" in kind:
         return 30
     return 30
+
+
+def _effective_refresh_interval_days(source: PolicySource) -> int:
+    try:
+        value = int(getattr(source, "refresh_interval_days", 0) or 0)
+        if value > 0:
+            return value
+    except Exception:
+        pass
+    return 30
+
+
+def _compute_next_refresh_due_at(source: PolicySource, *, from_dt: Optional[datetime] = None) -> datetime:
+    base = from_dt or getattr(source, "last_fetched_at", None) or _utcnow()
+    return base + timedelta(days=_effective_refresh_interval_days(source))
 
 
 def _safe_text_from_http_response(resp: httpx.Response) -> str:
@@ -172,6 +190,30 @@ def _safe_text_from_http_response(resp: httpx.Response) -> str:
         return ""
 
 
+def _sync_registry_defaults(source: PolicySource) -> None:
+    if not getattr(source, "source_name", None):
+        source.source_name = getattr(source, "publisher", None) or getattr(source, "title", None) or _source_name_from_url(source.url)
+    if not getattr(source, "source_type", None):
+        source.source_type = "local"
+    if not getattr(source, "jurisdiction_slug", None):
+        source.jurisdiction_slug = _jurisdiction_slug(
+            source_type=str(getattr(source, "source_type", None) or "local"),
+            state=_norm_state(getattr(source, "state", None)),
+            county=getattr(source, "county", None),
+            city=getattr(source, "city", None),
+            pha_name=getattr(source, "pha_name", None),
+            program_type=getattr(source, "program_type", None),
+        )
+    if not getattr(source, "fetch_method", None):
+        source.fetch_method = _fetch_method_from_url(source.url)
+    if not getattr(source, "fingerprint_algo", None):
+        source.fingerprint_algo = "sha256"
+    if not getattr(source, "registry_status", None):
+        source.registry_status = "active"
+    if getattr(source, "next_refresh_due_at", None) is None:
+        source.next_refresh_due_at = _compute_next_refresh_due_at(source)
+
+
 def policy_source_needs_refresh(
     source: PolicySource,
     *,
@@ -181,24 +223,24 @@ def policy_source_needs_refresh(
     if force:
         return True
 
-    now = now or datetime.utcnow()
+    now = now or _utcnow()
     status = (getattr(source, "registry_status", None) or "active").strip().lower()
-    if status not in {"active", "candidate"}:
+    if status not in {"active", "candidate", "warning"}:
         return False
 
     if getattr(source, "last_fetched_at", None) is None:
         return True
 
-    refresh_days = int(getattr(source, "refresh_interval_days", 30) or 30)
-    cutoff = now - timedelta(days=max(1, refresh_days))
-    if source.last_fetched_at < cutoff:
-        return True
+    due_at = getattr(source, "next_refresh_due_at", None)
+    if due_at is None:
+        due_at = _compute_next_refresh_due_at(source, from_dt=getattr(source, "last_fetched_at", None))
+        source.next_refresh_due_at = due_at
 
     freshness_status = (getattr(source, "freshness_status", None) or "").strip().lower()
-    if freshness_status in {"stale", "fetch_failed", "unknown"}:
+    if freshness_status in {"stale", "fetch_failed", "unknown", "error"}:
         return True
 
-    return False
+    return now >= due_at
 
 
 def merged_catalog_for_market(
@@ -229,6 +271,7 @@ def ensure_policy_source_from_catalog_entry(
     *,
     entry: PolicyCatalogEntry,
     org_id: Optional[int],
+    focus: str = "se_mi_extended",
 ) -> PolicySource:
     state = _norm_state(entry.state)
     county = _norm_lower(entry.county)
@@ -236,12 +279,12 @@ def ensure_policy_source_from_catalog_entry(
     pha_name = _norm_text(entry.pha_name)
     program_type = _norm_text(entry.program_type)
 
-    existing = db.scalar(
-        select(PolicySource).where(
-            PolicySource.url == entry.url,
-            or_(PolicySource.org_id == org_id, PolicySource.org_id.is_(None) if org_id is None else PolicySource.org_id == org_id),
-        )
-    )
+    stmt = select(PolicySource).where(PolicySource.url == entry.url)
+    if org_id is None:
+        stmt = stmt.where(PolicySource.org_id.is_(None))
+    else:
+        stmt = stmt.where(or_(PolicySource.org_id == org_id, PolicySource.org_id.is_(None)))
+    existing = db.scalar(stmt.order_by(PolicySource.id.asc()))
 
     source_type = _source_type_from_entry(entry)
     if existing is None:
@@ -257,7 +300,7 @@ def ensure_policy_source_from_catalog_entry(
             url=entry.url,
             content_type=None,
             http_status=None,
-            retrieved_at=datetime.utcnow(),
+            retrieved_at=None,
             content_sha256=None,
             raw_path=None,
             extracted_text=None,
@@ -285,7 +328,7 @@ def ensure_policy_source_from_catalog_entry(
             refresh_interval_days=_refresh_interval_days(entry),
             last_fetched_at=None,
             registry_status="active",
-            fetch_config_json=_json_dumps({"focus": focus if isinstance(focus, str) else "se_mi_extended"}),
+            fetch_config_json=_json_dumps({"focus": focus}),
             registry_meta_json=_json_dumps(
                 {
                     "catalog_entry_id": entry.id,
@@ -297,7 +340,14 @@ def ensure_policy_source_from_catalog_entry(
             fingerprint_algo="sha256",
             current_fingerprint=None,
             last_changed_at=None,
+            next_refresh_due_at=None,
+            last_fetch_error=None,
+            last_http_status=None,
+            last_seen_same_fingerprint_at=None,
+            source_metadata_json="{}",
+            last_verified_by_user_id=None,
         )
+        _sync_registry_defaults(source)
         db.add(source)
         db.flush()
         return source
@@ -334,6 +384,7 @@ def ensure_policy_source_from_catalog_entry(
         }
     )
     existing.registry_meta_json = _json_dumps(meta)
+    _sync_registry_defaults(existing)
     db.flush()
     return existing
 
@@ -359,127 +410,16 @@ def collect_catalog_for_market(
     )
     rows: list[PolicySource] = []
     for item in items:
-        rows.append(ensure_policy_source_from_catalog_entry(db, entry=item, org_id=org_id))
+        rows.append(
+            ensure_policy_source_from_catalog_entry(
+                db,
+                entry=item,
+                org_id=org_id,
+                focus=focus,
+            )
+        )
     db.commit()
     return rows
-
-
-def fetch_policy_source(
-    db: Session,
-    *,
-    source: PolicySource,
-    force: bool = False,
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-) -> dict[str, Any]:
-    now = datetime.utcnow()
-    if not policy_source_needs_refresh(source, force=force, now=now):
-        return {
-            "ok": True,
-            "source_id": int(source.id),
-            "skipped": True,
-            "reason": "fresh_enough",
-            "changed": False,
-            "current_fingerprint": getattr(source, "current_fingerprint", None),
-        }
-
-    url = (source.url or "").strip()
-    if not url:
-        source.registry_status = "error"
-        source.freshness_status = "fetch_failed"
-        source.freshness_reason = "missing_url"
-        source.freshness_checked_at = now
-        db.add(source)
-        db.commit()
-        return {
-            "ok": False,
-            "source_id": int(source.id),
-            "skipped": False,
-            "reason": "missing_url",
-            "changed": False,
-        }
-
-    http_status: int | None = None
-    content_type: str | None = None
-    extracted_text = ""
-    fetch_error: str | None = None
-
-    try:
-        with httpx.Client(timeout=timeout_seconds, follow_redirects=True) as client:
-            resp = client.get(url)
-            http_status = int(resp.status_code)
-            content_type = resp.headers.get("content-type")
-            extracted_text = _safe_text_from_http_response(resp)
-            if http_status < 200 or http_status >= 400:
-                fetch_error = f"http_status_{http_status}"
-    except Exception as exc:
-        fetch_error = f"{type(exc).__name__}: {exc}"
-
-    fingerprint = _fingerprint_for_text(extracted_text or "")
-    previous_fingerprint = getattr(source, "current_fingerprint", None)
-    changed = bool(fingerprint) and fingerprint != previous_fingerprint
-
-    version = PolicySourceVersion(
-        source_id=int(source.id),
-        retrieved_at=now,
-        http_status=http_status,
-        content_sha256=fingerprint or None,
-        raw_path=getattr(source, "raw_path", None),
-        content_type=content_type,
-        fetch_error=fetch_error,
-        extracted_text=extracted_text,
-        is_current=True,
-    )
-    db.add(version)
-
-    prior_versions = list(
-        db.scalars(
-            select(PolicySourceVersion)
-            .where(
-                PolicySourceVersion.source_id == int(source.id),
-                PolicySourceVersion.id != getattr(version, "id", -1),
-                PolicySourceVersion.is_current.is_(True),
-            )
-        ).all()
-    )
-    for row in prior_versions:
-        row.is_current = False
-        db.add(row)
-
-    source.http_status = http_status
-    source.content_type = content_type
-    source.retrieved_at = now
-    source.last_fetched_at = now
-    source.extracted_text = extracted_text
-    source.content_sha256 = fingerprint or None
-    source.current_fingerprint = fingerprint or None
-    source.freshness_checked_at = now
-    source.registry_status = "active" if fetch_error is None else "error"
-
-    if fetch_error is None:
-        source.freshness_status = "fresh"
-        source.freshness_reason = "fetched_successfully"
-        if changed:
-            source.last_changed_at = now
-    else:
-        source.freshness_status = "fetch_failed"
-        source.freshness_reason = fetch_error
-
-    db.add(source)
-    db.commit()
-    db.refresh(source)
-
-    return {
-        "ok": fetch_error is None,
-        "source_id": int(source.id),
-        "skipped": False,
-        "http_status": http_status,
-        "content_type": content_type,
-        "changed": changed,
-        "fingerprint": fingerprint,
-        "previous_fingerprint": previous_fingerprint,
-        "fetch_error": fetch_error,
-        "version_id": int(version.id),
-    }
 
 
 def list_sources_for_market(
@@ -502,15 +442,156 @@ def list_sources_for_market(
     else:
         stmt = stmt.where(or_(PolicySource.org_id == org_id, PolicySource.org_id.is_(None)))
 
-    rows = list(db.scalars(stmt).all())
+    rows = list(db.scalars(stmt.order_by(PolicySource.is_authoritative.desc(), PolicySource.id.asc())).all())
     out: list[PolicySource] = []
+
     for row in rows:
-        if row.county is not None and row.county != cnty:
+        row_county = _norm_lower(getattr(row, "county", None))
+        row_city = _norm_lower(getattr(row, "city", None))
+        row_pha = _norm_text(getattr(row, "pha_name", None))
+
+        if row_county is not None and row_county != cnty:
             continue
-        if row.city is not None and row.city != cty:
+        if row_city is not None and row_city != cty:
             continue
-        if row.pha_name is not None and row.pha_name != pha:
+        if pha is not None and row_pha not in {None, pha}:
             continue
+
+        _sync_registry_defaults(row)
         out.append(row)
-    out.sort(key=lambda r: ((r.source_type or ""), (r.title or ""), int(r.id or 0)))
+
+    db.commit()
     return out
+
+
+def fetch_policy_source(
+    db: Session,
+    *,
+    source: PolicySource,
+    force: bool = False,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    now = _utcnow()
+    _sync_registry_defaults(source)
+
+    if not policy_source_needs_refresh(source, force=force, now=now):
+        return {
+            "ok": True,
+            "source_id": int(source.id),
+            "skipped": True,
+            "reason": "fresh_enough",
+            "changed": False,
+            "current_fingerprint": getattr(source, "current_fingerprint", None),
+            "next_refresh_due_at": source.next_refresh_due_at.isoformat() if getattr(source, "next_refresh_due_at", None) else None,
+        }
+
+    url = (source.url or "").strip()
+    if not url:
+        source.registry_status = "warning"
+        source.freshness_status = "fetch_failed"
+        source.freshness_reason = "missing_url"
+        source.freshness_checked_at = now
+        source.last_fetch_error = "missing_url"
+        source.next_refresh_due_at = now + timedelta(days=1)
+        db.add(source)
+        db.commit()
+        return {
+            "ok": False,
+            "source_id": int(source.id),
+            "skipped": False,
+            "reason": "missing_url",
+            "changed": False,
+            "fetch_error": "missing_url",
+        }
+
+    http_status: int | None = None
+    content_type: str | None = None
+    extracted_text = ""
+    fetch_error: str | None = None
+
+    try:
+        with httpx.Client(timeout=timeout_seconds, follow_redirects=True) as client:
+            resp = client.get(url)
+            http_status = int(resp.status_code)
+            content_type = resp.headers.get("content-type")
+            extracted_text = _safe_text_from_http_response(resp)
+            if http_status < 200 or http_status >= 400:
+                fetch_error = f"http_status_{http_status}"
+    except Exception as exc:
+        fetch_error = f"{type(exc).__name__}: {exc}"
+
+    fingerprint = _fingerprint_for_text(extracted_text or "")
+    previous_fingerprint = getattr(source, "current_fingerprint", None) or getattr(source, "content_sha256", None)
+    changed = bool(fingerprint) and fingerprint != previous_fingerprint
+
+    version = PolicySourceVersion(
+        source_id=int(source.id),
+        retrieved_at=now,
+        http_status=http_status,
+        content_sha256=fingerprint[:64] if fingerprint else None,
+        raw_path=getattr(source, "raw_path", None),
+        content_type=content_type,
+        fetch_error=fetch_error,
+        extracted_text=extracted_text,
+        is_current=True,
+    )
+    db.add(version)
+    db.flush()
+
+    prior_versions = list(
+        db.scalars(
+            select(PolicySourceVersion).where(
+                PolicySourceVersion.source_id == int(source.id),
+                PolicySourceVersion.id != int(version.id),
+                PolicySourceVersion.is_current.is_(True),
+            )
+        ).all()
+    )
+    for row in prior_versions:
+        row.is_current = False
+        db.add(row)
+
+    source.http_status = http_status
+    source.last_http_status = http_status
+    source.content_type = content_type
+    source.retrieved_at = now
+    source.last_fetched_at = now
+    source.extracted_text = extracted_text
+    source.content_sha256 = fingerprint[:64] if fingerprint else None
+    source.current_fingerprint = fingerprint or None
+    source.freshness_checked_at = now
+    source.last_fetch_error = fetch_error
+    source.next_refresh_due_at = _compute_next_refresh_due_at(source, from_dt=now)
+
+    if fetch_error is None:
+        source.registry_status = "active"
+        source.freshness_status = "fresh"
+        source.freshness_reason = None
+        if changed:
+            source.last_changed_at = now
+        else:
+            source.last_seen_same_fingerprint_at = now
+    else:
+        source.registry_status = "warning"
+        source.freshness_status = "fetch_failed"
+        source.freshness_reason = fetch_error
+
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    db.refresh(version)
+
+    return {
+        "ok": fetch_error is None,
+        "source_id": int(source.id),
+        "source_version_id": int(version.id),
+        "skipped": False,
+        "reason": None if fetch_error is None else fetch_error,
+        "fetch_error": fetch_error,
+        "changed": bool(changed),
+        "previous_fingerprint": previous_fingerprint,
+        "current_fingerprint": fingerprint or None,
+        "http_status": http_status,
+        "content_type": content_type,
+        "next_refresh_due_at": source.next_refresh_due_at.isoformat() if getattr(source, "next_refresh_due_at", None) else None,
+    }

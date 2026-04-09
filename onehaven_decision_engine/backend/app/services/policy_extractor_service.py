@@ -1,4 +1,3 @@
-# backend/app/services/policy_extractor_service.py
 from __future__ import annotations
 
 import json
@@ -9,8 +8,15 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import normalize_category, normalize_categories
-from app.policy_models import PolicyAssertion, PolicySource
+from app.policy_models import PolicyAssertion, PolicySource, PolicySourceVersion
 from app.services.policy_rule_normalizer import normalize_rule_candidate
+
+
+DEFAULT_STALE_AFTER_DAYS = 90
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
 
 
 def _dumps(v: Any) -> str:
@@ -45,18 +51,25 @@ def _rule_family_for(rule_key: str) -> str:
         "federal_nspire_anchor": "federal_nspire",
         "federal_notice_anchor": "federal_notice",
         "mi_statute_anchor": "mi_landlord_tenant",
-        "rental_registration_required": "rental_registration",
-        "certificate_required_before_occupancy": "certificate_before_occupancy",
-        "inspection_program_exists": "inspection_program",
-        "property_maintenance_enforcement_anchor": "property_maintenance",
-        "building_safety_division_anchor": "building_safety",
-        "building_division_anchor": "building_division",
+        "mshda_program_anchor": "mshda_program",
         "pha_admin_plan_anchor": "pha_admin_plan",
         "pha_administrator_changed": "pha_admin_transfer",
         "pha_landlord_packet_required": "pha_landlord_workflow",
-        "mshda_program_anchor": "mshda_program",
         "hap_contract_and_tenancy_addendum_required": "voucher_lease_packet",
         "landlord_payment_timing_reference": "landlord_payment_timing",
+        "rental_registration_required": "rental_registration",
+        "rental_license_required": "rental_license",
+        "certificate_required_before_occupancy": "certificate_before_occupancy",
+        "certificate_of_occupancy_required": "certificate_before_occupancy",
+        "certificate_of_compliance_required": "certificate_before_occupancy",
+        "inspection_program_exists": "inspection_program",
+        "fire_safety_inspection_required": "inspection_program",
+        "property_maintenance_enforcement_anchor": "property_maintenance",
+        "building_safety_division_anchor": "building_safety",
+        "building_division_anchor": "building_division",
+        "lead_paint_affidavit_required": "lead",
+        "lead_clearance_required": "lead",
+        "lead_inspection_required": "lead",
     }
     return mapping.get(rule_key, rule_key)
 
@@ -74,10 +87,15 @@ def _assertion_type_for(rule_key: str) -> str:
 def _priority_for(rule_key: str) -> int:
     if rule_key in {
         "rental_registration_required",
+        "rental_license_required",
         "certificate_required_before_occupancy",
+        "certificate_of_occupancy_required",
+        "certificate_of_compliance_required",
         "inspection_program_exists",
+        "fire_safety_inspection_required",
         "hap_contract_and_tenancy_addendum_required",
         "pha_landlord_packet_required",
+        "lead_clearance_required",
     }:
         return 10
     if rule_key in {
@@ -109,6 +127,14 @@ def _source_rank_for(source: PolicySource) -> int:
     return 100
 
 
+def _source_version_for_source(db: Session, source_id: int) -> PolicySourceVersion | None:
+    return db.scalar(
+        select(PolicySourceVersion)
+        .where(PolicySourceVersion.source_id == int(source_id))
+        .order_by(PolicySourceVersion.retrieved_at.desc(), PolicySourceVersion.id.desc())
+    )
+
+
 def _stale_after_for(rule_key: str, source: PolicySource, now: datetime) -> datetime:
     url = (source.url or "").lower()
 
@@ -131,7 +157,7 @@ def _stale_after_for(rule_key: str, source: PolicySource, now: datetime) -> date
         return now + timedelta(days=120)
 
     refresh_days = int(getattr(source, "refresh_interval_days", 30) or 30)
-    return now + timedelta(days=max(30, refresh_days))
+    return now + timedelta(days=max(30, refresh_days, DEFAULT_STALE_AFTER_DAYS))
 
 
 def _normalized_category_for(rule_key: str) -> str | None:
@@ -141,18 +167,25 @@ def _normalized_category_for(rule_key: str) -> str | None:
         "federal_nspire_anchor": "inspection",
         "federal_notice_anchor": "section8",
         "mi_statute_anchor": "safety",
-        "rental_registration_required": "registration",
-        "certificate_required_before_occupancy": "occupancy",
-        "inspection_program_exists": "inspection",
-        "property_maintenance_enforcement_anchor": "safety",
-        "building_safety_division_anchor": "safety",
-        "building_division_anchor": "permits",
+        "mshda_program_anchor": "section8",
         "pha_admin_plan_anchor": "section8",
         "pha_administrator_changed": "section8",
         "pha_landlord_packet_required": "section8",
-        "mshda_program_anchor": "section8",
         "hap_contract_and_tenancy_addendum_required": "section8",
         "landlord_payment_timing_reference": "section8",
+        "rental_registration_required": "registration",
+        "rental_license_required": "registration",
+        "certificate_required_before_occupancy": "occupancy",
+        "certificate_of_occupancy_required": "occupancy",
+        "certificate_of_compliance_required": "occupancy",
+        "inspection_program_exists": "inspection",
+        "fire_safety_inspection_required": "inspection",
+        "property_maintenance_enforcement_anchor": "safety",
+        "building_safety_division_anchor": "safety",
+        "building_division_anchor": "permits",
+        "lead_paint_affidavit_required": "lead",
+        "lead_clearance_required": "lead",
+        "lead_inspection_required": "lead",
     }
     return normalize_category(mapping.get(rule_key))
 
@@ -181,7 +214,9 @@ def _refresh_source_category_metadata(source: PolicySource, created: list[Policy
     elif not source.retrieved_at:
         source.freshness_status = "unknown"
         source.freshness_reason = "missing_retrieved_at"
-    elif source.retrieved_at < (now - timedelta(days=max(30, int(getattr(source, "refresh_interval_days", 30) or 30) * 2))):
+    elif source.retrieved_at < (
+        now - timedelta(days=max(30, int(getattr(source, "refresh_interval_days", 30) or 30) * 2))
+    ):
         source.freshness_status = "stale"
         source.freshness_reason = "retrieved_at_older_than_refresh_window"
     else:
@@ -324,11 +359,18 @@ def _candidate_payload(
 ) -> dict[str, Any]:
     raw_text = value.get("summary") or value.get("text") or value.get("condition") or rule_key
     candidate = normalize_rule_candidate(
-        str(raw_text),
-        hint=f"{source.title or ''} {source.publisher or ''}",
-        source_url=source.url,
-        property_type=_norm_text(getattr(source, "program_type", None)),
-        normalized_version="v2",
+        {
+            "rule_key": rule_key,
+            "title": source.title,
+            "publisher": source.publisher,
+            "url": source.url,
+            "text": str(raw_text),
+            "raw_excerpt": str(raw_text),
+            "source_level": getattr(source, "source_type", None) or "local",
+            "property_type": _norm_text(getattr(source, "program_type", None)),
+            "normalized_version": "v2",
+            "confidence": confidence,
+        }
     )
     if candidate is None:
         source_level = getattr(source, "source_type", None) or "local"
@@ -342,10 +384,15 @@ def _candidate_payload(
             "required": True,
             "blocking": rule_key in {
                 "rental_registration_required",
+                "rental_license_required",
                 "certificate_required_before_occupancy",
+                "certificate_of_occupancy_required",
+                "certificate_of_compliance_required",
                 "inspection_program_exists",
+                "fire_safety_inspection_required",
                 "pha_landlord_packet_required",
                 "hap_contract_and_tenancy_addendum_required",
+                "lead_clearance_required",
             },
             "source_citation": source.url,
             "raw_excerpt": str(raw_text),
@@ -354,7 +401,7 @@ def _candidate_payload(
             "confidence": confidence,
         }
 
-    payload = {
+    return {
         "rule_family": candidate.rule_family,
         "rule_category": candidate.rule_category,
         "source_level": candidate.source_level,
@@ -367,7 +414,6 @@ def _candidate_payload(
         "version_group": candidate.version_group,
         "confidence": max(float(candidate.confidence), float(confidence)),
     }
-    return payload
 
 
 def _add_assertion(
@@ -375,6 +421,7 @@ def _add_assertion(
     *,
     target_org_id: Optional[int],
     source: PolicySource,
+    source_version_id: Optional[int],
     now: datetime,
     rule_key: str,
     value: dict[str, Any],
@@ -393,6 +440,7 @@ def _add_assertion(
         PolicyAssertion(
             org_id=target_org_id,
             source_id=source.id,
+            source_version_id=source_version_id,
             state=_norm_state(source.state),
             county=_norm_lower(source.county),
             city=_norm_lower(source.city),
@@ -413,6 +461,7 @@ def _add_assertion(
             verification_reason=None,
             stale_after=_stale_after_for(rule_key, source, now),
             superseded_by_assertion_id=None,
+            replaced_by_assertion_id=None,
             jurisdiction_slug=getattr(source, "jurisdiction_slug", None),
             source_level=payload["source_level"],
             property_type=payload["property_type"],
@@ -426,6 +475,26 @@ def _add_assertion(
             governance_state="draft",
             version_group=payload["version_group"],
             version_number=1,
+            is_current=False,
+            citation_json=_dumps(
+                {
+                    "url": source.url,
+                    "publisher": source.publisher,
+                    "title": source.title,
+                    "source_version_id": source_version_id,
+                }
+            ),
+            rule_provenance_json=_dumps(
+                {
+                    "source_id": int(source.id),
+                    "source_version_id": source_version_id,
+                    "source_type": getattr(source, "source_type", None),
+                    "jurisdiction_slug": getattr(source, "jurisdiction_slug", None),
+                }
+            ),
+            value_hash=None,
+            confidence_basis="inferred",
+            change_summary="extracted_from_source_refresh",
             normalized_category=payload["rule_category"],
             coverage_status=_coverage_status_for(rule_key),
             source_freshness_status=getattr(source, "freshness_status", None),
@@ -447,11 +516,12 @@ def extract_assertions_for_source(
     - preserve active/replaced assertions
     - refresh extracted/draft candidates for this exact source + scope
     - inference is based on source metadata only (url/title/publisher/notes/text)
-    - attach normalized_category + Phase 1/2 governance fields for downstream review
+    - attach normalized_category + governance/provenance fields for downstream review
     """
     target_org_id = org_id if org_scope else None
-    now = datetime.utcnow()
+    now = _utcnow()
     created: list[PolicyAssertion] = []
+    source_version = _source_version_for_source(db, int(source.id))
 
     q = db.query(PolicyAssertion).filter(PolicyAssertion.source_id == source.id)
     if target_org_id is None:
@@ -475,6 +545,7 @@ def extract_assertions_for_source(
         created,
         target_org_id=target_org_id,
         source=source,
+        source_version_id=int(source_version.id) if source_version is not None else None,
         now=now,
         rule_key="document_reference",
         value={
@@ -496,6 +567,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
             now=now,
             rule_key="federal_hcv_regulations_anchor",
             value={
@@ -510,20 +582,22 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
             now=now,
             rule_key="federal_nspire_anchor",
             value={
-                "summary": "HUD program requirements and inspection standards are reflected in 24 CFR Part 5 / current NSPIRE structure.",
+                "summary": "HUD program requirements and inspection standards are reflected in 24 CFR Part 5 / NSPIRE structure.",
                 "url": source.url,
             },
             confidence=0.75,
         )
 
-    if "federalregister.gov" in url and "nspire" in url:
+    if "federalregister.gov" in url and "nspire" in text:
         _add_assertion(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
             now=now,
             rule_key="federal_notice_anchor",
             value={
@@ -539,6 +613,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
             now=now,
             rule_key="mi_statute_anchor",
             value={
@@ -548,20 +623,29 @@ def extract_assertions_for_source(
             confidence=0.70,
         )
 
+    if "michigan.gov/mshda" in url or "mshda" in text:
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
+            now=now,
+            rule_key="mshda_program_anchor",
+            value={
+                "summary": "MSHDA program guidance relevant to state housing program administration.",
+                "url": source.url,
+            },
+            confidence=0.70,
+        )
+
     # Detroit
     if "detroitmi.gov" in url:
-        if _has_any(
-            text,
-            [
-                "landlord-rental",
-                "tenant-rental-property",
-                "rental requirements faq",
-            ],
-        ):
+        if _has_any(text, ["landlord-rental", "tenant-rental-property", "rental requirements faq"]):
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
                 source=source,
+                source_version_id=int(source_version.id) if source_version is not None else None,
                 now=now,
                 rule_key="rental_registration_required",
                 value={
@@ -577,10 +661,11 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
+                source_version_id=int(source_version.id) if source_version is not None else None,
                 now=now,
                 rule_key="certificate_required_before_occupancy",
                 value={
-                    "summary": "Detroit certificate of compliance / rental certificate process is relevant before normal compliant operation.",
+                    "summary": "Detroit certificate of compliance / rental certificate process is relevant before compliant operation.",
                     "url": source.url,
                     "scope_hint": "city",
                 },
@@ -592,6 +677,7 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
+                source_version_id=int(source_version.id) if source_version is not None else None,
                 now=now,
                 rule_key="inspection_program_exists",
                 value={
@@ -608,6 +694,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
             now=now,
             rule_key="rental_registration_required",
             value={
@@ -621,6 +708,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
             now=now,
             rule_key="inspection_program_exists",
             value={
@@ -634,6 +722,7 @@ def extract_assertions_for_source(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
             now=now,
             rule_key="certificate_required_before_occupancy",
             value={
@@ -658,6 +747,7 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
+                source_version_id=int(source_version.id) if source_version is not None else None,
                 now=now,
                 rule_key="rental_registration_required",
                 value={
@@ -671,6 +761,7 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
+                source_version_id=int(source_version.id) if source_version is not None else None,
                 now=now,
                 rule_key="inspection_program_exists",
                 value={
@@ -686,378 +777,208 @@ def extract_assertions_for_source(
                 created,
                 target_org_id=target_org_id,
                 source=source,
+                source_version_id=int(source_version.id) if source_version is not None else None,
                 now=now,
                 rule_key="property_maintenance_enforcement_anchor",
                 value={
-                    "summary": "Warren property maintenance enforcement page relevant to rental compliance operations.",
+                    "summary": "Warren property maintenance division is a local enforcement anchor.",
                     "url": source.url,
                     "scope_hint": "city",
-                },
-                confidence=0.45,
-            )
-
-    # Southfield
-    if "cityofsouthfield.com" in url:
-        if _has_any(text, ["rental-housing", "rental registration application"]):
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="rental_registration_required",
-                value={
-                    "summary": "Southfield rental workflow includes registration and inspection requirements.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.60,
-            )
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="inspection_program_exists",
-                value={
-                    "summary": "Southfield rental housing page indicates inspection requirements.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.60,
-            )
-
-        if "housing-section-8" in text:
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="pha_admin_plan_anchor",
-                value={
-                    "summary": "Southfield HCV / Section 8 administrative source.",
-                    "url": source.url,
-                    "pha_name": source.pha_name or "Southfield Housing Commission",
-                },
-                confidence=0.55,
-            )
-
-        if _has_any(text, ["transfer letter 2025", "transfer%20letter%202025", "plymouth"]):
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="pha_administrator_changed",
-                value={
-                    "summary": "Southfield indicates HCV administration transferred to Plymouth Housing Commission effective 2025-10-01.",
-                    "url": source.url,
-                    "prior_pha_name": "Southfield Housing Commission",
-                    "new_admin_hint": "Plymouth Housing Commission",
                 },
                 confidence=0.75,
             )
 
-    # Pontiac
-    if "pontiac.mi.us" in url or "pontiacminew" in url:
-        if _has_any(text, ["property_rentals", "rental registration application", "rentalapp"]):
+        if "building division" in text:
             _add_assertion(
                 created,
                 target_org_id=target_org_id,
                 source=source,
-                now=now,
-                rule_key="rental_registration_required",
-                value={
-                    "summary": "Pontiac indicates rental properties must be properly registered and kept up to code.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.60,
-            )
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="inspection_program_exists",
-                value={
-                    "summary": "Pontiac rental process includes inspection / compliance workflow through Building Safety.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.60,
-            )
-
-        if "building_safety" in text:
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="building_safety_division_anchor",
-                value={
-                    "summary": "Pontiac Building Safety Division is the city enforcement / inspection anchor for rental workflow.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.50,
-            )
-
-    # Livonia
-    if "livonia.gov" in url:
-        if _has_any(
-            text,
-            [
-                "inspection-building-enforcement",
-                "rental-guide",
-                "rental-license-application",
-                "rental properties guide",
-            ],
-        ):
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="rental_registration_required",
-                value={
-                    "summary": "Livonia rental workflow uses inspection / enforcement and rental licensing process.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.60,
-            )
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="inspection_program_exists",
-                value={
-                    "summary": "Livonia rental properties are governed through the Inspection Department / enforcement workflow.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.60,
-            )
-
-    # Westland
-    if "cityofwestland.com" in url:
-        if _has_any(text, ["residential-rental-program", "rental registration application"]):
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="rental_registration_required",
-                value={
-                    "summary": "Westland residential rental program requires registration on a recurring cycle.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.65,
-            )
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="inspection_program_exists",
-                value={
-                    "summary": "Westland rental workflow includes initial/final inspections and compliance certification.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.65,
-            )
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="certificate_required_before_occupancy",
-                value={
-                    "summary": "Westland rental program includes certification of compliance within the registration/inspection process.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.60,
-            )
-
-        if "building-division" in text:
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
+                source_version_id=int(source_version.id) if source_version is not None else None,
                 now=now,
                 rule_key="building_division_anchor",
                 value={
-                    "summary": "Westland Building Division page is the city anchor for rental certificates and inspection actions.",
+                    "summary": "Warren building division is a local permit/compliance anchor.",
                     "url": source.url,
                     "scope_hint": "city",
                 },
-                confidence=0.45,
+                confidence=0.70,
             )
 
-    # Taylor
-    if "cityoftaylor.com" in url or "ci.taylor.mi.us" in url:
-        if _has_any(text, ["rental-department", "rental property registration application"]):
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="rental_registration_required",
-                value={
-                    "summary": "Taylor rental workflow requires property registration and inspection scheduling through the Rental Department.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.65,
-            )
-
-        if _has_any(text, ["rental-property-insp", "rental-inspection", "rental-department"]):
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="inspection_program_exists",
-                value={
-                    "summary": "Taylor rental workflow includes formal rental inspection process and associated fees/forms.",
-                    "url": source.url,
-                    "scope_hint": "city",
-                },
-                confidence=0.65,
-            )
-
-    # DHC / Detroit PHA
-    if "dhcmi.org" in url or "detroit housing commission" in (source.publisher or "").lower():
+    # PHA / program
+    if _has_any(text, ["administrative plan", "admin plan"]):
         _add_assertion(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
             now=now,
             rule_key="pha_admin_plan_anchor",
             value={
-                "summary": "Detroit Housing Commission administrative or landlord process source.",
+                "summary": "PHA administrative plan is an authoritative local program anchor.",
                 "url": source.url,
-                "pha_name": source.pha_name or "Detroit Housing Commission",
+            },
+            confidence=0.85,
+        )
+
+    if _has_any(text, ["landlord packet"]):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
+            now=now,
+            rule_key="pha_landlord_packet_required",
+            value={
+                "summary": "Landlord packet appears required for voucher landlord onboarding/approval.",
+                "url": source.url,
+            },
+            confidence=0.72,
+        )
+
+    if _has_any(text, ["hap contract", "tenancy addendum"]):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
+            now=now,
+            rule_key="hap_contract_and_tenancy_addendum_required",
+            value={
+                "summary": "HAP contract and/or tenancy addendum appears required for voucher execution.",
+                "url": source.url,
+            },
+            confidence=0.80,
+        )
+
+    if _has_any(text, ["payment timing", "housing assistance payment", "landlord payment"]):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
+            now=now,
+            rule_key="landlord_payment_timing_reference",
+            value={
+                "summary": "Source contains timing/reference guidance for landlord payment processing.",
+                "url": source.url,
+            },
+            confidence=0.65,
+        )
+
+    if _has_any(text, ["administrator changed", "new pha administrator", "program administrator"]):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
+            now=now,
+            rule_key="pha_administrator_changed",
+            value={
+                "summary": "Source indicates a change to PHA/program administrator handling.",
+                "url": source.url,
             },
             confidence=0.70,
         )
 
-        if _has_any(text, ["landlord", "faq", "guide", "guidebook"]):
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="pha_landlord_packet_required",
-                value={
-                    "summary": "Detroit PHA landlord-facing forms/guidance exist and may be operationally required.",
-                    "url": source.url,
-                    "pha_name": source.pha_name or "Detroit Housing Commission",
-                },
-                confidence=0.55,
-            )
-
-    # MSHDA
-    if "michigan.gov/mshda" in url:
+    if _has_any(text, ["lead affidavit", "lead paint affidavit"]):
         _add_assertion(
             created,
             target_org_id=target_org_id,
             source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
             now=now,
-            rule_key="mshda_program_anchor",
+            rule_key="lead_paint_affidavit_required",
             value={
-                "summary": "MSHDA statewide HCV / landlord operations source.",
+                "summary": "Lead paint affidavit requirement appears in local or program source.",
                 "url": source.url,
             },
-            confidence=0.60,
+            confidence=0.72,
         )
 
-        if "hcv-landlords" in text:
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="hap_contract_and_tenancy_addendum_required",
-                value={
-                    "summary": "MSHDA landlord pages indicate HAP contract / tenancy addendum workflow requirements.",
-                    "url": source.url,
-                },
-                confidence=0.60,
-            )
+    if _has_any(text, ["lead clearance"]):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
+            now=now,
+            rule_key="lead_clearance_required",
+            value={
+                "summary": "Lead clearance requirement appears in source.",
+                "url": source.url,
+            },
+            confidence=0.75,
+        )
 
-        if _has_any(text, ["payment", "schedule", "hap/uap"]):
-            _add_assertion(
-                created,
-                target_org_id=target_org_id,
-                source=source,
-                now=now,
-                rule_key="landlord_payment_timing_reference",
-                value={
-                    "summary": "MSHDA payment timing / direct deposit schedule source for landlord operations.",
-                    "url": source.url,
-                },
-                confidence=0.50,
-            )
-
-    _refresh_source_category_metadata(source, created, now)
+    if _has_any(text, ["lead inspection"]):
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=int(source_version.id) if source_version is not None else None,
+            now=now,
+            rule_key="lead_inspection_required",
+            value={
+                "summary": "Lead inspection requirement appears in source.",
+                "url": source.url,
+            },
+            confidence=0.70,
+        )
 
     persisted: list[PolicyAssertion] = []
-    for row in created:
+    for item in created:
         existing = _existing_candidate_for_source(
             db,
             source_id=int(source.id),
             org_id=target_org_id,
-            version_group=getattr(row, "version_group", None),
-            raw_excerpt=getattr(row, "raw_excerpt", None),
-            rule_key=row.rule_key,
+            version_group=getattr(item, "version_group", None),
+            raw_excerpt=getattr(item, "raw_excerpt", None),
+            rule_key=item.rule_key,
         )
-        if existing is None:
-            db.add(row)
-            persisted.append(row)
-            continue
+        if existing is not None:
+            existing.rule_family = item.rule_family
+            existing.assertion_type = item.assertion_type
+            existing.value_json = item.value_json
+            existing.effective_date = item.effective_date
+            existing.expires_at = item.expires_at
+            existing.confidence = item.confidence
+            existing.priority = item.priority
+            existing.source_rank = item.source_rank
+            existing.review_status = "extracted"
+            existing.review_notes = "auto_extracted_from_source_refresh"
+            existing.stale_after = item.stale_after
+            existing.jurisdiction_slug = item.jurisdiction_slug
+            existing.source_level = item.source_level
+            existing.property_type = item.property_type
+            existing.rule_category = item.rule_category
+            existing.required = item.required
+            existing.blocking = item.blocking
+            existing.source_citation = item.source_citation
+            existing.raw_excerpt = item.raw_excerpt
+            existing.normalized_version = item.normalized_version
+            existing.rule_status = "candidate"
+            existing.governance_state = "draft"
+            existing.normalized_category = item.normalized_category
+            existing.coverage_status = item.coverage_status
+            existing.source_freshness_status = item.source_freshness_status
+            existing.extracted_at = now
+            existing.source_version_id = int(source_version.id) if source_version is not None else getattr(existing, "source_version_id", None)
+            existing.citation_json = item.citation_json
+            existing.rule_provenance_json = item.rule_provenance_json
+            existing.is_current = False
+            db.add(existing)
+            persisted.append(existing)
+        else:
+            db.add(item)
+            persisted.append(item)
 
-        existing.state = row.state
-        existing.county = row.county
-        existing.city = row.city
-        existing.pha_name = row.pha_name
-        existing.program_type = row.program_type
-        existing.rule_family = row.rule_family
-        existing.assertion_type = row.assertion_type
-        existing.value_json = row.value_json
-        existing.effective_date = row.effective_date
-        existing.confidence = max(float(existing.confidence or 0.0), float(row.confidence or 0.0))
-        existing.priority = row.priority
-        existing.source_rank = row.source_rank
-        existing.review_status = "extracted" if (existing.governance_state or "").lower() != "active" else existing.review_status
-        existing.review_notes = row.review_notes
-        existing.stale_after = row.stale_after
-        existing.jurisdiction_slug = row.jurisdiction_slug
-        existing.source_level = row.source_level
-        existing.property_type = row.property_type
-        existing.rule_category = row.rule_category
-        existing.required = row.required
-        existing.blocking = row.blocking
-        existing.source_citation = row.source_citation
-        existing.raw_excerpt = row.raw_excerpt
-        existing.normalized_version = row.normalized_version
-        existing.version_group = row.version_group
-        existing.normalized_category = row.normalized_category
-        existing.coverage_status = row.coverage_status if (existing.governance_state or "").lower() != "active" else existing.coverage_status
-        existing.source_freshness_status = row.source_freshness_status
-        existing.extracted_at = now
-        db.add(existing)
-        persisted.append(existing)
-
+    _refresh_source_category_metadata(source, persisted, now)
     db.add(source)
     db.commit()
 
-    for a in persisted:
-        db.refresh(a)
+    for row in persisted:
+        if getattr(row, "id", None) is not None:
+            db.refresh(row)
 
     return persisted
 
@@ -1066,34 +987,31 @@ def mark_assertions_stale_for_source(
     db: Session,
     *,
     source_id: int,
+    reason: str = "source_changed",
 ) -> dict[str, Any]:
     rows = list(
         db.scalars(
-            select(PolicyAssertion).where(
-                PolicyAssertion.source_id == int(source_id),
-                PolicyAssertion.superseded_by_assertion_id.is_(None),
-                or_(
-                    PolicyAssertion.governance_state.in_(["draft", "approved", "active"]),
-                    PolicyAssertion.review_status.in_(["extracted", "approved", "verified", "needs_recheck"]),
-                ),
-            )
+            select(PolicyAssertion).where(PolicyAssertion.source_id == int(source_id))
         ).all()
     )
 
-    changed_ids: list[int] = []
+    stale_ids: list[int] = []
     for row in rows:
-        if (row.governance_state or "").lower() == "active":
-            row.review_status = "needs_recheck"
-            row.coverage_status = "stale"
-        else:
-            row.review_status = "stale"
-            row.coverage_status = "stale"
-        row.source_freshness_status = "stale"
+        if (row.governance_state or "").lower() in {"active", "approved", "replaced"}:
+            continue
+        row.review_status = "stale"
+        row.rule_status = "stale"
+        row.coverage_status = "stale"
+        row.is_current = False
+        row.change_summary = reason
         db.add(row)
-        changed_ids.append(int(row.id))
+        stale_ids.append(int(row.id))
 
     db.commit()
     return {
-        "updated_count": len(changed_ids),
-        "updated_ids": changed_ids,
+        "ok": True,
+        "source_id": int(source_id),
+        "stale_count": len(stale_ids),
+        "stale_ids": stale_ids,
+        "reason": reason,
     }

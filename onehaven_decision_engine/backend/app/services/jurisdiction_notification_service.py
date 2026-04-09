@@ -1,4 +1,3 @@
-# backend/app/services/jurisdiction_notification_service.py
 from __future__ import annotations
 
 import json
@@ -33,6 +32,10 @@ class JurisdictionNotification:
             "message": self.message,
             "payload": self.payload,
         }
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
 
 
 def _dumps(value: Any) -> str:
@@ -114,7 +117,7 @@ def _build_base_stale_jurisdiction_notification(
     scope_label = _scope_label(profile)
     payload = profile_completeness_payload(db, profile)
 
-    if profile.stale_reason:
+    if getattr(profile, "stale_reason", None):
         message = f"Jurisdiction data for {scope_label} is stale ({profile.stale_reason})."
     else:
         message = f"Jurisdiction data for {scope_label} is stale."
@@ -138,6 +141,7 @@ def build_stale_jurisdiction_notification(
     payload["coverage_confidence"] = payload.get("coverage_confidence") or ("low" if payload.get("is_stale") else "medium")
     payload["missing_local_rule_areas"] = list(payload.get("missing_local_rule_areas") or payload.get("missing_categories") or [])
     payload["stale_warning"] = True
+    payload["stale_reason"] = getattr(profile, "stale_reason", None)
     return JurisdictionNotification(
         action=note.action,
         org_id=note.org_id,
@@ -151,12 +155,13 @@ def create_notification_audit_event(
     db: Session,
     *,
     notification: JurisdictionNotification,
+    entity_type: str = NOTIFICATION_ENTITY_TYPE,
 ) -> AuditEvent:
     row = AuditEvent(
         org_id=int(notification.org_id) if notification.org_id is not None else None,
         actor_user_id=None,
         action=notification.action,
-        entity_type=NOTIFICATION_ENTITY_TYPE,
+        entity_type=entity_type,
         entity_id=str(notification.entity_id),
         before_json=None,
         after_json=_dumps(
@@ -165,7 +170,7 @@ def create_notification_audit_event(
                 **notification.payload,
             }
         ),
-        created_at=datetime.utcnow(),
+        created_at=_utcnow(),
     )
     db.add(row)
     db.flush()
@@ -195,7 +200,7 @@ def record_notification_event(
         message=message,
         payload=payload,
     )
-    event = create_notification_audit_event(db, notification=notification)
+    event = create_notification_audit_event(db, notification=notification, entity_type=entity_type)
     db.commit()
     db.refresh(event)
     return {
@@ -315,9 +320,7 @@ def build_source_refresh_notification(
     level = "info"
     if not ok:
         level = "error"
-    elif changed:
-        level = "warning"
-    elif stale:
+    elif changed or stale:
         level = "warning"
 
     return {
@@ -336,7 +339,9 @@ def build_source_refresh_notification(
         "changed": changed,
         "ok": ok,
         "reason": refresh_result.get("fetch_error") or refresh_result.get("reason"),
-        "created_at": datetime.utcnow().isoformat(),
+        "previous_fingerprint": refresh_result.get("previous_fingerprint"),
+        "current_fingerprint": refresh_result.get("current_fingerprint"),
+        "created_at": _utcnow().isoformat(),
         "payload": refresh_result,
     }
 
@@ -346,13 +351,12 @@ def build_rule_change_notification(
     source: PolicySource,
     governance_result: dict[str, Any],
 ) -> dict[str, Any]:
-    activated_count = int(governance_result.get("activated_count", 0) or 0)
+    active_count = int(governance_result.get("active_count", 0) or 0)
     replaced_count = int(governance_result.get("replaced_count", 0) or 0)
-    updated_count = activated_count + replaced_count
+    approved_count = int(governance_result.get("approved_count", 0) or 0)
+    changed_count = active_count + replaced_count
 
-    level = "info"
-    if updated_count > 0:
-        level = "warning"
+    level = "warning" if changed_count > 0 else "info"
 
     return {
         "kind": "jurisdiction_rule_change",
@@ -364,11 +368,11 @@ def build_rule_change_notification(
         "jurisdiction_slug": getattr(source, "jurisdiction_slug", None),
         "title": getattr(source, "title", None),
         "message": f"Jurisdiction rules changed for source {getattr(source, 'title', None) or getattr(source, 'url', None)}",
-        "activated_count": activated_count,
+        "active_count": active_count,
         "replaced_count": replaced_count,
-        "approved_count": int(governance_result.get("approved_count", 0) or 0),
-        "changed": updated_count > 0,
-        "created_at": datetime.utcnow().isoformat(),
+        "approved_count": approved_count,
+        "changed": changed_count > 0,
+        "created_at": _utcnow().isoformat(),
         "payload": governance_result,
     }
 
@@ -391,7 +395,8 @@ def build_stale_source_notification(
         "freshness_status": getattr(source, "freshness_status", None),
         "last_fetched_at": getattr(source, "last_fetched_at", None).isoformat() if getattr(source, "last_fetched_at", None) else None,
         "last_verified_at": getattr(source, "last_verified_at", None).isoformat() if getattr(source, "last_verified_at", None) else None,
-        "created_at": datetime.utcnow().isoformat(),
+        "next_refresh_due_at": getattr(source, "next_refresh_due_at", None).isoformat() if getattr(source, "next_refresh_due_at", None) else None,
+        "created_at": _utcnow().isoformat(),
     }
 
 
@@ -400,118 +405,93 @@ def build_jurisdiction_profile_stale_notification(
     profile: JurisdictionProfile,
 ) -> dict[str, Any]:
     return {
-        "kind": "stale_jurisdiction_profile",
+        "kind": "jurisdiction_profile_stale",
         "level": "warning",
         "entity_type": NOTIFICATION_ENTITY_TYPE,
         "entity_id": str(getattr(profile, "id", "unknown")),
         "jurisdiction_profile_id": int(profile.id),
         "org_id": getattr(profile, "org_id", None),
-        "scope_label": _scope_label(profile),
+        "title": f"Jurisdiction profile stale: {_scope_label(profile)}",
+        "message": getattr(profile, "stale_reason", None) or "Jurisdiction profile needs refresh.",
         "state": getattr(profile, "state", None),
         "county": getattr(profile, "county", None),
         "city": getattr(profile, "city", None),
         "pha_name": getattr(profile, "pha_name", None),
-        "message": f"Jurisdiction profile is stale for {_scope_label(profile)}",
-        "completeness_status": getattr(profile, "completeness_status", None),
-        "stale_reason": getattr(profile, "stale_reason", None),
-        "last_refresh_success_at": getattr(profile, "last_refresh_success_at", None).isoformat() if getattr(profile, "last_refresh_success_at", None) else None,
         "last_verified_at": getattr(profile, "last_verified_at", None).isoformat() if getattr(profile, "last_verified_at", None) else None,
-        "created_at": datetime.utcnow().isoformat(),
+        "last_refresh_success_at": getattr(profile, "last_refresh_success_at", None).isoformat() if getattr(profile, "last_refresh_success_at", None) else None,
+        "stale_reason": getattr(profile, "stale_reason", None),
+        "created_at": _utcnow().isoformat(),
     }
 
 
 def build_review_queue_payload(
+    db: Session | None = None,
     *,
-    state: str | None,
-    county: str | None,
-    city: str | None,
-    pha_name: str | None,
-    assertions: list[PolicyAssertion],
+    org_id: int | None = None,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    assertions: list[PolicyAssertion] | None = None,
 ) -> dict[str, Any]:
+    rows = list(assertions or [])
+
+    if db is not None and not rows and state is not None:
+        stmt = select(PolicyAssertion).where(PolicyAssertion.state == (state or "MI").strip().upper())
+        if org_id is None:
+            stmt = stmt.where(PolicyAssertion.org_id.is_(None))
+        else:
+            stmt = stmt.where((PolicyAssertion.org_id == int(org_id)) | (PolicyAssertion.org_id.is_(None)))
+        rows = list(db.scalars(stmt).all())
+
     draft_ids: list[int] = []
     approved_ids: list[int] = []
-    active_ids: list[int] = []
-    replaced_ids: list[int] = []
+    stale_ids: list[int] = []
+    changed_candidate_ids: list[int] = []
 
-    for row in assertions:
-        lifecycle = (getattr(row, "governance_state", None) or "").lower()
-        if lifecycle == "draft":
+    norm_county = (county or "").strip().lower() or None
+    norm_city = (city or "").strip().lower() or None
+    norm_pha = (pha_name or "").strip() or None
+
+    scoped_rows: list[PolicyAssertion] = []
+    for row in rows:
+        if state is not None and (getattr(row, "state", None) or "MI").strip().upper() != (state or "MI").strip().upper():
+            continue
+        if norm_county is not None and (getattr(row, "county", None) or None) != norm_county:
+            continue
+        if norm_city is not None and (getattr(row, "city", None) or None) != norm_city:
+            continue
+        row_pha = getattr(row, "pha_name", None) or None
+        if norm_pha is not None and row_pha != norm_pha:
+            continue
+        scoped_rows.append(row)
+
+    for row in scoped_rows:
+        gov = str(getattr(row, "governance_state", "") or "").lower()
+        review_status = str(getattr(row, "review_status", "") or "").lower()
+        change_summary = str(getattr(row, "change_summary", "") or "").lower()
+
+        if gov == "draft":
             draft_ids.append(int(row.id))
-        elif lifecycle == "approved":
+        if gov == "approved":
             approved_ids.append(int(row.id))
-        elif lifecycle == "active":
-            active_ids.append(int(row.id))
-        elif lifecycle == "replaced":
-            replaced_ids.append(int(row.id))
+        if review_status == "stale":
+            stale_ids.append(int(row.id))
+        if "change" in change_summary or "new_candidate" in change_summary:
+            changed_candidate_ids.append(int(row.id))
 
     return {
-        "kind": "jurisdiction_review_queue",
-        "level": "info" if not draft_ids else "warning",
-        "entity_type": NOTIFICATION_ENTITY_TYPE,
-        "entity_id": _scope_label_from_values(state=state, county=county, city=city, pha_name=pha_name),
-        "scope_label": _scope_label_from_values(state=state, county=county, city=city, pha_name=pha_name),
-        "state": state,
-        "county": county,
-        "city": city,
-        "pha_name": pha_name,
-        "message": f"Jurisdiction review queue updated for {_scope_label_from_values(state=state, county=county, city=city, pha_name=pha_name)}",
+        "org_id": org_id,
+        "state": (state or "MI").strip().upper() if state is not None else None,
+        "county": norm_county,
+        "city": norm_city,
+        "pha_name": norm_pha,
         "draft_count": len(draft_ids),
-        "approved_count": len(approved_ids),
-        "active_count": len(active_ids),
-        "replaced_count": len(replaced_ids),
         "draft_ids": draft_ids,
+        "approved_count": len(approved_ids),
         "approved_ids": approved_ids,
-        "active_ids": active_ids,
-        "replaced_ids": replaced_ids,
-        "created_at": datetime.utcnow().isoformat(),
+        "stale_count": len(stale_ids),
+        "stale_ids": stale_ids,
+        "changed_candidate_count": len(changed_candidate_ids),
+        "changed_candidate_ids": changed_candidate_ids,
     }
-
-
-def build_inspection_reminder_notification(
-    *,
-    org_id: int | None,
-    inspection_id: int,
-    property_id: int | None,
-    scheduled_for: datetime | None,
-    inspector_name: str | None,
-    reminder_offset_minutes: int,
-) -> JurisdictionNotification:
-    when_text = scheduled_for.isoformat() if scheduled_for is not None else None
-    return JurisdictionNotification(
-        action="inspection_reminder_ready",
-        org_id=org_id,
-        entity_id=str(inspection_id),
-        message=(
-            f"Inspection reminder ready for property {property_id or 'unknown'} "
-            f"({reminder_offset_minutes} minutes before appointment)."
-        ),
-        payload={
-            "inspection_id": int(inspection_id),
-            "property_id": int(property_id) if property_id is not None else None,
-            "scheduled_for": when_text,
-            "inspector_name": inspector_name,
-            "reminder_offset_minutes": int(reminder_offset_minutes),
-        },
-    )
-
-
-def create_inspection_reminder_audit_event(
-    db: Session,
-    *,
-    org_id: int | None,
-    inspection_id: int,
-    property_id: int | None,
-    scheduled_for: datetime | None,
-    inspector_name: str | None,
-    reminder_offset_minutes: int,
-) -> AuditEvent:
-    notification = build_inspection_reminder_notification(
-        org_id=org_id,
-        inspection_id=inspection_id,
-        property_id=property_id,
-        scheduled_for=scheduled_for,
-        inspector_name=inspector_name,
-        reminder_offset_minutes=reminder_offset_minutes,
-    )
-    row = create_notification_audit_event(db, notification=notification)
-    return row

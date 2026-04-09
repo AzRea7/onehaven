@@ -4,13 +4,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import normalize_category
 from app.policy_models import PolicyAssertion, PolicySource
 from app.services.policy_rule_normalizer import (
     assertion_fingerprint,
+    candidate_matches_assertion,
     candidate_to_update_dict,
+    diff_reason,
     normalize_rule_candidate,
 )
 
@@ -32,6 +35,10 @@ AUTO_VERIFY_RULE_KEYS = {
     "mshda_program_anchor",
     "landlord_payment_timing_reference",
 }
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
 
 
 def _norm_state(s: Optional[str]) -> str:
@@ -64,128 +71,40 @@ def _market_label(state: str, county: Optional[str], city: Optional[str], pha_na
     return state
 
 
-def _source_is_authoritative(src: Optional[PolicySource]) -> bool:
-    if src is None:
-        return False
+def _query_market_assertions(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+):
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
 
-    if bool(getattr(src, "is_authoritative", False)):
-        return True
-
-    url = (src.url or "").lower()
-    publisher = (src.publisher or "").lower()
-
-    try:
-        status_ok = src.http_status is not None and 200 <= int(src.http_status) < 400
-    except Exception:
-        status_ok = False
-
-    if not status_ok:
-        return False
-
-    authoritative_domains = (
-        "ecfr.gov",
-        "federalregister.gov",
-        "hud.gov",
-        "legislature.mi.gov",
-        "michigan.gov",
-        ".gov",
-        "dhcmi.org",
-        "cityofwarren.org",
-        "cityofwestland.com",
-        "cityoftaylor.com",
-        "ci.taylor.mi.us",
-        "livonia.gov",
-        "pontiac.mi.us",
-        "cityofsouthfield.com",
-        "dearborn.gov",
-        "detroitmi.gov",
-    )
-
-    if any(domain in url for domain in authoritative_domains):
-        return True
-
-    if any(
-        phrase in publisher
-        for phrase in (
-            "city of",
-            "michigan legislature",
-            "mshda",
-            "hud",
-            "federal register",
-            "detroit housing commission",
-            "housing commission",
-            "michigan courts",
-        )
-    ):
-        return True
-
-    return False
-
-
-def _category_for_verified(a: PolicyAssertion) -> str | None:
-    current = normalize_category(getattr(a, "rule_category", None) or getattr(a, "normalized_category", None))
-    if current:
-        return current
-
-    by_rule = {
-        "rental_registration_required": "registration",
-        "inspection_program_exists": "inspection",
-        "certificate_required_before_occupancy": "occupancy",
-        "property_maintenance_enforcement_anchor": "safety",
-        "building_safety_division_anchor": "safety",
-        "building_division_anchor": "permits",
-        "pha_admin_plan_anchor": "section8",
-        "pha_administrator_changed": "section8",
-        "pha_landlord_packet_required": "section8",
-        "hap_contract_and_tenancy_addendum_required": "section8",
-        "federal_hcv_regulations_anchor": "section8",
-        "federal_nspire_anchor": "inspection",
-        "federal_notice_anchor": "section8",
-        "mi_statute_anchor": "safety",
-        "mshda_program_anchor": "section8",
-        "landlord_payment_timing_reference": "section8",
-    }
-    return normalize_category(by_rule.get(a.rule_key))
-
-
-def _confidence_for(rule_key: str, src: Optional[PolicySource]) -> float:
-    url = (src.url or "").lower() if src else ""
-
-    if rule_key in {"federal_hcv_regulations_anchor", "federal_nspire_anchor"}:
-        return 0.97
-    if rule_key == "mi_statute_anchor":
-        return 0.96
-    if rule_key in {
-        "rental_registration_required",
-        "inspection_program_exists",
-        "certificate_required_before_occupancy",
-    }:
-        if ".pdf" in url:
-            return 0.94
-        return 0.91
-    if rule_key in {
-        "property_maintenance_enforcement_anchor",
-        "building_safety_division_anchor",
-        "building_division_anchor",
-        "mshda_program_anchor",
-        "pha_admin_plan_anchor",
-        "pha_administrator_changed",
-        "pha_landlord_packet_required",
-        "hap_contract_and_tenancy_addendum_required",
-        "landlord_payment_timing_reference",
-        "federal_notice_anchor",
-    }:
-        return 0.90
-
-    return 0.88
-
-
-def _coverage_status_for_verified(a: PolicyAssertion) -> str:
-    if (a.rule_key or "").endswith("_anchor"):
-        return "verified"
-    if bool(getattr(a, "blocking", False)):
-        return "covered"
-    return "covered"
+    stmt = select(PolicyAssertion).where(PolicyAssertion.state == st)
+    if hasattr(PolicyAssertion, "org_id"):
+        if org_id is None:
+            stmt = stmt.where(PolicyAssertion.org_id.is_(None))
+        else:
+            stmt = stmt.where(or_(PolicyAssertion.org_id == org_id, PolicyAssertion.org_id.is_(None)))
+    if cnty is None:
+        stmt = stmt.where(PolicyAssertion.county.is_(None))
+    else:
+        stmt = stmt.where(PolicyAssertion.county == cnty)
+    if cty is None:
+        stmt = stmt.where(PolicyAssertion.city.is_(None))
+    else:
+        stmt = stmt.where(PolicyAssertion.city == cty)
+    if hasattr(PolicyAssertion, "pha_name"):
+        if pha is None:
+            stmt = stmt.where(or_(PolicyAssertion.pha_name.is_(None), PolicyAssertion.pha_name == ""))
+        else:
+            stmt = stmt.where(PolicyAssertion.pha_name == pha)
+    return stmt.order_by(PolicyAssertion.id.asc())
 
 
 def _market_assertions(
@@ -197,122 +116,198 @@ def _market_assertions(
     city: Optional[str],
     pha_name: Optional[str],
 ) -> list[PolicyAssertion]:
-    st = _norm_state(state)
-    cnty = _norm_lower(county)
-    cty = _norm_lower(city)
-    pha = _norm_text(pha_name)
-
-    q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
-
-    if org_id is None:
-        q = q.filter(PolicyAssertion.org_id.is_(None))
-    else:
-        q = q.filter((PolicyAssertion.org_id == org_id) | (PolicyAssertion.org_id.is_(None)))
-
-    rows = q.all()
-    out: list[PolicyAssertion] = []
-    for a in rows:
-        if a.county is not None and a.county != cnty:
-            continue
-        if a.city is not None and a.city != cty:
-            continue
-        if a.pha_name is not None and a.pha_name != pha:
-            continue
-        out.append(a)
-    return out
-
-
-def _source_map_for_assertions(
-    db: Session,
-    assertions: list[PolicyAssertion],
-) -> dict[int, PolicySource]:
-    source_ids = sorted({a.source_id for a in assertions if a.source_id is not None})
-    if not source_ids:
-        return {}
-    rows = db.query(PolicySource).filter(PolicySource.id.in_(source_ids)).all()
-    return {r.id: r for r in rows}
-
-
-def _active_assertions_for_version_group(
-    rows: list[PolicyAssertion],
-    *,
-    version_group: str,
-) -> list[PolicyAssertion]:
-    out: list[PolicyAssertion] = []
-    for row in rows:
-        if (row.version_group or "") != version_group:
-            continue
-        if (row.governance_state or "").lower() != "active":
-            continue
-        if (row.rule_status or "").lower() not in {"active", "candidate", "approved"}:
-            continue
-        if row.superseded_by_assertion_id is not None:
-            continue
-        out.append(row)
-    return out
-
-
-def _set_phase2_fields_from_candidate(assertion: PolicyAssertion, source: Optional[PolicySource]) -> bool:
-    hint = f"{getattr(source, 'title', '')} {getattr(source, 'publisher', '')}"
-    raw_text = getattr(assertion, "raw_excerpt", None) or getattr(assertion, "review_notes", None) or getattr(assertion, "value_json", None) or getattr(source, "title", None) or assertion.rule_key
-    candidate = normalize_rule_candidate(
-        str(raw_text or assertion.rule_key),
-        hint=hint,
-        source_url=getattr(source, "url", None),
-        property_type=getattr(assertion, "property_type", None),
-        normalized_version=str(getattr(assertion, "normalized_version", None) or "v2"),
+    return list(
+        db.scalars(
+            _query_market_assertions(
+                db,
+                org_id=org_id,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+            )
+        ).all()
     )
 
-    changed = False
 
-    if candidate is not None:
-        payload = candidate_to_update_dict(candidate)
-        for key, value in payload.items():
-            current = getattr(assertion, key, None)
-            if current != value and value is not None:
-                setattr(assertion, key, value)
-                changed = True
+def _active_assertions(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> list[PolicyAssertion]:
+    rows = _market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    out: list[PolicyAssertion] = []
+    for row in rows:
+        gov = (row.governance_state or "").lower()
+        status = (row.rule_status or "").lower()
+        if gov == "active" or status == "active" or bool(getattr(row, "is_current", False)):
+            out.append(row)
+    return out
 
-    if not getattr(assertion, "source_citation", None) and source is not None:
-        assertion.source_citation = getattr(source, "url", None)
-        changed = True
 
-    if not getattr(assertion, "raw_excerpt", None):
-        source_title = getattr(source, "title", None) if source is not None else None
-        assertion.raw_excerpt = source_title or assertion.rule_key
-        changed = True
+def _source_context(source: PolicySource | None) -> dict[str, Any]:
+    if source is None:
+        return {}
+    return {
+        "source_id": int(source.id),
+        "source_name": getattr(source, "source_name", None) or getattr(source, "title", None),
+        "source_type": getattr(source, "source_type", None),
+        "source_version_id": None,
+        "publisher": getattr(source, "publisher", None),
+        "title": getattr(source, "title", None),
+        "url": getattr(source, "url", None),
+        "jurisdiction_slug": getattr(source, "jurisdiction_slug", None),
+        "state": getattr(source, "state", None),
+        "county": getattr(source, "county", None),
+        "city": getattr(source, "city", None),
+        "pha_name": getattr(source, "pha_name", None),
+        "program_type": getattr(source, "program_type", None),
+        "source_level": getattr(source, "source_type", None) or getattr(source, "source_level", None),
+    }
 
-    if not getattr(assertion, "version_group", None):
-        source_level = getattr(assertion, "source_level", None) or "local"
-        property_type = getattr(assertion, "property_type", None) or "all"
-        assertion.version_group = f"{source_level}:{assertion.rule_key}:{property_type}"
-        changed = True
 
-    if not getattr(assertion, "normalized_version", None):
-        assertion.normalized_version = "v2"
-        changed = True
+def _coerce_candidate(
+    raw: Any,
+    *,
+    source: PolicySource | None = None,
+    fallback_state: Optional[str] = None,
+    fallback_county: Optional[str] = None,
+    fallback_city: Optional[str] = None,
+    fallback_pha_name: Optional[str] = None,
+) -> dict[str, Any]:
+    data = dict(raw or {})
+    ctx = _source_context(source)
 
-    if not getattr(assertion, "rule_family", None):
-        assertion.rule_family = assertion.rule_key
-        changed = True
+    for key, value in ctx.items():
+        if data.get(key) in {None, ""} and value not in {None, ""}:
+            data[key] = value
 
-    if not getattr(assertion, "rule_category", None):
-        assertion.rule_category = _category_for_verified(assertion)
-        changed = True
+    if data.get("state") in {None, ""} and fallback_state:
+        data["state"] = fallback_state
+    if data.get("county") in {None, ""} and fallback_county:
+        data["county"] = fallback_county
+    if data.get("city") in {None, ""} and fallback_city:
+        data["city"] = fallback_city
+    if data.get("pha_name") in {None, ""} and fallback_pha_name:
+        data["pha_name"] = fallback_pha_name
 
-    if not getattr(assertion, "source_level", None):
-        assertion.source_level = "local"
-        changed = True
+    if data.get("rule_category"):
+        data["rule_category"] = normalize_category(data.get("rule_category"))
+    elif data.get("category"):
+        data["rule_category"] = normalize_category(data.get("category"))
 
-    if getattr(assertion, "required", None) is None:
-        assertion.required = True
-        changed = True
+    return data
 
-    if getattr(assertion, "blocking", None) is None:
-        assertion.blocking = False
-        changed = True
 
-    return changed
+def _assertion_scope_matches(
+    row: PolicyAssertion,
+    *,
+    rule_key: str,
+    source_id: int | None,
+    source_level: str | None,
+    property_type: str | None,
+    version_group: str | None,
+) -> bool:
+    if (row.rule_key or "") != (rule_key or ""):
+        return False
+    if int(getattr(row, "source_id", 0) or 0) != int(source_id or 0):
+        return False
+    if (getattr(row, "source_level", None) or "") != (source_level or ""):
+        return False
+    if (getattr(row, "property_type", None) or None) != (property_type or None):
+        return False
+    if (getattr(row, "version_group", None) or "") != (version_group or ""):
+        return False
+    return True
+
+
+def _next_version_number(group_rows: list[PolicyAssertion], version_group: str) -> int:
+    max_version = 0
+    for row in group_rows:
+        if (getattr(row, "version_group", None) or "") != (version_group or ""):
+            continue
+        try:
+            max_version = max(max_version, int(getattr(row, "version_number", 0) or 0))
+        except Exception:
+            continue
+    return max_version + 1
+
+
+def _set_lifecycle_state(
+    row: PolicyAssertion,
+    *,
+    governance_state: str,
+    reviewer_user_id: int | None,
+    reviewed_at: datetime | None = None,
+) -> None:
+    now = reviewed_at or _utcnow()
+    row.governance_state = governance_state
+
+    if governance_state == "draft":
+        row.review_status = "extracted"
+        row.rule_status = "candidate"
+        row.coverage_status = "candidate"
+        row.is_current = False
+    elif governance_state == "approved":
+        row.review_status = "approved"
+        row.rule_status = "approved"
+        row.coverage_status = "approved"
+        row.is_current = False
+        row.approved_at = row.approved_at or now
+        row.approved_by_user_id = row.approved_by_user_id or reviewer_user_id
+    elif governance_state == "active":
+        row.review_status = "verified"
+        row.rule_status = "active"
+        row.coverage_status = "verified"
+        row.is_current = True
+        row.approved_at = row.approved_at or now
+        row.approved_by_user_id = row.approved_by_user_id or reviewer_user_id
+        row.activated_at = row.activated_at or now
+        row.activated_by_user_id = row.activated_by_user_id or reviewer_user_id
+    elif governance_state == "replaced":
+        row.review_status = "superseded"
+        row.rule_status = "superseded"
+        row.coverage_status = "superseded"
+        row.is_current = False
+        row.replaced_at = row.replaced_at or now
+
+    row.reviewed_by_user_id = reviewer_user_id
+    row.reviewed_at = now
+
+
+def _replace_previous_current(
+    rows: list[PolicyAssertion],
+    *,
+    keeper: PolicyAssertion,
+    reviewer_user_id: int | None,
+) -> list[int]:
+    now = _utcnow()
+    replaced_ids: list[int] = []
+    for row in rows:
+        if row.id == keeper.id:
+            continue
+        if (row.version_group or "") != (keeper.version_group or ""):
+            continue
+        if (row.rule_key or "") != (keeper.rule_key or ""):
+            continue
+        if not (bool(getattr(row, "is_current", False)) or (row.governance_state or "").lower() == "active"):
+            continue
+        row.replaced_by_assertion_id = keeper.id
+        row.superseded_by_assertion_id = keeper.id
+        _set_lifecycle_state(row, governance_state="replaced", reviewer_user_id=reviewer_user_id, reviewed_at=now)
+        replaced_ids.append(int(row.id))
+    return replaced_ids
 
 
 def normalize_market_assertions(
@@ -323,175 +318,155 @@ def normalize_market_assertions(
     county: Optional[str],
     city: Optional[str],
     pha_name: Optional[str] = None,
+    reviewer_user_id: int | None = None,
+    source_id: int | None = None,
+    raw_candidates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    rows = _market_assertions(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-    )
-    src_map = _source_map_for_assertions(db, rows)
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
 
-    normalized_ids: list[int] = []
-    for row in rows:
-        src = src_map.get(row.source_id) if row.source_id is not None else None
-        if _set_phase2_fields_from_candidate(row, src):
-            normalized_ids.append(int(row.id))
+    rows = _market_assertions(db, org_id=org_id, state=st, county=cnty, city=cty, pha_name=pha)
+    source: PolicySource | None = None
+    if source_id is not None:
+        source = db.get(PolicySource, int(source_id))
 
-    db.commit()
-    return {"normalized_count": len(normalized_ids), "normalized_ids": normalized_ids}
+    if raw_candidates is None:
+        out = []
+        updated = 0
+        for row in rows:
+            raw = {
+                "rule_key": row.rule_key,
+                "rule_category": row.rule_category or row.normalized_category,
+                "source_level": getattr(row, "source_level", None),
+                "property_type": getattr(row, "property_type", None),
+                "required": getattr(row, "required", True),
+                "blocking": getattr(row, "blocking", False),
+                "confidence": getattr(row, "confidence", 0.0),
+                "governance_state": getattr(row, "governance_state", "draft"),
+                "rule_status": getattr(row, "rule_status", "candidate"),
+                "normalized_version": getattr(row, "normalized_version", "v1"),
+                "version_group": getattr(row, "version_group", None),
+                "value_json": getattr(row, "value_json", None),
+                "source_citation": getattr(row, "source_citation", None),
+                "raw_excerpt": getattr(row, "raw_excerpt", None),
+                "source_id": getattr(row, "source_id", None),
+                "state": row.state,
+                "county": row.county,
+                "city": row.city,
+                "pha_name": getattr(row, "pha_name", None),
+            }
+            candidate = normalize_rule_candidate(raw)
+            if candidate is None:
+                continue
+            updates = candidate_to_update_dict(candidate, raw)
+            old_fp = assertion_fingerprint(row)
+            for key, value in updates.items():
+                setattr(row, key, value)
+            row.change_summary = None if old_fp == candidate.fingerprint else "normalized_fields_updated"
+            updated += 1
+            out.append(
+                {
+                    "assertion_id": int(row.id),
+                    "rule_key": row.rule_key,
+                    "fingerprint": candidate.fingerprint,
+                    "changed": old_fp != candidate.fingerprint,
+                }
+            )
+        db.commit()
+        return {"normalized_count": updated, "items": out}
 
-
-def detect_assertion_diff(
-    active_assertions: list[PolicyAssertion],
-    candidate_assertion: PolicyAssertion,
-) -> dict[str, Any]:
-    candidate_fp = assertion_fingerprint(candidate_assertion)
-    if not active_assertions:
-        return {
-            "status": "new_rule",
-            "changed": True,
-            "candidate_fingerprint": candidate_fp,
-            "active_fingerprints": [],
-            "matched_active_assertion_id": None,
-        }
-
-    active_fps = {assertion_fingerprint(row): row for row in active_assertions}
-    if candidate_fp in active_fps:
-        return {
-            "status": "unchanged",
-            "changed": False,
-            "candidate_fingerprint": candidate_fp,
-            "active_fingerprints": list(active_fps.keys()),
-            "matched_active_assertion_id": int(active_fps[candidate_fp].id),
-        }
-
-    return {
-        "status": "changed",
-        "changed": True,
-        "candidate_fingerprint": candidate_fp,
-        "active_fingerprints": list(active_fps.keys()),
-        "matched_active_assertion_id": None,
-    }
-
-
-def apply_governance_lifecycle(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str] = None,
-    reviewer_user_id: Optional[int] = None,
-) -> dict[str, Any]:
-    rows = _market_assertions(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-    )
-
-    grouped: dict[str, list[PolicyAssertion]] = {}
-    for row in rows:
-        key = row.version_group or f"{getattr(row, 'source_level', 'local')}:{row.rule_key}:{getattr(row, 'property_type', None) or 'all'}"
-        grouped.setdefault(key, []).append(row)
-
-    activated_ids: list[int] = []
-    approved_ids: list[int] = []
-    replaced_ids: list[int] = []
+    existing_rows = rows
+    created_ids: list[int] = []
+    updated_ids: list[int] = []
     unchanged_ids: list[int] = []
-    now = datetime.utcnow()
+    skipped: list[dict[str, Any]] = []
 
-    for _, group in grouped.items():
-        actives = _active_assertions_for_version_group(group, version_group=group[0].version_group or "")
-        candidates = [
-            row for row in group
-            if (row.governance_state or "").lower() in {"draft", "approved"}
-            and (row.review_status or "").lower() in {"verified", "extracted", "needs_recheck", "approved"}
+    for raw in raw_candidates:
+        payload = _coerce_candidate(
+            raw,
+            source=source,
+            fallback_state=st,
+            fallback_county=cnty,
+            fallback_city=cty,
+            fallback_pha_name=pha,
+        )
+        candidate = normalize_rule_candidate(payload)
+        if candidate is None:
+            skipped.append({"reason": "unrecognized_rule", "raw": raw})
+            continue
+
+        scoped_rows = [
+            row for row in existing_rows
+            if _assertion_scope_matches(
+                row,
+                rule_key=candidate.rule_key,
+                source_id=payload.get("source_id"),
+                source_level=candidate.source_level,
+                property_type=candidate.property_type,
+                version_group=candidate.version_group,
+            )
         ]
-        if not candidates:
+
+        matched = None
+        for row in scoped_rows:
+            if candidate_matches_assertion(candidate, row):
+                matched = row
+                break
+
+        if matched is not None:
+            # Refresh metadata but keep lifecycle stable.
+            updates = candidate_to_update_dict(candidate, payload)
+            for key, value in updates.items():
+                setattr(matched, key, value)
+            matched.change_summary = None
+            updated_ids.append(int(matched.id))
+            unchanged_ids.append(int(matched.id))
             continue
 
-        ordered_candidates = sorted(
-            candidates,
-            key=lambda row: (
-                float(getattr(row, "confidence", 0.0) or 0.0),
-                int(getattr(row, "version_number", 1) or 1),
-                int(getattr(row, "id", 0) or 0),
-            ),
-            reverse=True,
+        next_version = _next_version_number(scoped_rows, candidate.version_group)
+        updates = candidate_to_update_dict(candidate, payload)
+        row = PolicyAssertion(
+            org_id=org_id,
+            source_id=payload.get("source_id"),
+            source_version_id=payload.get("source_version_id"),
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            program_type=_norm_text(payload.get("program_type")),
+            priority=int(payload.get("priority") or 100),
+            source_rank=int(payload.get("source_rank") or 100),
+            assertion_type=_norm_text(payload.get("assertion_type")) or "document_reference",
+            effective_date=payload.get("effective_date") or payload.get("effective_at"),
+            expires_at=payload.get("expires_at"),
+            stale_after=payload.get("stale_after"),
+            source_freshness_status=_norm_text(payload.get("source_freshness_status")),
+            version_number=next_version,
+            extracted_at=_utcnow(),
+            **updates,
         )
-        winner = ordered_candidates[0]
-        diff = detect_assertion_diff(actives, winner)
-
-        winner.reviewed_by_user_id = reviewer_user_id
-        winner.reviewed_at = now
-
-        if diff["status"] == "unchanged":
-            winner.governance_state = "approved"
-            winner.rule_status = "active"
-            winner.review_status = "verified"
-            approved_ids.append(int(winner.id))
-            unchanged_ids.append(int(winner.id))
-
-            for active in actives:
-                if active.id != diff["matched_active_assertion_id"]:
-                    active.governance_state = "replaced"
-                    active.rule_status = "superseded"
-                    active.review_status = "superseded"
-                    active.superseded_by_assertion_id = diff["matched_active_assertion_id"]
-                    active.reviewed_by_user_id = reviewer_user_id
-                    active.reviewed_at = now
-                    replaced_ids.append(int(active.id))
-            continue
-
-        winner.governance_state = "active"
-        winner.rule_status = "active"
-        winner.review_status = "verified"
-        winner.version_number = max(
-            [int(getattr(row, "version_number", 1) or 1) for row in group] + [0]
-        )
-        activated_ids.append(int(winner.id))
-
-        for active in actives:
-            if active.id == winner.id:
-                continue
-            active.governance_state = "replaced"
-            active.rule_status = "superseded"
-            active.review_status = "superseded"
-            active.superseded_by_assertion_id = winner.id
-            active.reviewed_by_user_id = reviewer_user_id
-            active.reviewed_at = now
-            replaced_ids.append(int(active.id))
-
-        for draft in ordered_candidates[1:]:
-            if draft.id == winner.id:
-                continue
-            if (draft.governance_state or "").lower() == "active":
-                continue
-            draft.governance_state = "replaced"
-            draft.rule_status = "superseded"
-            draft.review_status = "superseded"
-            draft.superseded_by_assertion_id = winner.id
-            draft.reviewed_by_user_id = reviewer_user_id
-            draft.reviewed_at = now
-            replaced_ids.append(int(draft.id))
+        row.review_status = "extracted"
+        row.rule_status = "candidate"
+        row.coverage_status = "candidate"
+        row.is_current = False
+        row.change_summary = "new_candidate_from_normalization"
+        db.add(row)
+        db.flush()
+        existing_rows.append(row)
+        created_ids.append(int(row.id))
 
     db.commit()
     return {
-        "activated_count": len(activated_ids),
-        "activated_ids": activated_ids,
-        "approved_count": len(approved_ids),
-        "approved_ids": approved_ids,
-        "replaced_count": len(replaced_ids),
-        "replaced_ids": replaced_ids,
+        "normalized_count": len(created_ids) + len(updated_ids),
+        "created_count": len(created_ids),
+        "created_ids": created_ids,
+        "updated_count": len(updated_ids),
+        "updated_ids": updated_ids,
         "unchanged_count": len(unchanged_ids),
         "unchanged_ids": unchanged_ids,
+        "skipped": skipped,
     }
 
 
@@ -503,68 +478,40 @@ def auto_verify_market_assertions(
     county: Optional[str],
     city: Optional[str],
     pha_name: Optional[str] = None,
-    reviewer_user_id: Optional[int] = None,
-) -> dict:
-    st = _norm_state(state)
-    cnty = _norm_lower(county)
-    cty = _norm_lower(city)
-    pha = _norm_text(pha_name)
-    market_label = _market_label(st, cnty, cty, pha)
-
+    reviewer_user_id: int | None = None,
+) -> dict[str, Any]:
     rows = _market_assertions(
         db,
         org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
     )
-    src_map = _source_map_for_assertions(db, rows)
-
-    updated_ids: list[int] = []
-    now = datetime.utcnow()
-
-    for a in rows:
-        src = src_map.get(a.source_id) if a.source_id is not None else None
-        _set_phase2_fields_from_candidate(a, src)
-
-        if a.rule_key not in AUTO_VERIFY_RULE_KEYS:
+    now = _utcnow()
+    approved_ids: list[int] = []
+    active_ids: list[int] = []
+    for row in rows:
+        if (row.rule_key or "") not in AUTO_VERIFY_RULE_KEYS:
             continue
-        if (a.review_status or "").lower() not in {"extracted", "needs_recheck", "approved", "verified"}:
+        if float(row.confidence or 0.0) < 0.75:
             continue
-        if not _source_is_authoritative(src):
+        if (row.governance_state or "").lower() == "active":
+            row.is_current = True
+            active_ids.append(int(row.id))
             continue
-
-        a.review_status = "verified"
-        a.governance_state = "approved"
-        a.rule_status = "candidate"
-        a.confidence = max(float(a.confidence or 0.0), _confidence_for(a.rule_key, src))
-        a.verification_reason = "official_source_review"
-        a.reviewed_by_user_id = reviewer_user_id
-        a.reviewed_at = now
-        a.stale_after = None
-        a.normalized_category = _category_for_verified(a)
-        a.rule_category = a.rule_category or a.normalized_category
-        a.coverage_status = _coverage_status_for_verified(a)
-        a.source_freshness_status = getattr(src, "freshness_status", None) if src else None
-
-        auto_note = (
-            f"Auto-verified for {market_label} from authoritative source: {src.title or src.url}"
-            if src
-            else f"Auto-verified for {market_label} from authoritative source"
-        )
-        existing_note = (a.review_notes or "").strip()
-        a.review_notes = auto_note if not existing_note else existing_note
-        if not a.source_citation and src is not None:
-            a.source_citation = src.url
-
-        updated_ids.append(a.id)
-
+        if float(row.confidence or 0.0) >= 0.9:
+            _set_lifecycle_state(row, governance_state="active", reviewer_user_id=reviewer_user_id, reviewed_at=now)
+            active_ids.append(int(row.id))
+        else:
+            _set_lifecycle_state(row, governance_state="approved", reviewer_user_id=reviewer_user_id, reviewed_at=now)
+            approved_ids.append(int(row.id))
     db.commit()
-
     return {
-        "updated_count": len(updated_ids),
-        "updated_ids": updated_ids,
+        "approved_count": len(approved_ids),
+        "approved_ids": approved_ids,
+        "active_count": len(active_ids),
+        "active_ids": active_ids,
     }
 
 
@@ -576,22 +523,146 @@ def supersede_replaced_assertions(
     county: Optional[str],
     city: Optional[str],
     pha_name: Optional[str] = None,
-    reviewer_user_id: Optional[int] = None,
-) -> dict:
-    lifecycle = apply_governance_lifecycle(
+    reviewer_user_id: int | None = None,
+) -> dict[str, Any]:
+    rows = _market_assertions(
         db,
         org_id=org_id,
         state=state,
         county=county,
         city=city,
         pha_name=pha_name,
-        reviewer_user_id=reviewer_user_id,
     )
+    by_group: dict[tuple[str, str], list[PolicyAssertion]] = {}
+    for row in rows:
+        key = ((row.version_group or ""), (row.rule_key or ""))
+        by_group.setdefault(key, []).append(row)
+
+    replaced_ids: list[int] = []
+    kept_ids: list[int] = []
+    for _, group in by_group.items():
+        ordered = sorted(
+            group,
+            key=lambda x: (
+                1 if bool(getattr(x, "is_current", False)) else 0,
+                1 if (x.governance_state or "").lower() == "active" else 0,
+                1 if (x.governance_state or "").lower() == "approved" else 0,
+                float(x.confidence or 0.0),
+                int(x.version_number or 0),
+                int(x.id or 0),
+            ),
+            reverse=True,
+        )
+        keeper = ordered[0]
+        kept_ids.append(int(keeper.id))
+        for row in ordered[1:]:
+            if (row.governance_state or "").lower() == "replaced":
+                replaced_ids.append(int(row.id))
+                continue
+            row.replaced_by_assertion_id = keeper.id
+            row.superseded_by_assertion_id = keeper.id
+            _set_lifecycle_state(row, governance_state="replaced", reviewer_user_id=reviewer_user_id)
+            replaced_ids.append(int(row.id))
+    db.commit()
     return {
-        "superseded_count": int(lifecycle.get("replaced_count", 0)),
-        "superseded_ids": lifecycle.get("replaced_ids", []),
-        "activated_count": int(lifecycle.get("activated_count", 0)),
-        "activated_ids": lifecycle.get("activated_ids", []),
+        "kept_count": len(kept_ids),
+        "kept_ids": kept_ids,
+        "replaced_count": len(replaced_ids),
+        "replaced_ids": replaced_ids,
+    }
+
+
+def apply_governance_lifecycle(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    rows = _market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    now = _utcnow()
+    approved_ids: list[int] = []
+    active_ids: list[int] = []
+    replaced_ids: list[int] = []
+
+    by_group: dict[tuple[str, str], list[PolicyAssertion]] = {}
+    for row in rows:
+        key = ((row.version_group or ""), (row.rule_key or ""))
+        by_group.setdefault(key, []).append(row)
+
+    for _, group in by_group.items():
+        ordered = sorted(
+            group,
+            key=lambda x: (
+                float(x.confidence or 0.0),
+                int(x.version_number or 0),
+                int(x.id or 0),
+            ),
+            reverse=True,
+        )
+        keeper = ordered[0]
+
+        target_state = "approved"
+        if auto_activate and float(keeper.confidence or 0.0) >= 0.85:
+            target_state = "active"
+
+        _set_lifecycle_state(keeper, governance_state=target_state, reviewer_user_id=reviewer_user_id, reviewed_at=now)
+        if target_state == "active":
+            active_ids.append(int(keeper.id))
+            replaced_ids.extend(_replace_previous_current(group, keeper=keeper, reviewer_user_id=reviewer_user_id))
+        else:
+            approved_ids.append(int(keeper.id))
+
+        for row in ordered[1:]:
+            if row.id == keeper.id:
+                continue
+            if candidate_matches_assertion(
+                normalize_rule_candidate(
+                    {
+                        "rule_key": row.rule_key,
+                        "rule_category": row.rule_category or row.normalized_category,
+                        "source_level": row.source_level,
+                        "property_type": row.property_type,
+                        "required": row.required,
+                        "blocking": row.blocking,
+                        "confidence": row.confidence,
+                        "governance_state": row.governance_state,
+                        "rule_status": row.rule_status,
+                        "normalized_version": row.normalized_version,
+                        "version_group": row.version_group,
+                        "value_json": row.value_json,
+                        "source_citation": row.source_citation,
+                        "raw_excerpt": row.raw_excerpt,
+                    }
+                ) or {},
+                row,
+            ):
+                pass
+            if (row.governance_state or "").lower() not in {"active", "replaced"}:
+                _set_lifecycle_state(row, governance_state="replaced", reviewer_user_id=reviewer_user_id, reviewed_at=now)
+                row.replaced_by_assertion_id = keeper.id
+                row.superseded_by_assertion_id = keeper.id
+                replaced_ids.append(int(row.id))
+
+    db.commit()
+    return {
+        "approved_count": len(sorted(set(approved_ids))),
+        "approved_ids": sorted(set(approved_ids)),
+        "active_count": len(sorted(set(active_ids))),
+        "active_ids": sorted(set(active_ids)),
+        "replaced_count": len(sorted(set(replaced_ids))),
+        "replaced_ids": sorted(set(replaced_ids)),
     }
 
 
@@ -603,9 +674,8 @@ def cleanup_market_stale_assertions(
     county: Optional[str],
     city: Optional[str],
     pha_name: Optional[str] = None,
-    reviewer_user_id: Optional[int] = None,
-    archive_extracted_duplicates: bool = True,
-) -> dict:
+    reviewer_user_id: int | None = None,
+) -> dict[str, Any]:
     rows = _market_assertions(
         db,
         org_id=org_id,
@@ -615,7 +685,7 @@ def cleanup_market_stale_assertions(
         pha_name=pha_name,
     )
 
-    now = datetime.utcnow()
+    now = _utcnow()
     cleaned_ids: list[int] = []
     stale_resolved_ids: list[int] = []
     archived_duplicate_ids: list[int] = []
@@ -627,7 +697,7 @@ def cleanup_market_stale_assertions(
             row.source_id,
             row.county,
             row.city,
-            row.pha_name,
+            getattr(row, "pha_name", None),
         )
         by_group.setdefault(key, []).append(row)
 
@@ -635,6 +705,7 @@ def cleanup_market_stale_assertions(
         group = sorted(group, key=lambda x: (float(x.confidence or 0.0), int(x.id or 0)), reverse=True)
         keeper = group[0]
         for row in group[1:]:
+            original_status = row.review_status
             if (row.governance_state or "").lower() == "active":
                 continue
             if row.review_status not in {"stale", "needs_recheck", "extracted", "approved", "verified"}:
@@ -643,12 +714,15 @@ def cleanup_market_stale_assertions(
             row.governance_state = "replaced"
             row.rule_status = "superseded"
             row.superseded_by_assertion_id = keeper.id
+            row.replaced_by_assertion_id = keeper.id
             row.reviewed_by_user_id = reviewer_user_id
             row.reviewed_at = now
             row.stale_after = None
             row.coverage_status = "superseded"
+            row.is_current = False
+            row.replaced_at = now
             cleaned_ids.append(int(row.id))
-            if row.review_status in {"stale", "needs_recheck"}:
+            if original_status in {"stale", "needs_recheck"}:
                 stale_resolved_ids.append(int(row.id))
             else:
                 archived_duplicate_ids.append(int(row.id))
@@ -664,7 +738,7 @@ def cleanup_market_stale_assertions(
         pha_name=pha_name,
     )
     stale_remaining = [
-        a.id
+        int(a.id)
         for a in remaining_rows
         if (a.review_status or "").lower() in {"stale", "needs_recheck"}
         and a.superseded_by_assertion_id is None
@@ -679,4 +753,112 @@ def cleanup_market_stale_assertions(
         "archived_duplicate_ids": archived_duplicate_ids,
         "stale_items_remaining": len(stale_remaining),
         "stale_item_ids_remaining": stale_remaining,
+    }
+
+
+def diff_active_rules_for_source(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    source_id: int,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    raw_candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    source = db.get(PolicySource, int(source_id))
+    active_rows = [
+        row for row in _active_assertions(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+        if int(getattr(row, "source_id", 0) or 0) == int(source_id)
+    ]
+
+    candidate_fingerprints: dict[str, dict[str, Any]] = {}
+    changed: list[dict[str, Any]] = []
+    unchanged: list[dict[str, Any]] = []
+    new_candidates: list[dict[str, Any]] = []
+
+    for raw in raw_candidates:
+        payload = _coerce_candidate(
+            raw,
+            source=source,
+            fallback_state=state,
+            fallback_county=county,
+            fallback_city=city,
+            fallback_pha_name=pha_name,
+        )
+        candidate = normalize_rule_candidate(payload)
+        if candidate is None:
+            continue
+        key = f"{candidate.version_group}|{candidate.rule_key}"
+        candidate_fingerprints[key] = {"candidate": candidate, "raw": payload}
+
+    active_map: dict[str, PolicyAssertion] = {}
+    for row in active_rows:
+        key = f"{row.version_group}|{row.rule_key}"
+        active_map[key] = row
+
+    for key, wrapped in candidate_fingerprints.items():
+        candidate = wrapped["candidate"]
+        row = active_map.get(key)
+        if row is None:
+            new_candidates.append(
+                {
+                    "rule_key": candidate.rule_key,
+                    "version_group": candidate.version_group,
+                    "fingerprint": candidate.fingerprint,
+                    "reason": "no_active_rule",
+                }
+            )
+            continue
+        if candidate_matches_assertion(candidate, row):
+            unchanged.append(
+                {
+                    "assertion_id": int(row.id),
+                    "rule_key": row.rule_key,
+                    "version_group": row.version_group,
+                    "fingerprint": candidate.fingerprint,
+                }
+            )
+        else:
+            changed.append(
+                {
+                    "assertion_id": int(row.id),
+                    "rule_key": row.rule_key,
+                    "version_group": row.version_group,
+                    "old_fingerprint": assertion_fingerprint(row),
+                    "new_fingerprint": candidate.fingerprint,
+                    "reason": diff_reason(candidate, row),
+                }
+            )
+
+    missing_from_new_snapshot: list[dict[str, Any]] = []
+    for key, row in active_map.items():
+        if key not in candidate_fingerprints:
+            missing_from_new_snapshot.append(
+                {
+                    "assertion_id": int(row.id),
+                    "rule_key": row.rule_key,
+                    "version_group": row.version_group,
+                    "reason": "missing_from_latest_source_snapshot",
+                }
+            )
+
+    return {
+        "source_id": int(source_id),
+        "changed_count": len(changed),
+        "changed": changed,
+        "unchanged_count": len(unchanged),
+        "unchanged": unchanged,
+        "new_count": len(new_candidates),
+        "new": new_candidates,
+        "missing_count": len(missing_from_new_snapshot),
+        "missing": missing_from_new_snapshot,
     }
