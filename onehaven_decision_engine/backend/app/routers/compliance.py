@@ -714,6 +714,8 @@ def property_brief(
         county=getattr(prop, "county", None),
         city=getattr(prop, "city", None),
         pha_name=None,
+        property_id=int(property_id),
+        property=prop,
     )
 
 

@@ -544,6 +544,8 @@ def _safe_property_policy_brief(
             county=getattr(prop, "county", None),
             city=getattr(prop, "city", None),
             pha_name=profile_summary.get("pha_name"),
+            property_id=int(getattr(prop, "id")),
+            property=prop,
         ) or {}
     except TypeError:
         try:
@@ -554,6 +556,8 @@ def _safe_property_policy_brief(
                 county=getattr(prop, "county", None),
                 city=getattr(prop, "city", None),
                 pha_name=profile_summary.get("pha_name"),
+                property_id=int(getattr(prop, "id")),
+                property=prop,
             ) or {}
         except Exception:
             return {}
@@ -739,11 +743,7 @@ def build_property_inspection_readiness(
         db,
         org_id=org_id,
         property_id=property_id,
-    )
-    rebuild_property_projection(
-        db,
-        org_id=org_id,
-        property_id=property_id,
+        property=prop,
     )
     readiness_summary = build_property_readiness_summary(
         db,
@@ -1302,5 +1302,3 @@ def build_property_document_stack_snapshot(
         "documents": documents,
         "readiness_summary": readiness,
     }
-
-

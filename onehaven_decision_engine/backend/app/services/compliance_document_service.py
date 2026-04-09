@@ -11,7 +11,11 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .policy_projection_service import build_property_projection_snapshot, rebuild_property_projection, sync_document_evidence_for_property
+from .policy_projection_service import (
+    build_property_projection_snapshot,
+    rebuild_property_projection,
+    sync_document_evidence_for_property,
+)
 from .virus_scanning_service import scan_file
 
 

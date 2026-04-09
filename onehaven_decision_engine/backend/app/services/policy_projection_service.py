@@ -1525,7 +1525,19 @@ def build_property_compliance_brief(
 
     projection_snapshot = None
     if scope.property_id is not None and org_id is not None:
-        projection_snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=int(scope.property_id))
+        try:
+            projection_snapshot = rebuild_property_projection(
+                db,
+                org_id=int(org_id),
+                property_id=int(scope.property_id),
+                property=property,
+            )
+        except Exception:
+            projection_snapshot = build_property_projection_snapshot(
+                db,
+                org_id=int(org_id),
+                property_id=int(scope.property_id),
+            )
 
     blockers = list(summary.get("blocking_items") or [])
     if projection_snapshot and projection_snapshot.get("blockers"):
