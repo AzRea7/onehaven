@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import normalize_categories
@@ -18,7 +18,6 @@ from app.policy_models import (
     PropertyComplianceProjection,
     PropertyComplianceProjectionItem,
 )
-
 
 RULE_KEY_TO_CATEGORY = {
     "rental_registration_required": "registration",
@@ -66,6 +65,44 @@ ACTIVE_GOVERNANCE = {"active", "approved"}
 ACTIVE_REVIEW = {"verified", "accepted", "approved", "projected"}
 FAILING_EVIDENCE = {"fail", "failed", "denied", "expired", "missing", "blocked"}
 PASSING_EVIDENCE = {"pass", "passed", "verified", "satisfied", "confirmed", "complete"}
+
+SOURCE_LEVEL_PRECEDENCE = {
+    "property": 500,
+    "program": 400,
+    "local": 300,
+    "county": 250,
+    "city": 240,
+    "state": 200,
+    "federal": 100,
+    "other": 50,
+    "unknown": 0,
+}
+
+RULE_CATEGORY_COST_DEFAULTS: dict[str, float] = {
+    "registration": 250.0,
+    "inspection": 400.0,
+    "occupancy": 350.0,
+    "safety": 175.0,
+    "utilities": 125.0,
+    "permits": 300.0,
+    "jurisdiction": 200.0,
+    "jurisdiction_blocker": 250.0,
+    "governance": 0.0,
+    "other": 150.0,
+}
+
+RULE_CATEGORY_DAYS_DEFAULTS: dict[str, int] = {
+    "registration": 7,
+    "inspection": 10,
+    "occupancy": 7,
+    "safety": 3,
+    "utilities": 2,
+    "permits": 8,
+    "jurisdiction": 5,
+    "jurisdiction_blocker": 7,
+    "governance": 0,
+    "other": 4,
+}
 
 
 def _utcnow() -> datetime:
@@ -119,6 +156,11 @@ class PropertyScope:
     property_type: str | None
     jurisdiction_slug: str | None
     address: str | None
+
+
+def _source_level_rank(value: Optional[str]) -> int:
+    raw = str(value or "").strip().lower()
+    return SOURCE_LEVEL_PRECEDENCE.get(raw, SOURCE_LEVEL_PRECEDENCE["unknown"])
 
 
 def _specificity_score(assertion: PolicyAssertion, *, county: str | None, city: str | None, pha_name: str | None) -> int:
@@ -194,10 +236,12 @@ def _query_inherited_assertions(
 
     out.sort(
         key=lambda r: (
+            -_source_level_rank(getattr(r, "source_level", None)),
             -_specificity_score(r, county=cnty, city=cty, pha_name=pha),
             -float(getattr(r, "confidence", 0.0) or 0.0),
             int(getattr(r, "priority", 100) or 100),
             int(getattr(r, "source_rank", 100) or 100),
+            -int(getattr(r, "version_number", 1) or 1),
             int(getattr(r, "id", 0) or 0),
         )
     )
@@ -250,7 +294,9 @@ def _rule_value_state(assertion: PolicyAssertion) -> str:
     return "conditional"
 
 
-def _category_for_assertion(assertion: PolicyAssertion) -> str:
+def _category_for_assertion(assertion: PolicyAssertion | None) -> str:
+    if assertion is None:
+        return "other"
     normalized = str(getattr(assertion, "normalized_category", None) or "").strip().lower()
     if normalized:
         return normalized
@@ -271,7 +317,65 @@ def _merge_effective_assertions(assertions: list[PolicyAssertion]) -> dict[str, 
             continue
         if rule_key not in out:
             out[rule_key] = row
+            continue
+
+        current = out[rule_key]
+        challenger_score = (
+            _source_level_rank(getattr(row, "source_level", None)),
+            _specificity_score(
+                row,
+                county=_norm_lower(getattr(row, "county", None)),
+                city=_norm_lower(getattr(row, "city", None)),
+                pha_name=_norm_text(getattr(row, "pha_name", None)),
+            ),
+            float(getattr(row, "confidence", 0.0) or 0.0),
+            -(int(getattr(row, "priority", 100) or 100)),
+            -(int(getattr(row, "source_rank", 100) or 100)),
+            int(getattr(row, "version_number", 1) or 1),
+            int(getattr(row, "id", 0) or 0),
+        )
+        incumbent_score = (
+            _source_level_rank(getattr(current, "source_level", None)),
+            _specificity_score(
+                current,
+                county=_norm_lower(getattr(current, "county", None)),
+                city=_norm_lower(getattr(current, "city", None)),
+                pha_name=_norm_text(getattr(current, "pha_name", None)),
+            ),
+            float(getattr(current, "confidence", 0.0) or 0.0),
+            -(int(getattr(current, "priority", 100) or 100)),
+            -(int(getattr(current, "source_rank", 100) or 100)),
+            int(getattr(current, "version_number", 1) or 1),
+            int(getattr(current, "id", 0) or 0),
+        )
+        if challenger_score > incumbent_score:
+            out[rule_key] = row
     return out
+
+
+def _group_assertions_by_rule(assertions: list[PolicyAssertion]) -> dict[str, list[PolicyAssertion]]:
+    grouped: dict[str, list[PolicyAssertion]] = {}
+    for row in assertions:
+        if not _is_effective_assertion(row):
+            continue
+        rule_key = str(getattr(row, "rule_key", "") or "").strip()
+        if not rule_key:
+            continue
+        grouped.setdefault(rule_key, []).append(row)
+
+    for key, rows in grouped.items():
+        rows.sort(
+            key=lambda r: (
+                -_source_level_rank(getattr(r, "source_level", None)),
+                -float(getattr(r, "confidence", 0.0) or 0.0),
+                int(getattr(r, "priority", 100) or 100),
+                int(getattr(r, "source_rank", 100) or 100),
+                -int(getattr(r, "version_number", 1) or 1),
+                int(getattr(r, "id", 0) or 0),
+            )
+        )
+        grouped[key] = rows
+    return grouped
 
 
 def _coverage_row(
@@ -377,7 +481,7 @@ def _build_property_scope(
     prop_state = _norm_state(getattr(prop, "state", None) if prop is not None else state)
     prop_county = _norm_lower(getattr(prop, "county", None) if prop is not None else county)
     prop_city = _norm_lower(getattr(prop, "city", None) if prop is not None else city)
-    prop_pha = _norm_text(pha_name)
+    prop_pha = _norm_text(pha_name or (getattr(prop, "program_type", None) if prop is not None else None))
     prop_type = _norm_text(getattr(prop, "property_type", None) if prop is not None else None)
     jurisdiction_slug = _norm_text(getattr(prop, "jurisdiction_slug", None) if prop is not None else None)
     if jurisdiction_slug is None:
@@ -497,11 +601,13 @@ def build_policy_summary(
 
 def _document_rule_keys(category: str, metadata: dict[str, Any] | None = None, extracted_text: str | None = None) -> list[str]:
     out = list(DOCUMENT_CATEGORY_RULE_MAP.get(str(category or "other_evidence"), []))
-    joined = " ".join([
-        str(category or ""),
-        str((metadata or {}).get("label") or ""),
-        str(extracted_text or ""),
-    ]).lower()
+    joined = " ".join(
+        [
+            str(category or ""),
+            str((metadata or {}).get("label") or ""),
+            str(extracted_text or ""),
+        ]
+    ).lower()
     if "registration" in joined:
         out.append("rental_registration_required")
     if "certificate" in joined or "occupancy" in joined:
@@ -567,6 +673,7 @@ def _upsert_evidence(
             observed_at=observed_at,
         )
         db.add(row)
+
     row.projection_item_id = projection_item_id
     row.policy_assertion_id = policy_assertion_id
     row.compliance_document_id = compliance_document_id
@@ -627,6 +734,7 @@ def sync_document_evidence_for_property(
         satisfies_rule = False if status == "blocked" else True
         if not rule_keys:
             rule_keys = [f"document_category::{str(row.get('category') or 'other_evidence')}"]
+
         for rule_key in rule_keys:
             evidence_key = f"document:{int(row['id'])}:{rule_key}"
             _upsert_evidence(
@@ -654,6 +762,7 @@ def sync_document_evidence_for_property(
             )
             created_or_updated += 1
             linked_rule_keys.add(rule_key)
+
     return {
         "ok": True,
         "property_id": int(property_id),
@@ -706,6 +815,7 @@ def sync_inspection_evidence_for_property(
     for row in rows:
         if row.get("inspection_item_id") is None:
             continue
+
         rule_keys = _inspection_rule_keys(
             str(row.get("code") or ""),
             category=row.get("category"),
@@ -714,9 +824,11 @@ def sync_inspection_evidence_for_property(
         item_status = str(row.get("result_status") or "").lower().strip()
         if not item_status:
             item_status = "fail" if bool(row.get("details")) and bool(row.get("severity", 0) or 0) >= 3 else "pass"
+
         evidence_status = "failed" if item_status in {"fail", "blocked", "inconclusive"} else "verified"
         satisfies_rule = evidence_status == "verified"
         proof_state = "confirmed"
+
         for rule_key in rule_keys:
             evidence_key = f"inspection_item:{int(row['inspection_item_id'])}:{rule_key}"
             _upsert_evidence(
@@ -744,6 +856,7 @@ def sync_inspection_evidence_for_property(
             )
             created_or_updated += 1
             linked_rule_keys.add(rule_key)
+
     return {
         "ok": True,
         "property_id": int(property_id),
@@ -763,7 +876,13 @@ def _current_projection(db: Session, *, org_id: int, property_id: int) -> Proper
     )
 
 
-def _current_projection_items(db: Session, *, org_id: int, property_id: int, projection_id: int) -> list[PropertyComplianceProjectionItem]:
+def _current_projection_items(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    projection_id: int,
+) -> list[PropertyComplianceProjectionItem]:
     return list(
         db.scalars(
             select(PropertyComplianceProjectionItem).where(
@@ -797,52 +916,172 @@ def _build_evidence_index(rows: list[PropertyComplianceEvidence]) -> dict[str, l
     return out
 
 
+def _latest_datetime(values: list[datetime | None]) -> datetime | None:
+    filtered = [v for v in values if v is not None]
+    return max(filtered) if filtered else None
+
+
+def _estimate_cost(rule_category: str, assertion: PolicyAssertion | None, evidence_rows: list[PropertyComplianceEvidence]) -> float | None:
+    if assertion is not None:
+        payload = _loads(getattr(assertion, "value_json", None), {})
+        if isinstance(payload, dict):
+            for key in ("estimated_cost", "cost_estimate", "projected_cost"):
+                raw = payload.get(key)
+                if raw is not None:
+                    try:
+                        return float(raw)
+                    except Exception:
+                        pass
+
+    for row in evidence_rows:
+        details = _loads(getattr(row, "source_details_json", None), {})
+        raw = details.get("estimated_cost")
+        if raw is not None:
+            try:
+                return float(raw)
+            except Exception:
+                continue
+
+    return RULE_CATEGORY_COST_DEFAULTS.get(rule_category, RULE_CATEGORY_COST_DEFAULTS["other"])
+
+
+def _estimate_days(rule_category: str, assertion: PolicyAssertion | None, evidence_rows: list[PropertyComplianceEvidence]) -> int | None:
+    if assertion is not None:
+        payload = _loads(getattr(assertion, "value_json", None), {})
+        if isinstance(payload, dict):
+            for key in ("estimated_days", "days_to_complete", "projected_days"):
+                raw = payload.get(key)
+                if raw is not None:
+                    try:
+                        return int(raw)
+                    except Exception:
+                        pass
+
+    for row in evidence_rows:
+        details = _loads(getattr(row, "source_details_json", None), {})
+        raw = details.get("estimated_days")
+        if raw is not None:
+            try:
+                return int(raw)
+            except Exception:
+                continue
+
+    return RULE_CATEGORY_DAYS_DEFAULTS.get(rule_category, RULE_CATEGORY_DAYS_DEFAULTS["other"])
+
+
+def _compute_proof_state(evidence_rows: list[PropertyComplianceEvidence]) -> str:
+    if not evidence_rows:
+        return "unknown"
+
+    states = {str(getattr(r, "proof_state", "") or "").lower() for r in evidence_rows}
+    if "conflicting" in states:
+        return "conflicting"
+    if "confirmed" in states and ("inferred" in states or "unknown" in states):
+        return "confirmed"
+    if "confirmed" in states:
+        return "confirmed"
+    if "stale" in states:
+        return "stale"
+    if "inferred" in states:
+        return "inferred"
+    return "unknown"
+
+
+def _projection_status_from_counts(*, blocking: int, stale: int, unknown: int, conflicting: int) -> str:
+    if conflicting > 0:
+        return "conflicting"
+    if blocking > 0:
+        return "blocked"
+    if stale > 0:
+        return "stale"
+    if unknown > 0:
+        return "partial"
+    return "computed"
+
+
+def _layer_summary_for_rule(assertions: list[PolicyAssertion]) -> dict[str, Any]:
+    return {
+        "layers": [
+            {
+                "assertion_id": int(getattr(row, "id", 0) or 0),
+                "source_level": getattr(row, "source_level", None),
+                "jurisdiction_slug": getattr(row, "jurisdiction_slug", None),
+                "rule_status": getattr(row, "rule_status", None),
+                "governance_state": getattr(row, "governance_state", None),
+                "confidence": float(getattr(row, "confidence", 0.0) or 0.0),
+                "priority": int(getattr(row, "priority", 100) or 100),
+                "source_rank": int(getattr(row, "source_rank", 100) or 100),
+                "version_number": int(getattr(row, "version_number", 1) or 1),
+                "required": bool(getattr(row, "required", True)),
+                "blocking": bool(getattr(row, "blocking", False)),
+                "source_citation": getattr(row, "source_citation", None),
+            }
+            for row in assertions
+        ]
+    }
+
+
 def _evaluate_rule(
     *,
     rule_key: str,
     assertion: PolicyAssertion | None,
+    layer_assertions: list[PolicyAssertion],
     evidence_rows: list[PropertyComplianceEvidence],
 ) -> dict[str, Any]:
     required = bool(getattr(assertion, "required", True)) if assertion is not None else True
     blocking = bool(getattr(assertion, "blocking", False)) if assertion is not None else False
     confidence = float(getattr(assertion, "confidence", 0.0) or 0.0) if assertion is not None else 0.5
     rule_category = _category_for_assertion(assertion) if assertion is not None else RULE_KEY_TO_CATEGORY.get(rule_key, "inspection")
+
     evidence_summary_parts: list[str] = []
     evidence_gap: str | None = None
+    status_reason: str | None = None
     estimated_cost: float | None = None
     estimated_days: int | None = None
 
     if not evidence_rows:
         evaluation_status = "unknown"
         evidence_status = "missing"
+        proof_state = "unknown"
         evidence_gap = "No evidence linked to this rule yet."
+        status_reason = "Required rule has no supporting or resolving property evidence."
     else:
         failing = [row for row in evidence_rows if str(getattr(row, "evidence_status", "") or "").lower() in FAILING_EVIDENCE]
         passing = [row for row in evidence_rows if str(getattr(row, "evidence_status", "") or "").lower() in PASSING_EVIDENCE]
         expired = [row for row in evidence_rows if str(getattr(row, "evidence_status", "") or "").lower() == "expired"]
+        proof_state = _compute_proof_state(evidence_rows)
+
         if failing and passing:
             evaluation_status = "conflicting"
             evidence_status = "conflicting"
             evidence_gap = "Both passing and failing evidence exist."
-        elif failing:
-            evaluation_status = "fail"
-            evidence_status = str(getattr(failing[0], "evidence_status", "failed") or "failed").lower()
-            evidence_gap = str(getattr(failing[0], "notes", None) or "Inspection or document evidence still shows an unresolved issue.")
-            estimated_cost = 250.0 if blocking or required else 100.0
-            estimated_days = 7 if blocking else 3
-        elif expired:
+            status_reason = "At least one evidence record satisfies the rule while another shows a failure or unresolved issue."
+        elif expired and not passing and not failing:
             evaluation_status = "stale"
             evidence_status = "expired"
             evidence_gap = "Evidence exists but is expired or stale."
-            estimated_days = 2
+            status_reason = "The best available evidence is no longer current."
+        elif failing:
+            evaluation_status = "fail"
+            evidence_status = str(getattr(failing[0], "evidence_status", "failed") or "failed").lower()
+            evidence_gap = str(
+                getattr(failing[0], "notes", None)
+                or "Inspection or document evidence still shows an unresolved issue."
+            )
+            status_reason = "Linked property evidence currently indicates the rule is not satisfied."
+            estimated_cost = _estimate_cost(rule_category, assertion, evidence_rows)
+            estimated_days = _estimate_days(rule_category, assertion, evidence_rows)
         elif passing:
             evaluation_status = "pass"
             evidence_status = "satisfied"
             evidence_gap = None
+            status_reason = "Linked property evidence shows the rule is satisfied."
         else:
             evaluation_status = "unknown"
             evidence_status = "unknown"
+            proof_state = _compute_proof_state(evidence_rows)
             evidence_gap = "Evidence exists but could not be confidently evaluated."
+            status_reason = "Evidence is present but does not clearly prove satisfaction or failure."
 
         for row in evidence_rows:
             details = _loads(getattr(row, "source_details_json", None), {})
@@ -850,7 +1089,16 @@ def _evaluate_rule(
             evidence_summary_parts.append(str(label))
 
     if evaluation_status == "pass":
-        blocking = False if blocking else False
+        blocking = False
+
+    latest_evidence_updated_at = _latest_datetime(
+        [getattr(r, "updated_at", None) for r in evidence_rows] + [getattr(r, "observed_at", None) for r in evidence_rows]
+    )
+    proof_confidence = max(
+        [float(getattr(r, "confidence", 0.0) or 0.0) for r in evidence_rows] + [confidence],
+        default=confidence,
+    )
+
     return {
         "rule_key": rule_key,
         "rule_category": rule_category,
@@ -858,11 +1106,26 @@ def _evaluate_rule(
         "blocking": blocking,
         "evaluation_status": evaluation_status,
         "evidence_status": evidence_status,
-        "confidence": max(0.1, confidence),
+        "proof_state": proof_state,
+        "confidence": max(0.1, proof_confidence),
         "estimated_cost": estimated_cost,
         "estimated_days": estimated_days,
         "evidence_summary": ", ".join(sorted(set(evidence_summary_parts))) or None,
         "evidence_gap": evidence_gap,
+        "status_reason": status_reason,
+        "source_citation": getattr(assertion, "source_citation", None) if assertion is not None else None,
+        "raw_excerpt": getattr(assertion, "raw_excerpt", None) if assertion is not None else None,
+        "rule_value_json": getattr(assertion, "value_json", None) if assertion is not None else None,
+        "conflicting_evidence_count": len(evidence_rows) if evaluation_status == "conflicting" else 0,
+        "required_document_kind": None,
+        "evidence_updated_at": latest_evidence_updated_at,
+        "resolution_detail": {
+            "label": _rule_label(assertion) if assertion is not None else rule_key.replace("_", " ").title(),
+            "selected_layer": getattr(assertion, "source_level", None) if assertion is not None else None,
+            "selected_assertion_id": int(getattr(assertion, "id", 0) or 0) if assertion is not None else None,
+            "merge_basis": _layer_summary_for_rule(layer_assertions),
+            "status_reason": status_reason,
+        },
     }
 
 
@@ -883,6 +1146,8 @@ def rebuild_property_projection(
         pha_name=scope.pha_name,
         statuses=None,
     )
+    grouped_assertions = _group_assertions_by_rule(assertions)
+    effective_assertions = _merge_effective_assertions(assertions)
     summary = build_policy_summary(
         db,
         assertions,
@@ -895,9 +1160,10 @@ def rebuild_property_projection(
 
     sync_document_evidence_for_property(db, org_id=org_id, property_id=property_id)
     sync_inspection_evidence_for_property(db, org_id=org_id, property_id=property_id)
+
     evidence_rows = _evidence_rows(db, org_id=org_id, property_id=property_id)
     evidence_index = _build_evidence_index(evidence_rows)
-    effective_assertions = _merge_effective_assertions(assertions)
+
     rule_keys = set(effective_assertions.keys()) | set(evidence_index.keys())
 
     current = _current_projection(db, org_id=org_id, property_id=property_id)
@@ -906,6 +1172,15 @@ def rebuild_property_projection(
         current.superseded_at = _utcnow()
         current.updated_at = _utcnow()
         db.flush()
+
+    active_assertions = list(effective_assertions.values())
+    rules_effective_at = _latest_datetime([getattr(a, "effective_date", None) for a in active_assertions])
+    last_rule_change_at = _latest_datetime(
+        [getattr(a, "activated_at", None) for a in active_assertions]
+        + [getattr(a, "approved_at", None) for a in active_assertions]
+        + [getattr(a, "updated_at", None) for a in active_assertions]
+        + [getattr(a, "created_at", None) for a in active_assertions]
+    )
 
     projection = PropertyComplianceProjection(
         org_id=org_id,
@@ -921,9 +1196,14 @@ def rebuild_property_projection(
                 "city": scope.city,
                 "pha_name": scope.pha_name,
                 "address": scope.address,
+                "property_type": scope.property_type,
                 "verified_rule_count": len(summary.get("verified_rules") or []),
+                "required_categories": summary.get("required_categories") or [],
+                "category_coverage": summary.get("category_coverage") or {},
             }
         ),
+        rules_effective_at=rules_effective_at,
+        last_rule_change_at=last_rule_change_at,
         last_projected_at=_utcnow(),
         is_current=True,
     )
@@ -933,14 +1213,29 @@ def rebuild_property_projection(
     item_rows: list[PropertyComplianceProjectionItem] = []
     impacted_rules: list[dict[str, Any]] = []
     unresolved_gaps: list[dict[str, Any]] = []
-    blocking_count = unknown_count = stale_count = conflicting_count = 0
+
+    blocking_count = 0
+    unknown_count = 0
+    stale_count = 0
+    conflicting_count = 0
+    evidence_gap_count = 0
+    confirmed_count = 0
+    inferred_count = 0
+    failing_count = 0
     cost_total = 0.0
     days_total = 0
     confidence_values: list[float] = []
 
     for rule_key in sorted(rule_keys):
         assertion = effective_assertions.get(rule_key)
-        evaluation = _evaluate_rule(rule_key=rule_key, assertion=assertion, evidence_rows=evidence_index.get(rule_key, []))
+        layer_assertions = grouped_assertions.get(rule_key, [])
+        evaluation = _evaluate_rule(
+            rule_key=rule_key,
+            assertion=assertion,
+            layer_assertions=layer_assertions,
+            evidence_rows=evidence_index.get(rule_key, []),
+        )
+
         item = PropertyComplianceProjectionItem(
             org_id=org_id,
             projection_id=int(projection.id),
@@ -956,18 +1251,21 @@ def rebuild_property_projection(
             blocking=bool(evaluation["blocking"]),
             evaluation_status=evaluation["evaluation_status"],
             evidence_status=evaluation["evidence_status"],
+            proof_state=evaluation["proof_state"],
             confidence=float(evaluation["confidence"]),
             estimated_cost=evaluation["estimated_cost"],
             estimated_days=evaluation["estimated_days"],
             evidence_summary=evaluation["evidence_summary"],
             evidence_gap=evaluation["evidence_gap"],
-            resolution_detail_json=_dumps(
-                {
-                    "label": _rule_label(assertion) if assertion is not None else rule_key.replace("_", " ").title(),
-                    "source_citation": getattr(assertion, "source_citation", None) if assertion is not None else None,
-                    "raw_excerpt": getattr(assertion, "raw_excerpt", None) if assertion is not None else None,
-                }
-            ),
+            status_reason=evaluation["status_reason"],
+            source_citation=evaluation["source_citation"],
+            raw_excerpt=evaluation["raw_excerpt"],
+            rule_value_json=evaluation["rule_value_json"],
+            resolution_detail_json=_dumps(evaluation["resolution_detail"]),
+            conflicting_evidence_count=int(evaluation["conflicting_evidence_count"]),
+            required_document_kind=evaluation["required_document_kind"],
+            last_evaluated_at=_utcnow(),
+            evidence_updated_at=evaluation["evidence_updated_at"],
         )
         db.add(item)
         db.flush()
@@ -979,14 +1277,26 @@ def rebuild_property_projection(
             evidence.policy_assertion_id = int(assertion.id) if assertion is not None else evidence.policy_assertion_id
             evidence.updated_at = _utcnow()
 
-        if item.evaluation_status in {"fail", "blocked"} and item.blocking:
-            blocking_count += 1
+        if item.proof_state == "confirmed":
+            confirmed_count += 1
+        elif item.proof_state == "inferred":
+            inferred_count += 1
+
+        if item.evidence_gap:
+            evidence_gap_count += 1
+
+        if item.evaluation_status in {"fail", "blocked"}:
+            failing_count += 1
+            if item.blocking:
+                blocking_count += 1
         elif item.evaluation_status == "unknown":
             unknown_count += 1
         elif item.evaluation_status == "stale":
             stale_count += 1
         elif item.evaluation_status == "conflicting":
             conflicting_count += 1
+            if item.blocking:
+                blocking_count += 1
 
         if item.evaluation_status in {"fail", "blocked", "unknown", "stale", "conflicting"}:
             impacted_rules.append(
@@ -995,8 +1305,10 @@ def rebuild_property_projection(
                     "evaluation_status": item.evaluation_status,
                     "evidence_status": item.evidence_status,
                     "blocking": bool(item.blocking),
+                    "source_level": item.source_level,
                 }
             )
+
         if item.evidence_gap:
             unresolved_gaps.append(
                 {
@@ -1005,32 +1317,70 @@ def rebuild_property_projection(
                     "category": item.rule_category,
                 }
             )
+
         if item.estimated_cost:
             cost_total += float(item.estimated_cost)
         if item.estimated_days:
             days_total += int(item.estimated_days)
 
     total_items = max(1, len(item_rows))
-    good_items = sum(1 for row in item_rows if row.evaluation_status == "pass")
-    readiness_score = round((good_items / total_items) * 100.0, 2)
-    if blocking_count:
-        readiness_score = max(0.0, readiness_score - (blocking_count * 20.0))
-    if unknown_count:
-        readiness_score = max(0.0, readiness_score - (unknown_count * 5.0))
-    if conflicting_count:
-        readiness_score = max(0.0, readiness_score - (conflicting_count * 10.0))
+    passing_items = sum(1 for row in item_rows if row.evaluation_status == "pass")
+    base_readiness = (passing_items / total_items) * 100.0
+
+    readiness_penalty = (
+        (blocking_count * 20.0)
+        + (unknown_count * 6.0)
+        + (stale_count * 8.0)
+        + (conflicting_count * 12.0)
+        + (evidence_gap_count * 4.0)
+    )
+    readiness_score = round(max(0.0, min(100.0, base_readiness - readiness_penalty)), 2)
+
     confidence_score = round(sum(confidence_values) / max(1, len(confidence_values)), 3)
+
+    layer_confidence = {}
+    for row in active_assertions:
+        level = str(getattr(row, "source_level", "unknown") or "unknown").lower()
+        layer_confidence.setdefault(level, [])
+        layer_confidence[level].append(float(getattr(row, "confidence", 0.0) or 0.0))
+    source_confidence = {
+        level: round(sum(values) / max(1, len(values)), 3)
+        for level, values in layer_confidence.items()
+    }
+
+    projection_reason = {
+        "merge_strategy": "highest_precedence_effective_rule_per_rule_key",
+        "source_level_precedence": SOURCE_LEVEL_PRECEDENCE,
+        "coverage_status": summary.get("coverage", {}).get("coverage_status"),
+        "production_readiness": summary.get("coverage", {}).get("production_readiness"),
+        "completeness_status": summary.get("completeness_status"),
+        "stale_status": summary.get("stale_status"),
+        "rule_count": len(rule_keys),
+        "effective_rule_count": len(effective_assertions),
+    }
 
     projection.blocking_count = int(blocking_count)
     projection.unknown_count = int(unknown_count)
     projection.stale_count = int(stale_count)
     projection.conflicting_count = int(conflicting_count)
+    projection.evidence_gap_count = int(evidence_gap_count)
+    projection.confirmed_count = int(confirmed_count)
+    projection.inferred_count = int(inferred_count)
+    projection.failing_count = int(failing_count)
     projection.readiness_score = float(readiness_score)
     projection.projected_compliance_cost = float(round(cost_total, 2)) if cost_total else None
     projection.projected_days_to_rent = int(days_total) if days_total else None
     projection.confidence_score = float(confidence_score)
+    projection.projection_status = _projection_status_from_counts(
+        blocking=blocking_count,
+        stale=stale_count,
+        unknown=unknown_count,
+        conflicting=conflicting_count,
+    )
     projection.impacted_rules_json = _dumps(impacted_rules)
     projection.unresolved_evidence_gaps_json = _dumps(unresolved_gaps)
+    projection.source_confidence_json = _dumps(source_confidence)
+    projection.projection_reason_json = _dumps(projection_reason)
     projection.updated_at = _utcnow()
     db.flush()
 
@@ -1055,17 +1405,21 @@ def build_property_projection_snapshot(
             "evidence_summary": {"count": 0, "linked_documents": 0, "inspection_links": 0},
             "blockers": [],
         }
+
     items = _current_projection_items(db, org_id=org_id, property_id=property_id, projection_id=int(row.id))
     evidence = _evidence_rows(db, org_id=org_id, property_id=property_id)
+
     blockers = [
         {
             "rule_key": item.rule_key,
             "evaluation_status": item.evaluation_status,
             "evidence_gap": item.evidence_gap,
+            "source_level": item.source_level,
         }
         for item in items
         if item.evaluation_status in {"fail", "blocked", "conflicting", "stale"} and bool(item.blocking)
     ]
+
     return {
         "ok": True,
         "property_id": int(property_id),
@@ -1078,12 +1432,20 @@ def build_property_projection_snapshot(
             "unknown_count": int(row.unknown_count or 0),
             "stale_count": int(row.stale_count or 0),
             "conflicting_count": int(row.conflicting_count or 0),
+            "evidence_gap_count": int(row.evidence_gap_count or 0),
+            "confirmed_count": int(row.confirmed_count or 0),
+            "inferred_count": int(row.inferred_count or 0),
+            "failing_count": int(row.failing_count or 0),
             "readiness_score": float(row.readiness_score or 0.0),
             "projected_compliance_cost": row.projected_compliance_cost,
             "projected_days_to_rent": row.projected_days_to_rent,
             "confidence_score": float(row.confidence_score or 0.0),
             "impacted_rules": _loads(row.impacted_rules_json, []),
             "unresolved_evidence_gaps": _loads(row.unresolved_evidence_gaps_json, []),
+            "source_confidence": _loads(row.source_confidence_json, {}),
+            "projection_reason": _loads(row.projection_reason_json, {}),
+            "rules_effective_at": row.rules_effective_at,
+            "last_rule_change_at": row.last_rule_change_at,
             "last_projected_at": row.last_projected_at,
         },
         "items": [
@@ -1093,14 +1455,24 @@ def build_property_projection_snapshot(
                 "rule_category": item.rule_category,
                 "required": bool(item.required),
                 "blocking": bool(item.blocking),
+                "source_level": item.source_level,
                 "evaluation_status": item.evaluation_status,
                 "evidence_status": item.evidence_status,
+                "proof_state": item.proof_state,
                 "confidence": float(item.confidence or 0.0),
                 "estimated_cost": item.estimated_cost,
                 "estimated_days": item.estimated_days,
                 "evidence_summary": item.evidence_summary,
                 "evidence_gap": item.evidence_gap,
+                "status_reason": item.status_reason,
+                "source_citation": item.source_citation,
+                "raw_excerpt": item.raw_excerpt,
+                "rule_value": _loads(item.rule_value_json, {}),
                 "resolution_detail": _loads(item.resolution_detail_json, {}),
+                "conflicting_evidence_count": int(item.conflicting_evidence_count or 0),
+                "required_document_kind": item.required_document_kind,
+                "evidence_updated_at": item.evidence_updated_at,
+                "last_evaluated_at": item.last_evaluated_at,
             }
             for item in items
         ],
@@ -1150,6 +1522,7 @@ def build_property_compliance_brief(
         pha_name=scope.pha_name,
     )
     summary = build_policy_summary(db, assertions, org_id, scope.state, scope.county, scope.city, scope.pha_name)
+
     projection_snapshot = None
     if scope.property_id is not None and org_id is not None:
         projection_snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=int(scope.property_id))
@@ -1158,96 +1531,36 @@ def build_property_compliance_brief(
     if projection_snapshot and projection_snapshot.get("blockers"):
         blockers.extend(projection_snapshot["blockers"])
 
+    deduped_blockers: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in blockers:
+        key = (
+            str(item.get("rule_key") or item.get("code") or ""),
+            str(item.get("evaluation_status") or item.get("title") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped_blockers.append(item)
+
     return {
         "ok": True,
-        "state": scope.state,
-        "county": scope.county,
-        "city": scope.city,
-        "pha_name": scope.pha_name,
-        "jurisdiction_slug": scope.jurisdiction_slug,
-        "coverage": summary["coverage"],
-        "verified_rules": summary["verified_rules"],
-        "required_actions": summary["required_actions"],
-        "blocking_items": summary["blocking_items"],
-        "blockers": blockers,
-        "evidence_links": summary["evidence_links"],
-        "local_rule_statuses": summary["local_rule_statuses"],
-        "verified_rule_count_local": summary["verified_rule_count_local"],
-        "verified_rule_count_effective": summary["verified_rule_count_effective"],
-        "required_categories": summary["required_categories"],
-        "category_coverage": summary["category_coverage"],
-        "projection": projection_snapshot,
+        "scope": {
+            "state": scope.state,
+            "county": scope.county,
+            "city": scope.city,
+            "pha_name": scope.pha_name,
+            "property_type": scope.property_type,
+            "jurisdiction_slug": scope.jurisdiction_slug,
+            "property_id": scope.property_id,
+        },
+        "coverage": summary.get("coverage") or {},
+        "required_categories": summary.get("required_categories") or [],
+        "category_coverage": summary.get("category_coverage") or {},
+        "verified_rules": summary.get("verified_rules") or [],
+        "required_actions": summary.get("required_actions") or [],
+        "blocking_items": deduped_blockers,
+        "evidence_links": summary.get("evidence_links") or [],
+        "projection": projection_snapshot.get("projection") if projection_snapshot else None,
+        "projection_counts": projection_snapshot.get("counts") if projection_snapshot else None,
     }
-
-
-def project_verified_assertions_to_profile(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str],
-    notes: str | None = None,
-) -> JurisdictionProfile:
-    st = _norm_state(state)
-    cnty = _norm_lower(county)
-    cty = _norm_lower(city)
-    profile = _profile_row(db, org_id=org_id, state=st, county=cnty, city=cty)
-    if profile is None:
-        profile = JurisdictionProfile(
-            org_id=org_id,
-            state=st,
-            county=cnty,
-            city=cty,
-            pha_name=_norm_text(pha_name),
-            friction_multiplier=1.0,
-        )
-        db.add(profile)
-        db.flush()
-
-    brief = build_property_compliance_brief(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha_name,
-    )
-    coverage = brief.get("coverage") or {}
-    summary = build_policy_summary(
-        db,
-        _query_inherited_assertions(db, org_id, st, cnty, cty, pha_name),
-        org_id,
-        st,
-        cnty,
-        cty,
-        pha_name,
-    )
-    policy_json = {
-        "coverage": coverage,
-        "required_categories": brief.get("required_categories") or [],
-        "category_coverage": brief.get("category_coverage") or {},
-        "local_rule_statuses": brief.get("local_rule_statuses") or {},
-        "verified_rules": brief.get("verified_rules") or [],
-        "completeness_status": coverage.get("completeness_status") or summary.get("completeness_status"),
-        "stale_status": "stale" if coverage.get("is_stale") else "fresh",
-    }
-    profile.policy_json = _dumps(policy_json)
-    profile.notes = notes or profile.notes
-    profile.pha_name = _norm_text(pha_name)
-    profile.completeness_status = str(policy_json.get("completeness_status") or coverage.get("completeness_status") or "missing")
-    profile.completeness_score = float(coverage.get("completeness_score") or 0.0)
-    profile.required_categories_json = _dumps(brief.get("required_categories") or [])
-    profile.covered_categories_json = _dumps(
-        [cat for cat, status in (brief.get("category_coverage") or {}).items() if status in {"verified", "conditional"}]
-    )
-    profile.missing_categories_json = _dumps(
-        [cat for cat, status in (brief.get("category_coverage") or {}).items() if status == "missing"]
-    )
-    profile.is_stale = bool(coverage.get("is_stale", False))
-    profile.stale_reason = coverage.get("stale_reason")
-    profile.last_verified_at = _utcnow()
-    profile.updated_at = _utcnow()
-    db.flush()
-    return profile
