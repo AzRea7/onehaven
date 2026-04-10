@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import delete, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import normalize_categories
@@ -15,6 +15,7 @@ from app.policy_models import (
     JurisdictionProfile,
     PolicyAssertion,
     PropertyComplianceEvidence,
+    PropertyComplianceEvidenceFact,
     PropertyComplianceProjection,
     PropertyComplianceProjectionItem,
 )
@@ -172,6 +173,29 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except Exception:
         return default
+
+
+def _norm_status(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _parse_datetime(raw: Any) -> datetime | None:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    text_value = str(raw).strip()
+    if not text_value:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text_value[:19], fmt)
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(text_value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
 
 
 @dataclass(frozen=True)
@@ -692,21 +716,102 @@ def _document_expires_at(row: Any, metadata: dict[str, Any], parser_meta: dict[s
         parser_meta.get("expiration_date"),
         row.get("expires_at") if hasattr(row, "get") else None,
     ]:
-        if not raw:
-            continue
-        if isinstance(raw, datetime):
-            return raw
-        text_value = str(raw).strip()
-        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
-            try:
-                return datetime.strptime(text_value[:19], fmt)
-            except Exception:
-                continue
-        try:
-            return datetime.fromisoformat(text_value.replace("Z", "+00:00")).replace(tzinfo=None)
-        except Exception:
-            continue
+        parsed = _parse_datetime(raw)
+        if parsed is not None:
+            return parsed
     return None
+
+
+def _required_document_kind_for_rule(rule_key: str) -> str | None:
+    if rule_key in {
+        "certificate_required_before_occupancy",
+        "certificate_of_occupancy_required",
+        "certificate_of_compliance_required",
+    }:
+        return "certificate"
+    if rule_key == "rental_registration_required":
+        return "registration_certificate"
+    if rule_key in {"inspection_required", "pass_inspection_required", "reinspection_required"}:
+        return "inspection_report"
+    if rule_key in {"lead_based_paint_paperwork_required", "lead_clearance_required"}:
+        return "lead_based_paint_paperwork"
+    if rule_key in {"smoke_detector_required", "smoke_detectors_required"}:
+        return "smoke_detector_proof"
+    if rule_key == "utility_confirmation_required":
+        return "utility_confirmation"
+    return None
+
+
+def _replace_evidence_facts(
+    db: Session,
+    *,
+    evidence_id: int,
+    org_id: int,
+    property_id: int,
+    facts: list[dict[str, Any]],
+) -> None:
+    db.execute(
+        delete(PropertyComplianceEvidenceFact).where(
+            PropertyComplianceEvidenceFact.evidence_id == int(evidence_id)
+        )
+    )
+    for fact in facts:
+        row = PropertyComplianceEvidenceFact(
+            org_id=int(org_id),
+            property_id=int(property_id),
+            evidence_id=int(evidence_id),
+            projection_item_id=fact.get("projection_item_id"),
+            inspection_id=fact.get("inspection_id"),
+            checklist_item_id=fact.get("checklist_item_id"),
+            rule_key=fact.get("rule_key"),
+            fact_key=str(fact.get("fact_key") or "fact"),
+            fact_label=fact.get("fact_label"),
+            fact_type=str(fact.get("fact_type") or "status"),
+            fact_value=fact.get("fact_value"),
+            fact_status=str(fact.get("fact_status") or "observed"),
+            proof_state=str(fact.get("proof_state") or "inferred"),
+            severity=fact.get("severity"),
+            satisfies_rule=fact.get("satisfies_rule"),
+            observed_at=fact.get("observed_at"),
+            expires_at=fact.get("expires_at"),
+            resolved_at=fact.get("resolved_at"),
+            source_details_json=_dumps(fact.get("source_details") or {}),
+            metadata_json=_dumps(fact.get("metadata") or {}),
+        )
+        db.add(row)
+    db.flush()
+
+
+def _invalidate_missing_evidence(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    evidence_source_type: str,
+    keep_keys: set[str],
+) -> None:
+    rows = list(
+        db.scalars(
+            select(PropertyComplianceEvidence).where(
+                PropertyComplianceEvidence.org_id == int(org_id),
+                PropertyComplianceEvidence.property_id == int(property_id),
+                PropertyComplianceEvidence.evidence_source_type == evidence_source_type,
+                PropertyComplianceEvidence.is_current.is_(True),
+                PropertyComplianceEvidence.invalidated_at.is_(None),
+            )
+        ).all()
+    )
+    now = _utcnow()
+    for row in rows:
+        evidence_key = str(getattr(row, "evidence_key", "") or "")
+        if evidence_key in keep_keys:
+            continue
+        row.is_current = False
+        row.invalidated_at = now
+        row.invalidated_reason = f"{evidence_source_type}_source_missing"
+        row.updated_at = now
+        db.add(row)
+    db.flush()
 
 
 def _upsert_evidence(
@@ -833,6 +938,8 @@ def sync_document_evidence_for_property(
 
     created_or_updated = 0
     linked_rule_keys: set[str] = set()
+    keep_keys: set[str] = set()
+
     for row in rows:
         metadata = _loads(row.get("metadata_json"), {})
         parser_meta = _loads(row.get("parser_meta_json"), {})
@@ -869,15 +976,14 @@ def sync_document_evidence_for_property(
         ).strip() or None
         reference_number = _document_reference_number(row, metadata, parser_meta)
         expires_at = _document_expires_at(row, metadata, parser_meta)
-        remediation_due_at = _document_expires_at(
-            {"expires_at": metadata.get("remediation_due_at") or parser_meta.get("remediation_due_at")},
-            metadata,
-            parser_meta,
-        )
+        remediation_due_at = _parse_datetime(metadata.get("remediation_due_at") or parser_meta.get("remediation_due_at"))
+        observed_at = _parse_datetime(row.get("created_at")) or _utcnow()
 
         for rule_key in rule_keys:
             evidence_key = f"document:{int(row['id'])}:{rule_key}"
-            _upsert_evidence(
+            keep_keys.add(evidence_key)
+
+            evidence_row = _upsert_evidence(
                 db,
                 org_id=org_id,
                 property_id=property_id,
@@ -898,7 +1004,7 @@ def sync_document_evidence_for_property(
                 evidence_category=category,
                 issuing_authority=issuing_authority,
                 reference_number=reference_number,
-                observed_at=row.get("created_at"),
+                observed_at=observed_at,
                 expires_at=expires_at,
                 remediation_due_at=remediation_due_at,
                 confidence=0.9 if proof_state == "confirmed" else 0.65,
@@ -917,8 +1023,50 @@ def sync_document_evidence_for_property(
                     "scan_status": scan_status,
                 },
             )
+
+            _replace_evidence_facts(
+                db,
+                evidence_id=int(evidence_row.id),
+                org_id=org_id,
+                property_id=property_id,
+                facts=[
+                    {
+                        "inspection_id": int(row["inspection_id"]) if row.get("inspection_id") is not None else None,
+                        "checklist_item_id": int(row["checklist_item_id"]) if row.get("checklist_item_id") is not None else None,
+                        "rule_key": rule_key,
+                        "fact_key": f"document:{int(row['id'])}",
+                        "fact_label": row.get("label") or row.get("original_filename") or rule_key,
+                        "fact_type": "document",
+                        "fact_value": row.get("extracted_text_preview") or category,
+                        "fact_status": status,
+                        "proof_state": proof_state,
+                        "satisfies_rule": satisfies_rule,
+                        "observed_at": observed_at,
+                        "expires_at": expires_at,
+                        "source_details": {
+                            "document_id": int(row["id"]),
+                            "category": category,
+                            "reference_number": reference_number,
+                        },
+                        "metadata": {
+                            "issuing_authority": issuing_authority,
+                            "document_kind": document_kind,
+                        },
+                    }
+                ],
+            )
+
             created_or_updated += 1
             linked_rule_keys.add(rule_key)
+
+    if document_id is None:
+        _invalidate_missing_evidence(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            evidence_source_type="document",
+            keep_keys=keep_keys,
+        )
 
     db.commit()
     return {
@@ -972,6 +1120,8 @@ def sync_inspection_evidence_for_property(
 
     created_or_updated = 0
     linked_rule_keys: set[str] = set()
+    keep_keys: set[str] = set()
+
     for row in rows:
         if row.get("inspection_item_id") is None:
             continue
@@ -998,10 +1148,13 @@ def sync_inspection_evidence_for_property(
         severity_raw = row.get("severity")
         severity = str(severity_raw).lower() if severity_raw is not None else None
         remediation_status = "required" if evidence_status == "failed" else "not_required"
+        observed_at = _parse_datetime(row.get("inspection_date")) or _utcnow()
 
         for rule_key in rule_keys:
             evidence_key = f"inspection_item:{int(row['inspection_item_id'])}:{rule_key}"
-            _upsert_evidence(
+            keep_keys.add(evidence_key)
+
+            evidence_row = _upsert_evidence(
                 db,
                 org_id=org_id,
                 property_id=property_id,
@@ -1022,7 +1175,7 @@ def sync_inspection_evidence_for_property(
                 line_item_status=item_status,
                 severity=severity,
                 remediation_status=remediation_status,
-                observed_at=row.get("inspection_date"),
+                observed_at=observed_at,
                 confidence=0.95,
                 notes=row.get("fail_reason") or row.get("details"),
                 source_details={
@@ -1041,14 +1194,202 @@ def sync_inspection_evidence_for_property(
                     "passed": bool(row.get("passed")) if row.get("passed") is not None else None,
                 },
             )
+
+            _replace_evidence_facts(
+                db,
+                evidence_id=int(evidence_row.id),
+                org_id=org_id,
+                property_id=property_id,
+                facts=[
+                    {
+                        "inspection_id": int(row["inspection_id"]),
+                        "rule_key": rule_key,
+                        "fact_key": f"inspection_item:{int(row['inspection_item_id'])}",
+                        "fact_label": str(row.get("code") or row.get("category") or "Inspection item"),
+                        "fact_type": "inspection_item",
+                        "fact_value": row.get("details") or row.get("fail_reason") or row.get("category"),
+                        "fact_status": item_status,
+                        "proof_state": "confirmed",
+                        "severity": severity,
+                        "satisfies_rule": satisfies_rule,
+                        "observed_at": observed_at,
+                        "source_details": {
+                            "inspection_item_id": int(row["inspection_item_id"]),
+                            "inspection_id": int(row["inspection_id"]),
+                            "code": row.get("code"),
+                        },
+                        "metadata": {
+                            "requires_reinspection": bool(row.get("requires_reinspection")),
+                        },
+                    }
+                ],
+            )
+
             created_or_updated += 1
             linked_rule_keys.add(rule_key)
+
+    if inspection_id is None:
+        _invalidate_missing_evidence(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            evidence_source_type="inspection_item",
+            keep_keys=keep_keys,
+        )
 
     db.commit()
     return {
         "ok": True,
         "property_id": int(property_id),
         "inspection_id": int(inspection_id) if inspection_id is not None else None,
+        "linked_rule_keys": sorted(linked_rule_keys),
+        "evidence_rows": created_or_updated,
+    }
+
+
+def sync_checklist_evidence_for_property(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    scope = _build_property_scope(db, org_id=org_id, property_id=property_id)
+
+    checklist_rows = db.execute(
+        text(
+            """
+            SELECT
+                id,
+                item_code,
+                description,
+                category,
+                status,
+                severity,
+                common_fail,
+                created_at,
+                updated_at
+            FROM property_checklist_items
+            WHERE org_id = :org_id
+              AND property_id = :property_id
+            ORDER BY id ASC
+            """
+        ),
+        {"org_id": int(org_id), "property_id": int(property_id)},
+    ).mappings().all()
+
+    created_or_updated = 0
+    linked_rule_keys: set[str] = set()
+    keep_keys: set[str] = set()
+
+    for row in checklist_rows:
+        raw_status = _norm_status(row.get("status"))
+        if raw_status in {"done", "pass", "passed", "complete", "completed", "verified"}:
+            evidence_status = "verified"
+            proof_state = "confirmed"
+            line_item_status = "pass"
+            satisfies_rule = True
+        elif raw_status in {"failed", "fail", "blocked", "open"}:
+            evidence_status = "failed"
+            proof_state = "confirmed"
+            line_item_status = "fail" if raw_status != "blocked" else "blocked"
+            satisfies_rule = False
+        else:
+            evidence_status = "unknown"
+            proof_state = "inferred"
+            line_item_status = "unknown"
+            satisfies_rule = None
+
+        rule_keys = _inspection_rule_keys(
+            str(row.get("item_code") or ""),
+            category=row.get("category"),
+            fail_reason=row.get("description"),
+        )
+        observed_at = _parse_datetime(row.get("updated_at")) or _parse_datetime(row.get("created_at")) or _utcnow()
+        severity = str(row.get("severity")).lower() if row.get("severity") is not None else None
+
+        for rule_key in rule_keys:
+            evidence_key = f"checklist_item:{int(row['id'])}:{rule_key}"
+            keep_keys.add(evidence_key)
+
+            evidence_row = _upsert_evidence(
+                db,
+                org_id=org_id,
+                property_id=property_id,
+                evidence_source_type="checklist_item",
+                evidence_key=evidence_key,
+                evidence_name=str(row.get("description") or row.get("item_code") or rule_key),
+                evidence_status=evidence_status,
+                proof_state=proof_state,
+                satisfies_rule=satisfies_rule,
+                checklist_item_id=int(row["id"]),
+                jurisdiction_slug=scope.jurisdiction_slug,
+                program_type=scope.pha_name,
+                rule_key=rule_key,
+                rule_category=RULE_KEY_TO_CATEGORY.get(rule_key, "inspection"),
+                evidence_category=str(row.get("category") or "checklist_item"),
+                line_item_key=str(row.get("item_code") or row.get("id")),
+                line_item_label=str(row.get("description") or row.get("item_code") or ""),
+                line_item_status=line_item_status,
+                severity=severity,
+                remediation_status="required" if evidence_status == "failed" else "not_required",
+                observed_at=observed_at,
+                confidence=0.85 if proof_state == "confirmed" else 0.65,
+                notes=str(row.get("description") or ""),
+                source_details={
+                    "checklist_item_id": int(row["id"]),
+                    "item_code": row.get("item_code"),
+                    "category": row.get("category"),
+                    "common_fail": bool(row.get("common_fail")),
+                },
+                metadata_json={
+                    "status": raw_status,
+                },
+            )
+
+            _replace_evidence_facts(
+                db,
+                evidence_id=int(evidence_row.id),
+                org_id=org_id,
+                property_id=property_id,
+                facts=[
+                    {
+                        "checklist_item_id": int(row["id"]),
+                        "rule_key": rule_key,
+                        "fact_key": f"checklist_item:{int(row['id'])}",
+                        "fact_label": str(row.get("description") or row.get("item_code") or "Checklist item"),
+                        "fact_type": "checklist_item",
+                        "fact_value": raw_status,
+                        "fact_status": line_item_status,
+                        "proof_state": proof_state,
+                        "severity": severity,
+                        "satisfies_rule": satisfies_rule,
+                        "observed_at": observed_at,
+                        "source_details": {
+                            "item_code": row.get("item_code"),
+                            "category": row.get("category"),
+                        },
+                        "metadata": {
+                            "common_fail": bool(row.get("common_fail")),
+                        },
+                    }
+                ],
+            )
+
+            created_or_updated += 1
+            linked_rule_keys.add(rule_key)
+
+    _invalidate_missing_evidence(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        evidence_source_type="checklist_item",
+        keep_keys=keep_keys,
+    )
+
+    db.commit()
+    return {
+        "ok": True,
+        "property_id": int(property_id),
         "linked_rule_keys": sorted(linked_rule_keys),
         "evidence_rows": created_or_updated,
     }
@@ -1088,6 +1429,27 @@ def _evidence_rows(db: Session, *, org_id: int, property_id: int) -> list[Proper
             select(PropertyComplianceEvidence).where(
                 PropertyComplianceEvidence.org_id == org_id,
                 PropertyComplianceEvidence.property_id == property_id,
+                PropertyComplianceEvidence.is_current.is_(True),
+            )
+        ).all()
+    )
+
+
+def _evidence_facts_for_property(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    evidence_ids: list[int],
+) -> list[PropertyComplianceEvidenceFact]:
+    if not evidence_ids:
+        return []
+    return list(
+        db.scalars(
+            select(PropertyComplianceEvidenceFact).where(
+                PropertyComplianceEvidenceFact.org_id == int(org_id),
+                PropertyComplianceEvidenceFact.property_id == int(property_id),
+                PropertyComplianceEvidenceFact.evidence_id.in_(evidence_ids),
             )
         ).all()
     )
@@ -1228,7 +1590,7 @@ def _evaluate_rule(
     status_reason: str | None = None
     estimated_cost: float | None = None
     estimated_days: int | None = None
-    required_document_kind: str | None = None
+    required_document_kind: str | None = _required_document_kind_for_rule(rule_key)
 
     if not evidence_rows:
         evaluation_status = "unknown"
@@ -1240,6 +1602,11 @@ def _evaluate_rule(
         failing = [row for row in evidence_rows if str(getattr(row, "evidence_status", "") or "").lower() in FAILING_EVIDENCE]
         passing = [row for row in evidence_rows if str(getattr(row, "evidence_status", "") or "").lower() in PASSING_EVIDENCE]
         expired = [row for row in evidence_rows if str(getattr(row, "evidence_status", "") or "").lower() == "expired"]
+        stale_rows = [
+            row
+            for row in evidence_rows
+            if getattr(row, "expires_at", None) is not None and getattr(row, "expires_at") < _utcnow()
+        ]
         proof_state = _compute_proof_state(evidence_rows)
 
         if failing and passing:
@@ -1247,7 +1614,7 @@ def _evaluate_rule(
             evidence_status = "conflicting"
             evidence_gap = "Both passing and failing evidence exist."
             status_reason = "At least one evidence record satisfies the rule while another shows a failure or unresolved issue."
-        elif expired and not passing and not failing:
+        elif stale_rows or (expired and not passing and not failing):
             evaluation_status = "stale"
             evidence_status = "expired"
             evidence_gap = "Evidence exists but is expired or stale."
@@ -1291,7 +1658,8 @@ def _evaluate_rule(
         blocking = False
 
     latest_evidence_updated_at = _latest_datetime(
-        [getattr(r, "updated_at", None) for r in evidence_rows] + [getattr(r, "observed_at", None) for r in evidence_rows]
+        [getattr(r, "updated_at", None) for r in evidence_rows]
+        + [getattr(r, "observed_at", None) for r in evidence_rows]
     )
     proof_confidence = max(
         [float(getattr(r, "confidence", 0.0) or 0.0) for r in evidence_rows] + [confidence],
@@ -1354,6 +1722,20 @@ def _link_evidence_to_projection_items(
         db.add(evidence)
     db.flush()
 
+    linked_evidence_ids = [int(e.id) for e in evidence_rows if getattr(e, "projection_item_id", None) is not None]
+    if not linked_evidence_ids:
+        return
+
+    fact_rows = _evidence_facts_for_property(db, org_id=org_id, property_id=property_id, evidence_ids=linked_evidence_ids)
+    evidence_to_projection = {int(e.id): int(e.projection_item_id) for e in evidence_rows if getattr(e, "projection_item_id", None) is not None}
+    for fact in fact_rows:
+        projection_item_id = evidence_to_projection.get(int(fact.evidence_id))
+        if projection_item_id is None:
+            continue
+        fact.projection_item_id = projection_item_id
+        db.add(fact)
+    db.flush()
+
 
 def rebuild_property_projection(
     db: Session,
@@ -1386,6 +1768,7 @@ def rebuild_property_projection(
 
     sync_document_evidence_for_property(db, org_id=org_id, property_id=property_id)
     sync_inspection_evidence_for_property(db, org_id=org_id, property_id=property_id)
+    sync_checklist_evidence_for_property(db, org_id=org_id, property_id=property_id)
 
     evidence_rows = _evidence_rows(db, org_id=org_id, property_id=property_id)
     evidence_index = _build_evidence_index(evidence_rows)
@@ -1640,6 +2023,8 @@ def build_property_projection_snapshot(
             "property_id": int(property_id),
             "projection": None,
             "items": [],
+            "evidence": [],
+            "facts": [],
             "counts": {"blocking": 0, "unknown": 0, "stale": 0, "conflicting": 0},
             "evidence_summary": {"count": 0, "linked_documents": 0, "inspection_links": 0},
             "blockers": [],
@@ -1647,6 +2032,8 @@ def build_property_projection_snapshot(
 
     items = _current_projection_items(db, org_id=org_id, property_id=property_id, projection_id=int(row.id))
     evidence = _evidence_rows(db, org_id=org_id, property_id=property_id)
+    evidence_ids = [int(e.id) for e in evidence]
+    facts = _evidence_facts_for_property(db, org_id=org_id, property_id=property_id, evidence_ids=evidence_ids)
 
     blockers = [
         {
@@ -1720,6 +2107,68 @@ def build_property_projection_snapshot(
             }
             for item in items
         ],
+        "evidence": [
+            {
+                "id": int(e.id),
+                "projection_item_id": e.projection_item_id,
+                "policy_assertion_id": e.policy_assertion_id,
+                "compliance_document_id": e.compliance_document_id,
+                "inspection_id": e.inspection_id,
+                "checklist_item_id": e.checklist_item_id,
+                "rule_key": e.rule_key,
+                "rule_category": e.rule_category,
+                "evidence_source_type": e.evidence_source_type,
+                "evidence_category": e.evidence_category,
+                "evidence_key": e.evidence_key,
+                "evidence_name": e.evidence_name,
+                "document_kind": e.document_kind,
+                "issuing_authority": e.issuing_authority,
+                "reference_number": e.reference_number,
+                "line_item_key": e.line_item_key,
+                "line_item_label": e.line_item_label,
+                "line_item_status": e.line_item_status,
+                "severity": e.severity,
+                "remediation_status": e.remediation_status,
+                "remediation_due_at": e.remediation_due_at,
+                "evidence_status": e.evidence_status,
+                "proof_state": e.proof_state,
+                "satisfies_rule": e.satisfies_rule,
+                "confidence": float(e.confidence or 0.0),
+                "observed_at": e.observed_at,
+                "expires_at": e.expires_at,
+                "invalidated_at": e.invalidated_at,
+                "invalidated_reason": e.invalidated_reason,
+                "is_current": bool(e.is_current),
+                "notes": e.notes,
+                "source_details": _loads(e.source_details_json, {}),
+                "metadata": _loads(e.metadata_json, {}),
+            }
+            for e in evidence
+        ],
+        "facts": [
+            {
+                "id": int(f.id),
+                "evidence_id": int(f.evidence_id),
+                "projection_item_id": f.projection_item_id,
+                "inspection_id": f.inspection_id,
+                "checklist_item_id": f.checklist_item_id,
+                "rule_key": f.rule_key,
+                "fact_key": f.fact_key,
+                "fact_label": f.fact_label,
+                "fact_type": f.fact_type,
+                "fact_value": f.fact_value,
+                "fact_status": f.fact_status,
+                "proof_state": f.proof_state,
+                "severity": f.severity,
+                "satisfies_rule": f.satisfies_rule,
+                "observed_at": f.observed_at,
+                "expires_at": f.expires_at,
+                "resolved_at": f.resolved_at,
+                "source_details": _loads(f.source_details_json, {}),
+                "metadata": _loads(f.metadata_json, {}),
+            }
+            for f in facts
+        ],
         "counts": {
             "blocking": int(row.blocking_count or 0),
             "unknown": int(row.unknown_count or 0),
@@ -1730,6 +2179,7 @@ def build_property_projection_snapshot(
             "count": len(evidence),
             "linked_documents": sum(1 for e in evidence if getattr(e, "compliance_document_id", None) is not None),
             "inspection_links": sum(1 for e in evidence if getattr(e, "inspection_id", None) is not None),
+            "checklist_links": sum(1 for e in evidence if getattr(e, "checklist_item_id", None) is not None),
             "confirmed": sum(1 for e in evidence if str(getattr(e, "proof_state", "") or "").lower() == "confirmed"),
             "failing": sum(1 for e in evidence if str(getattr(e, "evidence_status", "") or "").lower() in FAILING_EVIDENCE),
         },
@@ -1819,4 +2269,5 @@ def build_property_compliance_brief(
         "evidence_links": summary.get("evidence_links") or [],
         "projection": projection_snapshot.get("projection") if projection_snapshot else None,
         "projection_counts": projection_snapshot.get("counts") if projection_snapshot else None,
+        "evidence_summary": projection_snapshot.get("evidence_summary") if projection_snapshot else None,
     }
