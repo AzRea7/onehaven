@@ -41,19 +41,19 @@ export default function CompliancePhotoFindingsPanel({
   analysis,
   busy,
   selectedCodes,
-  markBlocking,
-  onToggleCode,
-  onSelectAll,
-  onClear,
+  markTasksBlocking,
+  onSelectedCodesChange,
+  onPreview,
+  onCreateTasks,
   onMarkBlockingChange,
 }: {
   analysis?: any;
   busy?: boolean;
   selectedCodes?: string[];
-  markBlocking?: boolean;
-  onToggleCode?: (code: string) => void;
-  onSelectAll?: () => void;
-  onClear?: () => void;
+  markTasksBlocking?: boolean;
+  onSelectedCodesChange?: (codes: string[]) => void;
+  onPreview?: () => void | Promise<void>;
+  onCreateTasks?: () => void | Promise<void>;
   onMarkBlockingChange?: (value: boolean) => void;
 }) {
   const findings: Finding[] = Array.isArray(analysis?.findings)
@@ -61,7 +61,32 @@ export default function CompliancePhotoFindingsPanel({
     : Array.isArray(analysis?.issues)
       ? analysis.issues
       : [];
-  const selected = new Set((selectedCodes || []).map((x) => String(x).toUpperCase()));
+  const selected = new Set(
+    (selectedCodes || []).map((x) => String(x).toUpperCase()),
+  );
+
+  function toggleCode(code: string) {
+    const upper = String(code).toUpperCase();
+    const next = selected.has(upper)
+      ? (selectedCodes || []).filter(
+          (item) => String(item).toUpperCase() !== upper,
+        )
+      : [...(selectedCodes || []), upper];
+    onSelectedCodesChange?.(next);
+  }
+
+  function selectAll() {
+    const next = findings.map((finding, idx) =>
+      String(
+        finding.code || finding.rule_mapping?.code || `FINDING_${idx + 1}`,
+      ).toUpperCase(),
+    );
+    onSelectedCodesChange?.(next);
+  }
+
+  function clearAll() {
+    onSelectedCodesChange?.([]);
+  }
 
   return (
     <Surface
@@ -70,14 +95,48 @@ export default function CompliancePhotoFindingsPanel({
       actions={
         findings.length ? (
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => onSelectAll?.()} className="oh-btn oh-btn-secondary" disabled={busy}>
+            <button
+              onClick={() => void onPreview?.()}
+              className="oh-btn oh-btn-secondary"
+              disabled={busy}
+            >
+              {busy ? "Working..." : "Preview"}
+            </button>
+            <button
+              onClick={selectAll}
+              className="oh-btn oh-btn-secondary"
+              disabled={busy}
+            >
               Select all
             </button>
-            <button onClick={() => onClear?.()} className="oh-btn oh-btn-secondary" disabled={busy}>
+            <button
+              onClick={clearAll}
+              className="oh-btn oh-btn-secondary"
+              disabled={busy}
+            >
               Clear
             </button>
+            <button
+              onClick={() => void onCreateTasks?.()}
+              className="oh-btn"
+              disabled={busy || !selected.size}
+            >
+              {busy
+                ? "Working..."
+                : `Create ${selected.size} task${selected.size === 1 ? "" : "s"}`}
+            </button>
           </div>
-        ) : null
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => void onPreview?.()}
+              className="oh-btn oh-btn-secondary"
+              disabled={busy}
+            >
+              {busy ? "Working..." : "Preview"}
+            </button>
+          </div>
+        )
       }
     >
       {!analysis ? (
@@ -99,7 +158,7 @@ export default function CompliancePhotoFindingsPanel({
           <label className="inline-flex items-center gap-2 text-sm text-app-2">
             <input
               type="checkbox"
-              checked={Boolean(markBlocking)}
+              checked={Boolean(markTasksBlocking)}
               onChange={(e) => onMarkBlockingChange?.(e.target.checked)}
               className="h-4 w-4 rounded border-app bg-app-panel"
             />
@@ -109,7 +168,9 @@ export default function CompliancePhotoFindingsPanel({
           <div className="space-y-3">
             {findings.map((finding, idx) => {
               const code = String(
-                finding.code || finding.rule_mapping?.code || `FINDING_${idx + 1}`,
+                finding.code ||
+                  finding.rule_mapping?.code ||
+                  `FINDING_${idx + 1}`,
               ).toUpperCase();
               const checked = selected.has(code);
 
@@ -123,7 +184,7 @@ export default function CompliancePhotoFindingsPanel({
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => onToggleCode?.(code)}
+                        onChange={() => toggleCode(code)}
                         className="mt-1 h-4 w-4 rounded border-app bg-app-panel"
                       />
                       <div className="min-w-0">
@@ -137,10 +198,14 @@ export default function CompliancePhotoFindingsPanel({
                             {finding.severity || "unknown"}
                           </span>
                           {finding.requires_reinspection ? (
-                            <span className="oh-pill oh-pill-bad">Reinspect likely</span>
+                            <span className="oh-pill oh-pill-bad">
+                              Reinspect likely
+                            </span>
                           ) : null}
                           {finding.hard_blocker_candidate ? (
-                            <span className="oh-pill oh-pill-warn">Critical candidate</span>
+                            <span className="oh-pill oh-pill-warn">
+                              Critical candidate
+                            </span>
                           ) : null}
                         </div>
 
@@ -159,10 +224,14 @@ export default function CompliancePhotoFindingsPanel({
 
                         <div className="mt-3 flex flex-wrap gap-2 text-xs text-app-4">
                           {finding.confidence != null ? (
-                            <span className="oh-pill">Confidence {finding.confidence}</span>
+                            <span className="oh-pill">
+                              Confidence {finding.confidence}
+                            </span>
                           ) : null}
                           {finding.rule_mapping?.standard_label ? (
-                            <span className="oh-pill">{finding.rule_mapping.standard_label}</span>
+                            <span className="oh-pill">
+                              {finding.rule_mapping.standard_label}
+                            </span>
                           ) : null}
                           {finding.rule_mapping?.template_key ? (
                             <span className="oh-pill">
@@ -172,7 +241,8 @@ export default function CompliancePhotoFindingsPanel({
                                 : ""}
                             </span>
                           ) : null}
-                          {Array.isArray(finding.evidence_photo_ids) && finding.evidence_photo_ids.length ? (
+                          {Array.isArray(finding.evidence_photo_ids) &&
+                          finding.evidence_photo_ids.length ? (
                             <span className="oh-pill">
                               Photo refs {finding.evidence_photo_ids.join(", ")}
                             </span>

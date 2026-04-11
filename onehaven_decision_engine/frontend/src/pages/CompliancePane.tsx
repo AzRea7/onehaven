@@ -135,15 +135,21 @@ function labelize(value?: string | null) {
 
 function urgencyTone(urgency?: string | null) {
   const v = String(urgency || "").toLowerCase();
-  if (v === "critical") return "oh-pill oh-pill-bad";
-  if (v === "high") return "oh-pill oh-pill-warn";
-  if (v === "medium") return "oh-pill oh-pill-accent";
+  if (v === "critical" || v === "high") return "oh-pill oh-pill-bad";
+  if (v === "warning" || v === "medium") return "oh-pill oh-pill-warn";
+  if (v === "info" || v === "low") return "oh-pill oh-pill-good";
   return "oh-pill";
 }
 
 function statusTone(value?: string | boolean | null) {
   const v = String(value ?? "").toLowerCase();
-  if (v === "true" || v === "pass" || v === "ready" || v === "confirmed") {
+  if (
+    v === "true" ||
+    v === "pass" ||
+    v === "ready" ||
+    v === "confirmed" ||
+    v === "ok"
+  ) {
     return "oh-pill oh-pill-good";
   }
   if (
@@ -160,6 +166,7 @@ function statusTone(value?: string | boolean | null) {
       "failed",
       "canceled",
       "cancelled",
+      "conflicting",
     ].includes(v)
   ) {
     return "oh-pill oh-pill-bad";
@@ -173,6 +180,8 @@ function statusTone(value?: string | boolean | null) {
       "unknown",
       "draft",
       "scheduled",
+      "stale",
+      "partial",
     ].includes(v)
   ) {
     return "oh-pill oh-pill-warn";
@@ -182,9 +191,11 @@ function statusTone(value?: string | boolean | null) {
 
 function confidenceTone(value?: string | null) {
   const v = String(value || "").toLowerCase();
-  if (["high", "strong", "verified"].includes(v)) return "oh-pill oh-pill-good";
-  if (["medium", "partial", "unknown"].includes(v))
+  if (["high", "strong", "verified", "info"].includes(v))
+    return "oh-pill oh-pill-good";
+  if (["medium", "partial", "unknown", "warning"].includes(v)) {
     return "oh-pill oh-pill-warn";
+  }
   if (["low", "weak"].includes(v)) return "oh-pill oh-pill-bad";
   return "oh-pill";
 }
@@ -240,7 +251,7 @@ export default function CompliancePane() {
   const refresh = React.useCallback(async () => {
     try {
       setLoading(true);
-      const out = await api.get<PanePayload>("/dashboard/panes/compliance");
+      const out = await api.get<PanePayload>("/compliance/queue?limit=100");
       setData(out);
       setErr(null);
     } catch (e: any) {
@@ -294,15 +305,15 @@ export default function CompliancePane() {
   }, []);
 
   React.useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
-  const rows = Array.isArray(data?.rows) ? data!.rows! : [];
-  const blockers = Array.isArray(data?.blockers) ? data!.blockers! : [];
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  const blockers = Array.isArray(data?.blockers) ? data.blockers : [];
   const nextActions = Array.isArray(data?.next_actions)
-    ? data!.next_actions!
+    ? data.next_actions
     : [];
-  const staleItems = Array.isArray(data?.stale_items) ? data!.stale_items! : [];
+  const staleItems = Array.isArray(data?.stale_items) ? data.stale_items : [];
 
   React.useEffect(() => {
     if (!rows.length) {
@@ -347,21 +358,27 @@ export default function CompliancePane() {
     setDetailError(null);
 
     Promise.allSettled([
-      api.compliancePropertyBrief(selectedProperty.id),
-      api.complianceInspectionReadiness(selectedProperty.id),
+      api.get(`/compliance/properties/${selectedProperty.id}/brief`),
+      api.get(
+        `/compliance/property/${selectedProperty.id}/inspection-readiness`,
+      ),
     ])
       .then((results) => {
         if (cancelled) return;
         const briefRes = results[0];
         const readinessRes = results[1];
 
-        if (briefRes.status === "fulfilled")
+        if (briefRes.status === "fulfilled") {
           setSelectedBrief((briefRes.value as any) || null);
-        else setSelectedBrief(null);
+        } else {
+          setSelectedBrief(null);
+        }
 
-        if (readinessRes.status === "fulfilled")
+        if (readinessRes.status === "fulfilled") {
           setSelectedReadiness((readinessRes.value as any) || null);
-        else setSelectedReadiness(null);
+        } else {
+          setSelectedReadiness(null);
+        }
 
         if (
           briefRes.status === "rejected" &&
@@ -377,8 +394,8 @@ export default function CompliancePane() {
         if (!cancelled) setDetailLoading(false);
       });
 
-    refreshScheduling(selectedProperty.id);
-    refreshPropertyArtifacts(selectedProperty.id);
+    void refreshScheduling(selectedProperty.id);
+    void refreshPropertyArtifacts(selectedProperty.id);
 
     return () => {
       cancelled = true;
@@ -409,8 +426,9 @@ export default function CompliancePane() {
     try {
       setPhotoBusy(true);
       const form = new FormData();
-      if (selectedInspectionId != null)
+      if (selectedInspectionId != null) {
         form.append("inspection_id", String(selectedInspectionId));
+      }
       const result = await api.post(
         `/photos/${selectedProperty.id}/compliance-preview`,
         form,
@@ -428,8 +446,9 @@ export default function CompliancePane() {
       const form = new FormData();
       form.append("confirmed_codes", selectedFindingCodes.join(","));
       form.append("mark_blocking", String(markPhotoTasksBlocking));
-      if (selectedInspectionId != null)
+      if (selectedInspectionId != null) {
         form.append("inspection_id", String(selectedInspectionId));
+      }
       const result = await api.post(
         `/photos/${selectedProperty.id}/compliance-tasks`,
         form,
@@ -443,7 +462,7 @@ export default function CompliancePane() {
         });
       }
       api
-        .complianceInspectionReadiness(selectedProperty.id)
+        .get(`/compliance/property/${selectedProperty.id}/inspection-readiness`)
         .then(setSelectedReadiness)
         .catch(() => {});
     } finally {
@@ -453,12 +472,13 @@ export default function CompliancePane() {
 
   async function deletePhoto(photoId: number) {
     await api.delete(`/photos/${photoId}`);
-    if (selectedProperty?.id)
+    if (selectedProperty?.id) {
       await refreshPropertyArtifacts(selectedProperty.id);
+    }
   }
 
   const weakCoverageCount = rows.filter((row) =>
-    ["low", "partial", "medium", "unknown"].includes(
+    ["low", "partial", "medium", "unknown", "warning"].includes(
       String(
         row.jurisdiction?.coverage_confidence ||
           row.jurisdiction?.confidence_label ||
@@ -473,7 +493,7 @@ export default function CompliancePane() {
         <PageHero
           eyebrow="Lifecycle pane"
           title="Compliance / S8 pane"
-          subtitle="Property-scoped compliance, inspection history, scheduling, reminders, local rule coverage, stale alerts, and remediation now flow through one pane."
+          subtitle="Property-scoped compliance, workflow gating, inspection history, scheduling, reminders, local rule coverage, stale alerts, and remediation now flow through one pane."
           actions={
             <div className="flex flex-wrap gap-3">
               {selectedProperty?.id ? (
@@ -485,7 +505,10 @@ export default function CompliancePane() {
                   Schedule inspection
                 </button>
               ) : null}
-              <button onClick={refresh} className="oh-btn oh-btn-secondary">
+              <button
+                onClick={() => void refresh()}
+                className="oh-btn oh-btn-secondary"
+              >
                 <RefreshCcw className="h-4 w-4" />
                 Refresh pane
               </button>
@@ -505,7 +528,9 @@ export default function CompliancePane() {
             subtitle="Properties currently routed here"
           >
             <div className="text-3xl font-semibold text-app-0">
-              {Number(data?.kpis?.total_properties || data?.count || 0)}
+              {Number(
+                data?.kpis?.total_properties || data?.count || rows.length || 0,
+              )}
             </div>
           </Surface>
 
@@ -523,7 +548,7 @@ export default function CompliancePane() {
             subtitle="Records needing freshness or follow-up"
           >
             <div className="text-3xl font-semibold text-app-0">
-              {Number(data?.kpis?.stale_items || 0)}
+              {Number(data?.kpis?.stale_items || staleItems.length || 0)}
             </div>
           </Surface>
 
@@ -680,7 +705,7 @@ export default function CompliancePane() {
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Surface
             title="Compliance queue"
-            subtitle="Select a property to inspect readiness, scheduling state, local rule coverage, document stack, and failure-driven actions."
+            subtitle="Select a property to inspect readiness, scheduling state, local rule coverage, projection blockers, document stack, and failure-driven actions."
           >
             {loading ? (
               <div className="grid gap-3">
@@ -833,7 +858,7 @@ export default function CompliancePane() {
                   compact
                   icon={ClipboardCheck}
                   title="No property selected"
-                  description="Select a property to inspect readiness, checklist state, inspection history, scheduling, compliance documents, and local rule coverage."
+                  description="Select a property to inspect readiness, checklist state, inspection history, scheduling, compliance documents, local rule coverage, and workflow gating."
                 />
               </Surface>
             ) : detailError ? (
@@ -847,7 +872,7 @@ export default function CompliancePane() {
             ) : detailLoading && !selectedReadiness && !selectedBrief ? (
               <Surface
                 title="Selected property"
-                subtitle="Loading property-scoped inspection state"
+                subtitle="Loading property-scoped compliance state"
               >
                 <div className="grid gap-3">
                   <div className="oh-skeleton h-[120px] rounded-2xl" />
@@ -859,7 +884,7 @@ export default function CompliancePane() {
               <>
                 <Surface
                   title="Selected property"
-                  subtitle="Latest inspection, unresolved failures, readiness summary, jurisdiction coverage, scheduling state, and evidence uploads for the active property."
+                  subtitle="Latest inspection, projection blockers, readiness summary, jurisdiction coverage, workflow gate, scheduling state, and evidence uploads for the active property."
                   actions={
                     <div className="flex flex-wrap gap-3">
                       <button
@@ -935,16 +960,20 @@ export default function CompliancePane() {
                       <div className="mt-2 flex flex-wrap gap-2">
                         <span
                           className={confidenceTone(
-                            selectedBrief?.coverage?.coverage_confidence ||
-                              selectedBrief?.coverage?.confidence_label ||
+                            selectedBrief?.brief?.coverage
+                              ?.coverage_confidence ||
+                              selectedBrief?.brief?.coverage
+                                ?.confidence_label ||
                               selectedRow?.jurisdiction?.coverage_confidence ||
                               selectedRow?.jurisdiction?.confidence_label ||
                               "unknown",
                           )}
                         >
                           {labelize(
-                            selectedBrief?.coverage?.coverage_confidence ||
-                              selectedBrief?.coverage?.confidence_label ||
+                            selectedBrief?.brief?.coverage
+                              ?.coverage_confidence ||
+                              selectedBrief?.brief?.coverage
+                                ?.confidence_label ||
                               selectedRow?.jurisdiction?.coverage_confidence ||
                               selectedRow?.jurisdiction?.confidence_label ||
                               "unknown",
@@ -958,14 +987,16 @@ export default function CompliancePane() {
                         Rule version
                       </div>
                       <div className="mt-2 text-sm font-semibold text-app-0">
-                        {selectedBrief?.coverage?.resolved_rule_version ||
+                        {selectedBrief?.brief?.coverage
+                          ?.resolved_rule_version ||
+                          selectedBrief?.brief?.projection?.rules_version ||
                           selectedRow?.jurisdiction?.resolved_rule_version ||
                           "—"}
                       </div>
                       <div className="mt-1 text-xs text-app-4">
                         Refreshed{" "}
                         {formatDate(
-                          selectedBrief?.coverage?.last_refreshed ||
+                          selectedBrief?.brief?.coverage?.last_refreshed ||
                             selectedRow?.jurisdiction?.last_refreshed ||
                             selectedRow?.jurisdiction?.last_refreshed_at,
                         )}
@@ -973,13 +1004,27 @@ export default function CompliancePane() {
                     </div>
                   </div>
 
-                  {selectedBrief?.coverage?.is_stale ||
+                  {selectedBrief?.workflow?.compliance_gate?.blocked_reason ? (
+                    <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/[0.04] px-4 py-3">
+                      <div className="flex items-start gap-2 text-sm text-red-100">
+                        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div>
+                          {
+                            selectedBrief.workflow.compliance_gate
+                              .blocked_reason
+                          }
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {selectedBrief?.brief?.coverage?.is_stale ||
                   selectedRow?.jurisdiction?.is_stale ? (
                     <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] px-4 py-3">
                       <div className="flex items-start gap-2 text-sm text-amber-100">
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                         <div>
-                          {selectedBrief?.coverage?.stale_reason ||
+                          {selectedBrief?.brief?.coverage?.stale_reason ||
                             selectedRow?.jurisdiction?.stale_reason ||
                             "Local rule data is stale and needs review."}
                         </div>
@@ -987,7 +1032,7 @@ export default function CompliancePane() {
                     </div>
                   ) : null}
 
-                  {!!selectedBrief?.coverage ? (
+                  {!!selectedBrief?.brief?.coverage ? (
                     <div className="mt-4 grid gap-3 md:grid-cols-3">
                       <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
                         <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
@@ -995,7 +1040,7 @@ export default function CompliancePane() {
                         </div>
                         <div className="mt-2 text-sm font-semibold text-app-0">
                           {labelize(
-                            selectedBrief.coverage.completeness_status ||
+                            selectedBrief.brief.coverage.completeness_status ||
                               "unknown",
                           )}
                         </div>
@@ -1003,7 +1048,8 @@ export default function CompliancePane() {
                           Score{" "}
                           {Math.round(
                             Number(
-                              selectedBrief.coverage.completeness_score || 0,
+                              selectedBrief.brief.coverage.completeness_score ||
+                                0,
                             ) * 100,
                           )}
                           %
@@ -1015,15 +1061,20 @@ export default function CompliancePane() {
                           Covered categories
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          {(selectedBrief.coverage.covered_categories || [])
+                          {(
+                            selectedBrief.brief.coverage.covered_categories ||
+                            []
+                          )
                             .slice(0, 5)
                             .map((item: string) => (
                               <span key={item} className="oh-pill oh-pill-good">
                                 {labelize(item)}
                               </span>
                             ))}
-                          {!(selectedBrief.coverage.covered_categories || [])
-                            .length ? (
+                          {!(
+                            selectedBrief.brief.coverage.covered_categories ||
+                            []
+                          ).length ? (
                             <span className="text-sm text-app-4">
                               None listed
                             </span>
@@ -1036,15 +1087,20 @@ export default function CompliancePane() {
                           Missing local rule areas
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          {(selectedBrief.coverage.missing_categories || [])
+                          {(
+                            selectedBrief.brief.coverage.missing_categories ||
+                            []
+                          )
                             .slice(0, 6)
                             .map((item: string) => (
                               <span key={item} className="oh-pill oh-pill-warn">
                                 {labelize(item)}
                               </span>
                             ))}
-                          {!(selectedBrief.coverage.missing_categories || [])
-                            .length ? (
+                          {!(
+                            selectedBrief.brief.coverage.missing_categories ||
+                            []
+                          ).length ? (
                             <span className="oh-pill oh-pill-good">
                               No known gaps
                             </span>
@@ -1059,23 +1115,11 @@ export default function CompliancePane() {
                   analysis={photoAnalysis}
                   busy={photoBusy}
                   selectedCodes={selectedFindingCodes}
-                  onToggleCode={(code) =>
-                    setSelectedFindingCodes((prev) =>
-                      prev.includes(code)
-                        ? prev.filter((c) => c !== code)
-                        : [...prev, code],
-                    )
-                  }
-                  onSelectAll={() => {
-                    const codes =
-                      photoAnalysis?.findings?.map((f: any, i: number) =>
-                        (f.code || `FINDING_${i + 1}`).toUpperCase(),
-                      ) || [];
-                    setSelectedFindingCodes(codes);
-                  }}
-                  onClear={() => setSelectedFindingCodes([])}
+                  onSelectedCodesChange={setSelectedFindingCodes}
+                  onPreview={previewCompliancePhotoFindings}
+                  onCreateTasks={createComplianceTasksFromPhotos}
                   onMarkBlockingChange={setMarkPhotoTasksBlocking}
-                  markBlocking={markPhotoTasksBlocking}
+                  markTasksBlocking={markPhotoTasksBlocking}
                 />
 
                 <PropertyCompliancePanel
@@ -1084,56 +1128,70 @@ export default function CompliancePane() {
                   photoAnalysis={photoAnalysis}
                 />
 
-                <InspectionReadiness readiness={selectedReadiness} />
+                <InspectionReadiness
+                  property={selectedProperty}
+                  readiness={selectedReadiness}
+                />
 
                 <InspectionTimelineCard
                   rows={timelineRows}
                   loading={scheduleLoading}
+                  appointment={selectedAppointment}
+                  property={selectedProperty}
                 />
 
-                <ComplianceReminderPanel rows={reminderRows} />
+                <ComplianceReminderPanel
+                  property={selectedProperty}
+                  rows={reminderRows}
+                />
 
                 <Surface
                   title="Compliance documents"
                   subtitle="Documents and document-derived evidence linked to the active property."
-                  actions={
+                >
+                  <div className="grid gap-4">
                     <ComplianceDocumentUploader
                       propertyId={selectedProperty.id}
                       onUploaded={() =>
-                        refreshPropertyArtifacts(selectedProperty.id)
+                        void refreshPropertyArtifacts(selectedProperty.id)
                       }
                     />
-                  }
-                >
-                  <ComplianceDocumentStack
-                    data={documentStack}
-                    onDeleted={() =>
-                      refreshPropertyArtifacts(selectedProperty.id)
-                    }
-                  />
+                    <ComplianceDocumentStack
+                      propertyId={selectedProperty.id}
+                      documents={
+                        Array.isArray(documentStack?.rows)
+                          ? documentStack.rows
+                          : Array.isArray(documentStack?.documents)
+                            ? documentStack.documents
+                            : []
+                      }
+                      onChanged={() =>
+                        void refreshPropertyArtifacts(selectedProperty.id)
+                      }
+                    />
+                  </div>
                 </Surface>
 
                 <Surface
                   title="Property photos"
                   subtitle="Operational property photos, deletion, and rehab/compliance follow-up."
-                  actions={
+                >
+                  <div className="grid gap-4">
                     <PhotoUploader
                       propertyId={selectedProperty.id}
+                      inspectionId={selectedInspectionId}
+                      autoAnalyze
                       onUploaded={() =>
-                        refreshPropertyArtifacts(selectedProperty.id)
+                        void refreshPropertyArtifacts(selectedProperty.id)
                       }
                     />
-                  }
-                >
-                  <PhotoGallery photos={photos} onDelete={deletePhoto} />
+                    <PhotoGallery photos={photos} onDelete={deletePhoto} />
+                  </div>
                 </Surface>
 
                 <RehabFromPhotosCTA
-                  busy={photoBusy}
-                  analysis={photoAnalysis}
-                  selectedCount={selectedFindingCodes.length}
-                  onPreview={previewCompliancePhotoFindings}
-                  onGenerate={createComplianceTasksFromPhotos}
+                  propertyId={selectedProperty.id}
+                  selectedFindingCodes={selectedFindingCodes}
                 />
               </>
             )}
@@ -1237,17 +1295,15 @@ export default function CompliancePane() {
 
         {selectedProperty?.id ? (
           <InspectionSchedulerModal
-            inspectionId={selectedAppointment?.inspection_id ?? null}
-            propertyLabel={
-              selectedProperty.address || `Property #${selectedProperty.id}`
-            }
-            existing={selectedAppointment}
             open={schedulerOpen}
+            property={selectedProperty}
             onClose={() => setSchedulerOpen(false)}
             onSaved={async () => {
               setSchedulerOpen(false);
-              await refreshScheduling(selectedProperty.id);
-              await refresh();
+              await Promise.all([
+                refreshScheduling(selectedProperty.id),
+                refresh(),
+              ]);
             }}
           />
         ) : null}

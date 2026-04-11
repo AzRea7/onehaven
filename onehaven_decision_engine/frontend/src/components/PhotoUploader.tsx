@@ -10,6 +10,7 @@ type Props = {
   checklistItemId?: number | null;
   attachToComplianceByDefault?: boolean;
   autoAnalyzeByDefault?: boolean;
+  autoAnalyze?: boolean;
   onUploaded?: (payload?: any) => void | Promise<void>;
 };
 
@@ -36,17 +37,27 @@ export default function PhotoUploader({
   checklistItemId,
   attachToComplianceByDefault = true,
   autoAnalyzeByDefault = true,
+  autoAnalyze,
   onUploaded,
 }: Props) {
+  const effectiveAutoAnalyzeDefault =
+    typeof autoAnalyze === "boolean" ? autoAnalyze : autoAnalyzeByDefault;
+
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [kind, setKind] = React.useState("unknown");
   const [attachToCompliance, setAttachToCompliance] = React.useState(
     attachToComplianceByDefault,
   );
-  const [autoAnalyze, setAutoAnalyze] = React.useState(autoAnalyzeByDefault);
+  const [autoAnalyzeEnabled, setAutoAnalyzeEnabled] = React.useState(
+    effectiveAutoAnalyzeDefault,
+  );
   const [evidenceCategory, setEvidenceCategory] =
     React.useState("photo_evidence");
+
+  React.useEffect(() => {
+    setAutoAnalyzeEnabled(effectiveAutoAnalyzeDefault);
+  }, [effectiveAutoAnalyzeDefault]);
 
   async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -62,9 +73,10 @@ export default function PhotoUploader({
       form.append("label", file.name);
       form.append("attach_to_compliance", String(attachToCompliance));
       form.append("evidence_category", evidenceCategory);
-      form.append("auto_analyze_for_compliance", String(autoAnalyze));
-      if (inspectionId != null)
+      form.append("auto_analyze_for_compliance", String(autoAnalyzeEnabled));
+      if (inspectionId != null) {
         form.append("inspection_id", String(inspectionId));
+      }
       if (checklistItemId != null) {
         form.append("checklist_item_id", String(checklistItemId));
       }
@@ -120,8 +132,8 @@ export default function PhotoUploader({
           <label className="inline-flex items-center gap-2 text-sm text-app-2">
             <input
               type="checkbox"
-              checked={autoAnalyze}
-              onChange={(e) => setAutoAnalyze(e.target.checked)}
+              checked={autoAnalyzeEnabled}
+              onChange={(e) => setAutoAnalyzeEnabled(e.target.checked)}
               className="h-4 w-4 rounded border-app bg-app-panel"
             />
             Run compliance photo analysis right after upload
@@ -145,7 +157,7 @@ export default function PhotoUploader({
           )}
           {busy
             ? "Uploading..."
-            : autoAnalyze
+            : autoAnalyzeEnabled
               ? "Upload image + analyze for inspection findings"
               : attachToCompliance
                 ? "Upload image + attach as evidence"
@@ -157,7 +169,7 @@ export default function PhotoUploader({
             <Camera className="h-3.5 w-3.5" />
             Property photos
           </span>
-          {autoAnalyze ? (
+          {autoAnalyzeEnabled ? (
             <span className="inline-flex items-center gap-1">
               <Sparkles className="h-3.5 w-3.5" />
               AI inspection preview enabled

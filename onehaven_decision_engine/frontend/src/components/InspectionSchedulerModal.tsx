@@ -28,13 +28,21 @@ type SchedulerPayload = {
   calendar_provider?: string;
 };
 
+type PropertyLike = {
+  id?: number | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+};
+
 type InspectionSchedulerModalProps = {
   open: boolean;
   onClose: () => void;
-  inspectionId: number | null;
+  inspectionId?: number | null;
+  property?: PropertyLike | null;
   propertyLabel?: string;
   existing?: any;
-  onSaved?: (payload: any) => void;
+  onSaved?: (payload?: any) => void | Promise<void>;
 };
 
 function normalizeDateTimeInput(value?: string | null) {
@@ -51,14 +59,34 @@ function normalizeReminderOffsets(value: any): number[] {
   return [1440, 120];
 }
 
+function buildPropertyLabel(
+  property?: PropertyLike | null,
+  propertyLabel?: string,
+) {
+  if (propertyLabel) return propertyLabel;
+  if (!property) return "Selected property";
+  return (
+    [property.address, property.city, property.state]
+      .filter(Boolean)
+      .join(" · ") || "Selected property"
+  );
+}
+
 export default function InspectionSchedulerModal({
   open,
   onClose,
   inspectionId,
+  property,
   propertyLabel,
   existing,
   onSaved,
 }: InspectionSchedulerModalProps) {
+  const [resolvedInspectionId, setResolvedInspectionId] = React.useState<
+    number | null
+  >(inspectionId ?? null);
+  const [resolvedExisting, setResolvedExisting] = React.useState<any>(
+    existing || null,
+  );
   const [scheduledFor, setScheduledFor] = React.useState("");
   const [inspectorName, setInspectorName] = React.useState("");
   const [inspectorCompany, setInspectorCompany] = React.useState("");
@@ -67,23 +95,88 @@ export default function InspectionSchedulerModal({
   const [appointmentNotes, setAppointmentNotes] = React.useState("");
   const [status, setStatus] = React.useState("scheduled");
   const [calendarProvider, setCalendarProvider] = React.useState("ics");
-  const [reminderOffsets, setReminderOffsets] = React.useState<number[]>([1440, 120]);
+  const [reminderOffsets, setReminderOffsets] = React.useState<number[]>([
+    1440, 120,
+  ]);
+  const [loadingContext, setLoadingContext] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
-    setScheduledFor(normalizeDateTimeInput(existing?.scheduled_for));
-    setInspectorName(existing?.inspector_name || "");
-    setInspectorCompany(existing?.inspector_company || "");
-    setInspectorEmail(existing?.inspector_email || "");
-    setInspectorPhone(existing?.inspector_phone || "");
-    setAppointmentNotes(existing?.appointment_notes || "");
-    setStatus(existing?.status || "scheduled");
-    setCalendarProvider(existing?.calendar_provider || "ics");
-    setReminderOffsets(normalizeReminderOffsets(existing?.reminder_offsets));
+
+    let cancelled = false;
+
+    async function loadContext() {
+      setLoadingContext(true);
+      setError(null);
+
+      try {
+        if (inspectionId) {
+          if (!cancelled) {
+            setResolvedInspectionId(inspectionId);
+            setResolvedExisting(existing || null);
+          }
+          return;
+        }
+
+        if (!property?.id) {
+          if (!cancelled) {
+            setResolvedInspectionId(null);
+            setResolvedExisting(existing || null);
+          }
+          return;
+        }
+
+        const summary = await api.get(
+          `/inspections/property/${property.id}/schedule-summary`,
+        );
+        const appointment =
+          summary?.appointment ||
+          summary?.latest_appointment ||
+          summary?.next_appointment ||
+          null;
+
+        if (!cancelled) {
+          setResolvedInspectionId(
+            appointment?.inspection_id != null
+              ? Number(appointment.inspection_id)
+              : null,
+          );
+          setResolvedExisting(existing || appointment || null);
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setResolvedInspectionId(inspectionId ?? null);
+          setResolvedExisting(existing || null);
+          setError(String(e?.message || e));
+        }
+      } finally {
+        if (!cancelled) setLoadingContext(false);
+      }
+    }
+
+    void loadContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, inspectionId, property?.id, existing]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const source = resolvedExisting || existing || null;
+    setScheduledFor(normalizeDateTimeInput(source?.scheduled_for));
+    setInspectorName(source?.inspector_name || source?.inspector || "");
+    setInspectorCompany(source?.inspector_company || "");
+    setInspectorEmail(source?.inspector_email || "");
+    setInspectorPhone(source?.inspector_phone || "");
+    setAppointmentNotes(source?.appointment_notes || source?.note || "");
+    setStatus(source?.status || "scheduled");
+    setCalendarProvider(source?.calendar_provider || "ics");
+    setReminderOffsets(normalizeReminderOffsets(source?.reminder_offsets));
     setError(null);
-  }, [existing, open]);
+  }, [resolvedExisting, existing, open]);
 
   const toggleReminder = (minutes: number) => {
     setReminderOffsets((current) => {
@@ -96,8 +189,10 @@ export default function InspectionSchedulerModal({
   };
 
   const handleSave = async () => {
-    if (!inspectionId) {
-      setError("Missing inspection id.");
+    if (!resolvedInspectionId) {
+      setError(
+        "No inspection is available yet for this property. Schedule or create an inspection record first.",
+      );
       return;
     }
     if (!scheduledFor) {
@@ -120,8 +215,11 @@ export default function InspectionSchedulerModal({
     try {
       setSaving(true);
       setError(null);
-      const result = await api.post(`/inspections/${inspectionId}/appointment`, payload);
-      onSaved?.(result);
+      const result = await api.post(
+        `/inspections/${resolvedInspectionId}/appointment`,
+        payload,
+      );
+      await onSaved?.(result);
       onClose();
     } catch (e: any) {
       setError(String(e?.message || e));
@@ -141,15 +239,30 @@ export default function InspectionSchedulerModal({
               Schedule inspection
             </div>
             <div className="mt-1 text-sm text-app-4">
-              {propertyLabel || "Selected property"}
+              {buildPropertyLabel(property, propertyLabel)}
             </div>
+            {resolvedInspectionId ? (
+              <div className="mt-1 text-xs text-app-4">
+                Inspection #{resolvedInspectionId}
+              </div>
+            ) : null}
           </div>
-          <button type="button" onClick={onClose} className="oh-btn oh-btn-secondary">
+          <button
+            type="button"
+            onClick={onClose}
+            className="oh-btn oh-btn-secondary"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="grid gap-4 px-6 py-5">
+          {loadingContext ? (
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-3">
+              Loading inspection scheduling context...
+            </div>
+          ) : null}
+
           {error ? (
             <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-200">
               {error}
@@ -158,7 +271,9 @@ export default function InspectionSchedulerModal({
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2">
-              <span className="text-sm font-medium text-app-2">Scheduled for</span>
+              <span className="text-sm font-medium text-app-2">
+                Scheduled for
+              </span>
               <div className="relative">
                 <CalendarClock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
                 <input
@@ -186,7 +301,9 @@ export default function InspectionSchedulerModal({
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2">
-              <span className="text-sm font-medium text-app-2">Inspector name</span>
+              <span className="text-sm font-medium text-app-2">
+                Inspector name
+              </span>
               <div className="relative">
                 <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
                 <input
@@ -200,7 +317,9 @@ export default function InspectionSchedulerModal({
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm font-medium text-app-2">Inspector company</span>
+              <span className="text-sm font-medium text-app-2">
+                Inspector company
+              </span>
               <input
                 type="text"
                 value={inspectorCompany}
@@ -213,7 +332,9 @@ export default function InspectionSchedulerModal({
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2">
-              <span className="text-sm font-medium text-app-2">Inspector email</span>
+              <span className="text-sm font-medium text-app-2">
+                Inspector email
+              </span>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
                 <input
@@ -227,7 +348,9 @@ export default function InspectionSchedulerModal({
             </label>
 
             <label className="grid gap-2">
-              <span className="text-sm font-medium text-app-2">Inspector phone</span>
+              <span className="text-sm font-medium text-app-2">
+                Inspector phone
+              </span>
               <div className="relative">
                 <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-4" />
                 <input
@@ -242,7 +365,9 @@ export default function InspectionSchedulerModal({
           </div>
 
           <div className="grid gap-2">
-            <span className="text-sm font-medium text-app-2">Calendar provider</span>
+            <span className="text-sm font-medium text-app-2">
+              Calendar provider
+            </span>
             <AppSelect
               value={calendarProvider}
               onChange={setCalendarProvider}
@@ -254,7 +379,9 @@ export default function InspectionSchedulerModal({
           </div>
 
           <div className="grid gap-2">
-            <span className="text-sm font-medium text-app-2">Reminder offsets</span>
+            <span className="text-sm font-medium text-app-2">
+              Reminder offsets
+            </span>
             <div className="flex flex-wrap gap-2">
               {REMINDER_OPTIONS.map((item) => {
                 const active = reminderOffsets.includes(item.value);
@@ -278,7 +405,9 @@ export default function InspectionSchedulerModal({
           </div>
 
           <label className="grid gap-2">
-            <span className="text-sm font-medium text-app-2">Appointment notes</span>
+            <span className="text-sm font-medium text-app-2">
+              Appointment notes
+            </span>
             <textarea
               rows={4}
               value={appointmentNotes}
@@ -290,10 +419,19 @@ export default function InspectionSchedulerModal({
         </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-app px-6 py-5">
-          <button type="button" onClick={onClose} className="oh-btn oh-btn-secondary">
+          <button
+            type="button"
+            onClick={onClose}
+            className="oh-btn oh-btn-secondary"
+          >
             Cancel
           </button>
-          <button type="button" onClick={handleSave} disabled={saving} className="oh-btn">
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={saving || loadingContext}
+            className="oh-btn"
+          >
             {saving ? "Saving..." : "Save inspection"}
           </button>
         </div>

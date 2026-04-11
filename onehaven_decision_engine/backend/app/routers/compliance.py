@@ -30,6 +30,12 @@ from ..schemas import (
     ChecklistTemplateItemUpsert,
     PropertyChecklistOut,
 )
+from ..services.compliance_document_service import (
+    create_compliance_document_from_upload,
+    delete_compliance_document,
+    get_compliance_document,
+    list_compliance_documents,
+)
 from ..services.compliance_service import (
     apply_inspection_form_results,
     build_property_document_stack_snapshot,
@@ -48,14 +54,17 @@ from ..services.inspection_scheduling_service import (
     build_property_schedule_summary,
 )
 from ..services.inspector_communication_service import build_inspector_contact_payload
-from ..services.compliance_document_service import (
-    create_compliance_document_from_upload,
-    delete_compliance_document,
-    get_compliance_document,
-    list_compliance_documents,
+from ..services.jurisdiction_notification_service import (
+    build_impacted_property_notifications,
+    notify_impacted_properties_for_rule_change,
 )
 from ..services.jurisdiction_profile_service import resolve_operational_policy
-from ..services.policy_projection_service import build_property_compliance_brief
+from ..services.policy_projection_service import (
+    build_property_compliance_brief,
+    build_property_projection_snapshot,
+    rebuild_property_projection,
+    sync_document_evidence_for_property,
+)
 from ..services.property_state_machine import sync_property_state
 from ..services.stage_guard import require_stage
 from ..services.workflow_gate_service import build_workflow_summary
@@ -431,6 +440,39 @@ def _history_rows_for_property(
         .limit(limit)
     ).all()
     return [_inspection_row_payload(r) for r in rows]
+
+
+def _iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+def _serialize_doc(row: Any) -> dict[str, Any]:
+    return {
+        "id": int(getattr(row, "id", 0) or 0),
+        "property_id": getattr(row, "property_id", None),
+        "inspection_id": getattr(row, "inspection_id", None),
+        "checklist_item_id": getattr(row, "checklist_item_id", None),
+        "category": getattr(row, "category", None),
+        "label": getattr(row, "label", None),
+        "original_filename": getattr(row, "original_filename", None),
+        "storage_key": getattr(row, "storage_key", None),
+        "content_type": getattr(row, "content_type", None),
+        "size_bytes": getattr(row, "size_bytes", None),
+        "scan_status": getattr(row, "scan_status", None),
+        "parse_status": getattr(row, "parse_status", None),
+        "extracted_text_preview": getattr(row, "extracted_text_preview", None),
+        "metadata_json": json.loads(getattr(row, "metadata_json", None) or "{}"),
+        "parser_meta_json": json.loads(getattr(row, "parser_meta_json", None) or "{}"),
+        "created_at": _iso(getattr(row, "created_at", None)),
+        "updated_at": _iso(getattr(row, "updated_at", None)),
+    }
 
 
 @router.get("/templates", response_model=list[ChecklistTemplateItemOut])
@@ -832,44 +874,39 @@ def property_compliance_record(
             "latest_id": latest_checklist.id if latest_checklist else None,
             "strategy": latest_checklist.strategy if latest_checklist else None,
             "version": latest_checklist.version if latest_checklist else None,
-            "generated_at": latest_checklist.generated_at if latest_checklist else None,
+            "generated_at": latest_checklist.generated_at.isoformat() if latest_checklist and latest_checklist.generated_at else None,
             "summary": checklist_summary,
+            "items": [
+                {
+                    "id": row.id,
+                    "item_code": row.item_code,
+                    "category": row.category,
+                    "description": row.description,
+                    "severity": row.severity,
+                    "common_fail": row.common_fail,
+                    "status": row.status,
+                    "notes": row.notes,
+                    "proof_url": row.proof_url,
+                    "marked_at": row.marked_at.isoformat() if row.marked_at else None,
+                }
+                for row in checklist_items
+            ],
         },
-        "latest_inspection": latest_inspection,
-        "inspection_history": history,
-        "inspection_attempt_count": len(history),
-        "inspection_template": inspection_template,
         "readiness": readiness,
         "readiness_summary": readiness_summary,
-        "completion": {
-            "completion_pct": completion.completion_pct,
-            "completion_projection_pct": completion.completion_projection_pct,
-            "failed_count": completion.failed_count,
-            "blocked_count": completion.blocked_count,
-            "latest_inspection_passed": completion.latest_inspection_passed,
-            "latest_readiness_score": completion.latest_readiness_score,
-            "latest_readiness_status": completion.latest_readiness_status,
-            "latest_result_status": completion.latest_result_status,
-            "posture": completion.posture,
-            "is_compliant": completion.is_compliant,
-            "critical_count": completion.critical_count,
-            "unresolved_count": completion.unresolved_count,
-            "reinspection_needed": completion.reinspection_needed,
-        },
+        "completion": completion,
+        "template_preview": inspection_template,
         "jurisdiction": jurisdiction,
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
+        "latest_inspection": latest_inspection,
+        "inspection_history": history,
     }
 
 
-@router.get("/property/{property_id}/inspections", response_model=dict)
-def property_inspection_history(
+@router.post("/checklist/{property_id}/items/{item_code}", response_model=dict)
+def update_checklist_item(
     property_id: int,
-    limit: int = Query(default=50, ge=1, le=200),
+    item_code: str,
+    payload: ChecklistItemUpdateIn,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
@@ -879,136 +916,520 @@ def property_inspection_history(
         org_id=p.org_id,
         property_id=property_id,
         min_stage="compliance",
-        action="view property inspection history",
+        action="update compliance checklist item",
     )
-    rows = _history_rows_for_property(
+
+    row = db.scalar(
+        select(PropertyChecklistItem).where(
+            PropertyChecklistItem.org_id == p.org_id,
+            PropertyChecklistItem.property_id == property_id,
+            PropertyChecklistItem.item_code == item_code.upper(),
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="checklist item not found")
+
+    if payload.status is not None:
+        status = payload.status.strip().lower()
+        if status not in _ALLOWED_STATUS:
+            raise HTTPException(status_code=400, detail="invalid checklist status")
+        row.status = status
+    if payload.notes is not None:
+        row.notes = payload.notes
+    if payload.proof_url is not None:
+        row.proof_url = payload.proof_url
+
+    row.marked_at = datetime.utcnow()
+    row.marked_by_user_id = p.user_id
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+
+    db.add(
+        WorkflowEvent(
+            org_id=p.org_id,
+            property_id=property_id,
+            actor_user_id=p.user_id,
+            event_type="compliance.checklist_item_updated",
+            payload_json=json.dumps(
+                {
+                    "item_code": row.item_code,
+                    "status": row.status,
+                    "notes": row.notes,
+                    "proof_url": row.proof_url,
+                }
+            ),
+            created_at=datetime.utcnow(),
+        )
+    )
+    sync_property_state(db, org_id=p.org_id, property_id=property_id)
+    db.commit()
+
+    return {
+        "ok": True,
+        "item_code": row.item_code,
+        "status": row.status,
+        "marked_at": row.marked_at.isoformat() if row.marked_at else None,
+    }
+
+
+@router.get("/properties/{property_id}/brief", response_model=dict)
+def get_property_compliance_brief_v2(
+    property_id: int,
+    rebuild_projection: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    prop = _must_get_property(db, org_id=principal.org_id, property_id=property_id)
+    if rebuild_projection:
+        rebuild_property_projection(
+            db,
+            org_id=principal.org_id,
+            property_id=int(property_id),
+            property=prop,
+        )
+
+    brief = build_property_compliance_brief(
         db,
-        org_id=p.org_id,
-        property_id=property_id,
-        limit=limit,
+        org_id=principal.org_id,
+        state=getattr(prop, "state", None),
+        county=getattr(prop, "county", None),
+        city=getattr(prop, "city", None),
+        pha_name=getattr(prop, "program_type", None),
+        property_id=int(property_id),
+        property=prop,
+    )
+    workflow = build_workflow_summary(
+        db,
+        org_id=principal.org_id,
+        property_id=int(property_id),
+        principal=principal,
+        recompute=False,
+    )
+    docs = build_property_document_stack_snapshot(
+        db,
+        org_id=principal.org_id,
+        property_id=int(property_id),
+    )
+
+    return {
+        "ok": True,
+        "property": {
+            "id": int(prop.id),
+            "address": getattr(prop, "address", None),
+            "city": getattr(prop, "city", None),
+            "county": getattr(prop, "county", None),
+            "state": getattr(prop, "state", None),
+            "property_type": getattr(prop, "property_type", None),
+            "program_type": getattr(prop, "program_type", None),
+            "current_stage": getattr(prop, "current_stage", None),
+            "current_pane": getattr(prop, "current_pane", None),
+        },
+        "brief": brief,
+        "workflow": workflow,
+        "documents": docs,
+    }
+
+
+@router.get("/properties/{property_id}/projection", response_model=dict)
+def get_property_compliance_projection(
+    property_id: int,
+    rebuild: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    prop = _must_get_property(db, org_id=principal.org_id, property_id=property_id)
+
+    snapshot = (
+        rebuild_property_projection(
+            db,
+            org_id=principal.org_id,
+            property_id=int(property_id),
+            property=prop,
+        )
+        if rebuild
+        else build_property_projection_snapshot(
+            db,
+            org_id=principal.org_id,
+            property_id=int(property_id),
+        )
+    )
+
+    return {
+        "ok": True,
+        "property": {
+            "id": int(prop.id),
+            "address": getattr(prop, "address", None),
+            "city": getattr(prop, "city", None),
+            "county": getattr(prop, "county", None),
+            "state": getattr(prop, "state", None),
+        },
+        **snapshot,
+    }
+
+
+@router.get("/properties/{property_id}/workflow", response_model=dict)
+def get_property_compliance_workflow(
+    property_id: int,
+    recompute: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    _must_get_property(db, org_id=principal.org_id, property_id=property_id)
+    summary = build_workflow_summary(
+        db,
+        org_id=principal.org_id,
+        property_id=int(property_id),
+        principal=principal,
+        recompute=recompute,
     )
     return {
         "ok": True,
-        "property_id": property_id,
-        "count": len(rows),
+        "workflow": summary,
+    }
+
+
+@router.get("/properties/{property_id}/documents", response_model=dict)
+def get_property_compliance_documents(
+    property_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    _must_get_property(db, org_id=principal.org_id, property_id=property_id)
+    rows = list_compliance_documents(
+        db,
+        org_id=principal.org_id,
+        property_id=int(property_id),
+    )
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "documents": [_serialize_doc(row) for row in rows],
+    }
+
+
+@router.get("/properties/{property_id}/document-stack", response_model=dict)
+def get_property_document_stack(
+    property_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    _must_get_property(db, org_id=principal.org_id, property_id=property_id)
+    snapshot = build_property_document_stack_snapshot(
+        db,
+        org_id=principal.org_id,
+        property_id=int(property_id),
+    )
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "documents": snapshot,
+    }
+
+
+@router.post("/properties/{property_id}/documents/upload", response_model=dict)
+async def upload_property_document(
+    property_id: int,
+    file: UploadFile = File(...),
+    category: str = Form(...),
+    label: str | None = Form(default=None),
+    inspection_id: int | None = Form(default=None),
+    checklist_item_id: int | None = Form(default=None),
+    notes: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    _must_get_property(db, org_id=principal.org_id, property_id=property_id)
+    created = await create_compliance_document_from_upload(
+        db,
+        org_id=int(principal.org_id),
+        actor_user_id=int(principal.user_id),
+        property_id=int(property_id),
+        upload=file,
+        category=category,
+        label=label,
+        inspection_id=inspection_id,
+        checklist_item_id=checklist_item_id,
+        notes=notes,
+    )
+    sync_document_evidence_for_property(
+        db,
+        org_id=int(principal.org_id),
+        property_id=int(property_id),
+        document_id=int(created.id),
+    )
+    return {
+        "ok": True,
+        "document": _serialize_doc(created),
+    }
+
+
+@router.get("/properties/{property_id}/documents/{document_id}", response_model=dict)
+def get_property_document(
+    property_id: int,
+    document_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    _must_get_property(db, org_id=principal.org_id, property_id=property_id)
+    row = get_compliance_document(
+        db,
+        org_id=int(principal.org_id),
+        document_id=int(document_id),
+    )
+    if row is None or int(getattr(row, "property_id", 0) or 0) != int(property_id):
+        raise HTTPException(status_code=404, detail="document not found")
+    return {
+        "ok": True,
+        "document": _serialize_doc(row),
+    }
+
+
+@router.delete("/properties/{property_id}/documents/{document_id}", response_model=dict)
+def remove_property_document(
+    property_id: int,
+    document_id: int,
+    hard_delete_file: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    _must_get_property(db, org_id=principal.org_id, property_id=property_id)
+    ok = delete_compliance_document(
+        db,
+        org_id=int(principal.org_id),
+        actor_user_id=int(principal.user_id),
+        document_id=int(document_id),
+        hard_delete_file=bool(hard_delete_file),
+    )
+    return {
+        "ok": bool(ok),
+        "document_id": int(document_id),
+    }
+
+
+@router.get("/notifications/impacted-properties", response_model=dict)
+def preview_impacted_property_notifications(
+    jurisdiction_slug: str = Query(...),
+    limit: int = Query(default=50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    payload = build_impacted_property_notifications(
+        db,
+        org_id=principal.org_id,
+        jurisdiction_slug=jurisdiction_slug,
+        changed_rules=[],
+        trigger_payload={},
+        limit=limit,
+    )
+    return payload
+
+
+@router.post("/notifications/impacted-properties", response_model=dict)
+def create_impacted_property_notifications(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    jurisdiction_slug = str(payload.get("jurisdiction_slug") or "").strip()
+    if not jurisdiction_slug:
+        raise HTTPException(status_code=400, detail="jurisdiction_slug_required")
+
+    result = notify_impacted_properties_for_rule_change(
+        db,
+        org_id=principal.org_id,
+        jurisdiction_slug=jurisdiction_slug,
+        changed_rules=list(payload.get("changed_rules") or []),
+        trigger_payload=dict(payload.get("trigger_payload") or {}),
+        limit=int(payload.get("limit") or 200),
+    )
+    return result
+
+
+@router.get("/queue", response_model=dict)
+def get_compliance_queue(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    props = list(
+        db.scalars(
+            select(Property)
+            .where(Property.org_id == int(principal.org_id))
+            .order_by(desc(Property.id))
+            .limit(limit)
+        ).all()
+    )
+
+    rows: list[dict[str, Any]] = []
+    blocker_rollup: dict[str, dict[str, Any]] = {}
+    stale_rows: list[dict[str, Any]] = []
+    action_rows: list[dict[str, Any]] = []
+
+    for prop in props:
+        workflow = build_workflow_summary(
+            db,
+            org_id=principal.org_id,
+            property_id=int(prop.id),
+            principal=principal,
+            recompute=False,
+        )
+        projection = workflow.get("compliance_projection") or {}
+        compliance_gate = workflow.get("compliance_gate") or {}
+        pre_close_risk = workflow.get("pre_close_risk") or {}
+
+        blockers = [
+            str(item.get("rule_key") or item.get("title") or item.get("blocker") or "")
+            for item in (compliance_gate.get("blockers") or [])
+            if str(item.get("rule_key") or item.get("title") or item.get("blocker") or "").strip()
+        ]
+
+        row = {
+            "property_id": int(prop.id),
+            "address": getattr(prop, "address", None),
+            "city": getattr(prop, "city", None),
+            "state": getattr(prop, "state", None),
+            "county": getattr(prop, "county", None),
+            "current_stage": workflow.get("current_stage"),
+            "current_stage_label": workflow.get("current_stage_label"),
+            "current_pane": workflow.get("current_pane"),
+            "current_pane_label": workflow.get("current_pane_label"),
+            "urgency": compliance_gate.get("severity"),
+            "blockers": blockers,
+            "next_actions": workflow.get("next_actions") or [],
+            "compliance": {
+                "readiness_score": projection.get("readiness_score"),
+                "result_status": projection.get("projection_status"),
+                "blocked_count": projection.get("blocking_count"),
+                "open_failed_items": projection.get("failing_count"),
+                "reinspect_required": bool(projection.get("stale_count")),
+            },
+            "jurisdiction": {
+                "completeness_status": (workflow.get("compliance_projection") or {}).get("projection_status"),
+                "completeness_score": projection.get("confidence_score"),
+                "is_stale": bool(projection.get("stale_count")),
+                "gate_ok": bool(compliance_gate.get("ok", True)),
+                "stale_reason": compliance_gate.get("warning_reason"),
+                "coverage_confidence": projection.get("confidence_score"),
+                "confidence_label": compliance_gate.get("severity"),
+                "production_readiness": pre_close_risk.get("status"),
+                "missing_categories": [],
+                "covered_categories": [],
+                "required_categories": [],
+                "resolved_rule_version": projection.get("rules_version"),
+                "last_refreshed_at": projection.get("last_projected_at"),
+            },
+        }
+        rows.append(row)
+
+        for blocker in blockers:
+            bucket = blocker_rollup.setdefault(
+                blocker,
+                {
+                    "blocker": blocker,
+                    "count": 0,
+                    "example_property_id": int(prop.id),
+                    "example_address": getattr(prop, "address", None),
+                    "example_city": getattr(prop, "city", None),
+                    "urgency": compliance_gate.get("severity"),
+                },
+            )
+            bucket["count"] = int(bucket["count"]) + 1
+
+        if compliance_gate.get("stale_count") or workflow.get("post_close_recheck", {}).get("needed"):
+            stale_rows.append(
+                {
+                    "property_id": int(prop.id),
+                    "address": getattr(prop, "address", None),
+                    "city": getattr(prop, "city", None),
+                    "pane": workflow.get("current_pane"),
+                    "stage": workflow.get("current_stage"),
+                    "urgency": compliance_gate.get("severity"),
+                    "reasons": list(compliance_gate.get("warnings") or []),
+                }
+            )
+
+        action_rows.append(
+            {
+                "property_id": int(prop.id),
+                "address": getattr(prop, "address", None),
+                "city": getattr(prop, "city", None),
+                "stage": workflow.get("current_stage"),
+                "pane": workflow.get("current_pane"),
+                "urgency": compliance_gate.get("severity"),
+                "blocker": compliance_gate.get("blocked_reason"),
+                "action": (workflow.get("primary_action") or {}).get("title"),
+            }
+        )
+
+    return {
+        "ok": True,
+        "queue": rows,
         "rows": rows,
+        "blockers": list(blocker_rollup.values()),
+        "actions": action_rows,
+        "next_actions": action_rows,
+        "stale": stale_rows,
+        "stale_items": stale_rows,
+        "kpis": {
+            "total_properties": len(rows),
+            "with_blockers": sum(1 for row in rows if (row.get("compliance") or {}).get("blocked_count")),
+            "stale_items": len(stale_rows),
+            "critical_items": sum(1 for row in rows if row.get("urgency") == "high"),
+        },
+        "queue_counts": {
+            "total": len(rows),
+            "by_urgency": {
+                "high": sum(1 for row in rows if row.get("urgency") == "high"),
+                "warning": sum(1 for row in rows if row.get("urgency") == "warning"),
+                "info": sum(1 for row in rows if row.get("urgency") == "info"),
+            },
+            "by_status": {
+                "blocked": sum(1 for row in rows if ((row.get("compliance") or {}).get("result_status") or "") == "blocked"),
+                "warning": sum(1 for row in rows if row.get("urgency") == "warning"),
+                "ok": sum(1 for row in rows if row.get("urgency") == "info"),
+            },
+            "by_stage": {},
+        },
+        "counts": {
+            "total": len(rows),
+            "by_urgency": {
+                "high": sum(1 for row in rows if row.get("urgency") == "high"),
+                "warning": sum(1 for row in rows if row.get("urgency") == "warning"),
+                "info": sum(1 for row in rows if row.get("urgency") == "info"),
+            },
+        },
     }
 
 
 @router.get("/status/{property_id}", response_model=dict)
-def compliance_status(
+def property_status(
     property_id: int,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view compliance status",
-    )
-
-    readiness = build_property_inspection_readiness(
+    readiness = build_property_readiness_summary(
         db,
         org_id=p.org_id,
         property_id=property_id,
     )
-    completion = compute_compliance_status(
+    workflow = build_workflow_summary(
         db,
         org_id=p.org_id,
         property_id=property_id,
+        principal=p,
+        recompute=False,
     )
-    history = _history_rows_for_property(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        limit=25,
-    )
-
     return {
-        "property_id": property_id,
-        "passed": bool(
-            readiness["readiness"]["hqs_ready"]
-            and readiness["readiness"]["local_ready"]
-            and readiness["readiness"]["voucher_ready"]
-            and readiness["readiness"]["lease_up_ready"]
-        ),
-        "overall_status": readiness["overall_status"],
-        "score_pct": readiness["score_pct"],
-        "completion_pct": readiness.get("completion_pct"),
-        "completion_projection_pct": readiness.get("completion_projection_pct"),
-        "posture": readiness.get("posture"),
-        "readiness": readiness["readiness"],
-        "counts": readiness["counts"],
-        "blocking_items": readiness["blocking_items"],
-        "warning_items": readiness["warning_items"],
-        "recommended_actions": readiness["recommended_actions"],
-        "coverage": readiness["coverage"],
-        "latest_inspection": readiness.get("latest_inspection"),
-        "inspection_history": history,
-        "completion": {
-            "completion_pct": completion.completion_pct,
-            "completion_projection_pct": completion.completion_projection_pct,
-            "failed_count": completion.failed_count,
-            "blocked_count": completion.blocked_count,
-            "latest_inspection_passed": completion.latest_inspection_passed,
-            "latest_readiness_score": completion.latest_readiness_score,
-            "latest_readiness_status": completion.latest_readiness_status,
-            "latest_result_status": completion.latest_result_status,
-            "posture": completion.posture,
-            "is_compliant": completion.is_compliant,
-            "critical_count": completion.critical_count,
-            "unresolved_count": completion.unresolved_count,
-            "reinspection_needed": completion.reinspection_needed,
-        },
+        "ok": True,
+        "property_id": int(property_id),
+        "readiness": readiness,
+        "workflow": workflow,
     }
 
 
-@router.post("/run/{property_id}", response_model=dict)
-def run_compliance_hqs(
-    property_id: int,
-    auto_create_rehab_tasks: bool = Query(default=True),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="run compliance HQS",
-    )
-    try:
-        result = run_hqs_service(
-            db,
-            org_id=p.org_id,
-            actor_user_id=p.user_id,
-            actor_email=p.email,
-            property_id=property_id,
-            auto_create_rehab_tasks=auto_create_rehab_tasks,
-        )
-        sync_property_state(db, org_id=p.org_id, property_id=property_id)
-        db.commit()
-        return {
-            **result,
-            "workflow": build_workflow_summary(
-                db,
-                org_id=p.org_id,
-                property_id=property_id,
-                recompute=True,
-            ),
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"run failed: {e}")
-
-
-@router.post("/property/{property_id}/generate-policy-tasks", response_model=dict)
-def generate_policy_tasks(
+@router.post("/hqs/{property_id}", response_model=dict)
+def run_hqs(
     property_id: int,
     db: Session = Depends(get_db),
     p=Depends(get_principal),
@@ -1019,34 +1440,23 @@ def generate_policy_tasks(
         org_id=p.org_id,
         property_id=property_id,
         min_stage="compliance",
-        action="generate policy tasks",
+        action="run hqs",
     )
-    result = generate_policy_tasks_for_property(
+    result = run_hqs_service(
         db,
         org_id=p.org_id,
+        property_id=property_id,
         actor_user_id=p.user_id,
-        property_id=property_id,
     )
     sync_property_state(db, org_id=p.org_id, property_id=property_id)
-    db.commit()
-    return {
-        **result,
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
-    }
+    return result
 
 
-@router.post("/inspection/{property_id}/{inspection_id}/apply-form", response_model=dict)
-def apply_form_results(
+@router.post("/inspections/{property_id}/{inspection_id}/apply-results", response_model=dict)
+def apply_results(
     property_id: int,
     inspection_id: int,
-    raw_payload: dict[str, Any] | list[dict[str, Any]] = Body(...),
-    sync_checklist: bool = Query(default=True),
-    create_failure_tasks: bool = Query(default=True),
+    payload: dict[str, Any] = Body(default_factory=dict),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
@@ -1056,42 +1466,24 @@ def apply_form_results(
         org_id=p.org_id,
         property_id=property_id,
         inspection_id=inspection_id,
-    )
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="apply inspection form results",
     )
     result = apply_inspection_form_results(
         db,
         org_id=p.org_id,
-        actor_user_id=p.user_id,
         property_id=property_id,
         inspection_id=inspection_id,
-        raw_payload=raw_payload,
-        sync_checklist=sync_checklist,
-        create_failure_tasks=create_failure_tasks,
+        actor_user_id=p.user_id,
+        payload=payload,
     )
     sync_property_state(db, org_id=p.org_id, property_id=property_id)
-    db.commit()
-    return {
-        **result,
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
-    }
+    return result
 
 
-@router.get("/inspection/{property_id}/{inspection_id}/failure-actions", response_model=dict)
-def failure_actions(
+@router.post("/inspections/{property_id}/{inspection_id}/create-failure-tasks", response_model=dict)
+def create_failure_tasks(
     property_id: int,
     inspection_id: int,
-    limit: int = Query(default=10, ge=1, le=50),
+    payload: dict[str, Any] = Body(default_factory=dict),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
@@ -1102,24 +1494,70 @@ def failure_actions(
         property_id=property_id,
         inspection_id=inspection_id,
     )
-    require_stage(
+    result = create_failure_tasks_from_inspection(
         db,
         org_id=p.org_id,
         property_id=property_id,
-        min_stage="compliance",
-        action="view failure actions",
+        inspection_id=inspection_id,
+        actor_user_id=p.user_id,
+        blocking=bool(payload.get("blocking", False)),
+    )
+    sync_property_state(db, org_id=p.org_id, property_id=property_id)
+    return result
+
+
+@router.get("/inspections/{property_id}/{inspection_id}/failure-next-actions", response_model=dict)
+def failure_next_actions(
+    property_id: int,
+    inspection_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    _must_get_inspection(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
     )
     return build_failure_next_actions(
         db,
         org_id=p.org_id,
         property_id=property_id,
         inspection_id=inspection_id,
-        limit=limit,
     )
 
 
-@router.post("/inspection/{property_id}/{inspection_id}/tasks-from-failures", response_model=dict)
-def tasks_from_failures(
+@router.get("/inspections/property/{property_id}/timeline", response_model=dict)
+def inspection_timeline(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    return build_inspection_timeline(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+
+
+@router.get("/inspections/property/{property_id}/schedule-summary", response_model=dict)
+def inspection_schedule_summary(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property(db, org_id=p.org_id, property_id=property_id)
+    return build_property_schedule_summary(
+        db,
+        org_id=p.org_id,
+        property_id=property_id,
+    )
+
+
+@router.get("/inspections/{property_id}/{inspection_id}/contact-payload", response_model=dict)
+def inspection_contact_payload(
     property_id: int,
     inspection_id: int,
     db: Session = Depends(get_db),
@@ -1132,423 +1570,90 @@ def tasks_from_failures(
         property_id=property_id,
         inspection_id=inspection_id,
     )
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="create failure tasks",
-    )
-    out = create_failure_tasks_from_inspection(
+    return build_inspector_contact_payload(
         db,
         org_id=p.org_id,
         property_id=property_id,
         inspection_id=inspection_id,
     )
-    sync_property_state(db, org_id=p.org_id, property_id=property_id)
-    db.commit()
-    return {
-        **out,
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
-    }
 
 
-@router.get("/timeline/{property_id}", response_model=dict)
-def compliance_timeline(
+@router.post("/property/{property_id}/generate-policy-tasks", response_model=dict)
+def generate_policy_tasks(
     property_id: int,
-    limit: int = Query(default=200, ge=1, le=1000),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-
-    rows = db.scalars(
-        select(WorkflowEvent)
-        .where(
-            WorkflowEvent.org_id == p.org_id,
-            WorkflowEvent.property_id == property_id,
-        )
-        .order_by(desc(WorkflowEvent.id))
-        .limit(limit)
-    ).all()
-
-    out: list[dict[str, Any]] = []
-    for r in rows:
-        try:
-            payload = json.loads(r.payload_json or "{}")
-        except Exception:
-            payload = {"raw": r.payload_json}
-        out.append(
-            {
-                "id": r.id,
-                "event_type": r.event_type,
-                "created_at": r.created_at,
-                "payload": payload,
-                "actor_user_id": r.actor_user_id,
-            }
-        )
-    return {"property_id": property_id, "rows": out, "count": len(out)}
-
-
-@router.get("/run_hqs/{property_id}", response_model=dict)
-def run_hqs_summary_only(
-    property_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
     prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
+    result = generate_policy_tasks_for_property(
         db,
         org_id=p.org_id,
         property_id=property_id,
-        min_stage="compliance",
-        action="view HQS summary",
-    )
-
-    items = db.scalars(
-        select(PropertyChecklistItem).where(
-            PropertyChecklistItem.org_id == p.org_id,
-            PropertyChecklistItem.property_id == property_id,
-        )
-    ).all()
-    total = len(items)
-    passed_ct = sum(1 for x in items if (x.status or "").lower() == "done")
-    failed_ct = sum(1 for x in items if (x.status or "").lower() == "failed")
-    blocked_ct = sum(1 for x in items if (x.status or "").lower() == "blocked")
-    not_yet = total - passed_ct - failed_ct - blocked_ct
-    score_pct = round((passed_ct / total) * 100.0, 2) if total else 0.0
-    fail_codes = sorted(
-        [x.item_code for x in items if (x.status or "").lower() == "failed" and x.item_code]
-    )
-    jurisdiction = resolve_operational_policy(
-        db,
-        org_id=p.org_id,
-        city=prop.city,
+        actor_user_id=p.user_id,
+        state=getattr(prop, "state", None) or "MI",
         county=getattr(prop, "county", None),
-        state=prop.state or "MI",
+        city=getattr(prop, "city", None),
+        pha_name=payload.get("pha_name"),
     )
-
-    latest_inspection = db.scalar(
-        select(Inspection)
-        .where(
-            Inspection.org_id == p.org_id,
-            Inspection.property_id == property_id,
-        )
-        .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
-        .limit(1)
-    )
-
-    return {
-        "property_id": property_id,
-        "total": total,
-        "passed": passed_ct,
-        "failed": failed_ct,
-        "blocked": blocked_ct,
-        "not_yet": not_yet,
-        "score_pct": score_pct,
-        "fail_codes": fail_codes,
-        "latest_inspection": _inspection_row_payload(latest_inspection) if latest_inspection else None,
-        "jurisdiction_profile_id": jurisdiction.get("profile_id"),
-        "jurisdiction_scope": jurisdiction.get("scope"),
-        "jurisdiction_match_level": jurisdiction.get("match_level"),
-        "jurisdiction_required_actions": len(jurisdiction.get("required_actions") or []),
-        "jurisdiction_blocking_items": len(jurisdiction.get("blocking_items") or []),
-    }
-
-
-
-@router.get("/properties/{property_id}/schedule-summary", response_model=dict)
-def property_schedule_summary(
-    property_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view inspection schedule summary",
-    )
-    summary = build_property_schedule_summary(
-        db,
-        org_id=int(p.org_id),
-        property_id=int(property_id),
-    )
-    return {
-        **summary,
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
-    }
-
-
-@router.get("/properties/{property_id}/timeline", response_model=dict)
-def property_inspection_timeline(
-    property_id: int,
-    limit: int = Query(default=100, ge=1, le=300),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view inspection timeline",
-    )
-    return {
-        **build_inspection_timeline(
-            db,
-            org_id=int(p.org_id),
-            property_id=int(property_id),
-            limit=int(limit),
-        ),
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
-    }
-
-
-@router.get("/properties/{property_id}/inspector-contact", response_model=dict)
-def property_inspector_contact_payload(
-    property_id: int,
-    inspection_id: int | None = Query(default=None),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view inspector communication payload",
-    )
-
-    if inspection_id is None:
-        latest = db.scalar(
-            select(Inspection)
-            .where(
-                Inspection.org_id == p.org_id,
-                Inspection.property_id == property_id,
-            )
-            .order_by(desc(Inspection.inspection_date), desc(Inspection.id))
-            .limit(1)
-        )
-        if latest is None:
-            raise HTTPException(status_code=404, detail="no inspections found for property")
-        inspection_id = int(latest.id)
-
-    return {
-        "ok": True,
-        "property_id": int(property_id),
-        "inspection_id": int(inspection_id),
-        "payload": build_inspector_contact_payload(
-            db,
-            org_id=int(p.org_id),
-            inspection_id=int(inspection_id),
-        ),
-    }
-
-_ALLOWED_COMPLIANCE_DOCUMENT_CATEGORIES = {
-    "inspection_report",
-    "pass_certificate",
-    "reinspection_notice",
-    "repair_invoice",
-    "utility_confirmation",
-    "smoke_detector_proof",
-    "lead_based_paint_paperwork",
-    "local_jurisdiction_document",
-    "approval_letter",
-    "denial_letter",
-    "photo_evidence",
-    "other_evidence",
-}
-
-
-def _normalize_document_category(value: str | None) -> str:
-    raw = str(value or "other_evidence").strip().lower().replace(" ", "_")
-    return raw if raw in _ALLOWED_COMPLIANCE_DOCUMENT_CATEGORIES else "other_evidence"
-
-
-@router.get("/properties/{property_id}/documents", response_model=dict)
-def property_compliance_documents(
-    property_id: int,
-    inspection_id: int | None = Query(default=None),
-    checklist_item_id: int | None = Query(default=None),
-    category: str | None = Query(default=None),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view compliance documents",
-    )
-    rows = list_compliance_documents(
-        db,
-        org_id=int(p.org_id),
-        property_id=int(property_id),
-        inspection_id=int(inspection_id) if inspection_id is not None else None,
-        checklist_item_id=int(checklist_item_id) if checklist_item_id is not None else None,
-        category=_normalize_document_category(category) if category else None,
-    )
-    return {
-        "ok": True,
-        "property_id": int(property_id),
-        "count": len(rows),
-        "rows": rows,
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
-    }
-
-
-@router.post("/properties/{property_id}/documents/upload", response_model=dict)
-async def upload_property_compliance_document(
-    property_id: int,
-    category: str = Form(...),
-    file: UploadFile = File(...),
-    inspection_id: int | None = Form(default=None),
-    checklist_item_id: int | None = Form(default=None),
-    label: str | None = Form(default=None),
-    notes: str | None = Form(default=None),
-    parse_document: bool = Form(default=True),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="upload compliance document",
-    )
-
-    if inspection_id is not None:
-        _must_get_inspection(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            inspection_id=int(inspection_id),
-        )
-
-    row = await create_compliance_document_from_upload(
-        db,
-        org_id=int(p.org_id),
-        actor_user_id=int(p.user_id),
-        property_id=int(property_id),
-        category=_normalize_document_category(category),
-        upload=file,
-        inspection_id=int(inspection_id) if inspection_id is not None else None,
-        checklist_item_id=int(checklist_item_id) if checklist_item_id is not None else None,
-        label=label,
-        notes=notes,
-        parse_document=bool(parse_document),
-    )
-
     sync_property_state(db, org_id=p.org_id, property_id=property_id)
-    db.commit()
-
-    return {
-        "ok": True,
-        "document": row,
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
-    }
+    return result
 
 
-@router.get("/documents/{document_id}", response_model=dict)
-def get_property_compliance_document(
-    document_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    row = get_compliance_document(db, org_id=int(p.org_id), document_id=int(document_id))
-    return {"ok": True, "document": row}
-
-
-@router.get("/documents/{document_id}/download")
-def download_property_compliance_document(
-    document_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    row = get_compliance_document(db, org_id=int(p.org_id), document_id=int(document_id))
-    path = row.get("absolute_path")
-    if not path:
-        raise HTTPException(status_code=404, detail="document file not found")
-    from fastapi.responses import FileResponse
-    filename = row.get("original_filename") or row.get("storage_key") or f"document_{document_id}"
-    return FileResponse(path, filename=filename)
-
-
-@router.delete("/documents/{document_id}", response_model=dict)
-def delete_property_compliance_document(
-    document_id: int,
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-):
-    result = delete_compliance_document(
-        db,
-        org_id=int(p.org_id),
-        actor_user_id=int(p.user_id),
-        document_id=int(document_id),
-    )
-    db.commit()
-    return {"ok": True, **result}
-
-
-@router.get("/properties/{property_id}/document-stack", response_model=dict)
-def property_compliance_document_stack(
+@router.get("/audit/{property_id}", response_model=dict)
+def compliance_audit(
     property_id: int,
+    limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     p=Depends(get_principal),
 ):
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
-        db,
-        org_id=p.org_id,
-        property_id=property_id,
-        min_stage="compliance",
-        action="view compliance document stack",
+
+    workflow_events = list(
+        db.scalars(
+            select(WorkflowEvent)
+            .where(
+                WorkflowEvent.org_id == p.org_id,
+                WorkflowEvent.property_id == property_id,
+            )
+            .order_by(desc(WorkflowEvent.id))
+            .limit(limit)
+        ).all()
     )
-    out = build_property_document_stack_snapshot(
-        db,
-        org_id=int(p.org_id),
-        property_id=int(property_id),
+    audit_rows = list(
+        db.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.org_id == p.org_id)
+            .order_by(desc(AuditEvent.id))
+            .limit(limit)
+        ).all()
     )
+
     return {
-        **out,
-        "workflow": build_workflow_summary(
-            db,
-            org_id=p.org_id,
-            property_id=property_id,
-            recompute=True,
-        ),
+        "ok": True,
+        "property_id": int(property_id),
+        "workflow_events": [
+            {
+                "id": row.id,
+                "event_type": row.event_type,
+                "payload_json": json.loads(row.payload_json or "{}"),
+                "created_at": _iso(row.created_at),
+            }
+            for row in workflow_events
+        ],
+        "audit_events": [
+            {
+                "id": row.id,
+                "action": row.action,
+                "entity_type": row.entity_type,
+                "entity_id": row.entity_id,
+                "before_json": json.loads(row.before_json or "{}") if row.before_json else None,
+                "after_json": json.loads(row.after_json or "{}") if row.after_json else None,
+                "created_at": _iso(row.created_at),
+            }
+            for row in audit_rows
+            if str(row.entity_id or "") == str(property_id)
+            or str(row.entity_type or "").startswith("property")
+            or str(row.entity_type or "").startswith("compliance")
+        ],
     }

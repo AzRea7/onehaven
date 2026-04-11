@@ -53,7 +53,7 @@ function postureTone(posture?: string) {
 
 function statusTone(status?: string) {
   const s = String(status || "").toLowerCase();
-  if (["pass", "ready"].includes(s)) return "good";
+  if (["pass", "ready", "ok"].includes(s)) return "good";
   if (
     [
       "fail",
@@ -62,10 +62,12 @@ function statusTone(status?: string) {
       "needs_work",
       "reinspection_required",
     ].includes(s)
-  )
+  ) {
     return "bad";
-  if (["attention", "unknown", "pending", "inconclusive"].includes(s))
+  }
+  if (["attention", "unknown", "pending", "inconclusive"].includes(s)) {
     return "warn";
+  }
   return "neutral";
 }
 
@@ -359,6 +361,7 @@ function ChecklistCard({ item }: { item: any }) {
 }
 
 export default function InspectionReadiness({
+  property,
   readiness,
   brief,
   status,
@@ -366,6 +369,10 @@ export default function InspectionReadiness({
   onRunAutomation,
   busy,
 }: {
+  property?: {
+    id?: number;
+    address?: string;
+  } | null;
   readiness?: any;
   brief?: any;
   status?: any;
@@ -403,15 +410,15 @@ export default function InspectionReadiness({
   ];
 
   const readinessScore =
-    model?.score_pct ?? readinessMeta?.score ?? summary?.score_pct ?? null;
-  const completionPct = model?.completion_pct ?? completion?.pct ?? null;
+    model?.score_pct ?? readinessMeta?.score ?? runSummary?.score_pct ?? null;
+  const completionPct = model?.completion_pct ?? completion?.pct_done ?? null;
   const projectionPct =
     model?.completion_projection_pct ?? completion?.projection_pct ?? null;
   const failedCount =
     counts?.inspection_failed_items ??
     counts?.failing ??
     counts?.failed_items ??
-    summary?.failed ??
+    runSummary?.failed ??
     null;
   const blockedCount =
     counts?.inspection_blocked_items ??
@@ -450,7 +457,11 @@ export default function InspectionReadiness({
   return (
     <Surface
       title="Inspection readiness"
-      subtitle="Inspection-driven readiness combines the latest inspection with unresolved failures, blocked items, critical issues, and remediation guidance."
+      subtitle={
+        property?.address
+          ? `Inspection-driven readiness for ${property.address}.`
+          : "Inspection-driven readiness combines the latest inspection with unresolved failures, blocked items, critical issues, and remediation guidance."
+      }
       actions={
         onRunAutomation ? (
           <button

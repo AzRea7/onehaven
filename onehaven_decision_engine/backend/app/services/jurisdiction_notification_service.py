@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import AuditEvent
-from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
+from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource, PropertyComplianceProjection
 from app.services.jurisdiction_completeness_service import profile_completeness_payload
 
 
@@ -43,6 +43,36 @@ def _dumps(value: Any) -> str:
         return json.dumps(value, sort_keys=True, default=str)
     except Exception:
         return "{}"
+
+
+def _loads(value: Any, default: Any) -> Any:
+    if value in (None, ""):
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        parsed = json.loads(value)
+        return parsed if parsed is not None else default
+    except Exception:
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except Exception:
+        return default
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except Exception:
+        return default
 
 
 def _scope_label_from_values(
@@ -188,6 +218,8 @@ def record_notification_event(
         or payload.get("jurisdiction_profile_id")
         or payload.get("source_id")
         or payload.get("inspection_id")
+        or payload.get("property_id")
+        or payload.get("projection_id")
         or "unknown"
     )
     action = str(payload.get("kind") or payload.get("action") or "jurisdiction_event")
@@ -307,8 +339,6 @@ def notify_stale_jurisdictions(
         "results": results,
     }
 
-
-# ONLY SHOWING CHANGED / ADDED PARTS (rest remains EXACTLY as your file)
 
 def build_source_refresh_notification(
     *,
@@ -488,4 +518,189 @@ def build_review_queue_payload(
         "stale_ids": stale_ids,
         "changed_candidate_count": len(changed_candidate_ids),
         "changed_candidate_ids": changed_candidate_ids,
+    }
+
+
+def _projection_rows_for_scope(
+    db: Session,
+    *,
+    org_id: int | None,
+    jurisdiction_slug: str | None = None,
+    limit: int | None = None,
+) -> list[PropertyComplianceProjection]:
+    stmt = select(PropertyComplianceProjection).where(
+        PropertyComplianceProjection.is_current.is_(True)
+    )
+
+    if org_id is None:
+        stmt = stmt.where(PropertyComplianceProjection.org_id.is_(None))
+    else:
+        stmt = stmt.where(
+            or_(
+                PropertyComplianceProjection.org_id == int(org_id),
+                PropertyComplianceProjection.org_id.is_(None),
+            )
+        )
+
+    if jurisdiction_slug:
+        stmt = stmt.where(PropertyComplianceProjection.jurisdiction_slug == jurisdiction_slug)
+
+    stmt = stmt.order_by(PropertyComplianceProjection.id.asc())
+    if limit is not None:
+        stmt = stmt.limit(max(1, int(limit)))
+    return list(db.scalars(stmt).all())
+
+
+def build_property_rule_change_notification(
+    *,
+    property_projection: PropertyComplianceProjection,
+    changed_rules: list[dict[str, Any]] | None = None,
+    trigger_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    changed_rules = list(changed_rules or [])
+    impacted_rules = _loads(getattr(property_projection, "impacted_rules_json", None), [])
+    projection_reason = _loads(getattr(property_projection, "projection_reason_json", None), {})
+    blocking_count = _safe_int(getattr(property_projection, "blocking_count", None))
+    unknown_count = _safe_int(getattr(property_projection, "unknown_count", None))
+    stale_count = _safe_int(getattr(property_projection, "stale_count", None))
+    conflicting_count = _safe_int(getattr(property_projection, "conflicting_count", None))
+    confidence_score = _safe_float(getattr(property_projection, "confidence_score", None), 0.0)
+
+    severity = "info"
+    if blocking_count > 0 or conflicting_count > 0:
+        severity = "high"
+    elif stale_count > 0 or unknown_count > 0 or confidence_score < 0.65:
+        severity = "warning"
+
+    if blocking_count > 0:
+        reason = "Rule changes created active compliance blockers for this property."
+    elif conflicting_count > 0:
+        reason = "Rule changes introduced conflicting compliance evidence."
+    elif stale_count > 0:
+        reason = "Rule changes require stale proof to be refreshed."
+    elif unknown_count > 0:
+        reason = "Rule changes introduced unknown compliance requirements."
+    elif confidence_score < 0.65:
+        reason = "Rule changes reduced compliance confidence."
+    else:
+        reason = "Property should be re-evaluated after jurisdiction rule changes."
+
+    return {
+        "kind": "property_rule_change_impact",
+        "level": severity,
+        "entity_type": "property_compliance_projection",
+        "entity_id": str(getattr(property_projection, "id", "unknown")),
+        "projection_id": int(property_projection.id),
+        "property_id": int(property_projection.property_id),
+        "org_id": getattr(property_projection, "org_id", None),
+        "jurisdiction_slug": getattr(property_projection, "jurisdiction_slug", None),
+        "message": reason,
+        "changed_rules": changed_rules,
+        "impacted_rules": impacted_rules,
+        "blocking_count": blocking_count,
+        "unknown_count": unknown_count,
+        "stale_count": stale_count,
+        "conflicting_count": conflicting_count,
+        "confidence_score": confidence_score,
+        "projection_status": getattr(property_projection, "projection_status", None),
+        "projected_compliance_cost": getattr(property_projection, "projected_compliance_cost", None),
+        "projected_days_to_rent": getattr(property_projection, "projected_days_to_rent", None),
+        "projection_reason": projection_reason,
+        "trigger_payload": trigger_payload or {},
+        "created_at": _utcnow().isoformat(),
+    }
+
+
+def build_post_close_reevaluation_trigger(
+    *,
+    property_projection: PropertyComplianceProjection,
+    changed_rules: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    changed_rules = list(changed_rules or [])
+    return {
+        "kind": "property_post_close_recheck",
+        "level": "warning",
+        "entity_type": "property_compliance_projection",
+        "entity_id": str(getattr(property_projection, "id", "unknown")),
+        "projection_id": int(property_projection.id),
+        "property_id": int(property_projection.property_id),
+        "org_id": getattr(property_projection, "org_id", None),
+        "jurisdiction_slug": getattr(property_projection, "jurisdiction_slug", None),
+        "message": "Post-close compliance should be re-evaluated due to changed or stale jurisdiction rules.",
+        "changed_rules": changed_rules,
+        "blocking_count": _safe_int(getattr(property_projection, "blocking_count", None)),
+        "unknown_count": _safe_int(getattr(property_projection, "unknown_count", None)),
+        "stale_count": _safe_int(getattr(property_projection, "stale_count", None)),
+        "conflicting_count": _safe_int(getattr(property_projection, "conflicting_count", None)),
+        "confidence_score": _safe_float(getattr(property_projection, "confidence_score", None), 0.0),
+        "created_at": _utcnow().isoformat(),
+    }
+
+
+def build_impacted_property_notifications(
+    db: Session,
+    *,
+    org_id: int | None,
+    jurisdiction_slug: str | None,
+    changed_rules: list[dict[str, Any]] | None = None,
+    trigger_payload: dict[str, Any] | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    rows = _projection_rows_for_scope(
+        db,
+        org_id=org_id,
+        jurisdiction_slug=jurisdiction_slug,
+        limit=limit,
+    )
+    notifications: list[dict[str, Any]] = []
+    for row in rows:
+        notifications.append(
+            build_property_rule_change_notification(
+                property_projection=row,
+                changed_rules=changed_rules,
+                trigger_payload=trigger_payload,
+            )
+        )
+    return {
+        "ok": True,
+        "org_id": org_id,
+        "jurisdiction_slug": jurisdiction_slug,
+        "count": len(notifications),
+        "notifications": notifications,
+    }
+
+
+def notify_impacted_properties_for_rule_change(
+    db: Session,
+    *,
+    org_id: int | None,
+    jurisdiction_slug: str | None,
+    changed_rules: list[dict[str, Any]] | None = None,
+    trigger_payload: dict[str, Any] | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    payload = build_impacted_property_notifications(
+        db,
+        org_id=org_id,
+        jurisdiction_slug=jurisdiction_slug,
+        changed_rules=changed_rules,
+        trigger_payload=trigger_payload,
+        limit=limit,
+    )
+
+    created = 0
+    results: list[dict[str, Any]] = []
+    for item in payload["notifications"]:
+        result = record_notification_event(db, payload=item)
+        results.append(result)
+        if result.get("recorded"):
+            created += 1
+
+    return {
+        "ok": True,
+        "org_id": org_id,
+        "jurisdiction_slug": jurisdiction_slug,
+        "processed_count": len(payload["notifications"]),
+        "created_count": created,
+        "results": results,
     }

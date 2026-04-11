@@ -15,12 +15,8 @@ type DocumentRow = {
   parse_status?: string | null;
   scan_status?: string | null;
   file_size_bytes?: number | null;
+  size_bytes?: number | null;
   extracted_text_preview?: string | null;
-};
-
-type StackPayload = {
-  rows?: DocumentRow[];
-  by_category?: Record<string, DocumentRow[]>;
 };
 
 function labelize(value?: string | null) {
@@ -31,8 +27,10 @@ function labelize(value?: string | null) {
 
 function toneFor(value?: string | null) {
   const v = String(value || "").toLowerCase();
-  if (["clean", "parsed", "complete"].includes(v)) return "oh-pill oh-pill-good";
-  if (["queued", "skipped", "pending"].includes(v)) return "oh-pill oh-pill-warn";
+  if (["clean", "parsed", "complete"].includes(v))
+    return "oh-pill oh-pill-good";
+  if (["queued", "skipped", "pending"].includes(v))
+    return "oh-pill oh-pill-warn";
   if (["infected", "error", "failed"].includes(v)) return "oh-pill oh-pill-bad";
   return "oh-pill";
 }
@@ -46,21 +44,28 @@ function formatBytes(value?: number | null) {
 }
 
 export default function ComplianceDocumentStack({
-  data,
-  onDeleted,
+  propertyId,
+  documents,
+  onChanged,
 }: {
-  data?: StackPayload | null;
-  onDeleted?: () => void | Promise<void>;
+  propertyId?: number;
+  documents?: DocumentRow[] | null;
+  onChanged?: () => void | Promise<void>;
 }) {
-  const rows = Array.isArray(data?.rows) ? data!.rows! : [];
+  const rows = Array.isArray(documents) ? documents : [];
 
   async function handleDelete(id: number) {
-    await api.delete(`/compliance/documents/${id}`);
-    await onDeleted?.();
+    if (!propertyId) return;
+    await api.delete(`/compliance/properties/${propertyId}/documents/${id}`);
+    await onChanged?.();
   }
 
   async function handleDownload(id: number) {
-    window.open(`/api/compliance/documents/${id}/download`, "_blank");
+    if (!propertyId) return;
+    window.open(
+      `/api/compliance/properties/${propertyId}/documents/${id}`,
+      "_blank",
+    );
   }
 
   if (!rows.length) {
@@ -78,7 +83,9 @@ export default function ComplianceDocumentStack({
     <Surface
       title="Compliance document stack"
       subtitle="Evidence and compliance-specific files tied to the property, inspection, and checklist state."
-      actions={<div className="text-xs text-app-4">{rows.length} documents</div>}
+      actions={
+        <div className="text-xs text-app-4">{rows.length} documents</div>
+      }
     >
       <div className="grid gap-3">
         {rows.map((row) => (
@@ -91,7 +98,9 @@ export default function ComplianceDocumentStack({
                 <div className="flex flex-wrap items-center gap-2">
                   <FileText className="h-4 w-4 text-app-4" />
                   <div className="text-sm font-semibold text-app-0">
-                    {row.label || row.original_filename || `Document #${row.id}`}
+                    {row.label ||
+                      row.original_filename ||
+                      `Document #${row.id}`}
                   </div>
                   <span className="oh-pill">
                     {labelize(row.category || "other_evidence")}
@@ -110,12 +119,18 @@ export default function ComplianceDocumentStack({
 
                 <div className="mt-2 flex flex-wrap gap-2 text-xs text-app-4">
                   <span>{row.original_filename || "Unnamed file"}</span>
-                  <span>{formatBytes(row.file_size_bytes)}</span>
+                  <span>
+                    {formatBytes(row.file_size_bytes || row.size_bytes)}
+                  </span>
                   {row.inspection_id != null ? (
-                    <span className="oh-pill">Inspection #{row.inspection_id}</span>
+                    <span className="oh-pill">
+                      Inspection #{row.inspection_id}
+                    </span>
                   ) : null}
                   {row.checklist_item_id != null ? (
-                    <span className="oh-pill">Checklist #{row.checklist_item_id}</span>
+                    <span className="oh-pill">
+                      Checklist #{row.checklist_item_id}
+                    </span>
                   ) : null}
                 </div>
 
@@ -135,16 +150,18 @@ export default function ComplianceDocumentStack({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => handleDownload(row.id)}
+                  onClick={() => void handleDownload(row.id)}
                   className="oh-btn oh-btn-secondary"
+                  disabled={!propertyId}
                 >
                   <Download className="h-4 w-4" />
-                  Download
+                  Open
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDelete(row.id)}
+                  onClick={() => void handleDelete(row.id)}
                   className="oh-btn oh-btn-secondary text-red-300"
+                  disabled={!propertyId}
                 >
                   <Trash2 className="h-4 w-4" />
                   Delete

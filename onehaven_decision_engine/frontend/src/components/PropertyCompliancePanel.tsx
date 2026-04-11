@@ -1,19 +1,14 @@
 import React from "react";
 import {
   AlertTriangle,
-  BadgeCheck,
   Building2,
   CalendarClock,
   Camera,
-  CheckCircle2,
   ClipboardList,
   ClipboardX,
   FileCheck2,
-  FileText,
   Image as ImageIcon,
-  Mail,
   ShieldAlert,
-  ShieldCheck,
   TriangleAlert,
   Wrench,
 } from "lucide-react";
@@ -33,50 +28,107 @@ type PropertyLike = {
   address?: string | null;
 };
 
-type Brief = {
+type Projection = {
+  id?: number;
+  projection_status?: string | null;
+  rules_version?: string | null;
+  blocking_count?: number | null;
+  unknown_count?: number | null;
+  stale_count?: number | null;
+  conflicting_count?: number | null;
+  evidence_gap_count?: number | null;
+  confirmed_count?: number | null;
+  inferred_count?: number | null;
+  failing_count?: number | null;
+  readiness_score?: number | null;
+  projected_compliance_cost?: number | null;
+  projected_days_to_rent?: number | null;
+  confidence_score?: number | null;
+  impacted_rules?: any[];
+  unresolved_evidence_gaps?: any[];
+  last_projected_at?: string | null;
+};
+
+type Workflow = {
+  current_stage?: string | null;
+  current_stage_label?: string | null;
+  current_pane?: string | null;
+  current_pane_label?: string | null;
+  compliance_gate?: {
+    ok?: boolean;
+    severity?: string | null;
+    status?: string | null;
+    blocked_reason?: string | null;
+    warning_reason?: string | null;
+    warnings?: string[];
+    blockers?: any[];
+    readiness_score?: number | null;
+    confidence_score?: number | null;
+    projected_compliance_cost?: number | null;
+    projected_days_to_rent?: number | null;
+    blocking_count?: number | null;
+    unknown_count?: number | null;
+    stale_count?: number | null;
+    conflicting_count?: number | null;
+    impacted_rules?: any[];
+    unresolved_evidence_gaps?: any[];
+  };
+  pre_close_risk?: {
+    active?: boolean;
+    status?: string | null;
+    severity?: string | null;
+    blocking?: boolean;
+    warnings?: string[];
+    summary?: string | null;
+    projected_compliance_cost?: number | null;
+    projected_days_to_rent?: number | null;
+  };
+  post_close_recheck?: {
+    active?: boolean;
+    status?: string | null;
+    needed?: boolean;
+    reason?: string | null;
+    warnings?: string[];
+  };
+};
+
+type BriefPayload = {
   ok?: boolean;
-  market?: {
-    state?: string;
-    county?: string | null;
-    city?: string | null;
-    pha_name?: string | null;
-  };
-  compliance?: {
-    market_label?: string;
-    registration_required?: string | null;
-    inspection_required?: string | null;
-    certificate_required_before_occupancy?: string | null;
-    pha_specific_workflow?: boolean | null;
-    coverage_confidence?: string | null;
-    production_readiness?: string | null;
-    resolved_rule_version?: string | null;
-    last_refreshed?: string | null;
-  };
-  explanation?: string | null;
-  required_actions?: any[];
-  blocking_items?: any[];
-  resolved_profile?: any;
-  jurisdiction_profile?: any;
-  source_evidence?: any[];
-  resolved_layers?: any[];
-  coverage?: {
-    completeness_status?: string | null;
-    completeness_score?: number | null;
-    is_stale?: boolean | null;
-    stale_reason?: string | null;
-    missing_categories?: string[] | null;
-    covered_categories?: string[] | null;
-    required_categories?: string[] | null;
-    coverage_confidence?: string | null;
-    confidence_label?: string | null;
-    production_readiness?: string | null;
-    resolved_rule_version?: string | null;
-    last_refreshed?: string | null;
+  property?: PropertyLike;
+  brief?: {
+    coverage?: {
+      completeness_status?: string | null;
+      completeness_score?: number | null;
+      confidence_label?: string | null;
+      production_readiness?: string | null;
+      is_stale?: boolean | null;
+      stale_reason?: string | null;
+      required_categories?: string[] | null;
+      covered_categories?: string[] | null;
+      missing_categories?: string[] | null;
+      coverage_confidence?: string | null;
+      resolved_rule_version?: string | null;
+      last_refreshed?: string | null;
+      source_evidence?: any[] | null;
+      evidence?: any[] | null;
+      resolved_layers?: any[] | null;
+      layers?: any[] | null;
+    };
+    required_actions?: any[];
+    blocking_items?: any[];
+    verified_rules?: any[];
+    projection?: Projection | null;
+    projection_counts?: Record<string, number> | null;
     source_evidence?: any[];
-    evidence?: any[];
     resolved_layers?: any[];
-    layers?: any[];
   };
+  workflow?: Workflow;
+  documents?:
+    | {
+        documents?: any[];
+        rows?: any[];
+      }
+    | any;
 };
 
 type InspectionRecord = {
@@ -118,6 +170,8 @@ function badgeTone(v: any) {
       "clean",
       "parsed",
       "strong",
+      "ok",
+      "info",
     ].includes(s)
   ) {
     return "oh-pill oh-pill-good";
@@ -136,6 +190,7 @@ function badgeTone(v: any) {
       "draft",
       "queued",
       "skipped",
+      "stale",
     ].includes(s)
   ) {
     return "oh-pill oh-pill-warn";
@@ -147,7 +202,6 @@ function badgeTone(v: any) {
       "needs_review",
       "no",
       "missing",
-      "stale",
       "blocked",
       "critical_failures",
       "needs_remediation",
@@ -160,9 +214,52 @@ function badgeTone(v: any) {
       "cancelled",
       "infected",
       "error",
+      "conflicting",
     ].includes(s)
   ) {
     return "oh-pill oh-pill-bad";
+  }
+  return "oh-pill";
+}
+
+function statusTone(value?: string | boolean | null) {
+  const s = String(value ?? "").toLowerCase();
+  if (s === "true" || s === "ready" || s === "pass" || s === "ok")
+    return "oh-pill oh-pill-good";
+  if (
+    [
+      "false",
+      "fail",
+      "blocked",
+      "critical",
+      "critical_failures",
+      "needs_remediation",
+      "reinspection_required",
+      "not_ready",
+      "needs_work",
+      "failed",
+      "canceled",
+      "cancelled",
+      "conflicting",
+    ].includes(s)
+  ) {
+    return "oh-pill oh-pill-bad";
+  }
+  if (
+    [
+      "pending",
+      "warn",
+      "warning",
+      "unknown",
+      "attention",
+      "inconclusive",
+      "draft",
+      "scheduled",
+      "stale",
+      "partial",
+    ].includes(s)
+  ) {
+    return "oh-pill oh-pill-warn";
   }
   return "oh-pill";
 }
@@ -182,45 +279,6 @@ function titleCase(v: any) {
   return String(v || "")
     .replace(/_/g, " ")
     .trim();
-}
-
-function statusTone(value?: string | boolean | null) {
-  const s = String(value ?? "").toLowerCase();
-  if (s === "true" || s === "ready" || s === "pass")
-    return "oh-pill oh-pill-good";
-  if (
-    [
-      "false",
-      "fail",
-      "blocked",
-      "critical",
-      "critical_failures",
-      "needs_remediation",
-      "reinspection_required",
-      "not_ready",
-      "needs_work",
-      "failed",
-      "canceled",
-      "cancelled",
-    ].includes(s)
-  ) {
-    return "oh-pill oh-pill-bad";
-  }
-  if (
-    [
-      "pending",
-      "warn",
-      "warning",
-      "unknown",
-      "attention",
-      "inconclusive",
-      "draft",
-      "scheduled",
-    ].includes(s)
-  ) {
-    return "oh-pill oh-pill-warn";
-  }
-  return "oh-pill";
 }
 
 function toArray<T = any>(value: any): T[] {
@@ -334,6 +392,20 @@ function formatDate(v: any) {
   const d = new Date(String(v));
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleString();
+}
+
+function money(value?: number | null) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Number(value));
+}
+
+function percent(value?: number | null) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return `${Math.round(Number(value))}%`;
 }
 
 function FindingCard({ item, tone }: { item: any; tone: "bad" | "warn" }) {
@@ -512,39 +584,26 @@ function ChecklistExecutionCard({ item }: { item: any }) {
   );
 }
 
-function buildCoverage(brief: Brief | null) {
+function buildCoverage(briefPayload: BriefPayload | null) {
+  const brief = briefPayload?.brief || {};
   const coverage = brief?.coverage || {};
-  const compliance = brief?.compliance || {};
-  const profile = brief?.resolved_profile || brief?.jurisdiction_profile || {};
   return {
-    ...profile,
     ...coverage,
     coverage_confidence:
-      coverage?.coverage_confidence ||
-      coverage?.confidence_label ||
-      compliance?.coverage_confidence,
-    production_readiness:
-      coverage?.production_readiness || compliance?.production_readiness,
+      coverage?.coverage_confidence || coverage?.confidence_label,
+    production_readiness: coverage?.production_readiness,
     resolved_rule_version:
-      coverage?.resolved_rule_version ||
-      profile?.resolved_rule_version ||
-      compliance?.resolved_rule_version,
-    last_refreshed:
-      coverage?.last_refreshed ||
-      profile?.last_refreshed ||
-      compliance?.last_refreshed,
+      coverage?.resolved_rule_version || brief?.projection?.rules_version,
+    last_refreshed: coverage?.last_refreshed,
     source_evidence:
       coverage?.source_evidence ||
       coverage?.evidence ||
       brief?.source_evidence ||
-      profile?.source_evidence ||
       [],
     resolved_layers:
       coverage?.resolved_layers ||
       coverage?.layers ||
       brief?.resolved_layers ||
-      profile?.resolved_layers ||
-      profile?.layers ||
       [],
   };
 }
@@ -558,8 +617,14 @@ export default function PropertyCompliancePanel({
   compliance?: any;
   photoAnalysis?: any;
 }) {
-  const [brief, setBrief] = React.useState<Brief | null>(compliance || null);
+  const [briefPayload, setBriefPayload] = React.useState<BriefPayload | null>(
+    compliance || null,
+  );
   const [readiness, setReadiness] = React.useState<any | null>(null);
+  const [workflow, setWorkflow] = React.useState<Workflow | null>(null);
+  const [projectionSnapshot, setProjectionSnapshot] = React.useState<
+    any | null
+  >(null);
   const [scheduleSummary, setScheduleSummary] = React.useState<any | null>(
     null,
   );
@@ -577,8 +642,10 @@ export default function PropertyCompliancePanel({
     Promise.allSettled([
       compliance
         ? Promise.resolve(compliance)
-        : api.compliancePropertyBrief(property.id),
-      api.complianceInspectionReadiness(property.id),
+        : api.get(`/compliance/properties/${property.id}/brief`),
+      api.get(`/compliance/property/${property.id}/inspection-readiness`),
+      api.get(`/compliance/properties/${property.id}/workflow`),
+      api.get(`/compliance/properties/${property.id}/projection`),
       api.get(`/inspections/property/${property.id}/schedule-summary`),
       api.get(`/compliance/properties/${property.id}/document-stack`),
     ])
@@ -587,13 +654,21 @@ export default function PropertyCompliancePanel({
 
         const briefRes = results[0];
         const readinessRes = results[1];
-        const scheduleRes = results[2];
-        const documentRes = results[3];
+        const workflowRes = results[2];
+        const projectionRes = results[3];
+        const scheduleRes = results[4];
+        const documentRes = results[5];
 
         if (briefRes.status === "fulfilled")
-          setBrief((briefRes.value as any) || null);
+          setBriefPayload((briefRes.value as any) || null);
         if (readinessRes.status === "fulfilled")
           setReadiness((readinessRes.value as any) || null);
+        if (workflowRes.status === "fulfilled")
+          setWorkflow(
+            ((workflowRes.value as any)?.workflow || null) as Workflow | null,
+          );
+        if (projectionRes.status === "fulfilled")
+          setProjectionSnapshot((projectionRes.value as any) || null);
         if (scheduleRes.status === "fulfilled")
           setScheduleSummary((scheduleRes.value as any) || null);
         if (documentRes.status === "fulfilled") {
@@ -607,12 +682,16 @@ export default function PropertyCompliancePanel({
         if (
           briefRes.status === "rejected" &&
           readinessRes.status === "rejected" &&
+          workflowRes.status === "rejected" &&
+          projectionRes.status === "rejected" &&
           scheduleRes.status === "rejected" &&
           documentRes.status === "rejected"
         ) {
           throw (
             briefRes.reason ||
             readinessRes.reason ||
+            workflowRes.reason ||
+            projectionRes.reason ||
             scheduleRes.reason ||
             documentRes.reason
           );
@@ -630,17 +709,18 @@ export default function PropertyCompliancePanel({
     };
   }, [property?.id, compliance]);
 
-  const c = brief?.compliance || {};
-  const m = brief?.market || {};
-  const coverage = buildCoverage(brief || null);
+  const brief = briefPayload?.brief || {};
+  const projection: Projection | null =
+    brief?.projection || projectionSnapshot?.projection || null;
+  const coverage = buildCoverage(briefPayload || null);
   const requiredActions = toArray(brief?.required_actions);
   const blockingItems = toArray(brief?.blocking_items);
+  const verifiedRules = toArray(brief?.verified_rules);
 
   const readinessState = readiness?.readiness || {};
   const readinessSummary = readiness?.readiness_summary || {};
   const readinessMeta = readinessSummary?.readiness || {};
   const completionMeta = readinessSummary?.completion || {};
-  const readinessCounts = readiness?.counts || {};
   const readinessBlockingItems = toArray(readiness?.blocking_items);
   const readinessWarningItems = toArray(readiness?.warning_items);
   const recommendedActions = toArray(readiness?.recommended_actions);
@@ -669,24 +749,151 @@ export default function PropertyCompliancePanel({
     scheduleSummary?.appointment || scheduleSummary?.latest_appointment || null;
   const documents = Array.isArray(documentStack?.rows)
     ? documentStack.rows
-    : [];
-  const evidenceRows = toArray(coverage?.source_evidence);
+    : Array.isArray(documentStack?.documents)
+      ? documentStack.documents
+      : [];
+  const evidenceRows = toArray(
+    projectionSnapshot?.evidence || coverage?.source_evidence,
+  );
   const layerRows = toArray(coverage?.resolved_layers);
+  const impactedRules = toArray(projection?.impacted_rules);
+  const unresolvedGaps = toArray(projection?.unresolved_evidence_gaps);
+  const complianceGate = workflow?.compliance_gate || {};
+  const preCloseRisk = workflow?.pre_close_risk || {};
+  const postCloseRecheck = workflow?.post_close_recheck || {};
+
+  async function refreshProjection() {
+    if (!property?.id) return;
+    try {
+      setLoading(true);
+      const [briefRes, workflowRes, projectionRes, docsRes] = await Promise.all(
+        [
+          api.get(
+            `/compliance/properties/${property.id}/brief?rebuild_projection=1`,
+          ),
+          api.get(`/compliance/properties/${property.id}/workflow`),
+          api.get(`/compliance/properties/${property.id}/projection?rebuild=1`),
+          api.get(`/compliance/properties/${property.id}/document-stack`),
+        ],
+      );
+      setBriefPayload(briefRes || null);
+      setWorkflow((workflowRes?.workflow || null) as Workflow | null);
+      setProjectionSnapshot(projectionRes || null);
+      setDocumentStack(docsRes?.documents || docsRes || null);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const [photoAnalysisState, setPhotoAnalysisState] = React.useState<
+    any | null
+  >(photoAnalysis || null);
+  const [photoBusy, setPhotoBusy] = React.useState(false);
+  const [selectedFindingCodes, setSelectedFindingCodes] = React.useState<
+    string[]
+  >([]);
+  const [markPhotoTasksBlocking, setMarkPhotoTasksBlocking] =
+    React.useState(false);
+
+  React.useEffect(() => {
+    setPhotoAnalysisState(photoAnalysis || null);
+  }, [photoAnalysis]);
+
+  const selectedInspectionId =
+    scheduleSummary?.appointment?.inspection_id ||
+    scheduleSummary?.latest_appointment?.inspection_id ||
+    readiness?.latest_inspection?.id ||
+    null;
+
+  function syncSelectedFindings(analysis: any) {
+    setPhotoAnalysisState(analysis);
+    const codes = (Array.isArray(analysis?.findings) ? analysis.findings : [])
+      .map((item: any) =>
+        String(item?.code || item?.rule_mapping?.code || "").toUpperCase(),
+      )
+      .filter(Boolean);
+    setSelectedFindingCodes(codes);
+  }
+
+  async function previewCompliancePhotoFindings() {
+    if (!property?.id) return;
+    try {
+      setPhotoBusy(true);
+      const form = new FormData();
+      if (selectedInspectionId != null)
+        form.append("inspection_id", String(selectedInspectionId));
+      const result = await api.post(
+        `/photos/${property.id}/compliance-preview`,
+        form,
+      );
+      syncSelectedFindings(result);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  async function createComplianceTasksFromPhotos() {
+    if (!property?.id || !selectedFindingCodes.length) return;
+    try {
+      setPhotoBusy(true);
+      const form = new FormData();
+      form.append("confirmed_codes", selectedFindingCodes.join(","));
+      form.append("mark_blocking", String(markPhotoTasksBlocking));
+      if (selectedInspectionId != null)
+        form.append("inspection_id", String(selectedInspectionId));
+      const result = await api.post(
+        `/photos/${property.id}/compliance-tasks`,
+        form,
+      );
+      if (result?.findings) {
+        syncSelectedFindings({
+          ...(photoAnalysisState || {}),
+          ...result,
+          findings: result.findings,
+          issues: result.findings,
+        });
+      }
+      api
+        .get(`/compliance/property/${property.id}/inspection-readiness`)
+        .then(setReadiness)
+        .catch(() => {});
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
 
   return (
     <Surface
       title="Compliance posture"
-      subtitle="Property-scoped compliance merges inspection history, checklist execution state, unresolved failures, layered jurisdiction coverage, scheduling, and evidence documents."
+      subtitle="Property-scoped compliance merges projection, workflow gating, inspection history, checklist execution, local rule coverage, scheduling, and evidence."
       actions={
-        readiness?.posture ? (
-          <span className={badgeTone(readiness.posture)}>
-            {titleCase(readiness.posture)}
-          </span>
-        ) : c.production_readiness ? (
-          <span className={badgeTone(c.production_readiness)}>
-            {String(c.production_readiness).replace(/_/g, " ")}
-          </span>
-        ) : null
+        <div className="flex flex-wrap gap-2">
+          {workflow?.current_stage_label ? (
+            <span className={badgeTone(workflow.current_stage_label)}>
+              {titleCase(workflow.current_stage_label)}
+            </span>
+          ) : null}
+          {workflow?.current_pane_label ? (
+            <span className="oh-pill">
+              {titleCase(workflow.current_pane_label)}
+            </span>
+          ) : null}
+          {projection?.projection_status ? (
+            <span className={badgeTone(projection.projection_status)}>
+              {titleCase(projection.projection_status)}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="oh-btn oh-btn-secondary"
+            onClick={() => void refreshProjection()}
+            disabled={loading}
+          >
+            {loading ? "Refreshing..." : "Refresh projection"}
+          </button>
+        </div>
       }
     >
       {loading ? (
@@ -701,11 +908,11 @@ export default function PropertyCompliancePanel({
           title="Could not load compliance data"
           description={error}
         />
-      ) : !brief && !readiness ? (
+      ) : !briefPayload && !readiness && !projection ? (
         <EmptyState
           compact
           title="No compliance data yet"
-          description="Once the market profile and inspection readiness are computed, the property-level compliance view will show up here."
+          description="Once compliance projection and readiness are computed, the property-level view will appear here."
         />
       ) : (
         <div className="space-y-4">
@@ -715,35 +922,41 @@ export default function PropertyCompliancePanel({
               value={
                 <span className="flex items-center gap-2">
                   <Building2 className="h-4 w-4 text-app-4" />
-                  {c.market_label ||
-                    [m.city, m.county, m.state].filter(Boolean).join(", ") ||
-                    "—"}
+                  {[property?.address, property?.city, property?.state]
+                    .filter(Boolean)
+                    .join(" · ") || "—"}
                 </span>
               }
             />
             <Field
-              label="Registration"
+              label="Readiness"
               value={
-                <span className={badgeTone(c.registration_required)}>
-                  {fmtBoolish(c.registration_required)}
+                <span className={badgeTone(projection?.projection_status)}>
+                  {percent(projection?.readiness_score)}
                 </span>
               }
             />
             <Field
-              label="Inspection"
-              value={
-                <span className={badgeTone(c.inspection_required)}>
-                  {fmtBoolish(c.inspection_required)}
-                </span>
-              }
-            />
-            <Field
-              label="Certificate before occupancy"
+              label="Confidence"
               value={
                 <span
-                  className={badgeTone(c.certificate_required_before_occupancy)}
+                  className={badgeTone(
+                    coverage?.coverage_confidence ||
+                      projection?.confidence_score,
+                  )}
                 >
-                  {fmtBoolish(c.certificate_required_before_occupancy)}
+                  {projection?.confidence_score != null
+                    ? Number(projection.confidence_score).toFixed(2)
+                    : fmtBoolish(coverage?.coverage_confidence)}
+                </span>
+              }
+            />
+            <Field
+              label="Projected cost"
+              value={
+                <span className="flex items-center gap-2">
+                  <Wrench className="h-4 w-4 text-app-4" />
+                  {money(projection?.projected_compliance_cost)}
                 </span>
               }
             />
@@ -751,311 +964,363 @@ export default function PropertyCompliancePanel({
 
           <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             <Field
-              label="Readiness score"
-              value={
-                readiness?.score_pct != null
-                  ? `${Number(readiness.score_pct).toFixed(1)}%`
-                  : readinessMeta?.score != null
-                    ? `${Number(readinessMeta.score).toFixed(1)}%`
-                    : "—"
-              }
-            />
-            <Field
-              label="Completion"
-              value={
-                readiness?.completion_pct != null
-                  ? `${Number(readiness.completion_pct).toFixed(1)}%`
-                  : completionMeta?.pct != null
-                    ? `${Number(completionMeta.pct).toFixed(1)}%`
-                    : "—"
-              }
-            />
-            <Field
-              label="Projection"
-              value={
-                readiness?.completion_projection_pct != null
-                  ? `${Number(readiness.completion_projection_pct).toFixed(1)}%`
-                  : completionMeta?.projection_pct != null
-                    ? `${Number(completionMeta.projection_pct).toFixed(1)}%`
-                    : "—"
-              }
-            />
-            <Field
-              label="Readiness status"
+              label="Blocking"
               value={
                 <span
                   className={badgeTone(
-                    readinessState?.status || readinessMeta?.status,
+                    projection?.blocking_count ? "blocked" : "ok",
                   )}
                 >
-                  {titleCase(
-                    readinessState?.status || readinessMeta?.status || "—",
-                  )}
+                  {projection?.blocking_count ?? 0}
                 </span>
               }
             />
             <Field
-              label="Result status"
+              label="Unknown"
               value={
                 <span
                   className={badgeTone(
-                    readinessState?.result_status ||
-                      readinessMeta?.result_status,
+                    projection?.unknown_count ? "warning" : "ok",
                   )}
                 >
-                  {titleCase(
-                    readinessState?.result_status ||
-                      readinessMeta?.result_status ||
-                      "—",
-                  )}
+                  {projection?.unknown_count ?? 0}
                 </span>
               }
             />
             <Field
-              label="Posture"
+              label="Stale"
               value={
                 <span
                   className={badgeTone(
-                    readiness?.posture || readinessMeta?.posture,
+                    projection?.stale_count ? "stale" : "ok",
                   )}
                 >
-                  {titleCase(
-                    readiness?.posture || readinessMeta?.posture || "—",
+                  {projection?.stale_count ?? 0}
+                </span>
+              }
+            />
+            <Field
+              label="Conflicting"
+              value={
+                <span
+                  className={badgeTone(
+                    projection?.conflicting_count ? "conflicting" : "ok",
                   )}
+                >
+                  {projection?.conflicting_count ?? 0}
+                </span>
+              }
+            />
+            <Field
+              label="Evidence gaps"
+              value={
+                <span
+                  className={badgeTone(
+                    projection?.evidence_gap_count ? "warning" : "ok",
+                  )}
+                >
+                  {projection?.evidence_gap_count ?? 0}
+                </span>
+              }
+            />
+            <Field
+              label="Days to rent impact"
+              value={
+                <span className="flex items-center gap-2">
+                  <CalendarClock className="h-4 w-4 text-app-4" />
+                  {projection?.projected_days_to_rent ?? "—"}
                 </span>
               }
             />
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <Field
-              label="Latest inspection"
-              value={
-                <span className="flex flex-wrap gap-2">
-                  {latestInspection?.passed === true ? (
-                    <span className="oh-pill oh-pill-good">Passed</span>
-                  ) : latestInspection?.passed === false ? (
-                    <span className="oh-pill oh-pill-bad">Failed</span>
-                  ) : (
-                    <span className="oh-pill">No result</span>
-                  )}
-                  {latestInspection?.reinspect_required ? (
-                    <span className="oh-pill oh-pill-bad">
-                      Reinspection required
-                    </span>
-                  ) : null}
-                </span>
-              }
-            />
-            <Field
-              label="Inspection date"
-              value={latestInspection?.inspection_date || "—"}
-            />
-            <Field
-              label="Inspector"
-              value={latestInspection?.inspector || "—"}
-            />
-            <Field
-              label="Template"
-              value={
-                latestInspection?.template_key
-                  ? `${latestInspection.template_key}${latestInspection.template_version ? ` · ${latestInspection.template_version}` : ""}`
-                  : "—"
-              }
-            />
-          </div>
+          {complianceGate?.blocked_reason ||
+          complianceGate?.warning_reason ||
+          preCloseRisk?.summary ||
+          postCloseRecheck?.needed ? (
+            <div className="grid gap-3">
+              {complianceGate?.blocked_reason ? (
+                <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.04] px-4 py-3">
+                  <div className="flex items-start gap-2 text-sm text-red-100">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <div className="font-semibold">Workflow blocked</div>
+                      <div className="mt-1">
+                        {complianceGate.blocked_reason}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
-          <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-app-0">
-                Jurisdiction coverage
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <span
-                  className={badgeTone(
-                    coverage?.coverage_confidence || coverage?.confidence_label,
+              {!complianceGate?.blocked_reason && preCloseRisk?.summary ? (
+                <div className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] px-4 py-3">
+                  <div className="flex items-start gap-2 text-sm text-amber-100">
+                    <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <div className="font-semibold">Pre-close risk</div>
+                      <div className="mt-1">{preCloseRisk.summary}</div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {postCloseRecheck?.needed ? (
+                <div className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] px-4 py-3">
+                  <div className="flex items-start gap-2 text-sm text-amber-100">
+                    <CalendarClock className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <div className="font-semibold">
+                        Post-close recheck needed
+                      </div>
+                      <div className="mt-1">
+                        {postCloseRecheck.reason ||
+                          "Compliance should be re-evaluated."}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {(complianceGate?.warnings || []).length ? (
+                <div className="grid gap-2">
+                  {(complianceGate.warnings || []).map(
+                    (warning: string, idx: number) => (
+                      <div
+                        key={`${warning}-${idx}`}
+                        className="rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-2"
+                      >
+                        {warning}
+                      </div>
+                    ),
                   )}
-                >
-                  {titleCase(
-                    coverage?.coverage_confidence ||
-                      coverage?.confidence_label ||
-                      "unknown",
-                  )}
-                </span>
-                <span className={badgeTone(coverage?.completeness_status)}>
-                  {titleCase(coverage?.completeness_status || "unknown")}
-                </span>
-                {coverage?.production_readiness ? (
-                  <span className={badgeTone(coverage.production_readiness)}>
-                    {titleCase(coverage.production_readiness)}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Surface
+              title="Jurisdiction coverage"
+              subtitle="Coverage completeness and freshness used in this projection"
+            >
+              <div className="grid gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <span className={badgeTone(coverage?.production_readiness)}>
+                    {fmtBoolish(coverage?.production_readiness)}
                   </span>
+                  <span className={badgeTone(coverage?.completeness_status)}>
+                    {fmtBoolish(coverage?.completeness_status)}
+                  </span>
+                  {coverage?.is_stale ? (
+                    <span className="oh-pill oh-pill-warn">Stale</span>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Field
+                    label="Completeness score"
+                    value={percent(
+                      (Number(coverage?.completeness_score || 0) || 0) * 100,
+                    )}
+                  />
+                  <Field
+                    label="Coverage confidence"
+                    value={
+                      <span
+                        className={badgeTone(coverage?.coverage_confidence)}
+                      >
+                        {fmtBoolish(coverage?.coverage_confidence)}
+                      </span>
+                    }
+                  />
+                  <Field
+                    label="Rule version"
+                    value={
+                      coverage?.resolved_rule_version ||
+                      projection?.rules_version ||
+                      "—"
+                    }
+                  />
+                  <Field
+                    label="Last refreshed"
+                    value={formatDate(coverage?.last_refreshed)}
+                  />
+                </div>
+
+                {coverage?.stale_reason ? (
+                  <div className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-100">
+                    {coverage.stale_reason}
+                  </div>
                 ) : null}
-              </div>
-            </div>
 
-            <div className="mt-3 grid gap-3 md:grid-cols-4">
-              <Field
-                label="Completeness score"
-                value={`${Math.round(Number(coverage?.completeness_score || 0) * 100)}%`}
-              />
-              <Field
-                label="Rule version"
-                value={coverage?.resolved_rule_version || "—"}
-              />
-              <Field
-                label="Last refreshed"
-                value={formatDate(coverage?.last_refreshed)}
-              />
-              <Field
-                label="PHA / overlay"
-                value={m?.pha_name || coverage?.pha_name || "—"}
-              />
-            </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                      Covered categories
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(coverage?.covered_categories || []).length ? (
+                        (coverage.covered_categories || []).map(
+                          (item: string) => (
+                            <span key={item} className="oh-pill oh-pill-good">
+                              {titleCase(item)}
+                            </span>
+                          ),
+                        )
+                      ) : (
+                        <span className="text-sm text-app-4">None listed</span>
+                      )}
+                    </div>
+                  </div>
 
-            {coverage?.is_stale ? (
-              <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-500/[0.08] px-4 py-3 text-sm text-amber-100">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div>
-                    {coverage?.stale_reason ||
-                      "This rule set is stale and needs review."}
+                  <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                      Missing categories
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(coverage?.missing_categories || []).length ? (
+                        (coverage.missing_categories || []).map(
+                          (item: string) => (
+                            <span key={item} className="oh-pill oh-pill-warn">
+                              {titleCase(item)}
+                            </span>
+                          ),
+                        )
+                      ) : (
+                        <span className="oh-pill oh-pill-good">
+                          No known gaps
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                      Required categories
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(coverage?.required_categories || []).length ? (
+                        (coverage.required_categories || []).map(
+                          (item: string) => (
+                            <span key={item} className="oh-pill">
+                              {titleCase(item)}
+                            </span>
+                          ),
+                        )
+                      ) : (
+                        <span className="text-sm text-app-4">None listed</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
-            ) : null}
+            </Surface>
 
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-app-4">
-                  Covered categories
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {toArray(coverage?.covered_categories).length ? (
-                    toArray(coverage?.covered_categories).map(
-                      (item: string) => (
-                        <span key={item} className="oh-pill oh-pill-good">
-                          {titleCase(item)}
-                        </span>
-                      ),
-                    )
-                  ) : (
-                    <span className="text-sm text-app-4">None listed</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-app-4">
-                  Missing local rule areas
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {toArray(coverage?.missing_categories).length ? (
-                    toArray(coverage?.missing_categories).map(
-                      (item: string) => (
-                        <span key={item} className="oh-pill oh-pill-warn">
-                          {titleCase(item)}
-                        </span>
-                      ),
-                    )
-                  ) : (
-                    <span className="oh-pill oh-pill-good">No known gaps</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {layerRows.length ? (
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-              <div className="text-sm font-semibold text-app-0">
-                Resolved rule layers
-              </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {layerRows.map((row: any, idx: number) => (
-                  <div
-                    key={`${row?.layer || row?.scope || "layer"}-${idx}`}
-                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm font-semibold text-app-0">
-                        {titleCase(
-                          row?.layer || row?.scope || row?.label || "layer",
-                        )}
-                      </div>
+            <Surface
+              title="Projection outcomes"
+              subtitle="Rules, blockers, unknowns, and evidence gaps computed for this property"
+            >
+              <div className="grid gap-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Field
+                    label="Confirmed proofs"
+                    value={
+                      <span className={badgeTone("confirmed")}>
+                        {projection?.confirmed_count ?? 0}
+                      </span>
+                    }
+                  />
+                  <Field
+                    label="Inferred proofs"
+                    value={
+                      <span className={badgeTone("partial")}>
+                        {projection?.inferred_count ?? 0}
+                      </span>
+                    }
+                  />
+                  <Field
+                    label="Failing items"
+                    value={
                       <span
                         className={badgeTone(
-                          row?.confidence ||
-                            row?.status ||
-                            (row?.applied ? "applied" : "available"),
+                          projection?.failing_count ? "blocked" : "ok",
                         )}
                       >
-                        {titleCase(
-                          row?.confidence ||
-                            row?.status ||
-                            (row?.applied ? "applied" : "available"),
-                        )}
+                        {projection?.failing_count ?? 0}
                       </span>
+                    }
+                  />
+                  <Field
+                    label="Last projected"
+                    value={formatDate(projection?.last_projected_at)}
+                  />
+                </div>
+
+                {unresolvedGaps.length ? (
+                  <div>
+                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-app-0">
+                      <AlertTriangle className="h-4 w-4" />
+                      Unresolved evidence gaps
                     </div>
-                    <div className="mt-3 space-y-2 text-sm text-app-3">
-                      <div>
-                        Authority: {row?.authority || row?.source || "—"}
-                      </div>
-                      <div>Version: {row?.version || "—"}</div>
-                      <div>Applied: {row?.applied ? "Yes" : "No"}</div>
+                    <div className="grid gap-2">
+                      {unresolvedGaps
+                        .slice(0, 6)
+                        .map((item: any, idx: number) => (
+                          <div
+                            key={`${item?.rule_key || "gap"}-${idx}`}
+                            className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] px-4 py-3"
+                          >
+                            <div className="text-sm font-semibold text-amber-100">
+                              {titleCase(
+                                item?.rule_key ||
+                                  item?.category ||
+                                  "Evidence gap",
+                              )}
+                            </div>
+                            <div className="mt-1 text-sm text-amber-50/90">
+                              {item?.gap || "Evidence still needed."}
+                            </div>
+                          </div>
+                        ))}
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
+                ) : null}
 
-          {evidenceRows.length ? (
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-              <div className="text-sm font-semibold text-app-0">
-                Source evidence
-              </div>
-              <div className="mt-3 grid gap-3">
-                {evidenceRows.slice(0, 6).map((row: any, idx: number) => (
-                  <div
-                    key={`${row?.title || row?.label || row?.url || "evidence"}-${idx}`}
-                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm font-semibold text-app-0">
-                        {row?.title ||
-                          row?.label ||
-                          row?.source_name ||
-                          "Evidence"}
-                      </div>
-                      <span
-                        className={
-                          row?.is_authoritative
-                            ? "oh-pill oh-pill-good"
-                            : "oh-pill"
-                        }
-                      >
-                        {row?.is_authoritative ? "Authoritative" : "Supporting"}
-                      </span>
+                {impactedRules.length ? (
+                  <div>
+                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-app-0">
+                      <ShieldAlert className="h-4 w-4" />
+                      Impacted rules
                     </div>
-                    <div className="mt-2 text-sm text-app-3">
-                      {row?.source_name || row?.source || "Unknown source"}
+                    <div className="grid gap-2">
+                      {impactedRules
+                        .slice(0, 6)
+                        .map((item: any, idx: number) => (
+                          <div
+                            key={`${item?.rule_key || "impact"}-${idx}`}
+                            className="rounded-2xl border border-app bg-app-muted px-4 py-3"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-sm font-semibold text-app-0">
+                                {titleCase(item?.rule_key || "Rule")}
+                              </div>
+                              {item?.evaluation_status ? (
+                                <span
+                                  className={statusTone(item.evaluation_status)}
+                                >
+                                  {titleCase(item.evaluation_status)}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))}
                     </div>
-                    {row?.excerpt ? (
-                      <div className="mt-3 rounded-2xl border border-app bg-app-muted px-3 py-3 text-sm text-app-2">
-                        {row.excerpt}
-                      </div>
-                    ) : null}
                   </div>
-                ))}
+                ) : null}
               </div>
-            </div>
-          ) : null}
-
-          {brief?.explanation ? (
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4 text-sm leading-6 text-app-2">
-              {brief.explanation}
-            </div>
-          ) : null}
+            </Surface>
+          </div>
 
           <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
             <div className="space-y-4">
@@ -1139,6 +1404,52 @@ export default function PropertyCompliancePanel({
                           item={item}
                           tone="warn"
                         />
+                      ))}
+                  </div>
+                )}
+              </Surface>
+
+              <Surface
+                title="Verified rules"
+                subtitle="Resolved jurisdiction rules currently applied to this property"
+              >
+                {!verifiedRules.length ? (
+                  <EmptyState
+                    compact
+                    title="No verified rules"
+                    description="No verified rules were returned for this property."
+                  />
+                ) : (
+                  <div className="grid gap-2">
+                    {verifiedRules
+                      .slice(0, 10)
+                      .map((item: any, idx: number) => (
+                        <div
+                          key={`${item?.rule_key || idx}`}
+                          className="rounded-2xl border border-app bg-app-panel px-4 py-3"
+                        >
+                          <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                            <FileCheck2 className="h-4 w-4" />
+                            {item?.label || titleCase(item?.rule_key || "Rule")}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {item?.category ? (
+                              <span className="oh-pill">
+                                {titleCase(item.category)}
+                              </span>
+                            ) : null}
+                            {item?.status ? (
+                              <span className={badgeTone(item.status)}>
+                                {titleCase(item.status)}
+                              </span>
+                            ) : null}
+                            {item?.source_level ? (
+                              <span className="oh-pill">
+                                {titleCase(item.source_level)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
                       ))}
                   </div>
                 )}
@@ -1227,6 +1538,64 @@ export default function PropertyCompliancePanel({
                   </div>
                 </div>
               </Surface>
+
+              <Surface
+                title="Projection evidence"
+                subtitle="Evidence rows currently linked into the compliance projection"
+              >
+                {!evidenceRows.length ? (
+                  <EmptyState
+                    compact
+                    title="No evidence linked"
+                    description="No evidence rows were returned from the projection."
+                  />
+                ) : (
+                  <div className="grid gap-2">
+                    {evidenceRows.slice(0, 10).map((row: any, idx: number) => (
+                      <div
+                        key={`${row?.id || row?.evidence_key || idx}`}
+                        className="rounded-2xl border border-app bg-app-panel px-4 py-3"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-semibold text-app-0">
+                            {row?.evidence_name ||
+                              row?.line_item_label ||
+                              row?.rule_key ||
+                              "Evidence"}
+                          </div>
+                          {row?.evidence_status ? (
+                            <span className={statusTone(row.evidence_status)}>
+                              {titleCase(row.evidence_status)}
+                            </span>
+                          ) : null}
+                          {row?.proof_state ? (
+                            <span className={badgeTone(row.proof_state)}>
+                              {titleCase(row.proof_state)}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {row?.rule_key ? (
+                            <span className="oh-pill">
+                              {titleCase(row.rule_key)}
+                            </span>
+                          ) : null}
+                          {row?.document_kind ? (
+                            <span className="oh-pill">
+                              {titleCase(row.document_kind)}
+                            </span>
+                          ) : null}
+                          {row?.evidence_source_type ? (
+                            <span className="oh-pill">
+                              {titleCase(row.evidence_source_type)}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Surface>
             </div>
           </div>
 
@@ -1276,50 +1645,100 @@ export default function PropertyCompliancePanel({
             ) : null}
           </Surface>
 
-          {photoAnalysis ? (
-            <CompliancePhotoFindingsPanel
-              analysis={photoAnalysis}
-            />
-          ) : null}
-
-          {property?.id ? (
-            <div className="grid gap-4 xl:grid-cols-2">
-              <Surface
-                title="Compliance documents"
-                subtitle="Upload and review compliance packet documents."
-                actions={
-                  <ComplianceDocumentUploader
-                    propertyId={property.id}
-                    onUploaded={() => {}}
-                  />
-                }
-              >
-                <ComplianceDocumentStack
-                  data={documentStack}
-                  onDeleted={() => {}}
-                />
-              </Surface>
-
-              <Surface
-                title="Photo-driven evidence"
-                subtitle="Photo-linked evidence and checklist support."
-              >
-                <div className="grid gap-3">
-                  <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                      <ImageIcon className="h-4 w-4" />
-                      Photo analysis linked
+          {layerRows.length ? (
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+              <div className="text-sm font-semibold text-app-0">
+                Resolved rule layers
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {layerRows.map((row: any, idx: number) => (
+                  <div
+                    key={`${row?.layer || row?.scope || "layer"}-${idx}`}
+                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-app-0">
+                        {titleCase(
+                          row?.layer || row?.scope || row?.label || "layer",
+                        )}
+                      </div>
+                      <span
+                        className={badgeTone(
+                          row?.confidence ||
+                            row?.status ||
+                            (row?.applied ? "applied" : "available"),
+                        )}
+                      >
+                        {titleCase(
+                          row?.confidence ||
+                            row?.status ||
+                            (row?.applied ? "applied" : "available"),
+                        )}
+                      </span>
                     </div>
-                    <div className="mt-2 text-sm text-app-3">
-                      {photoAnalysis
-                        ? "Photo findings loaded for this property."
-                        : "No photo analysis loaded."}
+                    <div className="mt-3 space-y-2 text-sm text-app-3">
+                      <div>
+                        Authority: {row?.authority || row?.source || "—"}
+                      </div>
+                      <div>Version: {row?.version || "—"}</div>
+                      <div>Applied: {row?.applied ? "Yes" : "No"}</div>
                     </div>
                   </div>
-                </div>
-              </Surface>
+                ))}
+              </div>
             </div>
           ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Surface
+              title="Compliance documents"
+              subtitle="Upload and review compliance packet documents."
+            >
+              <div className="grid gap-4">
+                {property?.id ? (
+                  <ComplianceDocumentUploader
+                    propertyId={property.id}
+                    onUploaded={() => void refreshProjection()}
+                  />
+                ) : null}
+                <ComplianceDocumentStack
+                  propertyId={property?.id || 0}
+                  documents={documents}
+                  onChanged={() => void refreshProjection()}
+                />
+              </div>
+            </Surface>
+
+            <Surface
+              title="Photo-driven evidence"
+              subtitle="Photo-linked evidence and checklist support."
+            >
+              <div className="grid gap-3">
+                <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                    <ImageIcon className="h-4 w-4" />
+                    Photo analysis linked
+                  </div>
+                  <div className="mt-2 text-sm text-app-3">
+                    {photoAnalysisState
+                      ? "Photo findings loaded for this property."
+                      : "No photo analysis loaded."}
+                  </div>
+                </div>
+
+                <CompliancePhotoFindingsPanel
+                  analysis={photoAnalysisState}
+                  busy={photoBusy}
+                  selectedCodes={selectedFindingCodes}
+                  onSelectedCodesChange={setSelectedFindingCodes}
+                  onPreview={previewCompliancePhotoFindings}
+                  onCreateTasks={createComplianceTasksFromPhotos}
+                  onMarkBlockingChange={setMarkPhotoTasksBlocking}
+                  markTasksBlocking={markPhotoTasksBlocking}
+                />
+              </div>
+            </Surface>
+          </div>
         </div>
       )}
     </Surface>
