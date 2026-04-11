@@ -29,6 +29,11 @@ class NormalizedRuleCandidate:
     raw_excerpt: str | None
     evidence_state: str
     fingerprint: str
+    citation_quality: float
+    category_mapping_source: str
+    normalized_rule_key: str
+    rule_key_confidence: float
+    conflict_hints: list[str]
 
 
 def _clean(text: Optional[str]) -> str:
@@ -153,43 +158,43 @@ def _family_for(rule_key: str) -> str:
     return mapping.get(rule_key, rule_key)
 
 
-def _rule_key_from_text(text: str, hint: Optional[str] = None) -> str | None:
+def _rule_key_from_text(text: str, hint: Optional[str] = None) -> tuple[str | None, float]:
     whole = f"{_clean(hint)} {_clean(text)}".strip()
 
-    patterns: list[tuple[str, str]] = [
-        (r"(rental|property).*(registration|register)", "rental_registration_required"),
-        (r"(rental|property).*(license|licence)", "rental_license_required"),
-        (r"(inspection|inspected).*(required|must)|inspection program", "inspection_program_exists"),
-        (r"(fire).*(inspection|required)", "fire_safety_inspection_required"),
-        (r"certificate.*occupancy|occupancy permit", "certificate_of_occupancy_required"),
-        (r"certificate.*compliance", "certificate_of_compliance_required"),
-        (r"certificate.*before occupancy", "certificate_required_before_occupancy"),
-        (r"local agent|local representative|responsible agent", "local_agent_required"),
-        (r"po box.*not allowed|physical address required", "owner_po_box_allowed"),
-        (r"all fees.*paid|fees.*must be paid", "all_fees_must_be_paid"),
-        (r"lead.*affidavit", "lead_paint_affidavit_required"),
-        (r"lead.*clearance", "lead_clearance_required"),
-        (r"lead.*inspection", "lead_inspection_required"),
-        (r"smoke detector", "smoke_detector_required"),
-        (r"carbon monoxide", "carbon_monoxide_detector_required"),
-        (r"utility|utilities.*before inspection", "utilities_required_before_inspection"),
-        (r"nspire", "federal_nspire_anchor"),
-        (r"(housing choice voucher|hcv|24 cfr 982|voucher regulations)", "federal_hcv_regulations_anchor"),
-        (r"\bnotice\b", "federal_notice_anchor"),
-        (r"mshda", "mshda_program_anchor"),
-        (r"admin(istrative)? plan", "pha_admin_plan_anchor"),
-        (r"landlord packet", "pha_landlord_packet_required"),
-        (r"hap contract|tenancy addendum", "hap_contract_and_tenancy_addendum_required"),
-        (r"payment timing|landlord payment", "landlord_payment_timing_reference"),
-        (r"building safety", "building_safety_division_anchor"),
-        (r"property maintenance", "property_maintenance_enforcement_anchor"),
-        (r"building division", "building_division_anchor"),
-        (r"mcl|michigan legislature|public act|compiled laws", "mi_statute_anchor"),
+    patterns: list[tuple[str, str, float]] = [
+        (r"(rental|property).*(registration|register)", "rental_registration_required", 0.92),
+        (r"(rental|property).*(license|licence)", "rental_license_required", 0.92),
+        (r"(inspection|inspected).*(required|must)|inspection program", "inspection_program_exists", 0.90),
+        (r"(fire).*(inspection|required)", "fire_safety_inspection_required", 0.85),
+        (r"certificate.*occupancy|occupancy permit", "certificate_of_occupancy_required", 0.90),
+        (r"certificate.*compliance", "certificate_of_compliance_required", 0.90),
+        (r"certificate.*before occupancy", "certificate_required_before_occupancy", 0.96),
+        (r"local agent|local representative|responsible agent", "local_agent_required", 0.88),
+        (r"po box.*not allowed|physical address required", "owner_po_box_allowed", 0.80),
+        (r"all fees.*paid|fees.*must be paid", "all_fees_must_be_paid", 0.84),
+        (r"lead.*affidavit", "lead_paint_affidavit_required", 0.86),
+        (r"lead.*clearance", "lead_clearance_required", 0.90),
+        (r"lead.*inspection", "lead_inspection_required", 0.84),
+        (r"smoke detector", "smoke_detector_required", 0.72),
+        (r"carbon monoxide", "carbon_monoxide_detector_required", 0.72),
+        (r"utility|utilities.*before inspection", "utilities_required_before_inspection", 0.70),
+        (r"nspire", "federal_nspire_anchor", 0.94),
+        (r"(housing choice voucher|hcv|24 cfr 982|voucher regulations)", "federal_hcv_regulations_anchor", 0.95),
+        (r"\bnotice\b", "federal_notice_anchor", 0.55),
+        (r"mshda", "mshda_program_anchor", 0.90),
+        (r"admin(istrative)? plan", "pha_admin_plan_anchor", 0.92),
+        (r"landlord packet", "pha_landlord_packet_required", 0.88),
+        (r"hap contract|tenancy addendum", "hap_contract_and_tenancy_addendum_required", 0.90),
+        (r"payment timing|landlord payment", "landlord_payment_timing_reference", 0.82),
+        (r"building safety", "building_safety_division_anchor", 0.84),
+        (r"property maintenance", "property_maintenance_enforcement_anchor", 0.84),
+        (r"building division", "building_division_anchor", 0.84),
+        (r"mcl|michigan legislature|public act|compiled laws", "mi_statute_anchor", 0.94),
     ]
-    for pattern, key in patterns:
+    for pattern, key, confidence in patterns:
         if re.search(pattern, whole):
-            return key
-    return None
+            return key, confidence
+    return None, 0.0
 
 
 def _source_level_from_candidate(candidate: dict[str, Any]) -> str:
@@ -276,40 +281,89 @@ def _rule_status_for(candidate: dict[str, Any], governance_state: str, confidenc
         "verified",
         "stale",
         "conflicting",
+        "partial",
+        "inferred",
     }:
         return rule_status
     if governance_state == "active":
         return "active"
     if governance_state == "approved":
         return "approved"
-    if confidence >= 0.75:
+    if confidence >= 0.85:
         return "verified"
+    if confidence >= 0.45:
+        return "inferred"
     return "candidate"
 
 
-def _evidence_state_for(candidate: dict[str, Any], confidence: float) -> str:
+def _citation_quality(candidate: dict[str, Any], raw_excerpt: str | None) -> float:
+    explicit_citation = _norm_text(candidate.get("source_citation"))
+    url = _norm_text(candidate.get("url")) or _first_url(raw_excerpt or "")
+    title = _norm_text(candidate.get("title"))
+    publisher = _norm_text(candidate.get("publisher"))
+    score = 0.0
+    if explicit_citation:
+        score += 0.45
+    if url:
+        score += 0.25
+    if title:
+        score += 0.15
+    if publisher:
+        score += 0.10
+    if raw_excerpt and len(raw_excerpt) >= 25:
+        score += 0.05
+    return round(min(score, 1.0), 6)
+
+
+def _category_mapping_source(candidate: dict[str, Any], rule_key: str, normalized_category: str | None) -> str:
+    if normalized_category is None:
+        return "unmapped"
+    if _norm_text(candidate.get("rule_category")) or _norm_text(candidate.get("category")):
+        return "explicit_candidate_category"
+    if _category_for(rule_key):
+        return "rule_key_map"
+    return "heuristic"
+
+
+def _conflict_hints(candidate: dict[str, Any], body: str, normalized_category: str | None) -> list[str]:
+    hints: list[str] = []
+    combined = _clean(body)
+    if re.search(r"\b(may not|not required|optional)\b", combined) and re.search(r"\b(must|required|shall)\b", combined):
+        hints.append("mixed_requirement_language")
+    if re.search(r"\b(unless|except|however|subject to)\b", combined):
+        hints.append("conditional_language")
+    if normalized_category is None:
+        hints.append("category_unmapped")
+    if not (_norm_text(candidate.get("source_citation")) or _norm_text(candidate.get("url"))):
+        hints.append("missing_direct_citation")
+    return hints
+
+
+def _evidence_state_for(candidate: dict[str, Any], confidence: float, citation_quality: float, conflict_hints: list[str]) -> str:
     explicit = _norm_lower(candidate.get("evidence_state"))
     if explicit in {"confirmed", "inferred", "unknown", "stale", "conflicting"}:
         return explicit
-    if confidence >= 0.85:
+    if "mixed_requirement_language" in conflict_hints:
+        return "conflicting"
+    if confidence >= 0.85 and citation_quality >= 0.70:
         return "confirmed"
-    if confidence >= 0.4:
+    if confidence >= 0.45 and citation_quality >= 0.30:
         return "inferred"
     return "unknown"
 
 
 def _normalized_version_for(candidate: dict[str, Any]) -> str:
     value = _norm_text(candidate.get("normalized_version"))
-    return value or "v1"
+    return value or "v2"
 
 
-def _citation_text(candidate: dict[str, Any]) -> str | None:
+def _citation_text(candidate: dict[str, Any], raw_excerpt: str | None = None) -> str | None:
     explicit = _norm_text(candidate.get("source_citation"))
     if explicit:
         return explicit
     title = _norm_text(candidate.get("title"))
     publisher = _norm_text(candidate.get("publisher"))
-    url = _norm_text(candidate.get("url")) or _first_url(_norm_text(candidate.get("raw_excerpt")) or "")
+    url = _norm_text(candidate.get("url")) or _first_url(raw_excerpt or "")
     pieces = [p for p in [publisher, title, url] if p]
     return " | ".join(pieces) if pieces else None
 
@@ -337,6 +391,9 @@ def _base_value_json(candidate: dict[str, Any], *, rule_key: str, source_level: 
         "expires_at",
         "effective_at",
         "notes",
+        "status",
+        "condition",
+        "summary",
     ]:
         if candidate.get(key) is not None and key not in payload:
             payload[key] = candidate.get(key)
@@ -370,14 +427,20 @@ def candidate_citation_payload(
     candidate: dict[str, Any],
     normalized: NormalizedRuleCandidate | None = None,
 ) -> dict[str, Any]:
+    raw_excerpt = normalized.raw_excerpt if normalized else _clean_excerpt(candidate.get("raw_excerpt"))
     return {
-        "citation_text": normalized.source_citation if normalized else _citation_text(candidate),
+        "citation_text": normalized.source_citation if normalized else _citation_text(candidate, raw_excerpt=raw_excerpt),
         "url": candidate.get("url"),
         "publisher": candidate.get("publisher"),
         "title": candidate.get("title"),
-        "raw_excerpt": normalized.raw_excerpt if normalized else _clean_excerpt(candidate.get("raw_excerpt")),
+        "raw_excerpt": raw_excerpt,
         "source_id": candidate.get("source_id"),
         "source_version_id": candidate.get("source_version_id"),
+        "citation_quality": normalized.citation_quality if normalized else _citation_quality(candidate, raw_excerpt),
+        "category_mapping_source": normalized.category_mapping_source if normalized else None,
+        "conflict_hints": list(normalized.conflict_hints) if normalized else [],
+        "normalized_rule_key": normalized.normalized_rule_key if normalized else _norm_text(candidate.get("rule_key")),
+        "rule_key_confidence": normalized.rule_key_confidence if normalized else None,
     }
 
 
@@ -398,31 +461,50 @@ def normalize_rule_candidate(candidate: dict[str, Any]) -> NormalizedRuleCandida
         if p
     )
 
-    rule_key = _norm_text(candidate.get("rule_key"))
-    if rule_key:
-        rule_key = rule_key.strip().lower()
+    explicit_rule_key = _norm_text(candidate.get("rule_key"))
+    if explicit_rule_key:
+        rule_key = explicit_rule_key.strip().lower()
+        rule_key_confidence = 1.0
     else:
-        rule_key = _rule_key_from_text(body, hint=hint)
+        rule_key, rule_key_confidence = _rule_key_from_text(body, hint=hint)
 
     if not rule_key:
         return None
 
     source_level = _source_level_from_candidate(candidate)
     property_type = _property_type_from_candidate(candidate)
-    confidence = _bounded_confidence(candidate.get("confidence"), default=0.35)
-    required = _required_for(rule_key, candidate)
-    blocking = _blocking_for(rule_key, candidate)
-    governance_state = _governance_state_for(candidate, confidence)
-    rule_status = _rule_status_for(candidate, governance_state, confidence)
-    normalized_version = _normalized_version_for(candidate)
-    evidence_state = _evidence_state_for(candidate, confidence)
 
-    category_guess = (
+    base_confidence = _bounded_confidence(candidate.get("confidence"), default=0.35)
+    if not explicit_rule_key:
+        base_confidence = max(base_confidence, rule_key_confidence)
+
+    raw_category_guess = (
         _norm_text(candidate.get("rule_category"))
         or _norm_text(candidate.get("category"))
         or _category_for(rule_key)
     )
-    normalized_category = normalize_category(category_guess) if category_guess else None
+    normalized_category = normalize_category(raw_category_guess) if raw_category_guess else None
+    category_mapping_source = _category_mapping_source(candidate, rule_key, normalized_category)
+
+    citation_quality = _citation_quality(candidate, raw_excerpt)
+    conflict_hints = _conflict_hints(candidate, body, normalized_category)
+
+    confidence = base_confidence
+    confidence = (confidence * 0.65) + (citation_quality * 0.20) + (rule_key_confidence * 0.15)
+    if "missing_direct_citation" in conflict_hints:
+        confidence *= 0.80
+    if "category_unmapped" in conflict_hints:
+        confidence *= 0.75
+    if "mixed_requirement_language" in conflict_hints:
+        confidence *= 0.70
+    confidence = round(max(0.0, min(confidence, 1.0)), 6)
+
+    required = _required_for(rule_key, candidate)
+    blocking = _blocking_for(rule_key, candidate)
+    governance_state = _governance_state_for(candidate, confidence)
+    rule_status = _rule_status_for(candidate, governance_state, confidence)
+    evidence_state = _evidence_state_for(candidate, confidence, citation_quality, conflict_hints)
+    normalized_version = _normalized_version_for(candidate)
     rule_family = _family_for(rule_key)
     version_group = (
         _norm_text(candidate.get("version_group"))
@@ -433,7 +515,13 @@ def normalize_rule_candidate(candidate: dict[str, Any]) -> NormalizedRuleCandida
     version_group = f"{version_group}:{rule_key}:{source_level}"
 
     value_json = _base_value_json(candidate, rule_key=rule_key, source_level=source_level)
-    source_citation = _citation_text(candidate)
+    value_json["normalized_rule_key"] = rule_key
+    value_json["normalized_category"] = normalized_category
+    value_json["citation_quality"] = citation_quality
+    value_json["category_mapping_source"] = category_mapping_source
+    value_json["conflict_hints"] = list(conflict_hints)
+
+    source_citation = _citation_text(candidate, raw_excerpt=raw_excerpt)
 
     payload = {
         "rule_key": rule_key,
@@ -443,7 +531,7 @@ def normalize_rule_candidate(candidate: dict[str, Any]) -> NormalizedRuleCandida
         "property_type": property_type,
         "required": required,
         "blocking": blocking,
-        "confidence": round(confidence, 6),
+        "confidence": confidence,
         "governance_state": governance_state,
         "rule_status": rule_status,
         "normalized_version": normalized_version,
@@ -452,6 +540,11 @@ def normalize_rule_candidate(candidate: dict[str, Any]) -> NormalizedRuleCandida
         "source_citation": source_citation,
         "raw_excerpt": raw_excerpt,
         "evidence_state": evidence_state,
+        "citation_quality": citation_quality,
+        "category_mapping_source": category_mapping_source,
+        "normalized_rule_key": rule_key,
+        "rule_key_confidence": round(rule_key_confidence, 6),
+        "conflict_hints": list(conflict_hints),
     }
     fingerprint = sha256(_dumps(payload).encode("utf-8")).hexdigest()
 
@@ -463,7 +556,7 @@ def normalize_rule_candidate(candidate: dict[str, Any]) -> NormalizedRuleCandida
         property_type=property_type,
         required=required,
         blocking=blocking,
-        confidence=round(confidence, 6),
+        confidence=confidence,
         governance_state=governance_state,
         rule_status=rule_status,
         normalized_version=normalized_version,
@@ -473,6 +566,11 @@ def normalize_rule_candidate(candidate: dict[str, Any]) -> NormalizedRuleCandida
         raw_excerpt=raw_excerpt,
         evidence_state=evidence_state,
         fingerprint=fingerprint,
+        citation_quality=citation_quality,
+        category_mapping_source=category_mapping_source,
+        normalized_rule_key=rule_key,
+        rule_key_confidence=round(rule_key_confidence, 6),
+        conflict_hints=list(conflict_hints),
     )
 
 
@@ -480,6 +578,16 @@ def candidate_to_update_dict(candidate: NormalizedRuleCandidate, raw_candidate: 
     raw_candidate = raw_candidate or {}
     citation_payload = candidate_citation_payload(raw_candidate, normalized=candidate)
     provenance_payload = candidate_provenance_payload(raw_candidate)
+
+    coverage_status = "candidate"
+    if candidate.evidence_state == "conflicting":
+        coverage_status = "conflicting"
+    elif candidate.evidence_state == "confirmed" and candidate.citation_quality >= 0.70 and candidate.confidence >= 0.80:
+        coverage_status = "covered"
+    elif candidate.evidence_state == "inferred":
+        coverage_status = "inferred"
+    elif candidate.confidence >= 0.45:
+        coverage_status = "partial"
 
     return {
         "rule_key": candidate.rule_key,
@@ -501,9 +609,9 @@ def candidate_to_update_dict(candidate: NormalizedRuleCandidate, raw_candidate: 
         "raw_excerpt": candidate.raw_excerpt,
         "citation_json": _dumps(citation_payload),
         "rule_provenance_json": _dumps(provenance_payload),
-        "confidence_basis": candidate.evidence_state,
-        "change_summary": None,
-        "coverage_status": "candidate" if candidate.governance_state == "draft" else candidate.rule_status,
+        "confidence_basis": f"{candidate.evidence_state}:{candidate.citation_quality:.2f}",
+        "change_summary": None if not candidate.conflict_hints else f"conflict_hints={','.join(candidate.conflict_hints)}",
+        "coverage_status": coverage_status,
     }
 
 

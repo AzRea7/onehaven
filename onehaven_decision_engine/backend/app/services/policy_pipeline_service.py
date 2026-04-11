@@ -1,11 +1,12 @@
+# backend/app/services/policy_pipeline_service.py
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.policy_models import PolicyAssertion, PolicySource
+from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
 from app.services.jurisdiction_completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
@@ -32,7 +33,12 @@ from app.services.policy_review_service import (
     normalize_market_assertions,
     supersede_replaced_assertions,
 )
-from app.services.policy_source_service import collect_catalog_for_market, fetch_policy_source
+from app.services.policy_source_service import (
+    collect_catalog_for_market,
+    discover_policy_sources_for_market,
+    list_sources_for_market,
+    refresh_policy_source_and_detect_changes,
+)
 
 
 def _norm_state(s: Optional[str]) -> str:
@@ -57,6 +63,49 @@ def _is_archived_source(src: PolicySource) -> bool:
     return ARCHIVE_MARKER in (src.notes or "").lower()
 
 
+def _find_matching_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> JurisdictionProfile | None:
+    stmt = select(JurisdictionProfile).where(JurisdictionProfile.state == state)
+
+    if org_id is None:
+        stmt = stmt.where(JurisdictionProfile.org_id.is_(None))
+    else:
+        stmt = stmt.where(or_(JurisdictionProfile.org_id == org_id, JurisdictionProfile.org_id.is_(None)))
+
+    rows = list(db.scalars(stmt).all())
+    for row in rows:
+        row_county = _norm_lower(getattr(row, "county", None))
+        row_city = _norm_lower(getattr(row, "city", None))
+        row_pha = _norm_text(getattr(row, "pha_name", None))
+
+        if row_county not in {None, county}:
+            continue
+        if row_city not in {None, city}:
+            continue
+        if pha_name is not None and row_pha not in {None, pha_name}:
+            continue
+        if row_city == city and row_county == county:
+            return row
+
+    for row in rows:
+        row_county = _norm_lower(getattr(row, "county", None))
+        row_city = _norm_lower(getattr(row, "city", None))
+        if row_city is None and row_county == county:
+            return row
+
+    for row in rows:
+        if _norm_lower(getattr(row, "city", None)) is None and _norm_lower(getattr(row, "county", None)) is None:
+            return row
+    return None
+
+
 def _market_sources_from_catalog(
     db: Session,
     *,
@@ -67,7 +116,7 @@ def _market_sources_from_catalog(
     pha_name: Optional[str],
     focus: str,
 ) -> list[PolicySource]:
-    source_rows = collect_catalog_for_market(
+    collect_catalog_for_market(
         db,
         org_id=org_id,
         state=state,
@@ -76,9 +125,17 @@ def _market_sources_from_catalog(
         pha_name=pha_name,
         focus=focus,
     )
+    rows = list_sources_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
     out: list[PolicySource] = []
     seen: set[int] = set()
-    for row in source_rows:
+    for row in rows:
         if _is_archived_source(row):
             continue
         if int(row.id) in seen:
@@ -173,6 +230,203 @@ def _governance_summary(
     }
 
 
+def _discovery_missing_categories(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> list[str]:
+    coverage_before = compute_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    missing = coverage_before.get("missing_categories") or []
+    return [str(item).strip().lower() for item in missing if str(item).strip()]
+
+
+def _recompute_profile_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> dict[str, Any]:
+    profile = _find_matching_profile(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    if profile is None:
+        return {
+            "ok": True,
+            "recomputed": False,
+            "jurisdiction_profile_id": None,
+        }
+
+    refreshed_profile, coverage = recompute_profile_and_coverage(
+        db,
+        profile,
+        commit=True,
+    )
+    return {
+        "ok": True,
+        "recomputed": True,
+        "jurisdiction_profile_id": int(refreshed_profile.id),
+        "profile": profile_completeness_payload(db, refreshed_profile),
+        "coverage": {
+            "id": int(coverage.id),
+            "coverage_status": getattr(coverage, "coverage_status", None),
+            "production_readiness": getattr(coverage, "production_readiness", None),
+            "completeness_status": getattr(coverage, "completeness_status", None),
+            "is_stale": bool(getattr(coverage, "is_stale", False)),
+        },
+    }
+
+
+def _run_source_refresh_batch(
+    db: Session,
+    *,
+    sources: list[PolicySource],
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    reviewer_user_id: int | None,
+) -> dict[str, Any]:
+    source_runs: list[dict[str, Any]] = []
+    total_changed_rules = 0
+    total_new_rules = 0
+    total_missing_rules = 0
+    changed_source_ids: list[int] = []
+    failed_source_ids: list[int] = []
+
+    for source in sources:
+        fetch_result = refresh_policy_source_and_detect_changes(db, source=source)
+        content_changed = bool(fetch_result.get("change_detected") or fetch_result.get("changed"))
+        extract_result: dict[str, Any]
+        diff_result: dict[str, Any]
+        normalize_result: dict[str, Any] | None = None
+
+        if not fetch_result.get("ok"):
+            failed_source_ids.append(int(source.id))
+            stale_mark_result = mark_assertions_stale_for_source(
+                db,
+                source_id=int(source.id),
+                reason="source_fetch_failed",
+            )
+            extract_result = {
+                "ok": False,
+                "created_count": 0,
+                "assertion_ids": [],
+                "stale_mark_result": stale_mark_result,
+                "reason": "fetch_failed",
+            }
+            diff_result = {
+                "ok": False,
+                "changed_count": 0,
+                "new_count": 0,
+                "missing_count": 0,
+                "reason": "fetch_failed",
+            }
+        else:
+            raw_candidates: list[dict[str, Any]] = []
+            if content_changed:
+                changed_source_ids.append(int(source.id))
+                mark_assertions_stale_for_source(
+                    db,
+                    source_id=int(source.id),
+                    reason="source_changed",
+                )
+                extracted = extract_assertions_for_source(
+                    db,
+                    source=source,
+                    org_id=org_id,
+                    org_scope=(org_id is not None),
+                )
+                raw_candidates = _extract_raw_candidates(extracted)
+                extract_result = {
+                    "ok": True,
+                    "created_count": len(extracted),
+                    "assertion_ids": [int(a.id) for a in extracted if getattr(a, "id", None) is not None],
+                }
+                diff_result = diff_active_rules_for_source(
+                    db,
+                    org_id=org_id,
+                    source_id=int(source.id),
+                    state=state,
+                    county=county,
+                    city=city,
+                    pha_name=pha_name,
+                    raw_candidates=raw_candidates,
+                )
+                normalize_result = normalize_market_assertions(
+                    db,
+                    org_id=org_id,
+                    state=state,
+                    county=county,
+                    city=city,
+                    pha_name=pha_name,
+                    reviewer_user_id=reviewer_user_id,
+                    source_id=int(source.id),
+                    raw_candidates=raw_candidates,
+                )
+            else:
+                extract_result = {
+                    "ok": True,
+                    "created_count": 0,
+                    "assertion_ids": [],
+                    "reason": "no_content_change",
+                }
+                diff_result = {
+                    "ok": True,
+                    "changed_count": 0,
+                    "new_count": 0,
+                    "missing_count": 0,
+                    "reason": "no_content_change",
+                }
+
+        total_changed_rules += int(diff_result.get("changed_count") or 0)
+        total_new_rules += int(diff_result.get("new_count") or 0)
+        total_missing_rules += int(diff_result.get("missing_count") or 0)
+
+        source_runs.append(
+            {
+                "source_id": int(source.id),
+                "refresh": fetch_result,
+                "changed": content_changed,
+                "extract_result": extract_result,
+                "diff": diff_result,
+                "normalized": normalize_result,
+            }
+        )
+
+    return {
+        "source_runs": source_runs,
+        "changed_source_ids": sorted(set(changed_source_ids)),
+        "failed_source_ids": sorted(set(failed_source_ids)),
+        "summary": {
+            "changed_source_count": len(set(changed_source_ids)),
+            "failed_source_count": len(set(failed_source_ids)),
+            "changed_rule_count": total_changed_rules,
+            "new_rule_count": total_new_rules,
+            "missing_rule_count": total_missing_rules,
+        },
+    }
+
+
 def run_market_policy_pipeline(
     db: Session,
     *,
@@ -185,11 +439,30 @@ def run_market_policy_pipeline(
     reviewer_user_id: int | None = None,
     auto_activate: bool = True,
 ) -> dict[str, Any]:
-
     st = _norm_state(state)
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
     pha = _norm_text(pha_name)
+
+    missing_categories = _discovery_missing_categories(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    discovery_result = discover_policy_sources_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        missing_categories=missing_categories,
+        focus=focus,
+        probe=True,
+    )
 
     sources = _market_sources_from_catalog(
         db,
@@ -201,65 +474,17 @@ def run_market_policy_pipeline(
         focus=focus,
     )
 
-    source_runs = []
-    total_changed = 0
+    refresh_batch = _run_source_refresh_batch(
+        db,
+        sources=sources,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        reviewer_user_id=reviewer_user_id,
+    )
 
-    for source in sources:
-        fetch_result = fetch_policy_source(db, source=source)
-
-        # 🔥 KEY FIX: enforce consistent change detection
-        content_changed = bool(fetch_result.get("changed"))
-
-        if content_changed:
-            mark_assertions_stale_for_source(
-                db,
-                source_id=int(source.id),
-                reason="source_changed",
-            )
-
-        extracted = extract_assertions_for_source(
-            db,
-            source=source,
-            org_id=org_id,
-            org_scope=(org_id is not None),
-        )
-
-        raw_candidates = _extract_raw_candidates(extracted)
-
-        diff = diff_active_rules_for_source(
-            db,
-            org_id=org_id,
-            source_id=int(source.id),
-            state=st,
-            county=cnty,
-            city=cty,
-            pha_name=pha,
-            raw_candidates=raw_candidates,
-        )
-
-        normalize_result = normalize_market_assertions(
-            db,
-            org_id=org_id,
-            state=st,
-            county=cnty,
-            city=cty,
-            pha_name=pha,
-            reviewer_user_id=reviewer_user_id,
-            source_id=int(source.id),
-            raw_candidates=raw_candidates,
-        )
-
-        if diff.get("changed_count"):
-            total_changed += diff["changed_count"]
-
-        source_runs.append({
-            "source_id": int(source.id),
-            "changed": content_changed,
-            "diff": diff,
-            "normalized": normalize_result,
-        })
-
-    # 🔥 KEY FIX: ALWAYS run governance after all sources processed
     lifecycle_result = apply_governance_lifecycle(
         db,
         org_id=org_id,
@@ -271,8 +496,7 @@ def run_market_policy_pipeline(
         auto_activate=auto_activate,
     )
 
-    # 🔥 KEY FIX: recompute profile AFTER governance
-    recompute = recompute_profile_and_coverage(
+    recompute = _recompute_profile_for_market(
         db,
         org_id=org_id,
         state=st,
@@ -292,13 +516,19 @@ def run_market_policy_pipeline(
 
     return {
         "ok": True,
-        "sources_processed": len(source_runs),
-        "total_changed_rules": total_changed,
-        "source_runs": source_runs,
+        "missing_categories": missing_categories,
+        "discovery_result": discovery_result,
+        "sources_processed": len(refresh_batch["source_runs"]),
+        "total_changed_rules": int(refresh_batch["summary"]["changed_rule_count"]),
+        "changed_source_count": int(refresh_batch["summary"]["changed_source_count"]),
+        "failed_source_count": int(refresh_batch["summary"]["failed_source_count"]),
+        "source_runs": refresh_batch["source_runs"],
+        "refresh_summary": refresh_batch["summary"],
         "lifecycle_result": lifecycle_result,
         "recompute": recompute,
         "review_queue": review_queue,
     }
+
 
 def refresh_market_policy_pipeline(
     db: Session,
@@ -356,12 +586,42 @@ def refresh_single_policy_source(
     cty = _norm_lower(getattr(source, "city", None))
     pha = _norm_text(getattr(source, "pha_name", None))
 
-    fetch_result = fetch_policy_source(db, source=source, force=True)
-    if bool(fetch_result.get("changed")):
+    fetch_result = refresh_policy_source_and_detect_changes(db, source=source, force=True)
+    content_changed = bool(fetch_result.get("change_detected") or fetch_result.get("changed"))
+
+    if content_changed:
         stale_mark_result = mark_assertions_stale_for_source(
             db,
             source_id=int(source.id),
             reason="source_content_changed",
+        )
+        extract_result_rows = extract_assertions_for_source(
+            db,
+            source=source,
+            org_id=org_id,
+            org_scope=(org_id is not None),
+        )
+        raw_candidates = _extract_raw_candidates(extract_result_rows)
+        diff_result = diff_active_rules_for_source(
+            db,
+            org_id=org_id,
+            source_id=int(source.id),
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            raw_candidates=raw_candidates,
+        )
+        normalize_result = normalize_market_assertions(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            reviewer_user_id=reviewer_user_id,
+            source_id=int(source.id),
+            raw_candidates=raw_candidates,
         )
     else:
         stale_mark_result = {
@@ -371,36 +631,17 @@ def refresh_single_policy_source(
             "stale_ids": [],
             "reason": "no_source_change",
         }
+        extract_result_rows = []
+        raw_candidates = []
+        diff_result = {
+            "ok": True,
+            "changed_count": 0,
+            "new_count": 0,
+            "missing_count": 0,
+            "reason": "no_content_change",
+        }
+        normalize_result = None
 
-    extract_result_rows = extract_assertions_for_source(
-        db,
-        source=source,
-        org_id=org_id,
-        org_scope=(org_id is not None),
-    )
-    raw_candidates = _extract_raw_candidates(extract_result_rows)
-
-    diff_result = diff_active_rules_for_source(
-        db,
-        org_id=org_id,
-        source_id=int(source.id),
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        raw_candidates=raw_candidates,
-    )
-    normalize_result = normalize_market_assertions(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-        reviewer_user_id=reviewer_user_id,
-        source_id=int(source.id),
-        raw_candidates=raw_candidates,
-    )
     auto_verify_result = auto_verify_market_assertions(
         db,
         org_id=org_id,
@@ -453,7 +694,7 @@ def refresh_single_policy_source(
         state=st,
         county=cnty,
         city=cty,
-        coverage=coverage_payload,
+        pha_name=pha,
     )
 
     return {

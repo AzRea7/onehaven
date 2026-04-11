@@ -1,3 +1,4 @@
+# backend/app/services/policy_catalog_admin_service.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -129,20 +130,13 @@ def merged_catalog_for_market(
         pha_name=pha_name,
     )
 
-    # These URLs are explicitly suppressed by inactive editable rows.
-    # Important: suppression must work even if baseline_url is missing.
     suppressed_urls: set[str] = set()
-
-    # These are active override rows keyed by URL.
     overrides_by_url: dict[str, PolicyCatalogItem] = {}
 
     for row in db_rows:
         row_url = (row.url or "").strip()
         baseline_url = (row.baseline_url or "").strip()
 
-        # Inactive rows act as suppressions of:
-        # 1) their baseline_url if present
-        # 2) their own url always
         if not row.is_active:
             if baseline_url:
                 suppressed_urls.add(baseline_url)
@@ -156,13 +150,11 @@ def merged_catalog_for_market(
         item = _row_to_item(row)
         overrides_by_url[row_url] = item
 
-        # Active override with a different baseline URL replaces the baseline URL.
         if baseline_url and baseline_url != row_url:
             suppressed_urls.add(baseline_url)
 
     merged: list[PolicyCatalogItem] = []
 
-    # Bring in baseline, minus anything explicitly suppressed
     for item in baseline:
         url = item.url.strip()
         if not url:
@@ -174,7 +166,6 @@ def merged_catalog_for_market(
         else:
             merged.append(item)
 
-    # Add active override rows that are not already present
     for url, item in overrides_by_url.items():
         if url in suppressed_urls:
             continue
@@ -401,6 +392,9 @@ def disable_catalog_entry(
     return row
 
 
+_base_source_kind_coverage_for_market = None
+
+
 def source_kind_coverage_for_market(
     db: Session,
     *,
@@ -426,7 +420,6 @@ def source_kind_coverage_for_market(
         key = (item.source_kind or "unknown").strip()
         counts[key] = counts.get(key, 0) + 1
 
-    # Required for operational baseline
     required = [
         "federal_anchor",
         "state_anchor",
@@ -434,7 +427,6 @@ def source_kind_coverage_for_market(
         "municipal_inspection",
     ]
 
-    # Recommended / useful, but not always hard blockers
     recommended = [
         "municipal_certificate",
         "municipal_enforcement",
@@ -453,44 +445,23 @@ def source_kind_coverage_for_market(
         "missing_required": missing_required,
         "missing_recommended": missing_recommended,
         "complete_core": len(missing_required) == 0,
+        "resolution_order": [
+            "michigan_statewide_baseline",
+            "county_rules",
+            "city_rules",
+            "housing_authority_overlays",
+            "org_overrides",
+        ],
+        "recommended_source_layers": {
+            "statewide_baseline": ["state statute", "state housing program guidance", "federal anchors"],
+            "county_rules": ["county code", "county health / building authorities"],
+            "city_rules": ["city ordinance", "rental inspection program", "certificate / occupancy pages"],
+            "housing_authority_overlays": ["PHA admin plan", "landlord packet", "program notices"],
+            "org_overrides": ["internal operations memo", "approved exception handling"],
+        },
+        "governance_dependency": {
+            "full_coverage_requires": "governed_active_rules",
+            "partial_coverage_may_include": ["approved_not_active", "inferred", "partial"],
+            "excluded_from_full_coverage": ["draft", "replaced", "superseded", "conflicting"],
+        },
     }
-
-
-# ---- Chunk 5 catalog enrichments ----
-_base_source_kind_coverage_for_market = source_kind_coverage_for_market
-
-
-def source_kind_coverage_for_market(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str] = None,
-    focus: str = 'se_mi_extended',
-) -> dict:
-    payload = _base_source_kind_coverage_for_market(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-        focus=focus,
-    )
-    payload['resolution_order'] = [
-        'michigan_statewide_baseline',
-        'county_rules',
-        'city_rules',
-        'housing_authority_overlays',
-        'org_overrides',
-    ]
-    payload['recommended_source_layers'] = {
-        'statewide_baseline': ['state statute', 'state housing program guidance', 'federal anchors'],
-        'county_rules': ['county code', 'county health / building authorities'],
-        'city_rules': ['city ordinance', 'rental inspection program', 'certificate / occupancy pages'],
-        'housing_authority_overlays': ['PHA admin plan', 'landlord packet', 'program notices'],
-        'org_overrides': ['internal operations memo', 'approved exception handling'],
-    }
-    return payload

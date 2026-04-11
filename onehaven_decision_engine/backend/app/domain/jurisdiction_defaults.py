@@ -1,9 +1,42 @@
+# backend/app/domain/jurisdiction_defaults.py
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from .jurisdiction_categories import get_required_categories
+from .jurisdiction_categories import (
+    expected_rule_universe_for_scope,
+    get_required_categories,
+)
+
+
+DEFAULT_COMPLETENESS_WEIGHTS: dict[str, float] = {
+    "coverage": 0.35,
+    "freshness": 0.20,
+    "authority": 0.15,
+    "extraction": 0.15,
+    "governance": 0.15,
+}
+
+DEFAULT_COMPLETENESS_THRESHOLDS: dict[str, float] = {
+    "authoritative_source": 0.65,
+    "extraction_confidence": 0.65,
+    "citation_quality": 0.55,
+    "governance_quality": 0.70,
+    "freshness": 0.60,
+    "conflict_block": 0.50,
+}
+
+DEFAULT_CATEGORY_STATUS_WEIGHTS: dict[str, float] = {
+    "covered": 1.0,
+    "partial": 0.60,
+    "stale": 0.45,
+    "inferred": 0.35,
+    "conflicting": 0.15,
+    "missing": 0.0,
+}
+
+DEFAULT_STALE_DAYS = 90
 
 
 @dataclass(frozen=True)
@@ -21,7 +54,7 @@ class JurisdictionDefault:
     tenant_waitlist_depth: str | None = None
     notes: str | None = None
 
-    # Chunk 5 governance / coverage fields
+    # Coverage / trust fields
     county: str | None = None
     housing_authority: str | None = None
     coverage_confidence: str = "medium"
@@ -31,10 +64,6 @@ class JurisdictionDefault:
     default_layer: str = "statewide_baseline"
 
     def to_row_kwargs(self) -> Dict[str, Any]:
-        """
-        Keep this method stable because other seeders/fixtures may rely on it.
-        Only include model-safe fields that are likely to exist on JurisdictionRule.
-        """
         import json
 
         return {
@@ -50,11 +79,18 @@ class JurisdictionDefault:
             "notes": self.notes,
         }
 
+    def expected_rule_universe(self, *, include_section8: bool = True) -> dict[str, Any]:
+        return expected_rule_universe_for_scope(
+            state=self.state,
+            county=self.county,
+            city=self.city,
+            pha_name=self.housing_authority,
+            include_section8=include_section8,
+            tenant_waitlist_depth=self.tenant_waitlist_depth,
+        ).to_dict()
+
     def to_profile_policy(self) -> Dict[str, Any]:
-        """
-        Rich operational payload used by the jurisdiction profile / coverage layer.
-        This is not written directly to legacy JurisdictionRule rows.
-        """
+        universe = self.expected_rule_universe(include_section8=True)
         return {
             "summary": f"{self.city}, {self.state} jurisdiction default baseline",
             "resolved_from": {
@@ -68,6 +104,13 @@ class JurisdictionDefault:
                 "coverage_confidence": self.coverage_confidence,
                 "missing_local_rule_areas": list(self.missing_local_rule_areas or []),
                 "stale_warning": bool(self.stale_warning),
+                "scoring_weights": completeness_score_weights(),
+                "thresholds": completeness_scoring_thresholds(),
+                "expected_rule_universe": universe,
+                "required_categories": list(universe.get("required_categories", [])),
+                "critical_categories": list(universe.get("critical_categories", [])),
+                "optional_categories": list(universe.get("optional_categories", [])),
+                "jurisdiction_types": list(universe.get("jurisdiction_types", [])),
             },
             "compliance": {
                 "rental_license_required": "yes" if self.rental_license_required else "no",
@@ -82,17 +125,11 @@ class JurisdictionDefault:
                 "typical_fail_points": list(self.typical_fail_points or []),
             },
             "source_evidence": list(self.source_evidence or []),
+            "expected_rule_universe": universe,
             "notes": self.notes,
         }
 
     def required_categories(self, *, include_section8: bool = True) -> list[str]:
-        """
-        Operational category baseline for completeness scoring.
-
-        This does not change existing seed behavior; it only exposes a stable
-        domain helper that later services can use while deriving
-        jurisdiction-profile completeness.
-        """
         return get_required_categories(
             state=self.state,
             county=self.county,
@@ -105,14 +142,47 @@ class JurisdictionDefault:
         )
 
 
-def michigan_global_defaults() -> List[JurisdictionDefault]:
-    """
-    Boring + deterministic seed rules for Michigan.
+def completeness_score_weights() -> dict[str, float]:
+    return dict(DEFAULT_COMPLETENESS_WEIGHTS)
 
-    IMPORTANT:
-    These are NOT "legal truth". They're an operational baseline that should be
-    overridden by JurisdictionProfile governance data (policy_models) as you mature.
-    """
+
+def completeness_scoring_thresholds() -> dict[str, float]:
+    return dict(DEFAULT_COMPLETENESS_THRESHOLDS)
+
+
+def completeness_status_weights() -> dict[str, float]:
+    return dict(DEFAULT_CATEGORY_STATUS_WEIGHTS)
+
+
+def completeness_scoring_defaults() -> dict[str, Any]:
+    return {
+        "weights": completeness_score_weights(),
+        "thresholds": completeness_scoring_thresholds(),
+        "category_status_weights": completeness_status_weights(),
+        "stale_days": DEFAULT_STALE_DAYS,
+    }
+
+
+def expected_rule_universe_defaults_for_scope(
+    *,
+    state: str = "MI",
+    county: str | None = None,
+    city: str | None = None,
+    housing_authority: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> dict[str, Any]:
+    return expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=housing_authority,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    ).to_dict()
+
+
+def michigan_global_defaults() -> List[JurisdictionDefault]:
     return [
         JurisdictionDefault(
             city="Detroit",
@@ -300,10 +370,6 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
 
 
 def jurisdiction_default_map() -> dict[tuple[str, str], JurisdictionDefault]:
-    """
-    Useful for services that need deterministic city/state lookup without
-    re-looping through the defaults list every time.
-    """
     out: dict[tuple[str, str], JurisdictionDefault] = {}
     for item in michigan_global_defaults():
         out[(item.city.strip().lower(), item.state.strip().upper())] = item
@@ -316,12 +382,6 @@ def required_categories_for_city(
     *,
     include_section8: bool = True,
 ) -> list[str]:
-    """
-    Convenience helper for completeness services.
-
-    Falls back to generic required-category logic when a city does not have an
-    explicit operational default entry yet.
-    """
     key = ((city or "").strip().lower(), (state or "MI").strip().upper())
     default = jurisdiction_default_map().get(key)
 
@@ -335,49 +395,67 @@ def required_categories_for_city(
     )
 
 
+def default_policy_for_scope(
+    *,
+    state: str = "MI",
+    county: str | None = None,
+    city: str | None = None,
+    housing_authority: str | None = None,
+    include_section8: bool = True,
+) -> dict[str, Any]:
+    key = ((city or "").strip().lower(), (state or "MI").strip().upper())
+    default = jurisdiction_default_map().get(key) if city else None
+    if default is not None:
+        return default.to_profile_policy()
+
+    universe = expected_rule_universe_defaults_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        housing_authority=housing_authority,
+        include_section8=include_section8,
+    )
+    missing_local_rule_areas = list(universe.get("required_categories", []))
+    return {
+        "summary": f"{city or county or state} jurisdiction default baseline",
+        "resolved_from": {
+            "layer": "statewide_baseline",
+            "state": state,
+            "county": county,
+            "city": city,
+            "housing_authority": housing_authority,
+        },
+        "coverage": {
+            "coverage_confidence": "low",
+            "missing_local_rule_areas": missing_local_rule_areas,
+            "stale_warning": False,
+            "scoring_weights": completeness_score_weights(),
+            "thresholds": completeness_scoring_thresholds(),
+            "expected_rule_universe": universe,
+            "required_categories": list(universe.get("required_categories", [])),
+            "critical_categories": list(universe.get("critical_categories", [])),
+            "optional_categories": list(universe.get("optional_categories", [])),
+            "jurisdiction_types": list(universe.get("jurisdiction_types", [])),
+        },
+        "compliance": {
+            "rental_license_required": "unknown",
+            "inspection_required": "unknown",
+            "inspection_authority": None,
+            "inspection_frequency": None,
+        },
+        "operations": {},
+        "source_evidence": [],
+        "expected_rule_universe": universe,
+        "notes": "No explicit jurisdiction default exists yet.",
+    }
+
+
 def default_policy_for_city(
     city: str | None,
     state: str = "MI",
 ) -> dict[str, Any]:
-    """
-    Returns the richer baseline policy payload for a city if it exists.
-    """
-    key = ((city or "").strip().lower(), (state or "MI").strip().upper())
-    default = jurisdiction_default_map().get(key)
-    if default is None:
-        return {
-            "summary": f"{city or state} jurisdiction default baseline",
-            "resolved_from": {
-                "layer": "statewide_baseline",
-                "state": state,
-                "city": city,
-            },
-            "coverage": {
-                "coverage_confidence": "low",
-                "missing_local_rule_areas": ["inspection", "registration", "program_overlay"],
-                "stale_warning": False,
-            },
-            "compliance": {
-                "rental_license_required": "unknown",
-                "inspection_required": "unknown",
-                "inspection_authority": None,
-                "inspection_frequency": None,
-            },
-            "operations": {},
-            "source_evidence": [],
-            "notes": "No explicit city default exists yet.",
-        }
-    return default.to_profile_policy()
+    return default_policy_for_scope(state=state, city=city)
 
 
-# ------------------------------
-# Backwards-compatible export
-# ------------------------------
 def defaults_for_michigan() -> List[JurisdictionDefault]:
-    """
-    Compatibility shim.
-
-    Older/newer code paths import `defaults_for_michigan()`.
-    Your service layer currently expects this exact name.
-    """
     return michigan_global_defaults()

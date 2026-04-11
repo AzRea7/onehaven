@@ -1,6 +1,8 @@
+# backend/app/services/jurisdiction_profile_service.py
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from datetime import datetime
 from typing import Any, Optional
@@ -8,6 +10,8 @@ from typing import Any, Optional
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
+from app.domain.jurisdiction_categories import expected_rule_universe_for_scope
+from app.domain.jurisdiction_defaults import default_policy_for_scope
 from app.policy_models import JurisdictionProfile
 
 
@@ -84,6 +88,67 @@ def _dedupe_dict_list(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out.append(x)
 
     return out
+
+
+def _expected_rule_universe_payload(
+    *,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    include_section8: bool = True,
+    tenant_waitlist_depth: Optional[str] = None,
+) -> dict[str, Any]:
+    return expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    ).to_dict()
+
+
+def _augment_policy_with_expected_universe(
+    *,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    policy: dict[str, Any],
+) -> dict[str, Any]:
+    universe = _expected_rule_universe_payload(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=True,
+        tenant_waitlist_depth=(policy.get("operations") or {}).get("tenant_waitlist_depth") if isinstance(policy, dict) else None,
+    )
+    merged = _deep_merge(
+        default_policy_for_scope(
+            state=state,
+            county=county,
+            city=city,
+            housing_authority=pha_name,
+            include_section8=True,
+        ),
+        policy or {},
+    )
+    merged["expected_rule_universe"] = universe
+    coverage = merged.setdefault("coverage", {})
+    coverage["expected_rule_universe"] = universe
+    coverage["required_categories"] = list(universe.get("required_categories") or [])
+    coverage["critical_categories"] = list(universe.get("critical_categories") or [])
+    coverage["optional_categories"] = list(universe.get("optional_categories") or [])
+    coverage["jurisdiction_types"] = list(universe.get("jurisdiction_types") or [])
+    merged["required_categories"] = list(universe.get("required_categories") or [])
+    merged["critical_categories"] = list(universe.get("critical_categories") or [])
+    merged["optional_categories"] = list(universe.get("optional_categories") or [])
+    merged["jurisdiction_types"] = list(universe.get("jurisdiction_types") or [])
+    if not merged.get("missing_local_rule_areas"):
+        merged["missing_local_rule_areas"] = list(coverage.get("missing_local_rule_areas") or [])
+    return merged
 
 
 def _is_warren_market(*, state: str, county: Optional[str], city: Optional[str]) -> bool:
@@ -380,16 +445,16 @@ def _specificity(r: JurisdictionProfile) -> int:
 def resolve_profile(
     db: Session,
     *,
-    org_id: int,
-    city: Optional[str],
-    county: Optional[str],
-    state: str = "MI",
-) -> dict[str, Any]:
+    org_id: Optional[int],
+    city: Optional[str] = None,
+    county: Optional[str] = None,
+    state: str = 'MI',
+):
     st = _norm_state(state)
     req_city = _norm_city(city)
     req_county = _norm_county(county)
 
-    rows = list_profiles(db, org_id=org_id, include_global=True, state=st)
+    rows = list_profiles(db, org_id=org_id or 0, include_global=True, state=st)
 
     def match_level(r: JurisdictionProfile) -> Optional[str]:
         r_city = _norm_city(r.city)
@@ -427,16 +492,35 @@ def resolve_profile(
         candidates.append((spec, scope_pri, rid, r, lvl))
 
     if not candidates:
+        universe = _expected_rule_universe_payload(
+            state=st,
+            county=req_county,
+            city=req_city,
+            pha_name=None,
+            include_section8=True,
+        )
+        policy = _augment_policy_with_expected_universe(
+            state=st,
+            county=req_county,
+            city=req_city,
+            pha_name=None,
+            policy={},
+        )
         return {
             "matched": False,
             "scope": None,
             "match_level": None,
             "friction_multiplier": 1.0,
             "pha_name": None,
-            "policy": {},
+            "policy": policy,
             "rules": [],
+            "hqs_addenda": [],
             "notes": None,
             "profile_id": None,
+            "required_categories": list(universe.get("required_categories") or []),
+            "critical_categories": list(universe.get("critical_categories") or []),
+            "optional_categories": list(universe.get("optional_categories") or []),
+            "jurisdiction_types": list(universe.get("jurisdiction_types") or []),
             "market": {
                 "state": st,
                 "county": req_county,
@@ -449,12 +533,19 @@ def resolve_profile(
 
     scope = "org" if best_scope_pri == 1 else "global"
     raw_policy = _loads(getattr(chosen, "policy_json", None), {})
-    policy = _augment_policy_for_market(
+    policy = _augment_policy_with_expected_universe(
         state=st,
         county=req_county,
         city=req_city,
-        policy=raw_policy,
+        pha_name=chosen.pha_name,
+        policy=_augment_policy_for_market(
+            state=st,
+            county=req_county,
+            city=req_city,
+            policy=raw_policy,
+        ),
     )
+    universe = policy.get("expected_rule_universe") or {}
 
     return {
         "matched": True,
@@ -467,6 +558,10 @@ def resolve_profile(
         "hqs_addenda": policy.get("hqs_addenda", []),
         "notes": chosen.notes,
         "profile_id": int(chosen.id),
+        "required_categories": list(universe.get("required_categories") or []),
+        "critical_categories": list(universe.get("critical_categories") or []),
+        "optional_categories": list(universe.get("optional_categories") or []),
+        "jurisdiction_types": list(universe.get("jurisdiction_types") or []),
         "market": {
             "state": st,
             "county": req_county,
@@ -492,11 +587,17 @@ def upsert_profile(
     cty = _norm_city(city)
 
     if isinstance(policy, dict):
-        policy = _augment_policy_for_market(
+        policy = _augment_policy_with_expected_universe(
             state=st,
             county=cnty,
             city=cty,
-            policy=policy,
+            pha_name=_norm(pha_name),
+            policy=_augment_policy_for_market(
+                state=st,
+                county=cnty,
+                city=cty,
+                policy=policy,
+            ),
         )
 
     q = (
@@ -526,6 +627,8 @@ def upsert_profile(
             notes=_norm(notes),
             updated_at=now,
         )
+        if hasattr(row, "required_categories_json") and isinstance(policy, dict):
+            row.required_categories_json = _dumps(policy.get("required_categories") or [])
         db.add(row)
     else:
         row.friction_multiplier = float(friction_multiplier or 1.0)
@@ -533,6 +636,8 @@ def upsert_profile(
         row.policy_json = _dumps(policy or {})
         row.notes = _norm(notes)
         row.updated_at = now
+        if hasattr(row, "required_categories_json") and isinstance(policy, dict):
+            row.required_categories_json = _dumps(policy.get("required_categories") or [])
 
     db.commit()
     db.refresh(row)
@@ -662,8 +767,6 @@ def delete_profile(
 
 
 # ---- Chunk 5 layered profile helpers ----
-import hashlib
-
 _base_resolve_profile = resolve_profile
 _base_resolve_operational_policy = resolve_operational_policy
 _base_summarize_profile = summarize_profile
@@ -738,22 +841,71 @@ def resolve_operational_policy(
     city: Optional[str] = None,
     county: Optional[str] = None,
     state: str = 'MI',
+    pha_name: Optional[str] = None,
 ):
-    policy = _base_resolve_operational_policy(db, org_id=org_id, city=city, county=county, state=state)
+    policy = _base_resolve_operational_policy(
+        db,
+        org_id=org_id,
+        city=city,
+        county=county,
+        state=state,
+        pha_name=pha_name,
+    )
     layers = _resolved_layers_from_policy(policy if isinstance(policy, dict) else {})
     if isinstance(policy, dict):
         policy['resolved_layers'] = layers
         policy['resolved_rule_version'] = _policy_hash(policy)
         policy['missing_local_rule_areas'] = list(policy.get('missing_local_rule_areas') or policy.get('missing_categories') or [])
+        policy['source_evidence'] = list(policy.get('source_evidence') or [])
+        universe = _expected_rule_universe_payload(
+            state=_norm_state(state),
+            county=_norm_county(county),
+            city=_norm_city(city),
+            pha_name=_norm(pha_name) or policy.get('pha_name'),
+            include_section8=True,
+            tenant_waitlist_depth=((policy.get('brief') or {}).get('tenant_waitlist_depth') if isinstance(policy.get('brief'), dict) else None),
+        )
+        policy['expected_rule_universe'] = universe
+        policy['required_categories'] = list(policy.get('required_categories') or universe.get('required_categories') or [])
+        policy['critical_categories'] = list(policy.get('critical_categories') or universe.get('critical_categories') or [])
+        policy['optional_categories'] = list(policy.get('optional_categories') or universe.get('optional_categories') or [])
+        policy['jurisdiction_types'] = list(policy.get('jurisdiction_types') or universe.get('jurisdiction_types') or [])
     return policy
 
 
-def summarize_profile(profile: JurisdictionProfile) -> dict[str, Any]:
-    out = _base_summarize_profile(profile)
-    policy = _loads(getattr(profile, 'policy_json', None), {})
+def summarize_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    city: Optional[str],
+    county: Optional[str],
+    state: str = 'MI',
+    pha_name: Optional[str] = None,
+) -> dict[str, Any]:
+    out = _base_summarize_profile(
+        db,
+        org_id=org_id,
+        city=city,
+        county=county,
+        state=state,
+        pha_name=pha_name,
+    )
+    policy = dict(out.get('policy') or {})
     out['resolved_layers'] = _resolved_layers_from_policy(policy)
     out['resolved_rule_version'] = _policy_hash(policy)
     out['coverage_confidence'] = policy.get('coverage_confidence') or 'medium'
-    out['missing_local_rule_areas'] = list(policy.get('missing_local_rule_areas') or policy.get('missing_categories') or [])
+    out['missing_local_rule_areas'] = list(out.get('missing_local_rule_areas') or policy.get('missing_local_rule_areas') or policy.get('missing_categories') or [])
     out['source_evidence'] = list(policy.get('source_evidence') or [])
+    universe = policy.get('expected_rule_universe') or _expected_rule_universe_payload(
+        state=_norm_state(state),
+        county=_norm_county(county),
+        city=_norm_city(city),
+        pha_name=_norm(pha_name) or out.get('pha_name'),
+        include_section8=True,
+    )
+    out['expected_rule_universe'] = universe
+    out['required_categories'] = list(out.get('required_categories') or universe.get('required_categories') or [])
+    out['critical_categories'] = list(out.get('critical_categories') or universe.get('critical_categories') or [])
+    out['optional_categories'] = list(out.get('optional_categories') or universe.get('optional_categories') or [])
+    out['jurisdiction_types'] = list(out.get('jurisdiction_types') or universe.get('jurisdiction_types') or [])
     return out

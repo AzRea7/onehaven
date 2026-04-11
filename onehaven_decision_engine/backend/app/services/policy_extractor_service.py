@@ -26,6 +26,23 @@ def _dumps(v: Any) -> str:
         return "{}"
 
 
+def _json_loads_dict(v: Any) -> dict[str, Any]:
+    if v is None:
+        return {}
+    if isinstance(v, dict):
+        return dict(v)
+    if isinstance(v, str):
+        raw = v.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
 def _norm_state(value: Optional[str]) -> str:
     return (value or "MI").strip().upper()
 
@@ -190,14 +207,6 @@ def _normalized_category_for(rule_key: str) -> str | None:
     return normalize_category(mapping.get(rule_key))
 
 
-def _coverage_status_for(rule_key: str) -> str:
-    if rule_key == "document_reference":
-        return "candidate"
-    if rule_key.endswith("_anchor"):
-        return "candidate"
-    return "covered"
-
-
 def _refresh_source_category_metadata(source: PolicySource, created: list[PolicyAssertion], now: datetime) -> None:
     categories = normalize_categories(
         [a.normalized_category for a in created if getattr(a, "normalized_category", None)]
@@ -251,14 +260,40 @@ def _already_added(created: list[PolicyAssertion], rule_key: str, raw_excerpt: O
     return False
 
 
+def _build_direct_citation(source: PolicySource, source_version_id: Optional[int], raw_text: str) -> dict[str, Any]:
+    raw_excerpt = str(raw_text or "").strip()
+    return {
+        "url": source.url,
+        "publisher": source.publisher,
+        "title": source.title,
+        "source_version_id": source_version_id,
+        "raw_excerpt": raw_excerpt[:4000] if raw_excerpt else None,
+        "direct": bool(source.url and raw_excerpt),
+    }
+
+
+def _coverage_status_for(*, confidence: float, citation_quality: float, evidence_state: str, conflict_hints: list[str]) -> str:
+    if evidence_state == "conflicting" or conflict_hints:
+        return "conflicting"
+    if evidence_state == "confirmed" and confidence >= 0.80 and citation_quality >= 0.70:
+        return "covered"
+    if evidence_state == "inferred":
+        return "inferred"
+    if confidence >= 0.45 and citation_quality >= 0.30:
+        return "partial"
+    return "candidate"
+
+
 def _candidate_payload(
     *,
     source: PolicySource,
+    source_version_id: Optional[int],
     rule_key: str,
     value: dict[str, Any],
     confidence: float,
 ) -> dict[str, Any]:
     raw_text = value.get("summary") or value.get("text") or value.get("condition") or rule_key
+    direct_citation = _build_direct_citation(source, source_version_id, str(raw_text))
     candidate = normalize_rule_candidate(
         {
             "rule_key": rule_key,
@@ -267,20 +302,27 @@ def _candidate_payload(
             "url": source.url,
             "text": str(raw_text),
             "raw_excerpt": str(raw_text),
+            "source_citation": f"{source.publisher or ''} | {source.title or ''} | {source.url or ''}".strip(" |"),
+            "source_type": getattr(source, "source_type", None),
             "source_level": getattr(source, "source_type", None) or "local",
             "property_type": _norm_text(getattr(source, "program_type", None)),
             "normalized_version": "v2",
             "confidence": confidence,
             "source_id": getattr(source, "id", None),
-            "source_version_id": None,
+            "source_version_id": source_version_id,
             "jurisdiction_slug": getattr(source, "jurisdiction_slug", None),
             "state": getattr(source, "state", None),
             "county": getattr(source, "county", None),
             "city": getattr(source, "city", None),
             "pha_name": getattr(source, "pha_name", None),
             "program_type": getattr(source, "program_type", None),
+            "value_json": {
+                **value,
+                "direct_citation": direct_citation,
+            },
         }
     )
+
     if candidate is None:
         source_level = getattr(source, "source_type", None) or "local"
         property_type = _norm_text(getattr(source, "program_type", None))
@@ -290,6 +332,21 @@ def _candidate_payload(
             or "global"
         )
         version_group = f"{version_group}:{rule_key}:{source_level}"
+        citation_json = {
+            **direct_citation,
+            "citation_quality": 0.40 if direct_citation.get("direct") else 0.20,
+            "category_mapping_source": "extractor_rule_map",
+            "normalized_rule_key": rule_key,
+            "rule_key_confidence": 1.0,
+            "conflict_hints": [],
+        }
+        evidence_state = "inferred" if confidence >= 0.45 else "unknown"
+        coverage_status = _coverage_status_for(
+            confidence=confidence,
+            citation_quality=float(citation_json["citation_quality"]),
+            evidence_state=evidence_state,
+            conflict_hints=[],
+        )
         return {
             "rule_family": _rule_family_for(rule_key),
             "rule_category": _normalized_category_for(rule_key),
@@ -313,8 +370,31 @@ def _candidate_payload(
             "normalized_version": "v2",
             "version_group": version_group,
             "confidence": confidence,
+            "value_hash": None,
+            "citation_json": citation_json,
+            "confidence_basis": evidence_state,
+            "coverage_status": coverage_status,
+            "change_summary": None,
+            "conflict_hints": [],
         }
 
+    citation_json = {
+        **candidate.value_json.get("direct_citation", direct_citation),
+        "citation_quality": candidate.citation_quality,
+        "category_mapping_source": candidate.category_mapping_source,
+        "normalized_rule_key": candidate.normalized_rule_key,
+        "rule_key_confidence": candidate.rule_key_confidence,
+        "conflict_hints": list(candidate.conflict_hints),
+        "citation_text": candidate.source_citation,
+        "source_id": getattr(source, "id", None),
+        "source_version_id": source_version_id,
+    }
+    coverage_status = _coverage_status_for(
+        confidence=candidate.confidence,
+        citation_quality=candidate.citation_quality,
+        evidence_state=candidate.evidence_state,
+        conflict_hints=list(candidate.conflict_hints),
+    )
     return {
         "rule_family": candidate.rule_family,
         "rule_category": candidate.rule_category,
@@ -326,8 +406,13 @@ def _candidate_payload(
         "raw_excerpt": candidate.raw_excerpt or str(raw_text),
         "normalized_version": candidate.normalized_version,
         "version_group": candidate.version_group,
-        "confidence": max(float(candidate.confidence), float(confidence)),
+        "confidence": float(candidate.confidence),
         "value_hash": candidate.fingerprint,
+        "citation_json": citation_json,
+        "confidence_basis": candidate.evidence_state,
+        "coverage_status": coverage_status,
+        "change_summary": None if not candidate.conflict_hints else f"conflict_hints={','.join(candidate.conflict_hints)}",
+        "conflict_hints": list(candidate.conflict_hints),
     }
 
 
@@ -344,6 +429,7 @@ def _add_assertion(
 ) -> None:
     payload = _candidate_payload(
         source=source,
+        source_version_id=source_version_id,
         rule_key=rule_key,
         value=value,
         confidence=confidence,
@@ -364,7 +450,13 @@ def _add_assertion(
             rule_key=rule_key,
             rule_family=payload["rule_family"],
             assertion_type=_assertion_type_for(rule_key),
-            value_json=_dumps(value),
+            value_json=_dumps(
+                {
+                    **value,
+                    "conflict_hints": payload.get("conflict_hints", []),
+                    "normalized_category": payload["rule_category"],
+                }
+            ),
             effective_date=getattr(source, "effective_date", None),
             expires_at=None,
             confidence=float(payload["confidence"]),
@@ -391,27 +483,24 @@ def _add_assertion(
             version_group=payload["version_group"],
             version_number=1,
             is_current=False,
-            citation_json=_dumps(
-                {
-                    "url": source.url,
-                    "publisher": source.publisher,
-                    "title": source.title,
-                    "source_version_id": source_version_id,
-                }
-            ),
+            citation_json=_dumps(payload["citation_json"]),
             rule_provenance_json=_dumps(
                 {
                     "source_id": int(source.id),
                     "source_version_id": source_version_id,
                     "source_type": getattr(source, "source_type", None),
                     "jurisdiction_slug": getattr(source, "jurisdiction_slug", None),
+                    "category_mapping_source": payload["citation_json"].get("category_mapping_source"),
+                    "normalized_rule_key": payload["citation_json"].get("normalized_rule_key"),
+                    "rule_key_confidence": payload["citation_json"].get("rule_key_confidence"),
+                    "conflict_hints": payload["citation_json"].get("conflict_hints", []),
                 }
             ),
             value_hash=payload.get("value_hash"),
-            confidence_basis="inferred",
-            change_summary="extracted_from_source_refresh",
+            confidence_basis=payload["confidence_basis"],
+            change_summary=payload["change_summary"],
             normalized_category=payload["rule_category"],
-            coverage_status=_coverage_status_for(rule_key),
+            coverage_status=payload["coverage_status"],
             source_freshness_status=getattr(source, "freshness_status", None),
             extracted_at=now,
             reviewed_at=None,
@@ -884,36 +973,24 @@ def mark_assertions_stale_for_source(
             select(PolicyAssertion).where(PolicyAssertion.source_id == int(source_id))
         ).all()
     )
+
     count = 0
-    now = _utcnow()
-
+    ids: list[int] = []
     for row in rows:
-        if (row.governance_state or "").lower() == "active":
-            row.source_freshness_status = "stale"
-            row.change_summary = reason
-            db.add(row)
-            count += 1
-            continue
-
         row.review_status = "stale"
         row.rule_status = "stale"
-        row.coverage_status = "stale"
-        row.source_freshness_status = "stale"
         row.change_summary = reason
-        row.reviewed_at = now
+        row.source_freshness_status = "stale"
         db.add(row)
         count += 1
-
-    source = db.get(PolicySource, int(source_id))
-    if source is not None:
-        source.freshness_status = "stale"
-        source.freshness_reason = reason
-        source.freshness_checked_at = now
-        db.add(source)
+        if getattr(row, "id", None) is not None:
+            ids.append(int(row.id))
 
     db.commit()
     return {
+        "ok": True,
         "source_id": int(source_id),
-        "updated_count": count,
+        "stale_count": count,
+        "stale_ids": ids,
         "reason": reason,
     }
