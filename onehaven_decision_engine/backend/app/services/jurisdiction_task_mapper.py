@@ -1,3 +1,4 @@
+# backend/app/services/jurisdiction_task_mapper.py
 from __future__ import annotations
 
 import json
@@ -58,6 +59,23 @@ def _loads_json_list(value: Any) -> list[Any]:
             return []
 
     return []
+
+
+def _loads_json_dict(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 
 def _scope_label(
@@ -230,6 +248,40 @@ def build_completeness_review_task(
     )
 
 
+def build_escalation_task(
+    *,
+    escalation_code: str,
+    title: str,
+    reason: str,
+    priority: str,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    jurisdiction_profile_id: int | None = None,
+    categories: Iterable[Any] | None = None,
+) -> JurisdictionTask:
+    return JurisdictionTask(
+        task_key=f"jurisdiction_escalation:{escalation_code}",
+        title=title,
+        category="jurisdiction_review",
+        status=TASK_STATUS_TODO,
+        priority=priority,
+        reason=reason,
+        metadata={
+            "task_type": "jurisdiction_escalation",
+            "escalation_code": escalation_code,
+            "categories": normalize_categories(categories),
+            "state": state,
+            "county": county,
+            "city": city,
+            "pha_name": pha_name,
+            "jurisdiction_profile_id": jurisdiction_profile_id,
+            "scope_label": _scope_label(state=state, county=county, city=city, pha_name=pha_name),
+        },
+    )
+
+
 def dedupe_tasks(tasks: Iterable[JurisdictionTask]) -> list[JurisdictionTask]:
     seen: set[str] = set()
     deduped: list[JurisdictionTask] = []
@@ -241,7 +293,7 @@ def dedupe_tasks(tasks: Iterable[JurisdictionTask]) -> list[JurisdictionTask]:
         seen.add(key)
         deduped.append(task)
 
-    return deduped
+    return dedupe_tasks(tasks)
 
 
 def map_jurisdiction_tasks(
@@ -256,10 +308,17 @@ def map_jurisdiction_tasks(
     city: str | None,
     pha_name: str | None = None,
     jurisdiction_profile_id: int | None = None,
+    critical_categories: Iterable[Any] | None = None,
+    stale_categories: Iterable[Any] | None = None,
+    conflicting_categories: Iterable[Any] | None = None,
+    discovery_retries_exhausted: bool = False,
 ) -> list[JurisdictionTask]:
     tasks: list[JurisdictionTask] = []
 
     normalized_missing = normalize_categories(missing_categories)
+    normalized_critical = normalize_categories(critical_categories)
+    normalized_stale_categories = normalize_categories(stale_categories)
+    normalized_conflicting = normalize_categories(conflicting_categories)
 
     if completeness_status in {"missing", "partial"}:
         tasks.append(
@@ -298,7 +357,175 @@ def map_jurisdiction_tasks(
             )
         )
 
-    return dedupe_tasks(tasks)
+    critical_missing = [category for category in normalized_missing if category in set(normalized_critical)]
+    if critical_missing:
+        tasks.append(
+            build_escalation_task(
+                escalation_code="critical_category_missing",
+                title="Escalate critical jurisdiction gap",
+                reason=(
+                    f"{_scope_label(state=state, county=county, city=city, pha_name=pha_name)} "
+                    f"is missing critical jurisdiction coverage."
+                ),
+                priority=TASK_PRIORITY_HIGH,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                jurisdiction_profile_id=jurisdiction_profile_id,
+                categories=critical_missing,
+            )
+        )
+
+    critical_stale = [category for category in normalized_stale_categories if category in set(normalized_critical)]
+    if critical_stale:
+        tasks.append(
+            build_escalation_task(
+                escalation_code="critical_category_stale",
+                title="Escalate stale critical jurisdiction coverage",
+                reason=(
+                    f"{_scope_label(state=state, county=county, city=city, pha_name=pha_name)} "
+                    f"has stale coverage in critical categories."
+                ),
+                priority=TASK_PRIORITY_HIGH,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                jurisdiction_profile_id=jurisdiction_profile_id,
+                categories=critical_stale,
+            )
+        )
+
+    if normalized_conflicting:
+        tasks.append(
+            build_escalation_task(
+                escalation_code="authoritative_conflict",
+                title="Resolve authoritative jurisdiction conflict",
+                reason=(
+                    f"{_scope_label(state=state, county=county, city=city, pha_name=pha_name)} "
+                    f"has conflicting jurisdiction evidence that requires operator review."
+                ),
+                priority=TASK_PRIORITY_HIGH,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                jurisdiction_profile_id=jurisdiction_profile_id,
+                categories=normalized_conflicting,
+            )
+        )
+
+    if discovery_retries_exhausted:
+        tasks.append(
+            build_escalation_task(
+                escalation_code="discovery_retries_exhausted",
+                title="Review exhausted jurisdiction discovery retries",
+                reason=(
+                    f"{_scope_label(state=state, county=county, city=city, pha_name=pha_name)} "
+                    f"exhausted automated discovery retries without resolving coverage gaps."
+                ),
+                priority=TASK_PRIORITY_MEDIUM,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                jurisdiction_profile_id=jurisdiction_profile_id,
+                categories=[],
+            )
+        )
+
+    return deduped_tasks(tasks)
+
+
+def deduped_tasks(tasks: Iterable[JurisdictionTask]) -> list[JurisdictionTask]:
+    seen: set[str] = set()
+    deduped: list[JurisdictionTask] = []
+
+    for task in tasks:
+        key = task.task_key
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(task)
+
+    return deduped
+
+
+def _profile_meta(profile: JurisdictionProfile) -> dict[str, Any]:
+    try:
+        payload = json.loads(getattr(profile, "policy_json", None) or "{}")
+    except Exception:
+        payload = {}
+    meta = payload.get("meta") or {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _profile_critical_categories(profile: JurisdictionProfile) -> list[str]:
+    meta = _profile_meta(profile)
+    completeness_meta = meta.get("completeness") or {}
+    candidates = (
+        completeness_meta.get("critical_categories")
+        or meta.get("critical_categories")
+        or []
+    )
+    return normalize_categories(candidates)
+
+
+def _profile_stale_categories(profile: JurisdictionProfile) -> list[str]:
+    meta = _profile_meta(profile)
+    completeness_meta = meta.get("completeness") or {}
+    source_freshness = _loads_json_dict(getattr(profile, "source_freshness_json", None))
+    scoring = source_freshness.get("scoring") or {}
+    candidates = (
+        completeness_meta.get("stale_categories")
+        or scoring.get("stale_categories")
+        or []
+    )
+    return normalize_categories(candidates)
+
+
+def _profile_conflicting_categories(profile: JurisdictionProfile) -> list[str]:
+    meta = _profile_meta(profile)
+    completeness_meta = meta.get("completeness") or {}
+    source_freshness = _loads_json_dict(getattr(profile, "source_freshness_json", None))
+    scoring = source_freshness.get("scoring") or {}
+    candidates = (
+        completeness_meta.get("conflicting_categories")
+        or scoring.get("conflicting_categories")
+        or []
+    )
+    return normalize_categories(candidates)
+
+
+def _profile_discovery_retries_exhausted(profile: JurisdictionProfile) -> bool:
+    source_freshness = _loads_json_dict(getattr(profile, "source_freshness_json", None))
+    scoring = source_freshness.get("scoring") or {}
+    for candidate in (
+        source_freshness.get("discovery_retries_exhausted"),
+        source_freshness.get("retry_exhausted"),
+        source_freshness.get("retries_exhausted"),
+        scoring.get("discovery_retries_exhausted"),
+        scoring.get("retry_exhausted"),
+        scoring.get("retries_exhausted"),
+    ):
+        if candidate is True:
+            return True
+    retry_count = 0
+    max_retry_count = 0
+    try:
+        retry_count = int(source_freshness.get("discovery_retry_count") or 0)
+    except Exception:
+        retry_count = 0
+    try:
+        max_retry_count = int(
+            source_freshness.get("discovery_retry_max")
+            or source_freshness.get("discovery_max_retries")
+            or 0
+        )
+    except Exception:
+        max_retry_count = 0
+    return max_retry_count > 0 and retry_count >= max_retry_count
 
 
 def map_profile_jurisdiction_tasks(profile: Optional[JurisdictionProfile]) -> list[JurisdictionTask]:
@@ -318,11 +545,16 @@ def map_profile_jurisdiction_tasks(profile: Optional[JurisdictionProfile]) -> li
         city=getattr(profile, "city", None),
         pha_name=getattr(profile, "pha_name", None),
         jurisdiction_profile_id=getattr(profile, "id", None),
+        critical_categories=_profile_critical_categories(profile),
+        stale_categories=_profile_stale_categories(profile),
+        conflicting_categories=_profile_conflicting_categories(profile),
+        discovery_retries_exhausted=_profile_discovery_retries_exhausted(profile),
     )
 
 
 def map_profile_jurisdiction_task_dicts(profile: Optional[JurisdictionProfile]) -> list[dict[str, Any]]:
     return [task.to_dict() for task in map_profile_jurisdiction_tasks(profile)]
+
 
 # ---- Chunk 5 task helpers ----
 

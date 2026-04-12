@@ -1,4 +1,4 @@
-# onehaven_decision_engine/backend/app/seed/jurisdictions_seed.py
+# backend/app/seed/jurisdictions_seed.py
 from __future__ import annotations
 
 """
@@ -14,58 +14,53 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from ..models import JurisdictionRule
+from ..domain.jurisdiction_defaults import defaults_for_michigan
 
 
-SEED = [
-    # Detroit (starter assumptions; tune later)
-    dict(
-        city="Detroit",
-        state="MI",
-        require_rental_registration=True,
-        require_city_inspection=True,
-        lead_paint_affidavit_required=True,
+def _notes_from_default(default) -> str:
+    policy = default.to_profile_policy()
+    discovery = ((policy.get("discovery") or {}).get("search_hints") or {})
+    required_categories = (
+        ((policy.get("coverage") or {}).get("required_categories") or [])
+    )
+    thresholds = ((policy.get("coverage") or {}).get("thresholds") or {})
+    trust = ((policy.get("trust") or {}).get("projection") or {})
+    freshness = ((policy.get("freshness") or {}).get("policy_sources") or {})
+
+    note_parts = [
+        default.notes or "",
+        f"Expected categories: {', '.join(required_categories)}." if required_categories else "",
+        f"Discovery base terms: {', '.join(discovery.get('base_terms') or [])}." if discovery.get("base_terms") else "",
+        f"Primary source hints: {', '.join(discovery.get('preferred_source_kinds') or [])}." if discovery.get("preferred_source_kinds") else "",
+        f"Authoritative source threshold: {thresholds.get('authoritative_source')}." if thresholds.get("authoritative_source") is not None else "",
+        f"Default stale-days threshold: {freshness.get('stale_days')}." if freshness.get("stale_days") is not None else "",
+        f"Projection trust minimum: {trust.get('min_completeness_score_for_trust')}." if trust.get("min_completeness_score_for_trust") is not None else "",
+    ]
+    return " ".join(part.strip() for part in note_parts if part and str(part).strip())
+
+
+def _seed_payload_from_default(default) -> dict:
+    return dict(
+        city=default.city,
+        state=default.state,
+        require_rental_registration=bool(default.rental_license_required),
+        require_city_inspection=bool(default.inspection_authority or default.inspection_frequency),
+        lead_paint_affidavit_required=bool(
+            "lead" in {str(x).strip().lower() for x in (default.required_categories(include_section8=True) or [])}
+            or any("lead" in str(x).lower() for x in (default.typical_fail_points or []))
+        ),
         criminal_background_policy="moderate",
-        typical_days_to_approve=21,
-        friction_weight=1.25,
-        notes="Detroit requires registration + inspection; expect delays.",
-    ),
-    # Pontiac
-    dict(
-        city="Pontiac",
-        state="MI",
-        require_rental_registration=True,
-        require_city_inspection=True,
-        lead_paint_affidavit_required=True,
-        criminal_background_policy="moderate",
-        typical_days_to_approve=18,
-        friction_weight=1.15,
-        notes="Pontiac: registration/inspection common; slightly faster than Detroit.",
-    ),
-    # Southfield
-    dict(
-        city="Southfield",
-        state="MI",
-        require_rental_registration=True,
-        require_city_inspection=False,
-        lead_paint_affidavit_required=True,
-        criminal_background_policy="strict",
-        typical_days_to_approve=14,
-        friction_weight=1.10,
-        notes="Southfield often stricter screening; registration present.",
-    ),
-    # Royal Oak (often fewer municipal hurdles)
-    dict(
-        city="Royal Oak",
-        state="MI",
-        require_rental_registration=False,
-        require_city_inspection=False,
-        lead_paint_affidavit_required=False,
-        criminal_background_policy="moderate",
-        typical_days_to_approve=10,
-        friction_weight=1.00,
-        notes="Royal Oak: generally fewer municipal process steps.",
-    ),
-]
+        typical_days_to_approve=int(default.processing_days or 14),
+        friction_weight=float(
+            1.25 if default.coverage_confidence == "low"
+            else 1.10 if default.coverage_confidence == "medium"
+            else 1.00
+        ),
+        notes=_notes_from_default(default),
+    )
+
+
+SEED = [_seed_payload_from_default(default) for default in defaults_for_michigan()]
 
 
 def upsert_rule(db: Session, org_id: int, payload: dict) -> JurisdictionRule:

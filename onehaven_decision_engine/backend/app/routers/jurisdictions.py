@@ -14,7 +14,7 @@ from ..db import get_db
 from ..domain.audit import emit_audit
 from ..domain.jurisdiction_defaults import michigan_global_defaults
 from ..models import JurisdictionRule, Property
-from ..policy_models import JurisdictionProfile
+from ..policy_models import JurisdictionProfile, PolicySource
 from ..services.jurisdiction_completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
@@ -68,6 +68,83 @@ def _profile_layers_payload(profile: JurisdictionProfile | None) -> list[dict]:
     return rows
 
 
+def _serialize_policy_source(row: PolicySource) -> dict:
+    return {
+        "id": int(getattr(row, "id", 0) or 0),
+        "title": getattr(row, "title", None),
+        "publisher": getattr(row, "publisher", None),
+        "url": getattr(row, "url", None),
+        "source_kind": getattr(row, "source_kind", None),
+        "is_authoritative": bool(getattr(row, "is_authoritative", False)),
+        "freshness_status": getattr(row, "freshness_status", None),
+        "last_verified_at": getattr(row, "last_verified_at", None).isoformat() if getattr(row, "last_verified_at", None) else None,
+    }
+
+
+def _category_matrix_from_completeness(db: Session, completeness: dict) -> list[dict]:
+    details = completeness.get("category_details") or {}
+    statuses = completeness.get("category_statuses") or {}
+    required = list(completeness.get("required_categories") or [])
+    ordered = required + [cat for cat in details.keys() if cat not in required]
+    out = []
+    req_set = set(required)
+    covered = set(completeness.get("covered_categories") or [])
+    missing = set(completeness.get("missing_categories") or [])
+    stale = set(completeness.get("stale_categories") or [])
+    inferred = set(completeness.get("inferred_categories") or [])
+    conflicting = set(completeness.get("conflicting_categories") or [])
+    for category in ordered:
+        detail = details.get(category) or {}
+        source_ids = [int(x) for x in (detail.get("source_ids") or []) if str(x).strip()]
+        source_rows = []
+        if source_ids:
+            rows = list(db.query(PolicySource).filter(PolicySource.id.in_(source_ids)).all())
+            row_map = {int(row.id): row for row in rows if getattr(row, "id", None) is not None}
+            source_rows = [_serialize_policy_source(row_map[source_id]) for source_id in source_ids if source_id in row_map]
+        out.append(
+            {
+                "category": category,
+                "status": detail.get("status") or statuses.get(category) or "missing",
+                "expected": category in req_set,
+                "covered": category in covered,
+                "missing": category in missing,
+                "stale": category in stale,
+                "inferred": category in inferred,
+                "conflicting": category in conflicting,
+                "latest_verified_at": detail.get("latest_verified_at"),
+                "source_count": int(detail.get("source_count") or 0),
+                "authoritative_source_count": int(detail.get("authoritative_source_count") or 0),
+                "assertion_count": int(detail.get("assertion_count") or 0),
+                "governed_assertion_count": int(detail.get("governed_assertion_count") or 0),
+                "citation_count": int(detail.get("citation_count") or 0),
+                "source_ids": source_ids,
+                "assertion_ids": [int(x) for x in (detail.get("assertion_ids") or []) if str(x).strip()],
+                "sources": source_rows,
+            }
+        )
+    return out
+
+
+def _coverage_matrix_payload(db: Session, profile: JurisdictionProfile | None) -> dict | None:
+    if profile is None:
+        return None
+    completeness = profile_completeness_payload(db, profile)
+    return {
+        "jurisdiction_profile_id": int(profile.id),
+        "state": profile.state,
+        "county": profile.county,
+        "city": profile.city,
+        "pha_name": profile.pha_name,
+        "expected_categories": list(completeness.get("required_categories") or []),
+        "covered_categories": list(completeness.get("covered_categories") or []),
+        "missing_categories": list(completeness.get("missing_categories") or []),
+        "stale_categories": list(completeness.get("stale_categories") or []),
+        "inferred_categories": list(completeness.get("inferred_categories") or []),
+        "conflicting_categories": list(completeness.get("conflicting_categories") or []),
+        "category_matrix": _category_matrix_from_completeness(db, completeness),
+    }
+
+
 def _profile_resolution_payload(db: Session, profile: JurisdictionProfile | None) -> dict | None:
     if profile is None:
         return None
@@ -79,16 +156,49 @@ def _profile_resolution_payload(db: Session, profile: JurisdictionProfile | None
         "county": profile.county,
         "city": profile.city,
         "pha_name": getattr(profile, "pha_name", None),
-        "resolved_rule_version": meta.get("resolved_rule_version") or meta.get("rule_version") or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
-        "coverage_confidence": completeness.get("coverage_confidence") or meta.get("coverage_confidence") or ("high" if completeness.get("completeness_score", 0) >= 0.85 else "medium" if completeness.get("completeness_score", 0) >= 0.6 else "low"),
+        "resolved_rule_version": meta.get("resolved_rule_version")
+        or meta.get("rule_version")
+        or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
+        "coverage_confidence": completeness.get("coverage_confidence")
+        or meta.get("coverage_confidence")
+        or (
+            "high"
+            if completeness.get("completeness_score", 0) >= 0.85
+            else "medium"
+            if completeness.get("completeness_score", 0) >= 0.6
+            else "low"
+        ),
+        "confidence_label": completeness.get("confidence_label")
+        or completeness.get("coverage_confidence")
+        or meta.get("coverage_confidence"),
         "completeness_score": completeness.get("completeness_score"),
         "completeness_status": completeness.get("completeness_status"),
-        "missing_local_rule_areas": completeness.get("missing_local_rule_areas") or completeness.get("missing_categories") or meta.get("missing_local_rule_areas") or [],
+        "production_readiness": completeness.get("production_readiness"),
+        "trustworthy_for_projection": bool(
+            completeness.get("trustworthy_for_projection", False)
+        ),
+        "missing_local_rule_areas": completeness.get("missing_local_rule_areas")
+        or completeness.get("missing_categories")
+        or meta.get("missing_local_rule_areas")
+        or [],
+        "missing_categories": completeness.get("missing_categories") or [],
+        "stale_categories": completeness.get("stale_categories") or [],
+        "inferred_categories": completeness.get("inferred_categories") or [],
+        "conflicting_categories": completeness.get("conflicting_categories") or [],
         "source_evidence": meta.get("source_evidence") or meta.get("evidence") or [],
-        "last_refreshed": meta.get("last_refreshed") or completeness.get("last_refreshed") or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
+        "last_refresh": completeness.get("last_refresh")
+        or meta.get("last_refreshed")
+        or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
+        "last_refreshed": completeness.get("last_refreshed")
+        or meta.get("last_refreshed")
+        or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
+        "discovery_status": completeness.get("discovery_status") or meta.get("discovery_status"),
+        "last_discovery_run": completeness.get("last_discovery_run") or meta.get("last_discovery_run"),
+        "last_discovered_at": completeness.get("last_discovered_at") or meta.get("last_discovered_at"),
         "is_stale": bool(completeness.get("is_stale")),
         "stale_reason": completeness.get("stale_reason") or meta.get("stale_reason"),
         "resolved_layers": _profile_layers_payload(profile),
+        "coverage_matrix": _coverage_matrix_payload(db, profile),
     }
 
 
@@ -152,10 +262,7 @@ def _profile_query_for_scope(
     q = select(JurisdictionProfile).where(JurisdictionProfile.state == state)
 
     if include_global:
-        q = q.where(
-            (JurisdictionProfile.org_id == org_id)
-            | (JurisdictionProfile.org_id.is_(None))
-        )
+        q = q.where((JurisdictionProfile.org_id == org_id) | (JurisdictionProfile.org_id.is_(None)))
     else:
         q = q.where(JurisdictionProfile.org_id == org_id)
 
@@ -320,12 +427,13 @@ def upsert_rule(
             after=_row_to_dict(row),
         )
         db.commit()
-        return {"ok": True, "id": row.id, "scope": "global" if row.org_id is None else "org"}
+        return {"ok": True, "scope": scope, "rule": _row_to_dict(row)}
 
     for k, v in data.items():
         if hasattr(existing, k):
             setattr(existing, k, v)
     existing.updated_at = now
+    db.add(existing)
     db.commit()
     db.refresh(existing)
 
@@ -341,103 +449,12 @@ def upsert_rule(
     )
     db.commit()
 
-    return {"ok": True, "id": existing.id, "scope": "global" if existing.org_id is None else "org"}
+    return {"ok": True, "scope": scope, "rule": _row_to_dict(existing)}
 
 
-@router.delete("/rule", response_model=dict)
-def delete_rule(
-    city: str,
-    state: str = "MI",
-    scope: str = Query(default="org", description="org|global"),
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-    _owner=Depends(require_owner),
-):
-    city = _norm_city(city)
-    state = _norm_state(state)
-    org_id = None if scope == "global" else p.org_id
-
-    row = db.scalar(
-        select(JurisdictionRule).where(
-            JurisdictionRule.org_id.is_(None) if org_id is None else (JurisdictionRule.org_id == org_id),
-            JurisdictionRule.city == city,
-            JurisdictionRule.state == state,
-        )
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="Rule not found")
-
-    before = _row_to_dict(row)
-    rid = row.id
-    db.delete(row)
-    db.commit()
-
-    emit_audit(
-        db,
-        org_id=p.org_id,
-        actor_user_id=p.user_id,
-        action="jurisdiction.delete",
-        entity_type="JurisdictionRule",
-        entity_id=str(rid),
-        before=before,
-        after=None,
-    )
-    db.commit()
-
-    return {"ok": True, "deleted_id": rid}
-
-
-@router.post("/seed", response_model=dict)
-def seed_michigan_defaults(
-    db: Session = Depends(get_db),
-    p=Depends(get_principal),
-    _owner=Depends(require_owner),
-):
-    now = datetime.utcnow()
-    created = 0
-
-    allow_notes = _has_col(JurisdictionRule, "notes")
-
-    for d in michigan_global_defaults():
-        row_kwargs = d.to_row_kwargs()
-        city = _norm_city(row_kwargs.get("city", ""))
-        state = _norm_state(row_kwargs.get("state", "MI"))
-        if not city:
-            continue
-
-        exists = db.scalar(
-            select(JurisdictionRule).where(
-                JurisdictionRule.org_id.is_(None),
-                JurisdictionRule.city == city,
-                JurisdictionRule.state == state,
-            )
-        )
-        if exists:
-            continue
-
-        insert_kwargs = dict(
-            org_id=None,
-            city=city,
-            state=state,
-            rental_license_required=bool(row_kwargs.get("rental_license_required", False)),
-            inspection_authority=row_kwargs.get("inspection_authority"),
-            inspection_frequency=row_kwargs.get("inspection_frequency"),
-            typical_fail_points_json=row_kwargs.get("typical_fail_points_json") or "[]",
-            registration_fee=row_kwargs.get("registration_fee"),
-            processing_days=row_kwargs.get("processing_days"),
-            tenant_waitlist_depth=row_kwargs.get("tenant_waitlist_depth"),
-            created_at=now,
-            updated_at=now,
-        )
-        if allow_notes:
-            insert_kwargs["notes"] = row_kwargs.get("notes")
-
-        row = JurisdictionRule(**insert_kwargs)
-        db.add(row)
-        created += 1
-
-    db.commit()
-    return {"ok": True, "created": created}
+@router.get("/defaults", response_model=list[dict])
+def defaults():
+    return michigan_global_defaults()
 
 
 @router.get("/coverage", response_model=dict)
@@ -449,7 +466,11 @@ def coverage(
     state = _norm_state(state)
 
     pairs = db.execute(
-        select(func.lower(Property.city).label("city_lc"), Property.state, func.lower(Property.county).label("county_lc"))
+        select(
+            func.lower(Property.city).label("city_lc"),
+            Property.state,
+            func.lower(Property.county).label("county_lc"),
+        )
         .where(Property.org_id == p.org_id, Property.state == state)
         .group_by(func.lower(Property.city), Property.state, func.lower(Property.county))
     ).all()
@@ -505,15 +526,22 @@ def coverage(
                 "provenance": provenance,
                 "jurisdiction_profile_id": getattr(profile, "id", None) if profile else None,
                 "jurisdiction_completeness_status": completeness.get("completeness_status") if completeness else None,
+                "jurisdiction_completeness_score": completeness.get("completeness_score") if completeness else None,
+                "jurisdiction_confidence_label": completeness.get("confidence_label") if completeness else None,
+                "jurisdiction_discovery_status": completeness.get("discovery_status") if completeness else None,
+                "jurisdiction_production_readiness": completeness.get("production_readiness") if completeness else None,
                 "jurisdiction_is_stale": completeness.get("is_stale") if completeness else None,
                 "jurisdiction_missing_categories": completeness.get("missing_categories") if completeness else [],
+                "jurisdiction_stale_categories": completeness.get("stale_categories") if completeness else [],
+                "jurisdiction_inferred_categories": completeness.get("inferred_categories") if completeness else [],
+                "jurisdiction_conflicting_categories": completeness.get("conflicting_categories") if completeness else [],
+                "jurisdiction_expected_categories": completeness.get("required_categories") if completeness else [],
+                "jurisdiction_category_matrix": _category_matrix_from_completeness(db, completeness) if completeness else [],
             }
         )
 
     missing = [r for r in rows if r["provenance"] == "missing"]
-    incomplete = [
-        r for r in rows if r.get("jurisdiction_completeness_status") not in {None, "complete"}
-    ]
+    incomplete = [r for r in rows if r.get("jurisdiction_completeness_status") not in {None, "complete"}]
     stale = [r for r in rows if bool(r.get("jurisdiction_is_stale"))]
 
     return {
@@ -582,6 +610,26 @@ def refresh_jurisdiction(
         force=bool(force),
     )
     return result
+
+
+@router.get("/{jurisdiction_profile_id}/coverage-matrix", response_model=dict)
+def get_jurisdiction_coverage_matrix(
+    jurisdiction_profile_id: int,
+    recompute: bool = Query(False),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+
+    if profile.org_id is not None and profile.org_id != p.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if recompute:
+        profile, _ = recompute_profile_and_coverage(db, profile, commit=True)
+
+    return {"ok": True, **(_coverage_matrix_payload(db, profile) or {})}
 
 
 @router.post("/{jurisdiction_profile_id}/notify-stale", response_model=dict)
@@ -666,9 +714,21 @@ def property_coverage_detail(
     state = _norm_state(getattr(prop, "state", None) or "MI")
     county = _norm_county(getattr(prop, "county", None))
     city = _norm_text(getattr(prop, "city", None))
-    profile = _effective_profile(db, org_id=p.org_id, state=state, county=county, city=(city.lower() if city else None))
+    profile = _effective_profile(
+        db,
+        org_id=p.org_id,
+        state=state,
+        county=county,
+        city=(city.lower() if city else None),
+    )
     if profile is None and city:
-        profile = _effective_profile(db, org_id=p.org_id, state=state, county=county, city=city)
+        profile = _effective_profile(
+            db,
+            org_id=p.org_id,
+            state=state,
+            county=county,
+            city=city,
+        )
     if profile is not None and recompute:
         profile, _ = recompute_profile_and_coverage(db, profile, commit=True)
 
@@ -679,7 +739,15 @@ def property_coverage_detail(
             "property_id": int(prop.id),
             "coverage_status": "missing",
             "coverage_confidence": "low",
+            "confidence_label": "low",
+            "production_readiness": "blocked",
+            "trustworthy_for_projection": False,
             "missing_local_rule_areas": ["statewide baseline", "county overlay", "city overlay"],
+            "missing_categories": ["statewide baseline", "county overlay", "city overlay"],
+            "stale_categories": [],
+            "inferred_categories": [],
+            "conflicting_categories": [],
+            "discovery_status": "not_started",
             "stale_warning": False,
             "resolved_layers": [],
             "source_evidence": [],
@@ -690,11 +758,22 @@ def property_coverage_detail(
         "property_id": int(prop.id),
         "coverage_status": profile_payload.get("completeness_status"),
         "coverage_confidence": profile_payload.get("coverage_confidence"),
+        "confidence_label": profile_payload.get("confidence_label"),
+        "production_readiness": profile_payload.get("production_readiness"),
+        "trustworthy_for_projection": profile_payload.get("trustworthy_for_projection"),
         "missing_local_rule_areas": profile_payload.get("missing_local_rule_areas"),
+        "missing_categories": profile_payload.get("missing_categories"),
+        "stale_categories": profile_payload.get("stale_categories"),
+        "inferred_categories": profile_payload.get("inferred_categories"),
+        "conflicting_categories": profile_payload.get("conflicting_categories"),
+        "discovery_status": profile_payload.get("discovery_status"),
+        "last_discovery_run": profile_payload.get("last_discovery_run"),
+        "last_discovered_at": profile_payload.get("last_discovered_at"),
         "stale_warning": bool(profile_payload.get("is_stale")),
         "stale_reason": profile_payload.get("stale_reason"),
         "resolved_rule_version": profile_payload.get("resolved_rule_version"),
         "resolved_layers": profile_payload.get("resolved_layers"),
         "source_evidence": profile_payload.get("source_evidence"),
+        "last_refresh": profile_payload.get("last_refresh"),
         "last_refreshed": profile_payload.get("last_refreshed"),
     }

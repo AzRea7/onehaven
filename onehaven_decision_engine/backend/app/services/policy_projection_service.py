@@ -550,6 +550,156 @@ def _build_property_scope(
         address=_norm_text(getattr(prop, "address", None) if prop is not None else None),
     )
 
+# 1) ADD THESE HELPERS near the other small helper functions, after _profile_row / before build_policy_summary.
+
+def _profile_policy_json(profile: JurisdictionProfile | None) -> dict[str, Any]:
+    if profile is None:
+        return {}
+    payload = _loads(getattr(profile, "policy_json", None), {})
+    return payload if isinstance(payload, dict) else {}
+
+
+def _profile_meta(profile: JurisdictionProfile | None) -> dict[str, Any]:
+    policy = _profile_policy_json(profile)
+    meta = policy.get("meta") or {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _coverage_metadata(coverage_row: JurisdictionCoverageStatus | None) -> dict[str, Any]:
+    if coverage_row is None:
+        return {}
+    payload = _loads(getattr(coverage_row, "metadata_json", None), {})
+    return payload if isinstance(payload, dict) else {}
+
+
+def _jurisdiction_trust_for_scope(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> dict[str, Any]:
+    coverage_row = _coverage_row(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    profile = _profile_row(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+    )
+
+    coverage_meta = _coverage_metadata(coverage_row)
+    profile_meta = _profile_meta(profile)
+    profile_completeness = profile_meta.get("completeness") or {}
+    profile_critical = normalize_categories(
+        profile_completeness.get("critical_categories")
+        or profile_meta.get("critical_categories")
+        or (_profile_policy_json(profile).get("critical_categories") if profile is not None else [])
+        or []
+    )
+
+    source_summary = _loads(getattr(coverage_row, "source_summary_json", None), {})
+    source_summary = source_summary if isinstance(source_summary, dict) else {}
+
+    stale_categories = normalize_categories(
+        profile_completeness.get("stale_categories")
+        or (((coverage_meta.get("profile_scoring") or {}).get("stale_categories")) if isinstance(coverage_meta, dict) else [])
+        or []
+    )
+    inferred_categories = normalize_categories(
+        profile_completeness.get("inferred_categories")
+        or (((coverage_meta.get("profile_scoring") or {}).get("inferred_categories")) if isinstance(coverage_meta, dict) else [])
+        or []
+    )
+    conflicting_categories = normalize_categories(
+        profile_completeness.get("conflicting_categories")
+        or (((coverage_meta.get("profile_scoring") or {}).get("conflicting_categories")) if isinstance(coverage_meta, dict) else [])
+        or []
+    )
+
+    required_categories = normalize_categories(
+        profile_completeness.get("required_categories")
+        or _loads(getattr(coverage_row, "required_categories_json", None), [])
+        or []
+    )
+    covered_categories = normalize_categories(
+        profile_completeness.get("covered_categories")
+        or _loads(getattr(coverage_row, "covered_categories_json", None), [])
+        or []
+    )
+    missing_categories = normalize_categories(
+        profile_completeness.get("missing_categories")
+        or _loads(getattr(coverage_row, "missing_categories_json", None), [])
+        or []
+    )
+
+    if not required_categories and city:
+        required_categories = normalize_categories(
+            required_categories_for_city(city, state=state, include_section8=bool(pha_name))
+        )
+
+    critical_missing_categories = [cat for cat in missing_categories if cat in set(profile_critical)]
+    critical_stale_categories = [cat for cat in stale_categories if cat in set(profile_critical)]
+    critical_inferred_categories = [cat for cat in inferred_categories if cat in set(profile_critical)]
+    critical_conflicting_categories = [cat for cat in conflicting_categories if cat in set(profile_critical)]
+
+    return {
+        "coverage_status": getattr(coverage_row, "coverage_status", None),
+        "production_readiness": (
+            profile_completeness.get("production_readiness")
+            or ((coverage_meta.get("profile_rollup") or {}).get("production_readiness") if isinstance(coverage_meta, dict) else None)
+            or getattr(coverage_row, "production_readiness", None)
+        ),
+        "coverage_confidence": (
+            profile_completeness.get("confidence_label")
+            or ((coverage_meta.get("profile_rollup") or {}).get("coverage_confidence") if isinstance(coverage_meta, dict) else None)
+            or getattr(coverage_row, "confidence_label", None)
+            or ("high" if _safe_float(getattr(coverage_row, "confidence_score", None), 0.0) >= 0.85 else "medium" if _safe_float(getattr(coverage_row, "confidence_score", None), 0.0) >= 0.60 else "low")
+        ),
+        "completeness_score": _safe_float(
+            profile_completeness.get("completeness_score")
+            or getattr(coverage_row, "completeness_score", None),
+            0.0,
+        ),
+        "completeness_status": (
+            profile_completeness.get("completeness_status")
+            or getattr(coverage_row, "completeness_status", None)
+        ),
+        "required_categories": required_categories,
+        "covered_categories": covered_categories,
+        "missing_categories": missing_categories,
+        "stale_categories": stale_categories,
+        "inferred_categories": inferred_categories,
+        "conflicting_categories": conflicting_categories,
+        "critical_categories": profile_critical,
+        "critical_missing_categories": critical_missing_categories,
+        "critical_stale_categories": critical_stale_categories,
+        "critical_inferred_categories": critical_inferred_categories,
+        "critical_conflicting_categories": critical_conflicting_categories,
+        "category_statuses": source_summary,
+        "is_stale": bool(getattr(coverage_row, "is_stale", False)) if coverage_row is not None else False,
+        "stale_reason": getattr(coverage_row, "stale_reason", None) if coverage_row is not None else None,
+        "trustworthy_for_projection": bool(
+            profile_completeness.get("trustworthy_for_projection")
+            if profile_completeness.get("trustworthy_for_projection") is not None
+            else ((coverage_meta.get("profile_rollup") or {}).get("trustworthy_for_projection") if isinstance(coverage_meta, dict) else False)
+        ),
+        "resolved_rule_version": profile_meta.get("resolved_rule_version") if isinstance(profile_meta, dict) else None,
+        "discovery_status": profile_completeness.get("discovery_status"),
+        "last_refresh": profile_completeness.get("last_refresh") or profile_completeness.get("last_refreshed"),
+        "last_discovery_run": profile_completeness.get("last_discovery_run"),
+    }
+
+# 2) REPLACE the existing build_policy_summary() body with this updated version.
 
 def build_policy_summary(
     db: Session,
@@ -604,36 +754,54 @@ def build_policy_summary(
     )
     if not required_categories:
         required_categories = normalize_categories(["registration", "inspection", "safety"])
+
     category_coverage = {cat: ("verified" if cat in covered_categories else "missing") for cat in required_categories}
     for rule_key, status in local_rule_statuses.items():
         cat = RULE_KEY_TO_CATEGORY.get(rule_key)
         if cat and status == "conditional":
             category_coverage[cat] = "conditional"
 
-    coverage_row = _coverage_row(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name)
+    jurisdiction_trust = _jurisdiction_trust_for_scope(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+
     coverage = {
-        "coverage_status": getattr(coverage_row, "coverage_status", None) or ("verified_extended" if verified_rules else "not_started"),
-        "production_readiness": getattr(coverage_row, "production_readiness", None) or ("ready" if verified_rules else "partial"),
-        "confidence_label": (
+        "coverage_status": jurisdiction_trust.get("coverage_status") or ("verified_extended" if verified_rules else "not_started"),
+        "production_readiness": jurisdiction_trust.get("production_readiness") or ("ready" if verified_rules else "partial"),
+        "confidence_label": jurisdiction_trust.get("coverage_confidence") or (
             "high"
             if len(verified_rules) >= 6
             else "medium"
             if len(verified_rules) >= 3
             else "low"
         ),
-        "completeness_score": float(getattr(coverage_row, "completeness_score", 0.0) or 0.0),
-        "completeness_status": getattr(coverage_row, "completeness_status", None),
-        "is_stale": bool(getattr(coverage_row, "is_stale", False)) if coverage_row is not None else False,
-        "stale_reason": getattr(coverage_row, "stale_reason", None) if coverage_row is not None else None,
-        "required_categories": _loads(getattr(coverage_row, "required_categories_json", None), required_categories),
-        "covered_categories": _loads(getattr(coverage_row, "covered_categories_json", None), sorted(covered_categories)),
-        "missing_categories": _loads(
-            getattr(coverage_row, "missing_categories_json", None),
-            [cat for cat, status in category_coverage.items() if status == "missing"],
-        ),
+        "completeness_score": float(jurisdiction_trust.get("completeness_score") or 0.0),
+        "completeness_status": jurisdiction_trust.get("completeness_status"),
+        "is_stale": bool(jurisdiction_trust.get("is_stale", False)),
+        "stale_reason": jurisdiction_trust.get("stale_reason"),
+        "required_categories": jurisdiction_trust.get("required_categories") or required_categories,
+        "covered_categories": jurisdiction_trust.get("covered_categories") or sorted(covered_categories),
+        "missing_categories": jurisdiction_trust.get("missing_categories") or [cat for cat, status in category_coverage.items() if status == "missing"],
+        "stale_categories": jurisdiction_trust.get("stale_categories") or [],
+        "inferred_categories": jurisdiction_trust.get("inferred_categories") or [],
+        "conflicting_categories": jurisdiction_trust.get("conflicting_categories") or [],
+        "critical_categories": jurisdiction_trust.get("critical_categories") or [],
+        "critical_missing_categories": jurisdiction_trust.get("critical_missing_categories") or [],
+        "critical_stale_categories": jurisdiction_trust.get("critical_stale_categories") or [],
+        "critical_inferred_categories": jurisdiction_trust.get("critical_inferred_categories") or [],
+        "critical_conflicting_categories": jurisdiction_trust.get("critical_conflicting_categories") or [],
+        "trustworthy_for_projection": bool(jurisdiction_trust.get("trustworthy_for_projection", False)),
+        "resolved_rule_version": jurisdiction_trust.get("resolved_rule_version"),
     }
+
     if coverage.get("required_categories"):
         required_categories = normalize_categories(coverage["required_categories"])
+
     return {
         "coverage": coverage,
         "verified_rules": verified_rules,
@@ -648,6 +816,7 @@ def build_policy_summary(
         "completeness_status": coverage.get("completeness_status") or ("partial" if verified_rules else "missing"),
         "completeness_score": float(coverage.get("completeness_score") or 0.0),
         "stale_status": "stale" if coverage.get("is_stale") else "fresh",
+        "jurisdiction_trust": jurisdiction_trust,
     }
 
 
@@ -1948,16 +2117,40 @@ def rebuild_property_projection(
     passing_items = sum(1 for row in item_rows if row.evaluation_status == "pass")
     base_readiness = (passing_items / total_items) * 100.0
 
+    jurisdiction_trust = summary.get("jurisdiction_trust") or {}
+    critical_missing_categories = list(jurisdiction_trust.get("critical_missing_categories") or [])
+    critical_stale_categories = list(jurisdiction_trust.get("critical_stale_categories") or [])
+    critical_inferred_categories = list(jurisdiction_trust.get("critical_inferred_categories") or [])
+    critical_conflicting_categories = list(jurisdiction_trust.get("critical_conflicting_categories") or [])
+
+    jurisdiction_readiness_penalty = (
+        (len(critical_missing_categories) * 18.0)
+        + (len(critical_stale_categories) * 10.0)
+        + (len(critical_inferred_categories) * 8.0)
+        + (len(critical_conflicting_categories) * 16.0)
+    )
+
     readiness_penalty = (
         (blocking_count * 20.0)
         + (unknown_count * 6.0)
         + (stale_count * 8.0)
         + (conflicting_count * 12.0)
         + (evidence_gap_count * 4.0)
+        + jurisdiction_readiness_penalty
     )
     readiness_score = round(max(0.0, min(100.0, base_readiness - readiness_penalty)), 2)
 
-    confidence_score = round(sum(confidence_values) / max(1, len(confidence_values)), 3)
+    base_confidence_score = round(sum(confidence_values) / max(1, len(confidence_values)), 3)
+
+    jurisdiction_confidence_penalty = (
+        (0.20 if str(jurisdiction_trust.get("coverage_confidence") or "").strip().lower() == "low" else 0.10 if str(jurisdiction_trust.get("coverage_confidence") or "").strip().lower() == "medium" else 0.0)
+        + (0.18 if critical_missing_categories else 0.0)
+        + (0.10 if critical_stale_categories else 0.0)
+        + (0.08 if critical_inferred_categories else 0.0)
+        + (0.15 if critical_conflicting_categories else 0.0)
+        + (0.08 if not bool(jurisdiction_trust.get("trustworthy_for_projection", False)) else 0.0)
+    )
+    confidence_score = round(max(0.0, min(1.0, base_confidence_score - jurisdiction_confidence_penalty)), 3)
 
     layer_confidence = {}
     for row in active_assertions:
@@ -1969,6 +2162,65 @@ def rebuild_property_projection(
         for level, values in layer_confidence.items()
     }
 
+    if critical_missing_categories:
+        impacted_rules.append(
+            {
+                "rule_key": "jurisdiction_critical_missing",
+                "evaluation_status": "blocked",
+                "evidence_status": "missing",
+                "blocking": True,
+                "source_level": "jurisdiction",
+                "categories": critical_missing_categories,
+            }
+        )
+        for category in critical_missing_categories:
+            unresolved_gaps.append(
+                {
+                    "rule_key": f"jurisdiction::{category}",
+                    "gap": "Critical local jurisdiction coverage missing",
+                    "category": category,
+                }
+            )
+        blocking_count += len(critical_missing_categories)
+
+    if critical_stale_categories:
+        impacted_rules.append(
+            {
+                "rule_key": "jurisdiction_critical_stale",
+                "evaluation_status": "stale",
+                "evidence_status": "stale",
+                "blocking": False,
+                "source_level": "jurisdiction",
+                "categories": critical_stale_categories,
+            }
+        )
+
+    if critical_inferred_categories:
+        impacted_rules.append(
+            {
+                "rule_key": "jurisdiction_critical_inferred",
+                "evaluation_status": "warning",
+                "evidence_status": "inferred",
+                "blocking": False,
+                "source_level": "jurisdiction",
+                "categories": critical_inferred_categories,
+            }
+        )
+
+    if critical_conflicting_categories:
+        impacted_rules.append(
+            {
+                "rule_key": "jurisdiction_critical_conflicting",
+                "evaluation_status": "conflicting",
+                "evidence_status": "conflicting",
+                "blocking": True,
+                "source_level": "jurisdiction",
+                "categories": critical_conflicting_categories,
+            }
+        )
+        blocking_count += len(critical_conflicting_categories)
+        conflicting_count += len(critical_conflicting_categories)
+
     projection_reason = {
         "merge_strategy": "highest_precedence_effective_rule_per_rule_key",
         "source_level_precedence": SOURCE_LEVEL_PRECEDENCE,
@@ -1978,6 +2230,11 @@ def rebuild_property_projection(
         "stale_status": summary.get("stale_status"),
         "rule_count": len(rule_keys),
         "effective_rule_count": len(effective_assertions),
+        "jurisdiction_trust": jurisdiction_trust,
+        "jurisdiction_penalties": {
+            "readiness_penalty": jurisdiction_readiness_penalty,
+            "confidence_penalty": jurisdiction_confidence_penalty,
+        },
     }
 
     projection.blocking_count = int(blocking_count)
@@ -2028,6 +2285,7 @@ def build_property_projection_snapshot(
             "counts": {"blocking": 0, "unknown": 0, "stale": 0, "conflicting": 0},
             "evidence_summary": {"count": 0, "linked_documents": 0, "inspection_links": 0},
             "blockers": [],
+            "jurisdiction": (_loads(row.projection_reason_json, {}) or {}).get("jurisdiction_trust", {}),
         }
 
     items = _current_projection_items(db, org_id=org_id, property_id=property_id, projection_id=int(row.id))
@@ -2070,6 +2328,8 @@ def build_property_projection_snapshot(
             "unresolved_evidence_gaps": _loads(row.unresolved_evidence_gaps_json, []),
             "source_confidence": _loads(row.source_confidence_json, {}),
             "projection_reason": _loads(row.projection_reason_json, {}),
+            "jurisdiction": (_loads(row.projection_reason_json, {}) or {}).get("jurisdiction_trust", {}),
+            "jurisdiction_penalties": (_loads(row.projection_reason_json, {}) or {}).get("jurisdiction_penalties", {}),
             "rules_effective_at": row.rules_effective_at,
             "last_rule_change_at": row.last_rule_change_at,
             "last_projected_at": row.last_projected_at,
@@ -2184,6 +2444,7 @@ def build_property_projection_snapshot(
             "failing": sum(1 for e in evidence if str(getattr(e, "evidence_status", "") or "").lower() in FAILING_EVIDENCE),
         },
         "blockers": blockers,
+        
     }
 
 

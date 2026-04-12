@@ -1,8 +1,17 @@
+# backend/app/services/workflow_gate_service.py
 from __future__ import annotations
 
 from typing import Any
 
-from ..domain.workflow.stages import STAGES, clamp_stage, next_stage, stage_catalog, stage_label, stage_meta, stage_rank
+from ..domain.workflow.stages import (
+    STAGES,
+    clamp_stage,
+    next_stage,
+    stage_catalog,
+    stage_label,
+    stage_meta,
+    stage_rank,
+)
 from .pane_routing_service import build_pane_context
 from .policy_projection_service import build_property_projection_snapshot
 from .property_state_machine import get_state_payload, get_transition_payload
@@ -66,6 +75,18 @@ def _projection_payload(db, *, org_id: int, property_id: int) -> dict[str, Any] 
         return None
 
 
+def _jurisdiction_trust_payload(projection_snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    if not projection_snapshot:
+        return {}
+
+    projection = projection_snapshot.get("projection") or {}
+    projection_reason = projection.get("projection_reason") or {}
+    trust = projection_reason.get("jurisdiction_trust") or {}
+    if isinstance(trust, dict):
+        return trust
+    return {}
+
+
 def _build_compliance_gate(
     projection_snapshot: dict[str, Any] | None,
     *,
@@ -92,6 +113,12 @@ def _build_compliance_gate(
             "impacted_rules": [],
             "unresolved_evidence_gaps": [],
             "post_close_recheck_needed": False,
+            "jurisdiction_trust": {},
+            "jurisdiction_blocking": False,
+            "critical_missing_categories": [],
+            "critical_stale_categories": [],
+            "critical_inferred_categories": [],
+            "critical_conflicting_categories": [],
         }
 
     projection = projection_snapshot.get("projection") or {}
@@ -107,14 +134,29 @@ def _build_compliance_gate(
     impacted_rules = list(projection.get("impacted_rules") or [])
     unresolved_gaps = list(projection.get("unresolved_evidence_gaps") or [])
 
+    jurisdiction_trust = _jurisdiction_trust_payload(projection_snapshot)
+    completeness_status = str(jurisdiction_trust.get("completeness_status") or "").strip().lower()
+    coverage_confidence = str(jurisdiction_trust.get("coverage_confidence") or "").strip().lower()
+    production_readiness = str(jurisdiction_trust.get("production_readiness") or "").strip().lower()
+    completeness_score = _safe_float(jurisdiction_trust.get("completeness_score"), 0.0)
+
+    critical_missing_categories = list(jurisdiction_trust.get("critical_missing_categories") or [])
+    critical_stale_categories = list(jurisdiction_trust.get("critical_stale_categories") or [])
+    critical_inferred_categories = list(jurisdiction_trust.get("critical_inferred_categories") or [])
+    critical_conflicting_categories = list(jurisdiction_trust.get("critical_conflicting_categories") or [])
+
     warnings: list[str] = []
     blocked_reason = None
     warning_reason = None
+
+    jurisdiction_blocking = bool(critical_missing_categories or critical_conflicting_categories)
 
     hard_block = (
         blocking_count > 0
         or conflicting_count > 0
         or readiness_score < 45.0
+        or jurisdiction_blocking
+        or production_readiness in {"blocked", "needs_review"}
     )
 
     soft_warn = (
@@ -123,6 +165,11 @@ def _build_compliance_gate(
         or confidence_score < 0.65
         or readiness_score < 70.0
         or len(unresolved_gaps) > 0
+        or bool(critical_stale_categories)
+        or bool(critical_inferred_categories)
+        or coverage_confidence == "low"
+        or completeness_status in {"missing", "partial", "stale", "conflicting"}
+        or completeness_score < 0.80
     )
 
     if blocking_count > 0:
@@ -142,15 +189,59 @@ def _build_compliance_gate(
     if projected_days is not None:
         warnings.append(f"Projected days to rent impact is {_safe_int(projected_days)} day(s).")
 
+    if critical_missing_categories:
+        warnings.append(
+            "Critical jurisdiction coverage is missing for: "
+            + ", ".join(critical_missing_categories)
+            + "."
+        )
+    if critical_stale_categories:
+        warnings.append(
+            "Critical jurisdiction coverage is stale for: "
+            + ", ".join(critical_stale_categories)
+            + "."
+        )
+    if critical_inferred_categories:
+        warnings.append(
+            "Critical jurisdiction coverage is inferred-only for: "
+            + ", ".join(critical_inferred_categories)
+            + "."
+        )
+    if critical_conflicting_categories:
+        warnings.append(
+            "Critical jurisdiction coverage is conflicting for: "
+            + ", ".join(critical_conflicting_categories)
+            + "."
+        )
+    if coverage_confidence == "low":
+        warnings.append("Jurisdiction coverage confidence is low.")
+    if completeness_status in {"missing", "partial", "stale", "conflicting"}:
+        warnings.append(
+            f"Jurisdiction completeness is {completeness_status} "
+            f"({completeness_score:.2f})."
+        )
+
     if hard_block and current_stage in PRE_CLOSE_STAGES:
-        if blocking_count > 0:
+        if critical_missing_categories:
+            blocked_reason = "Critical local jurisdiction coverage is missing before close."
+        elif critical_conflicting_categories:
+            blocked_reason = "Critical jurisdiction conflicts must be resolved before close."
+        elif blocking_count > 0:
             blocked_reason = "Pre-close compliance blocker(s) remain unresolved."
         elif conflicting_count > 0:
             blocked_reason = "Conflicting compliance evidence must be resolved before closing."
+        elif production_readiness in {"blocked", "needs_review"}:
+            blocked_reason = "Jurisdiction trust is too weak for a safe pre-close decision."
         else:
             blocked_reason = "Compliance readiness is too low to proceed safely."
     elif soft_warn and current_stage in PRE_CLOSE_STAGES:
-        if stale_count > 0:
+        if critical_stale_categories:
+            warning_reason = "Critical jurisdiction proof is stale and should be refreshed before close."
+        elif critical_inferred_categories:
+            warning_reason = "Critical jurisdiction coverage is inferred-only and needs stronger verification."
+        elif coverage_confidence == "low":
+            warning_reason = "Jurisdiction trust is weak and should be reviewed before close."
+        elif stale_count > 0:
             warning_reason = "Compliance proof is stale and should be refreshed before close."
         elif unknown_count > 0:
             warning_reason = "Compliance proof is incomplete before close."
@@ -164,6 +255,9 @@ def _build_compliance_gate(
         or unknown_count > 0
         or conflicting_count > 0
         or blocking_count > 0
+        or bool(critical_stale_categories)
+        or bool(critical_inferred_categories)
+        or bool(critical_conflicting_categories)
     )
 
     ok = not (current_stage in PRE_CLOSE_STAGES and hard_block)
@@ -190,6 +284,12 @@ def _build_compliance_gate(
         "impacted_rules": impacted_rules,
         "unresolved_evidence_gaps": unresolved_gaps,
         "post_close_recheck_needed": post_close_recheck_needed,
+        "jurisdiction_trust": jurisdiction_trust,
+        "jurisdiction_blocking": jurisdiction_blocking,
+        "critical_missing_categories": critical_missing_categories,
+        "critical_stale_categories": critical_stale_categories,
+        "critical_inferred_categories": critical_inferred_categories,
+        "critical_conflicting_categories": critical_conflicting_categories,
     }
 
 
@@ -228,6 +328,7 @@ def _build_pre_close_risk_summary(compliance_gate: dict[str, Any], *, current_st
         "summary": summary,
         "projected_compliance_cost": compliance_gate.get("projected_compliance_cost"),
         "projected_days_to_rent": compliance_gate.get("projected_days_to_rent"),
+        "jurisdiction_trust": compliance_gate.get("jurisdiction_trust") or {},
     }
 
 
@@ -249,7 +350,13 @@ def _build_post_close_recheck_summary(compliance_gate: dict[str, Any], *, curren
             "reason": None,
         }
 
-    if _safe_int(compliance_gate.get("stale_count")) > 0:
+    if compliance_gate.get("critical_conflicting_categories"):
+        reason = "Post-close jurisdiction trust contains critical conflicting coverage."
+    elif compliance_gate.get("critical_stale_categories"):
+        reason = "Post-close critical jurisdiction proof has gone stale and should be re-evaluated."
+    elif compliance_gate.get("critical_inferred_categories"):
+        reason = "Post-close critical jurisdiction coverage is still inferred-only."
+    elif _safe_int(compliance_gate.get("stale_count")) > 0:
         reason = "Post-close compliance proof has gone stale and should be re-evaluated."
     elif _safe_int(compliance_gate.get("unknown_count")) > 0:
         reason = "Post-close compliance still includes unknown requirements."
@@ -264,6 +371,7 @@ def _build_post_close_recheck_summary(compliance_gate: dict[str, Any], *, curren
         "needed": True,
         "reason": reason,
         "warnings": list(compliance_gate.get("warnings") or []),
+        "jurisdiction_trust": compliance_gate.get("jurisdiction_trust") or {},
     }
 
 
@@ -318,18 +426,20 @@ def build_workflow_summary(db, *, org_id: int, property_id: int, principal: Any 
         is_completed = bool(completed_lookup.get(stage, False))
         is_current = rank == cur_rank
         is_next = nxt == stage
-        rows.append({
-            "key": stage,
-            "rank": rank,
-            "label": meta["label"],
-            "description": meta["description"],
-            "primary_action": meta["primary_action"],
-            "status": "completed" if is_completed and rank < cur_rank else "current" if is_current else "next" if is_next else "locked",
-            "is_completed": is_completed,
-            "is_current": is_current,
-            "is_next": is_next,
-            "is_locked": rank > cur_rank and nxt != stage,
-        })
+        rows.append(
+            {
+                "key": stage,
+                "rank": rank,
+                "label": meta["label"],
+                "description": meta["description"],
+                "primary_action": meta["primary_action"],
+                "status": "completed" if is_completed and rank < cur_rank else "current" if is_current else "next" if is_next else "locked",
+                "is_completed": is_completed,
+                "is_current": is_current,
+                "is_next": is_next,
+                "is_locked": rank > cur_rank and nxt != stage,
+            }
+        )
 
     start_gate = ((constraints.get("acquisition") or {}).get("start_gate") or {}) if isinstance(constraints, dict) else {}
     if cur == "underwritten" and start_gate:

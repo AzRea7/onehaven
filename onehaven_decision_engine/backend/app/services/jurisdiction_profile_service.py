@@ -909,3 +909,103 @@ def summarize_profile(
     out['optional_categories'] = list(out.get('optional_categories') or universe.get('optional_categories') or [])
     out['jurisdiction_types'] = list(out.get('jurisdiction_types') or universe.get('jurisdiction_types') or [])
     return out
+
+
+# ---- Chunk 7 profile-level completeness rollup helpers ----
+def _policy_json_dict(profile: JurisdictionProfile | None) -> dict[str, Any]:
+    if profile is None:
+        return {}
+    raw = _loads(getattr(profile, "policy_json", None), {})
+    return raw if isinstance(raw, dict) else {}
+
+
+def _policy_meta(profile: JurisdictionProfile | None) -> dict[str, Any]:
+    policy = _policy_json_dict(profile)
+    meta = policy.get("meta") or {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def merge_profile_policy_meta(
+    profile: JurisdictionProfile,
+    meta_updates: dict[str, Any],
+) -> JurisdictionProfile:
+    policy = _policy_json_dict(profile)
+    current_meta = _policy_meta(profile)
+    current_meta = _deep_merge(current_meta, meta_updates or {})
+    policy["meta"] = current_meta
+    profile.policy_json = _dumps(policy)
+    return profile
+
+
+def set_profile_operational_rollup(
+    profile: JurisdictionProfile,
+    *,
+    completeness: dict[str, Any],
+    commit_hash_source: Optional[str] = None,
+) -> JurisdictionProfile:
+    policy = _policy_json_dict(profile)
+    meta = _policy_meta(profile)
+
+    completeness_summary = {
+        "completeness_score": completeness.get("completeness_score"),
+        "completeness_status": completeness.get("completeness_status"),
+        "confidence_label": completeness.get("confidence_label")
+        or completeness.get("coverage_confidence"),
+        "production_readiness": completeness.get("production_readiness"),
+        "trustworthy_for_projection": bool(
+            completeness.get("trustworthy_for_projection", False)
+        ),
+        "required_categories": list(completeness.get("required_categories") or []),
+        "covered_categories": list(completeness.get("covered_categories") or []),
+        "missing_categories": list(completeness.get("missing_categories") or []),
+        "stale_categories": list(completeness.get("stale_categories") or []),
+        "inferred_categories": list(completeness.get("inferred_categories") or []),
+        "conflicting_categories": list(completeness.get("conflicting_categories") or []),
+        "discovery_status": completeness.get("discovery_status"),
+        "last_refresh": completeness.get("last_refresh")
+        or completeness.get("last_refreshed"),
+        "last_refreshed": completeness.get("last_refreshed")
+        or completeness.get("last_refresh"),
+        "last_discovery_run": completeness.get("last_discovery_run"),
+        "last_discovered_at": completeness.get("last_discovered_at"),
+        "last_verified_at": completeness.get("last_verified_at"),
+    }
+
+    meta["completeness"] = completeness_summary
+    meta["coverage_confidence"] = completeness_summary["confidence_label"]
+    meta["missing_local_rule_areas"] = list(
+        completeness_summary.get("missing_categories") or []
+    )
+    meta["last_refreshed"] = completeness_summary.get("last_refreshed")
+    meta["discovery_status"] = completeness_summary.get("discovery_status")
+    meta["last_discovery_run"] = completeness_summary.get("last_discovery_run")
+    meta["last_discovered_at"] = completeness_summary.get("last_discovered_at")
+    meta["production_readiness"] = completeness_summary.get("production_readiness")
+    meta["trustworthy_for_projection"] = bool(
+        completeness_summary.get("trustworthy_for_projection", False)
+    )
+
+    if commit_hash_source:
+        meta["resolved_rule_version"] = hashlib.sha1(
+            commit_hash_source.encode("utf-8")
+        ).hexdigest()[:12]
+    elif not meta.get("resolved_rule_version"):
+        meta["resolved_rule_version"] = hashlib.sha1(
+            json.dumps(
+                {
+                    "profile_id": getattr(profile, "id", None),
+                    "state": getattr(profile, "state", None),
+                    "county": getattr(profile, "county", None),
+                    "city": getattr(profile, "city", None),
+                    "pha_name": getattr(profile, "pha_name", None),
+                    "completeness": completeness_summary,
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+
+    policy["meta"] = meta
+    profile.policy_json = _dumps(policy)
+    return profile

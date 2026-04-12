@@ -99,14 +99,32 @@ class JurisdictionProfile(Base):
     is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     stale_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     missing_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    stale_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    inferred_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    conflicting_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    required_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    covered_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     unresolved_items_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    completeness_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     latest_rule_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    category_norm_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    authoritative_source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    freshest_source_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    oldest_source_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    discovery_status: Mapped[str] = mapped_column(String(40), nullable=False, default="not_started")
+    last_discovery_run_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    last_discovered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_discovery_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_refresh_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_refresh_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_refresh_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_refresh_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    source_freshness_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    discovery_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
@@ -234,8 +252,11 @@ class PolicySource(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     is_authoritative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    source_origin: Mapped[str] = mapped_column(String(40), nullable=False, default="curated")
+    authority_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     normalized_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    category_hints_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     freshness_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
     freshness_reason: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     freshness_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -258,10 +279,13 @@ class PolicySource(Base):
     last_changed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     next_refresh_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_discovery_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    next_discovery_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_fetch_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_seen_same_fingerprint_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     source_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    discovery_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     last_verified_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -357,6 +381,9 @@ class PolicyAssertion(Base):
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
+    extraction_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    authority_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    conflict_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     source_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
 
@@ -424,6 +451,8 @@ class JurisdictionCoverageStatus(Base):
         Index("ix_jurisdiction_coverage_status_scope", "state", "county", "city"),
         Index("ix_jurisdiction_coverage_status_completeness_status", "completeness_status"),
         Index("ix_jurisdiction_coverage_status_is_stale", "is_stale"),
+        Index("ix_jurisdiction_coverage_status_discovery_status", "discovery_status"),
+        Index("ix_jurisdiction_coverage_status_next_discovery_due_at", "next_discovery_due_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -447,16 +476,33 @@ class JurisdictionCoverageStatus(Base):
 
     covered_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     missing_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    stale_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    inferred_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    conflicting_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    required_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    category_coverage_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    category_last_verified_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    category_source_backing_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    completeness_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     source_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     source_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    authority_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    extraction_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    conflict_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    production_readiness: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    discovery_status: Mapped[str] = mapped_column(String(40), nullable=False, default="not_started")
+    last_discovery_run_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
     is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     stale_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     stale_since: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_computed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_source_change_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_discovery_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    next_discovery_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     projection_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    discovery_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
     created_at: Mapped[datetime] = mapped_column(
@@ -596,21 +642,21 @@ class PropertyComplianceProjectionItem(Base):
     source_citation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     raw_excerpt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     rule_value_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    resolution_detail_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    conflicting_evidence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    required_document_kind: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     required_evidence_type: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     required_evidence_key: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     required_evidence_group: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     proof_requirement_level: Mapped[str] = mapped_column(String(40), nullable=False, default="standard")
     proof_validity_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    last_evaluated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    evidence_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         server_default=sa.text("now()"),
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        onupdate=datetime.utcnow,
     )
 
 
@@ -618,11 +664,7 @@ class PropertyComplianceEvidence(Base):
     __tablename__ = "property_compliance_evidence"
     __table_args__ = (
         Index("ix_property_compliance_evidence_org_property", "org_id", "property_id"),
-        Index("ix_property_compliance_evidence_projection_item", "projection_item_id"),
-        Index("ix_property_compliance_evidence_policy_assertion", "policy_assertion_id"),
-        Index("ix_property_compliance_evidence_status", "evidence_status", "proof_state"),
-        Index("ix_property_compliance_evidence_expires_at", "expires_at"),
-        Index("ix_property_compliance_evidence_verified_at", "verified_at"),
+        Index("ix_property_compliance_evidence_kind", "evidence_source_type"),
         Index("ix_property_compliance_evidence_rule_key", "rule_key"),
         Index("ix_property_compliance_evidence_reference_number", "reference_number"),
         Index("ix_property_compliance_evidence_current", "is_current", "invalidated_at"),
@@ -644,16 +686,6 @@ class PropertyComplianceEvidence(Base):
     projection_item_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey("property_compliance_projection_items.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    policy_assertion_id: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("policy_assertions.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    compliance_document_id: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("compliance_documents.id", ondelete="SET NULL"),
         nullable=True,
     )
     inspection_id: Mapped[Optional[int]] = mapped_column(

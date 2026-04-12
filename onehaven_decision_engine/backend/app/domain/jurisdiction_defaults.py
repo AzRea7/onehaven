@@ -38,6 +38,12 @@ DEFAULT_CATEGORY_STATUS_WEIGHTS: dict[str, float] = {
 
 DEFAULT_STALE_DAYS = 90
 
+DEFAULT_DISCOVERY_MAX_RETRIES = 3
+DEFAULT_DISCOVERY_RETRY_BACKOFF_HOURS = 24
+DEFAULT_TRUST_MIN_COMPLETENESS_SCORE = 0.80
+DEFAULT_TRUST_LOW_CONFIDENCE_THRESHOLD = 0.60
+DEFAULT_TRUST_READY_CONFIDENCE_THRESHOLD = 0.85
+
 
 @dataclass(frozen=True)
 class JurisdictionDefault:
@@ -62,6 +68,11 @@ class JurisdictionDefault:
     missing_local_rule_areas: list[str] | None = None
     stale_warning: bool = False
     default_layer: str = "statewide_baseline"
+
+    # New bootstrap defaults
+    discovery_search_hints: dict[str, Any] | None = None
+    trust_defaults: dict[str, Any] | None = None
+    freshness_defaults: dict[str, Any] | None = None
 
     def to_row_kwargs(self) -> Dict[str, Any]:
         import json
@@ -89,8 +100,101 @@ class JurisdictionDefault:
             tenant_waitlist_depth=self.tenant_waitlist_depth,
         ).to_dict()
 
+    def required_categories(self, *, include_section8: bool = True) -> list[str]:
+        return get_required_categories(
+            state=self.state,
+            county=self.county,
+            city=self.city,
+            rental_license_required=self.rental_license_required,
+            inspection_authority=self.inspection_authority,
+            inspection_frequency=self.inspection_frequency,
+            tenant_waitlist_depth=self.tenant_waitlist_depth,
+            include_section8=include_section8,
+        )
+
+    def default_discovery_search_hints(self) -> dict[str, Any]:
+        if isinstance(self.discovery_search_hints, dict) and self.discovery_search_hints:
+            return dict(self.discovery_search_hints)
+
+        scope_terms = [term for term in [self.city, self.county, self.state] if term]
+        base_terms = [
+            "rental license",
+            "rental registration",
+            "inspection",
+            "certificate of occupancy",
+            "housing code",
+        ]
+        if self.rental_license_required:
+            base_terms.append("landlord license")
+        if self.housing_authority:
+            base_terms.extend(
+                [
+                    self.housing_authority,
+                    "section 8",
+                    "housing choice voucher",
+                    "payment standards",
+                ]
+            )
+        if self.tenant_waitlist_depth in {"medium", "high"}:
+            base_terms.append("voucher program")
+
+        return {
+            "scope_terms": scope_terms,
+            "base_terms": base_terms,
+            "preferred_source_kinds": [
+                "municipal_code",
+                "city_program_page",
+                "housing_authority",
+                "county_program_page",
+                "state_program_page",
+                "state_statute",
+            ],
+            "preferred_publishers": [
+                self.city,
+                f"{self.county.title()} County" if self.county else None,
+                self.housing_authority,
+                "State of Michigan",
+                "Michigan Legislature",
+            ],
+            "seed_urls": [
+                item.get("url")
+                for item in (self.source_evidence or [])
+                if isinstance(item, dict) and item.get("url")
+            ],
+        }
+
+    def default_trust_defaults(self) -> dict[str, Any]:
+        if isinstance(self.trust_defaults, dict) and self.trust_defaults:
+            return dict(self.trust_defaults)
+
+        return {
+            "min_completeness_score_for_trust": DEFAULT_TRUST_MIN_COMPLETENESS_SCORE,
+            "ready_confidence_threshold": DEFAULT_TRUST_READY_CONFIDENCE_THRESHOLD,
+            "low_confidence_threshold": DEFAULT_TRUST_LOW_CONFIDENCE_THRESHOLD,
+            "default_coverage_confidence": self.coverage_confidence,
+            "requires_authoritative_sources_for_critical_categories": True,
+            "block_on_critical_missing": True,
+            "warn_on_critical_stale": True,
+            "warn_on_inferred_critical_categories": True,
+        }
+
+    def default_freshness_defaults(self) -> dict[str, Any]:
+        if isinstance(self.freshness_defaults, dict) and self.freshness_defaults:
+            return dict(self.freshness_defaults)
+
+        return {
+            "stale_days": DEFAULT_STALE_DAYS,
+            "max_discovery_retries": DEFAULT_DISCOVERY_MAX_RETRIES,
+            "retry_backoff_hours": DEFAULT_DISCOVERY_RETRY_BACKOFF_HOURS,
+            "require_last_verified_at_for_authoritative_sources": True,
+            "freshness_warning_enabled": True,
+        }
+
     def to_profile_policy(self) -> Dict[str, Any]:
         universe = self.expected_rule_universe(include_section8=True)
+        discovery_hints = self.default_discovery_search_hints()
+        trust_defaults = self.default_trust_defaults()
+        freshness_defaults = self.default_freshness_defaults()
         return {
             "summary": f"{self.city}, {self.state} jurisdiction default baseline",
             "resolved_from": {
@@ -124,22 +228,23 @@ class JurisdictionDefault:
                 "registration_fee": self.registration_fee,
                 "typical_fail_points": list(self.typical_fail_points or []),
             },
+            "discovery": {
+                "search_hints": discovery_hints,
+                "bootstrap_enabled": True,
+                "max_retries": freshness_defaults.get("max_discovery_retries"),
+                "retry_backoff_hours": freshness_defaults.get("retry_backoff_hours"),
+            },
+            "trust": {
+                "projection": trust_defaults,
+                "freshness": freshness_defaults,
+            },
+            "freshness": {
+                "policy_sources": freshness_defaults,
+            },
             "source_evidence": list(self.source_evidence or []),
             "expected_rule_universe": universe,
             "notes": self.notes,
         }
-
-    def required_categories(self, *, include_section8: bool = True) -> list[str]:
-        return get_required_categories(
-            state=self.state,
-            county=self.county,
-            city=self.city,
-            rental_license_required=self.rental_license_required,
-            inspection_authority=self.inspection_authority,
-            inspection_frequency=self.inspection_frequency,
-            tenant_waitlist_depth=self.tenant_waitlist_depth,
-            include_section8=include_section8,
-        )
 
 
 def completeness_score_weights() -> dict[str, float]:
@@ -208,6 +313,28 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
                     "strength": "baseline",
                 }
             ],
+            discovery_search_hints={
+                "scope_terms": ["Detroit", "Wayne County", "Michigan"],
+                "base_terms": [
+                    "rental registration",
+                    "rental inspection",
+                    "certificate of compliance",
+                    "landlord",
+                    "housing code",
+                ],
+                "preferred_source_kinds": [
+                    "municipal_code",
+                    "city_program_page",
+                    "city_form",
+                    "housing_authority",
+                    "state_statute",
+                ],
+                "preferred_publishers": [
+                    "City of Detroit",
+                    "Detroit Housing Commission",
+                    "State of Michigan",
+                ],
+            },
             notes="Baseline default. Override per neighborhood, county, city, or housing authority if needed.",
         ),
         JurisdictionDefault(
@@ -233,6 +360,25 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
                     "strength": "baseline",
                 }
             ],
+            discovery_search_hints={
+                "scope_terms": ["Pontiac", "Oakland County", "Michigan"],
+                "base_terms": [
+                    "rental registration",
+                    "rental inspection",
+                    "certificate of occupancy",
+                    "landlord",
+                ],
+                "preferred_source_kinds": [
+                    "municipal_code",
+                    "city_program_page",
+                    "city_form",
+                    "state_statute",
+                ],
+                "preferred_publishers": [
+                    "City of Pontiac",
+                    "State of Michigan",
+                ],
+            },
             notes="Baseline default. Confirm local registration, fees, and housing authority overlays.",
         ),
         JurisdictionDefault(
@@ -258,6 +404,25 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
                     "strength": "baseline",
                 }
             ],
+            discovery_search_hints={
+                "scope_terms": ["Southfield", "Oakland County", "Michigan"],
+                "base_terms": [
+                    "rental inspection",
+                    "rental certificate",
+                    "landlord",
+                    "property maintenance code",
+                ],
+                "preferred_source_kinds": [
+                    "municipal_code",
+                    "city_program_page",
+                    "city_form",
+                    "state_statute",
+                ],
+                "preferred_publishers": [
+                    "City of Southfield",
+                    "State of Michigan",
+                ],
+            },
             notes="Baseline default. Verify rental certification steps and any local overlay workflow.",
         ),
         JurisdictionDefault(
@@ -284,6 +449,35 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
                     "strength": "baseline",
                 }
             ],
+            discovery_search_hints={
+                "scope_terms": ["Inkster", "Wayne County", "Michigan"],
+                "base_terms": [
+                    "rental registration",
+                    "rental inspection",
+                    "certificate",
+                    "housing code",
+                ],
+                "preferred_source_kinds": [
+                    "municipal_code",
+                    "city_program_page",
+                    "county_program_page",
+                    "state_statute",
+                ],
+                "preferred_publishers": [
+                    "City of Inkster",
+                    "State of Michigan",
+                ],
+            },
+            trust_defaults={
+                "min_completeness_score_for_trust": 0.85,
+                "ready_confidence_threshold": 0.90,
+                "low_confidence_threshold": 0.60,
+                "default_coverage_confidence": "low",
+                "requires_authoritative_sources_for_critical_categories": True,
+                "block_on_critical_missing": True,
+                "warn_on_critical_stale": True,
+                "warn_on_inferred_critical_categories": True,
+            },
             notes="Baseline default. Many older housing stock issues. Needs stronger local rule coverage.",
         ),
         JurisdictionDefault(
@@ -309,6 +503,25 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
                     "strength": "baseline",
                 }
             ],
+            discovery_search_hints={
+                "scope_terms": ["Dearborn", "Wayne County", "Michigan"],
+                "base_terms": [
+                    "rental inspection",
+                    "rental certificate",
+                    "certificate of occupancy",
+                    "housing code",
+                ],
+                "preferred_source_kinds": [
+                    "municipal_code",
+                    "city_program_page",
+                    "city_form",
+                    "state_statute",
+                ],
+                "preferred_publishers": [
+                    "City of Dearborn",
+                    "State of Michigan",
+                ],
+            },
             notes="Baseline default. Verify frequency by license type.",
         ),
         JurisdictionDefault(
@@ -339,6 +552,35 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
                     "strength": "strong",
                 },
             ],
+            discovery_search_hints={
+                "scope_terms": ["Warren", "Macomb County", "Michigan"],
+                "base_terms": [
+                    "rental inspections division",
+                    "rental application paperwork",
+                    "rental license",
+                    "inspection",
+                ],
+                "preferred_source_kinds": [
+                    "city_program_page",
+                    "city_form",
+                    "municipal_code",
+                    "state_statute",
+                ],
+                "preferred_publishers": [
+                    "City of Warren",
+                    "State of Michigan",
+                ],
+            },
+            trust_defaults={
+                "min_completeness_score_for_trust": 0.75,
+                "ready_confidence_threshold": 0.85,
+                "low_confidence_threshold": 0.60,
+                "default_coverage_confidence": "high",
+                "requires_authoritative_sources_for_critical_categories": True,
+                "block_on_critical_missing": True,
+                "warn_on_critical_stale": True,
+                "warn_on_inferred_critical_categories": True,
+            },
             notes="Baseline default. Warren should typically resolve with higher confidence because the current codebase already models Warren more deeply.",
         ),
         JurisdictionDefault(
@@ -364,6 +606,25 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
                     "strength": "baseline",
                 }
             ],
+            discovery_search_hints={
+                "scope_terms": ["Royal Oak", "Oakland County", "Michigan"],
+                "base_terms": [
+                    "rental license",
+                    "rental inspection",
+                    "certificate",
+                    "housing code",
+                ],
+                "preferred_source_kinds": [
+                    "municipal_code",
+                    "city_program_page",
+                    "city_form",
+                    "state_statute",
+                ],
+                "preferred_publishers": [
+                    "City of Royal Oak",
+                    "State of Michigan",
+                ],
+            },
             notes="Baseline default. Verify frequency by rental license type.",
         ),
     ]
@@ -416,6 +677,48 @@ def default_policy_for_scope(
         include_section8=include_section8,
     )
     missing_local_rule_areas = list(universe.get("required_categories", []))
+    discovery_hints = {
+        "scope_terms": [term for term in [city, county, state] if term],
+        "base_terms": [
+            "rental license",
+            "rental registration",
+            "inspection",
+            "certificate of occupancy",
+            "housing code",
+        ],
+        "preferred_source_kinds": [
+            "municipal_code",
+            "city_program_page",
+            "county_program_page",
+            "housing_authority",
+            "state_statute",
+        ],
+        "preferred_publishers": [
+            city,
+            f"{county.title()} County" if county else None,
+            housing_authority,
+            "State of Michigan",
+            "Michigan Legislature",
+        ],
+        "seed_urls": [],
+    }
+    trust_defaults = {
+        "min_completeness_score_for_trust": DEFAULT_TRUST_MIN_COMPLETENESS_SCORE,
+        "ready_confidence_threshold": DEFAULT_TRUST_READY_CONFIDENCE_THRESHOLD,
+        "low_confidence_threshold": DEFAULT_TRUST_LOW_CONFIDENCE_THRESHOLD,
+        "default_coverage_confidence": "low",
+        "requires_authoritative_sources_for_critical_categories": True,
+        "block_on_critical_missing": True,
+        "warn_on_critical_stale": True,
+        "warn_on_inferred_critical_categories": True,
+    }
+    freshness_defaults = {
+        "stale_days": DEFAULT_STALE_DAYS,
+        "max_discovery_retries": DEFAULT_DISCOVERY_MAX_RETRIES,
+        "retry_backoff_hours": DEFAULT_DISCOVERY_RETRY_BACKOFF_HOURS,
+        "require_last_verified_at_for_authoritative_sources": True,
+        "freshness_warning_enabled": True,
+    }
     return {
         "summary": f"{city or county or state} jurisdiction default baseline",
         "resolved_from": {
@@ -444,6 +747,19 @@ def default_policy_for_scope(
             "inspection_frequency": None,
         },
         "operations": {},
+        "discovery": {
+            "search_hints": discovery_hints,
+            "bootstrap_enabled": True,
+            "max_retries": freshness_defaults.get("max_discovery_retries"),
+            "retry_backoff_hours": freshness_defaults.get("retry_backoff_hours"),
+        },
+        "trust": {
+            "projection": trust_defaults,
+            "freshness": freshness_defaults,
+        },
+        "freshness": {
+            "policy_sources": freshness_defaults,
+        },
         "source_evidence": [],
         "expected_rule_universe": universe,
         "notes": "No explicit jurisdiction default exists yet.",
