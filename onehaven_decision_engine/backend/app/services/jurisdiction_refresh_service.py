@@ -28,9 +28,14 @@ from app.services.policy_review_service import apply_governance_lifecycle, diff_
 from app.services.policy_source_service import (
     collect_catalog_for_market,
     discover_policy_sources_for_market,
+    inventory_summary_for_market,
     list_sources_for_market,
     policy_source_needs_refresh,
     refresh_policy_source_and_detect_changes,
+)
+from app.services.policy_change_detection_service import (
+    compute_next_retry_due,
+    determine_profile_refresh_state,
 )
 
 
@@ -516,6 +521,36 @@ def _refresh_confidence_from_profile(profile_payload: dict[str, Any]) -> dict[st
     }
 
 
+def _set_profile_refresh_state(
+    profile: JurisdictionProfile,
+    *,
+    refresh_state: str,
+    reason: str | None,
+    now: datetime,
+    blocked_reason: str | None = None,
+    next_step: str | None = None,
+    requirements: dict[str, Any] | None = None,
+    retry_count: int | None = None,
+    run_id: str | None = None,
+) -> JurisdictionProfile:
+    profile.refresh_state = refresh_state
+    profile.refresh_status_reason = reason
+    profile.refresh_blocked_reason = blocked_reason
+    profile.last_refresh_state_transition_at = now
+    if retry_count is not None:
+        profile.refresh_retry_count = int(retry_count)
+    if run_id is not None:
+        profile.current_refresh_run_id = run_id
+    existing_requirements = _loads_json_dict(getattr(profile, "refresh_requirements_json", None))
+    if next_step is not None:
+        existing_requirements["next_step"] = next_step
+    if isinstance(requirements, dict) and requirements:
+        existing_requirements.update(requirements)
+    profile.refresh_requirements_json = json.dumps(existing_requirements, ensure_ascii=False, sort_keys=True, default=str)
+    return profile
+
+
+
 def refresh_jurisdiction_profile(
     db: Session,
     *,
@@ -533,6 +568,8 @@ def refresh_jurisdiction_profile(
             "jurisdiction_profile_id": int(jurisdiction_profile_id),
         }
 
+    now = _utcnow()
+    run_id = f"jurisdiction-refresh-{int(profile.id)}-{int(now.timestamp())}"
     state = _norm_state(getattr(profile, "state", None))
     county = _norm_lower(getattr(profile, "county", None))
     city = _norm_lower(getattr(profile, "city", None))
@@ -560,6 +597,7 @@ def refresh_jurisdiction_profile(
             "last_refresh_success_at": profile_obj.last_refresh_success_at.isoformat()
             if profile_obj.last_refresh_success_at
             else None,
+            "refresh_state": getattr(profile_obj, "refresh_state", None),
         }
         return {
             "ok": True,
@@ -588,8 +626,18 @@ def refresh_jurisdiction_profile(
             "refresh_confidence": _refresh_confidence_from_profile(profile_payload),
         }
 
-    profile.last_refresh_started_at = _utcnow()
+    profile.last_refresh_started_at = now
+    profile.last_refresh_attempt_at = now
     profile.last_refresh_error = None
+    _set_profile_refresh_state(
+        profile,
+        refresh_state="pending",
+        reason="refresh_started",
+        now=now,
+        next_step="discover",
+        retry_count=int(getattr(profile, "refresh_retry_count", 0) or 0),
+        run_id=run_id,
+    )
     db.add(profile)
     db.commit()
 
@@ -598,6 +646,11 @@ def refresh_jurisdiction_profile(
         profile=profile,
         stale_days=stale_days,
     )
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    _set_profile_refresh_state(profile, refresh_state="crawling", reason="discovery_running", now=_utcnow(), next_step="crawl", run_id=run_id)
+    db.add(profile)
+    db.commit()
+
     discovery_result = discover_policy_sources_for_market(
         db,
         org_id=org_id,
@@ -662,6 +715,11 @@ def refresh_jurisdiction_profile(
                 )
             )
 
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    _set_profile_refresh_state(profile, refresh_state="validating", reason="governance_validation_running", now=_utcnow(), next_step="recompute", run_id=run_id)
+    db.add(profile)
+    db.commit()
+
     governance_result = apply_governance_lifecycle(
         db,
         org_id=org_id,
@@ -687,6 +745,11 @@ def refresh_jurisdiction_profile(
                     payload=build_rule_change_notification(source=source, governance_result=governance_result),
                 )
             )
+
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    _set_profile_refresh_state(profile, refresh_state="recomputing", reason="recompute_running", now=_utcnow(), next_step="finalize", run_id=run_id)
+    db.add(profile)
+    db.commit()
 
     refreshed_profile = db.get(JurisdictionProfile, int(profile.id))
     refreshed_profile, coverage = recompute_profile_and_coverage(
@@ -733,6 +796,77 @@ def refresh_jurisdiction_profile(
         profile=refreshed_profile,
     )
 
+    inventory_summary = inventory_summary_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        program_type="section8" if "section8" in set(missing_categories) else None,
+    )
+    profile_payload = profile_completeness_payload(db, refreshed_profile, stale_days=stale_days)
+    state_payload = determine_profile_refresh_state(
+        refresh_runs=[{"refresh": row} for row in refresh_results],
+        recompute_ok=True,
+        missing_categories=list(profile_payload.get("missing_categories") or []),
+        stale_categories=list(profile_payload.get("stale_categories") or []),
+        profile_is_stale=bool(profile_payload.get("is_stale", False)),
+    )
+    unresolved_missing = list(profile_payload.get("missing_categories") or [])
+    requirements = {
+        "next_step": state_payload["next_step"],
+        "missing_categories": unresolved_missing,
+        "inventory_summary": {
+            "inventory_count": inventory_summary.get("inventory_count"),
+            "lifecycle_counts": inventory_summary.get("lifecycle_counts"),
+            "crawl_counts": inventory_summary.get("crawl_counts"),
+        },
+    }
+    if unresolved_missing:
+        requirements["next_search_retry_due_at"] = compute_next_retry_due(
+            retry_count=int(getattr(refreshed_profile, "refresh_retry_count", 0) or 0),
+            base_dt=_utcnow(),
+            min_hours=24,
+            max_days=14,
+        ).isoformat()
+
+    _set_profile_refresh_state(
+        refreshed_profile,
+        refresh_state=state_payload["refresh_state"],
+        reason=state_payload["status_reason"],
+        now=_utcnow(),
+        blocked_reason="blocked_sources_present" if state_payload["refresh_state"] == "blocked" else None,
+        next_step=state_payload["next_step"],
+        requirements=requirements,
+        retry_count=(0 if state_payload["refresh_state"] == "healthy" else int(getattr(refreshed_profile, "refresh_retry_count", 0) or 0) + (1 if unresolved_missing else 0)),
+        run_id=run_id,
+    )
+    refreshed_profile.last_refresh_completed_at = _utcnow()
+    refreshed_profile.last_refresh_success_at = _utcnow() if state_payload["refresh_state"] in {"healthy", "degraded", "pending", "validating"} else getattr(refreshed_profile, "last_refresh_success_at", None)
+    refreshed_profile.last_refresh_changed_source_count = int(summary.get("changed_source_count") or 0)
+    refreshed_profile.last_refresh_changed_rule_count = int(summary.get("changed_rule_count") or 0)
+    refreshed_profile.last_refresh_outcome_json = json.dumps(
+        {
+            "ok": True,
+            "run_id": run_id,
+            "refresh_state": state_payload["refresh_state"],
+            "status_reason": state_payload["status_reason"],
+            "summary": summary,
+            "governance_result": governance_result,
+            "inventory_summary": {
+                "inventory_count": inventory_summary.get("inventory_count"),
+                "lifecycle_counts": inventory_summary.get("lifecycle_counts"),
+                "crawl_counts": inventory_summary.get("crawl_counts"),
+            },
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    db.add(refreshed_profile)
+    db.commit()
+
     profile_payload = {
         "id": int(refreshed_profile.id),
         "org_id": refreshed_profile.org_id,
@@ -747,6 +881,8 @@ def refresh_jurisdiction_profile(
         "last_refresh_success_at": refreshed_profile.last_refresh_success_at.isoformat()
         if refreshed_profile.last_refresh_success_at
         else None,
+        "refresh_state": getattr(refreshed_profile, "refresh_state", None),
+        "refresh_status_reason": getattr(refreshed_profile, "refresh_status_reason", None),
     }
 
     return {
@@ -782,14 +918,18 @@ def refresh_jurisdiction_profile(
         "review_queue": review_queue,
         "notification_results": notification_results,
         "stale_profile_notification": stale_profile_notice,
+        "inventory_summary": inventory_summary,
         "summary": {
             **summary,
             "discovered_source_count": int(discovery_result.get("created_count") or 0),
+            "refresh_state": state_payload["refresh_state"],
+            "next_step": state_payload["next_step"],
         },
     }
 
 
 def refresh_due_jurisdictions(
+
     db: Session,
     *,
     org_id: int | None = None,
@@ -959,3 +1099,128 @@ def mark_profile_stale_if_needed(
         "marked_stale": False,
         "jurisdiction_profile_id": int(profile.id),
     }
+
+from app.config import settings as _chunk8_settings
+from app.services.jurisdiction_health_service import get_jurisdiction_health as _chunk8_get_jurisdiction_health
+from app.services.jurisdiction_lockout_service import profile_lockout_payload as _chunk8_profile_lockout_payload
+from app.services.jurisdiction_notification_service import notify_if_profile_locked as _chunk8_notify_if_profile_locked
+from app.services.jurisdiction_sla_service import source_due_at as _chunk8_source_due_at, source_is_past_sla as _chunk8_source_is_past_sla
+
+_chunk8_original_refresh_jurisdiction_profile = refresh_jurisdiction_profile
+_chunk8_original_refresh_due_jurisdictions = refresh_due_jurisdictions
+
+
+def refresh_jurisdiction_profile(
+    db: Session,
+    *,
+    jurisdiction_profile_id: int,
+    reviewer_user_id: int | None = None,
+    force: bool = False,
+    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
+    focus: str = "se_mi_extended",
+) -> dict[str, Any]:
+    result = _chunk8_original_refresh_jurisdiction_profile(
+        db,
+        jurisdiction_profile_id=jurisdiction_profile_id,
+        reviewer_user_id=reviewer_user_id,
+        force=force,
+        stale_days=stale_days,
+        focus=focus,
+    )
+
+    if not result.get("ok"):
+        return result
+
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    if profile is None:
+        return result
+
+    profile_payload = result.get("profile") or {}
+    lockout = _chunk8_profile_lockout_payload(profile, profile_payload)
+
+    # Enforce next-search retry when there are unresolved gaps.
+    requirements = _loads_json_dict(getattr(profile, "refresh_requirements_json", None))
+    if result.get("missing_categories"):
+        requirements["next_search_retry_due_at"] = compute_next_retry_due(
+            retry_count=int(getattr(profile, "refresh_retry_count", 0) or 0),
+            base_dt=_utcnow(),
+            min_hours=int(getattr(_chunk8_settings, "jurisdiction_sla_discovery_retry_hours", 24) or 24),
+            max_days=14,
+        ).isoformat()
+        requirements.setdefault("next_step", "retry_discovery")
+        profile.refresh_requirements_json = json.dumps(requirements, ensure_ascii=False, sort_keys=True, default=str)
+
+    # Apply source-level SLA due dates as an operational hint.
+    try:
+        sources = list_sources_for_market(
+            db,
+            org_id=getattr(profile, "org_id", None),
+            state=_norm_state(getattr(profile, "state", None)),
+            county=_norm_lower(getattr(profile, "county", None)),
+            city=_norm_lower(getattr(profile, "city", None)),
+            pha_name=_norm_text(getattr(profile, "pha_name", None)),
+        )
+        for source in sources:
+            if getattr(source, "next_refresh_due_at", None) is None:
+                source.next_refresh_due_at = _chunk8_source_due_at(source)
+            if _chunk8_source_is_past_sla(source) and getattr(source, "refresh_state", None) == "healthy":
+                source.refresh_state = "degraded"
+                source.refresh_status_reason = "source_past_sla"
+            db.add(source)
+    except Exception:
+        pass
+
+    if bool(lockout.get("lockout_active")) and bool(getattr(_chunk8_settings, "jurisdiction_critical_stale_lockout_enabled", True)):
+        profile.refresh_state = "blocked"
+        profile.refresh_status_reason = str(lockout.get("lockout_reason") or "critical_authoritative_data_stale")
+        profile.refresh_blocked_reason = str(lockout.get("lockout_reason") or "critical_authoritative_data_stale")
+        db.add(profile)
+        db.commit()
+        _chunk8_notify_if_profile_locked(
+            db,
+            profile=profile,
+            categories=list(lockout.get("critical_stale_categories") or []),
+        )
+    else:
+        db.add(profile)
+        db.commit()
+
+    result["health"] = _chunk8_get_jurisdiction_health(db, profile_id=int(profile.id))
+    result["lockout"] = lockout
+    return result
+
+
+def refresh_due_jurisdictions(
+    db: Session,
+    *,
+    org_id: int | None = None,
+    reviewer_user_id: int | None = None,
+    batch_size: int | None = None,
+    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
+    focus: str = "se_mi_extended",
+) -> dict[str, Any]:
+    result = _chunk8_original_refresh_due_jurisdictions(
+        db,
+        org_id=org_id,
+        reviewer_user_id=reviewer_user_id,
+        batch_size=batch_size,
+        stale_days=stale_days,
+        focus=focus,
+    )
+    if not result.get("ok"):
+        return result
+
+    health_items = []
+    for item in result.get("refreshed", []):
+        profile_id = item.get("jurisdiction_profile_id")
+        if profile_id is None:
+            continue
+        try:
+            health_items.append(_chunk8_get_jurisdiction_health(db, profile_id=int(profile_id)))
+        except Exception:
+            continue
+
+    result["health_items"] = health_items
+    result["blocked_count"] = sum(1 for h in health_items if bool((h.get("lockout") or {}).get("lockout_active")))
+    result["degraded_count"] = sum(1 for h in health_items if h.get("refresh_state") == "degraded")
+    return result

@@ -1064,3 +1064,37 @@ def notify_impacted_properties_for_rule_change(
         "created_count": created,
         "results": results,
     }
+
+def build_critical_stale_lockout_notification(
+    *,
+    profile: JurisdictionProfile,
+    categories: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "kind": "jurisdiction_lockout",
+        "level": "error",
+        "entity_type": NOTIFICATION_ENTITY_TYPE,
+        "entity_id": str(getattr(profile, "id", "unknown")),
+        "jurisdiction_profile_id": int(profile.id),
+        "org_id": getattr(profile, "org_id", None),
+        "title": f"Jurisdiction lockout: {_scope_label(profile)}",
+        "message": "Critical authoritative compliance data exceeded freshness SLA and the jurisdiction has been locked.",
+        "state": getattr(profile, "state", None),
+        "county": getattr(profile, "county", None),
+        "city": getattr(profile, "city", None),
+        "pha_name": getattr(profile, "pha_name", None),
+        "refresh_state": getattr(profile, "refresh_state", None),
+        "refresh_status_reason": getattr(profile, "refresh_status_reason", None),
+        "critical_stale_categories": list(categories or []),
+        "created_at": _utcnow().isoformat(),
+    }
+
+
+def notify_if_profile_locked(
+    db: Session,
+    *,
+    profile: JurisdictionProfile,
+    categories: list[str] | None = None,
+) -> dict[str, Any]:
+    payload = build_critical_stale_lockout_notification(profile=profile, categories=categories)
+    return record_notification_event(db, payload=payload)

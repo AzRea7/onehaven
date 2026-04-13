@@ -36,9 +36,13 @@ from app.services.policy_review_service import (
 from app.services.policy_source_service import (
     collect_catalog_for_market,
     discover_policy_sources_for_market,
+    inventory_summary_for_market,
     list_sources_for_market,
     refresh_policy_source_and_detect_changes,
 )
+from app.services.policy_discovery_service import expected_inventory_hints
+from app.services.policy_change_detection_service import summarize_refresh_runs
+from app.services.policy_validation_service import validate_market_assertions
 
 
 def _norm_state(s: Optional[str]) -> str:
@@ -251,6 +255,7 @@ def _discovery_missing_categories(
     return [str(item).strip().lower() for item in missing if str(item).strip()]
 
 
+
 def _recompute_profile_for_market(
     db: Session,
     *,
@@ -260,17 +265,41 @@ def _recompute_profile_for_market(
     city: Optional[str],
     pha_name: Optional[str],
 ) -> dict[str, Any]:
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
     profile = _find_matching_profile(
         db,
         org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
     )
+    inventory_hints = expected_inventory_hints(
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        include_section8=True,
+    )
+    inventory_summary = inventory_summary_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        program_type="section8" if "section8" in set(inventory_hints.get("expected_categories") or []) else None,
+    )
+
     if profile is None:
         return {
             "ok": True,
+            "expected_inventory": inventory_hints,
+            "inventory_summary": inventory_summary,
             "recomputed": False,
             "jurisdiction_profile_id": None,
         }
@@ -280,8 +309,11 @@ def _recompute_profile_for_market(
         profile,
         commit=True,
     )
+
     return {
         "ok": True,
+        "expected_inventory": inventory_hints,
+        "inventory_summary": inventory_summary,
         "recomputed": True,
         "jurisdiction_profile_id": int(refreshed_profile.id),
         "profile": profile_completeness_payload(db, refreshed_profile),
@@ -296,6 +328,7 @@ def _recompute_profile_for_market(
 
 
 def _run_source_refresh_batch(
+
     db: Session,
     *,
     sources: list[PolicySource],
@@ -319,6 +352,7 @@ def _run_source_refresh_batch(
         extract_result: dict[str, Any]
         diff_result: dict[str, Any]
         normalize_result: dict[str, Any] | None = None
+        validation_result: dict[str, Any] | None = None
 
         if not fetch_result.get("ok"):
             failed_source_ids.append(int(source.id))
@@ -383,6 +417,15 @@ def _run_source_refresh_batch(
                     source_id=int(source.id),
                     raw_candidates=raw_candidates,
                 )
+                validation_result = validate_market_assertions(
+                    db,
+                    org_id=org_id,
+                    state=state,
+                    county=county,
+                    city=city,
+                    pha_name=pha_name,
+                    source_id=int(source.id),
+                )
             else:
                 extract_result = {
                     "ok": True,
@@ -397,6 +440,14 @@ def _run_source_refresh_batch(
                     "missing_count": 0,
                     "reason": "no_content_change",
                 }
+                validation_result = {
+                    "validated_count": 0,
+                    "weak_support_count": 0,
+                    "ambiguous_count": 0,
+                    "conflicting_count": 0,
+                    "unsupported_count": 0,
+                    "updated_ids": [],
+                }
 
         total_changed_rules += int(diff_result.get("changed_count") or 0)
         total_new_rules += int(diff_result.get("new_count") or 0)
@@ -410,6 +461,7 @@ def _run_source_refresh_batch(
                 "extract_result": extract_result,
                 "diff": diff_result,
                 "normalized": normalize_result,
+                "validation": validation_result,
             }
         )
 
@@ -425,6 +477,7 @@ def _run_source_refresh_batch(
             "missing_rule_count": total_missing_rules,
         },
     }
+
 
 
 def run_market_policy_pipeline(
@@ -444,6 +497,7 @@ def run_market_policy_pipeline(
     cty = _norm_lower(city)
     pha = _norm_text(pha_name)
 
+    inventory_hints = expected_inventory_hints(state=st, county=cnty, city=cty, pha_name=pha, include_section8=True)
     missing_categories = _discovery_missing_categories(
         db,
         org_id=org_id,
@@ -484,6 +538,16 @@ def run_market_policy_pipeline(
         pha_name=pha,
         reviewer_user_id=reviewer_user_id,
     )
+    inventory_summary = inventory_summary_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        program_type="section8" if "section8" in set(inventory_hints.get("expected_categories") or []) else None,
+    )
+    refresh_state_summary = summarize_refresh_runs(refresh_batch["source_runs"])
 
     lifecycle_result = apply_governance_lifecycle(
         db,
@@ -517,6 +581,7 @@ def run_market_policy_pipeline(
     return {
         "ok": True,
         "missing_categories": missing_categories,
+        "expected_inventory": inventory_hints,
         "discovery_result": discovery_result,
         "sources_processed": len(refresh_batch["source_runs"]),
         "total_changed_rules": int(refresh_batch["summary"]["changed_rule_count"]),
@@ -524,13 +589,16 @@ def run_market_policy_pipeline(
         "failed_source_count": int(refresh_batch["summary"]["failed_source_count"]),
         "source_runs": refresh_batch["source_runs"],
         "refresh_summary": refresh_batch["summary"],
+        "refresh_state": refresh_state_summary,
         "lifecycle_result": lifecycle_result,
         "recompute": recompute,
         "review_queue": review_queue,
+        "inventory_summary": inventory_summary,
     }
 
 
 def refresh_market_policy_pipeline(
+
     db: Session,
     *,
     org_id: Optional[int],

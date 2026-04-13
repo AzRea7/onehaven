@@ -222,6 +222,26 @@ class Settings(BaseSettings):
 
         return deduped or ["google", "nominatim", "rentcast"]
 
+
+    # ---- Compliance / jurisdiction automation ----
+    jurisdiction_refresh_schedule_minutes: int = 12 * 60
+    jurisdiction_discovery_retry_schedule_minutes: int = 24 * 60
+    jurisdiction_validation_retry_schedule_minutes: int = 6 * 60
+    jurisdiction_recompute_schedule_minutes: int = 12 * 60
+    jurisdiction_health_schedule_minutes: int = 6 * 60
+
+    jurisdiction_sla_default_hours: int = 24 * 30
+    jurisdiction_sla_authoritative_hours: int = 24 * 21
+    jurisdiction_sla_critical_authoritative_hours: int = 24 * 14
+    jurisdiction_sla_program_overlay_hours: int = 24 * 14
+    jurisdiction_sla_discovery_retry_hours: int = 24
+    jurisdiction_sla_validation_retry_hours: int = 12
+
+    jurisdiction_critical_stale_lockout_enabled: bool = True
+    jurisdiction_notification_enabled: bool = True
+    jurisdiction_automation_enabled: bool = True
+    jurisdiction_health_fail_open: bool = False
+
     def model_post_init(self, __context) -> None:
         if self.rent_calibration_apha is not None:
             object.__setattr__(self, "rent_calibration_alpha", float(self.rent_calibration_apha))

@@ -34,6 +34,7 @@ class NormalizedRuleCandidate:
     normalized_rule_key: str
     rule_key_confidence: float
     conflict_hints: list[str]
+    validation_hint: str | None
 
 
 def _clean(text: Optional[str]) -> str:
@@ -545,6 +546,7 @@ def normalize_rule_candidate(candidate: dict[str, Any]) -> NormalizedRuleCandida
         "normalized_rule_key": rule_key,
         "rule_key_confidence": round(rule_key_confidence, 6),
         "conflict_hints": list(conflict_hints),
+        "validation_hint": "strong" if confidence >= 0.80 and citation_quality >= 0.70 else ("moderate" if confidence >= 0.55 and citation_quality >= 0.45 else "weak"),
     }
     fingerprint = sha256(_dumps(payload).encode("utf-8")).hexdigest()
 
@@ -571,6 +573,7 @@ def normalize_rule_candidate(candidate: dict[str, Any]) -> NormalizedRuleCandida
         normalized_rule_key=rule_key,
         rule_key_confidence=round(rule_key_confidence, 6),
         conflict_hints=list(conflict_hints),
+        validation_hint=("strong" if confidence >= 0.80 and citation_quality >= 0.70 else ("moderate" if confidence >= 0.55 and citation_quality >= 0.45 else "weak")),
     )
 
 

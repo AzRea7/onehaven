@@ -66,6 +66,8 @@ class JurisdictionProfile(Base):
         Index("ix_jp_is_stale", "is_stale"),
         Index("ix_jp_last_verified_at", "last_verified_at"),
         Index("ix_jp_last_refresh_success_at", "last_refresh_success_at"),
+        Index("ix_jp_refresh_state", "refresh_state"),
+        Index("ix_jp_last_refresh_completed_at", "last_refresh_completed_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -122,6 +124,17 @@ class JurisdictionProfile(Base):
     last_refresh_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_refresh_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_refresh_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_state: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
+    refresh_status_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    refresh_blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_refresh_state_transition_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_refresh_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_refresh_outcome_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    refresh_requirements_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    refresh_retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_refresh_run_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    last_refresh_changed_source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_refresh_changed_rule_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     source_freshness_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     discovery_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
@@ -219,6 +232,8 @@ class PolicySource(Base):
         Index("ix_policy_sources_registry_status", "registry_status"),
         Index("ix_policy_sources_status_type", "registry_status", "source_type"),
         Index("ix_policy_sources_next_refresh_due_at", "next_refresh_due_at"),
+        Index("ix_policy_sources_refresh_state", "refresh_state"),
+        Index("ix_policy_sources_validation_due_at", "validation_due_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -296,6 +311,18 @@ class PolicySource(Base):
     source_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     discovery_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     last_verified_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    refresh_state: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
+    refresh_status_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    refresh_blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_refresh_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_refresh_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_state_transition_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_refresh_outcome_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    last_change_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    revalidation_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    validation_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    refresh_retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_refresh_run_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -332,6 +359,128 @@ class PolicySourceVersion(Base):
     )
 
 
+class PolicySourceInventory(Base):
+    __tablename__ = "policy_source_inventory"
+    __table_args__ = (
+        UniqueConstraint("org_id", "scope_key", "canonical_url", name="uq_policy_source_inventory_scope_url"),
+        Index("ix_policy_source_inventory_scope", "org_id", "state", "county", "city"),
+        Index("ix_policy_source_inventory_scope_key", "scope_key"),
+        Index("ix_policy_source_inventory_lifecycle", "lifecycle_state"),
+        Index("ix_policy_source_inventory_status", "crawl_status"),
+        Index("ix_policy_source_inventory_next_crawl_due", "next_crawl_due_at"),
+        Index("ix_policy_source_inventory_source_id", "policy_source_id"),
+        Index("ix_policy_source_inventory_domain", "domain_name"),
+        Index("ix_policy_source_inventory_refresh_state", "refresh_state"),
+        Index("ix_policy_source_inventory_validation_due_at", "validation_due_at"),
+        Index("ix_policy_source_inventory_next_search_retry_due_at", "next_search_retry_due_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+
+    state: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    pha_name: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    program_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    scope_key: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    canonical_url: Mapped[str] = mapped_column(Text, nullable=False)
+    domain_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    publisher: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    source_type: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    publication_type: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
+    policy_source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("policy_sources.id", ondelete="SET NULL"), nullable=True)
+    current_source_version_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("policy_source_versions.id", ondelete="SET NULL"), nullable=True)
+
+    lifecycle_state: Mapped[str] = mapped_column(String(40), nullable=False, default="discovered")
+    crawl_status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
+    inventory_origin: Mapped[str] = mapped_column(String(40), nullable=False, default="discovered")
+    is_curated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_official_candidate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    dedupe_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    canonical_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    fingerprint_algo: Mapped[str] = mapped_column(String(40), nullable=False, default="sha256")
+
+    authority_tier: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    authority_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    authority_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    expected_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    expected_tiers_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    category_hints_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    search_terms_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
+    discovered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_crawled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_failure_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    next_crawl_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    last_http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    searched_not_found_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    inventory_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    refresh_state: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
+    refresh_status_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    next_refresh_step: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    revalidation_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    validation_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_change_detected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_refresh_outcome_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    last_change_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    last_search_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    next_search_retry_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_state_transition_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"), onupdate=func.now())
+
+
+class PolicyDiscoveryAttempt(Base):
+    __tablename__ = "policy_discovery_attempts"
+    __table_args__ = (
+        Index("ix_policy_discovery_attempts_scope", "org_id", "state", "county", "city"),
+        Index("ix_policy_discovery_attempts_status", "status"),
+        Index("ix_policy_discovery_attempts_started", "started_at"),
+        Index("ix_policy_discovery_attempts_inventory", "inventory_id"),
+        Index("ix_policy_discovery_attempts_next_retry_due_at", "next_retry_due_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    inventory_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("policy_source_inventory.id", ondelete="SET NULL"), nullable=True)
+    policy_source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("policy_sources.id", ondelete="SET NULL"), nullable=True)
+
+    state: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    pha_name: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    program_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    scope_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    attempt_type: Mapped[str] = mapped_column(String(40), nullable=False, default="discovery")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="started")
+    query_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    searched_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    searched_tiers_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    result_urls_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    not_found: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    next_retry_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    attempt_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"))
+
+
 class PolicyAssertion(Base):
     __tablename__ = "policy_assertions"
     __table_args__ = (
@@ -350,6 +499,8 @@ class PolicyAssertion(Base):
         Index("ix_policy_assertions_version_group_number", "version_group", "version_number"),
         Index("ix_policy_assertions_source_version_id", "source_version_id"),
         Index("ix_policy_assertions_is_current", "is_current"),
+        Index("ix_policy_assertions_validation_state", "validation_state"),
+        Index("ix_policy_assertions_trust_state", "trust_state"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -432,6 +583,12 @@ class PolicyAssertion(Base):
     value_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     confidence_basis: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     change_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    validation_state: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
+    validation_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    validation_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trust_state: Mapped[str] = mapped_column(String(40), nullable=False, default="extracted")
+    validated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     approved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

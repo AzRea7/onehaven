@@ -248,18 +248,36 @@ def _set_lifecycle_state(
         row.rule_status = "candidate"
         row.coverage_status = "candidate"
         row.is_current = False
+        if hasattr(row, "trust_state") and (getattr(row, "trust_state", None) in {None, "trusted"}):
+            row.trust_state = "extracted"
     elif governance_state == "approved":
-        row.review_status = "approved"
-        row.rule_status = "approved"
-        row.coverage_status = "approved"
+        validation_state = (getattr(row, "validation_state", None) or "pending").lower()
+        row.review_status = "approved" if validation_state == "validated" else "needs_validation"
+        row.rule_status = "approved" if validation_state == "validated" else "candidate"
+        row.coverage_status = "approved" if validation_state == "validated" else "partial"
         row.is_current = False
+        if hasattr(row, "trust_state"):
+            row.trust_state = "validated" if validation_state == "validated" else "needs_review"
         row.approved_at = row.approved_at or now
         row.approved_by_user_id = row.approved_by_user_id or reviewer_user_id
     elif governance_state == "active":
+        validation_state = (getattr(row, "validation_state", None) or "pending").lower()
+        if validation_state != "validated":
+            row.review_status = "needs_validation"
+            row.rule_status = "candidate"
+            row.coverage_status = "partial"
+            row.is_current = False
+            if hasattr(row, "trust_state"):
+                row.trust_state = "needs_review"
+            row.reviewed_by_user_id = reviewer_user_id
+            row.reviewed_at = now
+            return
         row.review_status = "verified"
         row.rule_status = "active"
         row.coverage_status = "verified"
         row.is_current = True
+        if hasattr(row, "trust_state"):
+            row.trust_state = "trusted"
         row.approved_at = row.approved_at or now
         row.approved_by_user_id = row.approved_by_user_id or reviewer_user_id
         row.activated_at = row.activated_at or now
@@ -484,6 +502,8 @@ def auto_verify_market_assertions(
             continue
         if float(row.confidence or 0.0) < 0.75:
             continue
+        if (getattr(row, "validation_state", None) or "pending").lower() != "validated":
+            continue
         if (row.governance_state or "").lower() == "active":
             row.is_current = True
             active_ids.append(int(row.id))
@@ -601,9 +621,12 @@ def apply_governance_lifecycle(
         )
         keeper = ordered[0]
 
-        target_state = "approved"
-        if auto_activate and float(keeper.confidence or 0.0) >= 0.85:
-            target_state = "active"
+        validation_state = (getattr(keeper, "validation_state", None) or "pending").lower()
+        target_state = "draft"
+        if validation_state == "validated":
+            target_state = "approved"
+            if auto_activate and float(keeper.confidence or 0.0) >= 0.85:
+                target_state = "active"
 
         _set_lifecycle_state(keeper, governance_state=target_state, reviewer_user_id=reviewer_user_id, reviewed_at=now)
         if target_state == "active":

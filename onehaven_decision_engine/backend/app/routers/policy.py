@@ -14,6 +14,7 @@ from app.db import get_db
 from app.models import Property
 from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
 from app.services.jurisdiction_completeness_service import profile_completeness_payload
+from app.services.jurisdiction_health_service import get_jurisdiction_health
 from app.services.policy_catalog import (
     catalog_for_market,
     catalog_mi_authoritative,
@@ -1218,4 +1219,56 @@ def get_property_resolved_rules(
         "missing_local_rule_areas": (profile_payload or {}).get("missing_local_rule_areas") or [],
         "stale_warning": bool((profile_payload or {}).get("is_stale")),
         "coverage_matrix": (profile_payload or {}).get("coverage_matrix"),
+    }
+
+@router.get("/operational-health")
+def policy_operational_health(
+    profile_id: int | None = Query(None),
+    state: str | None = Query(None),
+    county: str | None = Query(None),
+    city: str | None = Query(None),
+    pha_name: str | None = Query(None),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    return get_jurisdiction_health(
+        db,
+        profile_id=profile_id,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+
+
+@router.get("/sources/stale")
+def list_stale_sources(
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    rows = (
+        db.query(PolicySource)
+        .filter((PolicySource.org_id == principal.org_id) | (PolicySource.org_id.is_(None)))
+        .filter((PolicySource.freshness_status == "stale") | (PolicySource.refresh_state.in_(["blocked", "degraded", "failed"])))
+        .order_by(PolicySource.next_refresh_due_at.asc().nullsfirst())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "items": [
+            {
+                "id": int(s.id),
+                "title": s.title,
+                "publisher": s.publisher,
+                "url": s.url,
+                "freshness_status": getattr(s, "freshness_status", None),
+                "refresh_state": getattr(s, "refresh_state", None),
+                "refresh_status_reason": getattr(s, "refresh_status_reason", None),
+                "next_refresh_due_at": s.next_refresh_due_at.isoformat() if getattr(s, "next_refresh_due_at", None) else None,
+                "validation_due_at": s.validation_due_at.isoformat() if getattr(s, "validation_due_at", None) else None,
+            }
+            for s in rows
+        ]
     }

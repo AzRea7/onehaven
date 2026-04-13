@@ -82,6 +82,26 @@ def _beat_schedule() -> dict[str, dict]:
             "schedule": 12 * 60 * 60.0,
             "options": {"queue": queue, "routing_key": queue},
         },
+        "jurisdiction-retry-discovery": {
+            "task": "jurisdiction.retry_discovery",
+            "schedule": float(max(300, int(settings.jurisdiction_discovery_retry_schedule_minutes) * 60)),
+            "options": {"queue": queue, "routing_key": queue},
+        },
+        "jurisdiction-retry-validation": {
+            "task": "jurisdiction.retry_validation",
+            "schedule": float(max(300, int(settings.jurisdiction_validation_retry_schedule_minutes) * 60)),
+            "options": {"queue": queue, "routing_key": queue},
+        },
+        "jurisdiction-recompute-due-profiles": {
+            "task": "jurisdiction.recompute_due_profiles",
+            "schedule": float(max(300, int(settings.jurisdiction_recompute_schedule_minutes) * 60)),
+            "options": {"queue": queue, "routing_key": queue},
+        },
+        "jurisdiction-health-snapshot": {
+            "task": "jurisdiction.health_snapshot",
+            "schedule": float(max(300, int(settings.jurisdiction_health_schedule_minutes) * 60)),
+            "options": {"queue": queue, "routing_key": queue},
+        },
     }
 
 
@@ -131,6 +151,7 @@ celery_app.conf.update(
         "app.workers.agent_tasks",
         "app.tasks.ingestion_tasks",
         "app.tasks.market_sync_tasks",
+        "app.tasks.jurisdiction_tasks",
     ),
 
     beat_scheduler="celery.beat:PersistentScheduler",

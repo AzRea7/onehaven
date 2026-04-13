@@ -20,6 +20,7 @@ from ..services.jurisdiction_completeness_service import (
     recompute_profile_and_coverage,
 )
 from ..services.jurisdiction_notification_service import notify_if_jurisdiction_stale
+from ..services.jurisdiction_health_service import get_jurisdiction_health
 from ..services.jurisdiction_refresh_service import refresh_jurisdiction_profile
 
 router = APIRouter(prefix="/jurisdictions", tags=["jurisdictions"])
@@ -777,3 +778,49 @@ def property_coverage_detail(
         "last_refresh": profile_payload.get("last_refresh"),
         "last_refreshed": profile_payload.get("last_refreshed"),
     }
+
+@router.get("/health")
+def jurisdiction_health(
+    profile_id: int | None = Query(None),
+    state: str | None = Query(None),
+    county: str | None = Query(None),
+    city: str | None = Query(None),
+    pha_name: str | None = Query(None),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    return get_jurisdiction_health(
+        db,
+        profile_id=profile_id,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+
+
+@router.post("/{profile_id}/refresh")
+def force_refresh_jurisdiction(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    return refresh_jurisdiction_profile(
+        db,
+        jurisdiction_profile_id=int(profile_id),
+        reviewer_user_id=getattr(principal, "user_id", None),
+        force=True,
+    )
+
+
+@router.post("/{profile_id}/notify-stale")
+def notify_stale_jurisdiction(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    profile = db.get(JurisdictionProfile, int(profile_id))
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+    return notify_if_jurisdiction_stale(db, profile=profile, force=True)

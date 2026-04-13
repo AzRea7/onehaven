@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.domain.jurisdiction_categories import normalize_category, normalize_categories
 from app.policy_models import PolicyAssertion, PolicySource, PolicySourceVersion
 from app.services.policy_rule_normalizer import normalize_rule_candidate
+from app.services.policy_validation_service import validate_assertion
 
 DEFAULT_STALE_AFTER_DAYS = 90
 
@@ -436,9 +437,7 @@ def _add_assertion(
     )
     if _already_added(created, rule_key, payload.get("raw_excerpt")):
         return
-
-    created.append(
-        PolicyAssertion(
+    row = PolicyAssertion(
             org_id=target_org_id,
             source_id=source.id,
             source_version_id=source_version_id,
@@ -504,8 +503,18 @@ def _add_assertion(
             source_freshness_status=getattr(source, "freshness_status", None),
             extracted_at=now,
             reviewed_at=None,
-        )
     )
+    row.extraction_confidence = float(payload["confidence"])
+    row.authority_score = float(getattr(source, "authority_score", 0.0) or 0.0)
+    row.conflict_count = len(payload.get("conflict_hints", []))
+    validation_payload = validate_assertion(assertion=row, source=source)
+    row.validation_state = validation_payload["validation_state"]
+    row.validation_score = validation_payload["validation_quality"]
+    row.validation_reason = validation_payload["validation_reason"]
+    row.trust_state = validation_payload["trust_state"]
+    row.validated_at = validation_payload["validated_at"]
+    row.extraction_confidence = validation_payload["extraction_confidence"]
+    created.append(row)
 
 
 def _maybe_add_warren_certificate_rule(
