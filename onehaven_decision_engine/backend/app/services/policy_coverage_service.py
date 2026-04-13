@@ -8,6 +8,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import (
+    compute_tier_coverage,
     expected_rule_universe_for_scope,
     normalize_categories,
 )
@@ -16,8 +17,17 @@ from app.services.jurisdiction_completeness_service import (
     collect_covered_categories_for_scope,
     compute_jurisdiction_score_breakdown,
     compute_scope_freshness_summary,
+    evaluate_jurisdiction_trust_decision,
 )
 from app.policy_models import JurisdictionCoverageStatus, PolicyAssertion, PolicySource
+
+
+AUTHORITY_TIER_RANKS: dict[str, int] = {
+    "derived_or_inferred": 25,
+    "semi_authoritative_operational": 60,
+    "approved_official_supporting": 85,
+    "authoritative_official": 100,
+}
 from app.services.policy_catalog_admin_service import merged_catalog_for_market
 from app.services.policy_cleanup_service import ARCHIVE_MARKER
 
@@ -275,6 +285,98 @@ def _category_presence_map(categories: list[str], required: list[str]) -> dict[s
     return {category: category in category_set for category in required}
 
 
+def _source_authority_rank(source: PolicySource) -> int:
+    try:
+        rank = int(getattr(source, "authority_rank", 0) or 0)
+        if rank > 0:
+            return rank
+    except Exception:
+        pass
+    tier = str(getattr(source, "authority_tier", None) or "derived_or_inferred").strip()
+    return int(AUTHORITY_TIER_RANKS.get(tier, 25))
+
+
+def _source_authority_tier(source: PolicySource) -> str:
+    tier = str(getattr(source, "authority_tier", None) or "").strip()
+    if tier:
+        return tier
+    rank = _source_authority_rank(source)
+    if rank >= 100:
+        return "authoritative_official"
+    if rank >= 85:
+        return "approved_official_supporting"
+    if rank >= 60:
+        return "semi_authoritative_operational"
+    return "derived_or_inferred"
+
+
+def _category_source_authority_summary(latest_sources: list[PolicySource], required_categories: list[str], critical_categories: list[str]) -> dict[str, Any]:
+    by_category: dict[str, dict[str, Any]] = {}
+    critical_set = set(required_categories).intersection(set(critical_categories))
+    for category in required_categories:
+        by_category[category] = {
+            "category": category,
+            "source_count": 0,
+            "authoritative_source_count": 0,
+            "approved_supporting_source_count": 0,
+            "semi_authoritative_source_count": 0,
+            "derived_source_count": 0,
+            "best_authority_tier": None,
+            "best_authority_rank": 0,
+            "best_authority_score": 0.0,
+            "source_urls": [],
+            "authority_classes": [],
+            "authoritative_backing_ok": category not in critical_set,
+        }
+
+    for source in latest_sources:
+        categories = normalize_categories(_loads_dict(getattr(source, "source_metadata_json", None)).get("discovery", {}).get("category_hints") or [])
+        categories = categories or normalize_categories(_loads_dict(getattr(source, "registry_meta_json", None)).get("category_hints") or [])
+        categories = categories or normalize_categories(getattr(source, "normalized_categories_json", None))
+        if not categories:
+            categories = required_categories
+        tier = _source_authority_tier(source)
+        rank = _source_authority_rank(source)
+        auth_score = float(getattr(source, "authority_score", 0.0) or 0.0)
+        for category in categories:
+            if category not in by_category:
+                continue
+            row = by_category[category]
+            row["source_count"] += 1
+            if tier == "authoritative_official":
+                row["authoritative_source_count"] += 1
+            elif tier == "approved_official_supporting":
+                row["approved_supporting_source_count"] += 1
+            elif tier == "semi_authoritative_operational":
+                row["semi_authoritative_source_count"] += 1
+            else:
+                row["derived_source_count"] += 1
+            if rank >= row["best_authority_rank"]:
+                row["best_authority_rank"] = rank
+                row["best_authority_tier"] = tier
+                row["best_authority_score"] = max(auth_score, row["best_authority_score"])
+            url = str(getattr(source, "url", "") or "").strip()
+            if url and url not in row["source_urls"]:
+                row["source_urls"].append(url)
+            authority_class = str(getattr(source, "authority_class", "") or "").strip()
+            if authority_class and authority_class not in row["authority_classes"]:
+                row["authority_classes"].append(authority_class)
+
+    critical_missing = []
+    for category in critical_set:
+        row = by_category.get(category) or {}
+        authoritative_backing_ok = bool(row.get("best_authority_rank", 0) >= AUTHORITY_TIER_RANKS["approved_official_supporting"])
+        row["authoritative_backing_ok"] = authoritative_backing_ok
+        if not authoritative_backing_ok:
+            critical_missing.append(category)
+
+    return {
+        "by_category": by_category,
+        "critical_categories_missing_authoritative_backing": critical_missing,
+        "authoritative_backing_ok": not bool(critical_missing),
+    }
+
+
 def _governance_category_buckets(assertions: list[PolicyAssertion]) -> dict[str, dict[str, int]]:
     out: dict[str, dict[str, int]] = {}
     for assertion in assertions:
@@ -326,6 +428,8 @@ def compute_coverage_status(
     latest_sources_by_url = _latest_active_source_by_url(all_sources, active_urls=active_urls)
     latest_sources = list(latest_sources_by_url.values())
     source_ids_active = {src.id for src in latest_sources}
+    authority_summary = _category_source_authority_summary(latest_sources, required_categories, critical_categories)
+    critical_categories_missing_authoritative_backing = authority_summary["critical_categories_missing_authoritative_backing"]
 
     assertions = _market_assertions(db, org_id=org_id, state=st, county=cnty, city=cty, pha_name=pha)
     trustworthy_effective_assertions = _effective_assertions(assertions)
@@ -384,11 +488,33 @@ def compute_coverage_status(
         city=cty,
         required_categories=required_categories,
     )
-    breakdown = compute_jurisdiction_score_breakdown(required_categories=required_categories, category_assessments=category_assessments)
+    breakdown = compute_jurisdiction_score_breakdown(
+        required_categories=required_categories,
+        category_assessments=category_assessments,
+    )
     covered_categories = collect_covered_categories_for_scope(db, state=st, county=cnty, city=cty)
     freshness = compute_scope_freshness_summary(db, state=st, county=cnty, city=cty)
 
+    trust_decision = evaluate_jurisdiction_trust_decision(
+        breakdown=breakdown,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        include_section8=True,
+    )
+    tier_coverage_snapshot = compute_tier_coverage(
+        covered_categories=breakdown.covered_categories,
+        category_statuses=breakdown.category_statuses,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        include_section8=True,
+    )
+
     critical_missing = [category for category in breakdown.missing_categories if category in set(critical_categories)]
+    critical_missing = sorted(set(critical_missing + list(critical_categories_missing_authoritative_backing)))
     critical_stale = [category for category in breakdown.stale_categories if category in set(critical_categories)]
     critical_conflicting = [category for category in breakdown.conflicting_categories if category in set(critical_categories)]
     critical_inferred = [category for category in breakdown.inferred_categories if category in set(critical_categories)]
@@ -399,7 +525,7 @@ def compute_coverage_status(
         coverage_status = "sources_collected"
     elif has_extracted and active_governed_rule_count == 0 and approved_not_active_count == 0:
         coverage_status = "assertions_extracted"
-    elif critical_missing or critical_stale or critical_conflicting:
+    elif critical_missing or critical_stale or critical_conflicting or critical_categories_missing_authoritative_backing:
         coverage_status = "critical_gaps"
     elif verified_rule_count > 0:
         coverage_status = "verified_extended"
@@ -440,11 +566,18 @@ def compute_coverage_status(
         "optional_categories": optional_categories,
         "covered_categories": normalize_categories(covered_categories),
         "covered_category_presence": covered_presence,
+        "expected_category_statuses": dict(breakdown.category_statuses),
+        "tier_coverage": [row.to_dict() for row in tier_coverage_snapshot],
+        "incomplete_required_tiers": [row.jurisdiction_type for row in tier_coverage_snapshot if not row.complete],
         "missing_categories": breakdown.missing_categories,
         "stale_categories": breakdown.stale_categories,
         "inferred_categories": breakdown.inferred_categories,
         "conflicting_categories": breakdown.conflicting_categories,
         "critical_missing_categories": critical_missing,
+        "critical_categories_missing_authoritative_backing": critical_categories_missing_authoritative_backing,
+        "source_authority_summary": authority_summary,
+        "category_authority_tiers": authority_summary.get("by_category", {}),
+        "authoritative_backing_ok": authority_summary.get("authoritative_backing_ok", False),
         "critical_stale_categories": critical_stale,
         "critical_inferred_categories": critical_inferred,
         "critical_conflicting_categories": critical_conflicting,
@@ -503,6 +636,18 @@ def compute_coverage_status(
             "excluded_states": ["replaced", "superseded", "conflicting"],
         },
         "scoring_defaults": breakdown.scoring_defaults,
+        # Chunk 1 additive trust gating fields.
+        "trust_decision": trust_decision.to_dict(),
+        "safe_for_projection": trust_decision.safe_for_projection,
+        "safe_for_user_reliance": trust_decision.safe_for_user_reliance,
+        "trust_decision_code": trust_decision.decision_code,
+        "trust_blocked": trust_decision.blocked,
+        "trust_blocker_reasons": sorted(set(list(trust_decision.blocker_reasons) + (["critical_categories_missing_authoritative_backing"] if critical_categories_missing_authoritative_backing else []))),
+        "manual_review_reasons": trust_decision.manual_review_reasons,
+        "missing_critical_categories_for_trust": trust_decision.missing_critical_categories,
+        "stale_authoritative_categories": trust_decision.stale_authoritative_categories,
+        "incomplete_required_tiers": [row.jurisdiction_type for row in tier_coverage_snapshot if not row.complete],
+        "tier_coverage": [row.to_dict() for row in tier_coverage_snapshot],
     }
 
 
@@ -580,6 +725,7 @@ def upsert_coverage_status(
             "critical_categories": payload.get("critical_categories", []),
             "optional_categories": payload.get("optional_categories", []),
             "critical_missing_categories": payload.get("critical_missing_categories", []),
+            "critical_categories_missing_authoritative_backing": payload.get("critical_categories_missing_authoritative_backing", []),
             "critical_stale_categories": payload.get("critical_stale_categories", []),
             "critical_inferred_categories": payload.get("critical_inferred_categories", []),
             "critical_conflicting_categories": payload.get("critical_conflicting_categories", []),
@@ -600,6 +746,20 @@ def upsert_coverage_status(
             "excluded_rule_count": payload.get("excluded_rule_count"),
             "governance_category_buckets": payload.get("governance_category_buckets", {}),
             "category_details": payload.get("category_details", {}),
+            "source_authority_summary": payload.get("source_authority_summary", {}),
+            "category_authority_tiers": payload.get("category_authority_tiers", {}),
+            "authoritative_backing_ok": payload.get("authoritative_backing_ok"),
+            # Chunk 1 additive trust metadata.
+            "trust_decision": payload.get("trust_decision", {}),
+            "safe_for_projection": payload.get("safe_for_projection"),
+            "safe_for_user_reliance": payload.get("safe_for_user_reliance"),
+            "trust_decision_code": payload.get("trust_decision_code"),
+            "trust_blocked": payload.get("trust_blocked"),
+            "trust_blocker_reasons": payload.get("trust_blocker_reasons", []),
+            "manual_review_reasons": payload.get("manual_review_reasons", []),
+            "stale_authoritative_categories": payload.get("stale_authoritative_categories", []),
+            "incomplete_required_tiers": payload.get("incomplete_required_tiers", []),
+            "tier_coverage": payload.get("tier_coverage", []),
         }
     )
 
@@ -619,6 +779,10 @@ def upsert_coverage_status(
         setattr(row, "pha_core_ok", payload["pha_core_ok"])
     if hasattr(row, "authoritative_source_count"):
         setattr(row, "authoritative_source_count", payload["authoritative_source_count"])
+    if hasattr(row, "safe_for_projection"):
+        setattr(row, "safe_for_projection", payload["safe_for_projection"])
+    if hasattr(row, "safe_for_user_reliance"):
+        setattr(row, "safe_for_user_reliance", payload["safe_for_user_reliance"])
 
     db.commit()
     db.refresh(row)

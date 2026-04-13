@@ -5,8 +5,6 @@ from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Mapping
 
 
-# Canonical normalized categories used by completeness + coverage services.
-# Keep these stable because they become persisted values in DB rows.
 CATEGORY_RENTAL_LICENSE = "rental_license"
 CATEGORY_INSPECTION = "inspection"
 CATEGORY_SECTION8 = "section8"
@@ -68,7 +66,6 @@ CATEGORY_DISPLAY_NAMES: dict[str, str] = {
     CATEGORY_SOURCE_OF_INCOME: "Source of income",
 }
 
-# Loose aliases so policy extraction / legacy defaults can map into one stable set.
 _CATEGORY_ALIASES: dict[str, str] = {
     "license": CATEGORY_RENTAL_LICENSE,
     "licenses": CATEGORY_RENTAL_LICENSE,
@@ -158,6 +155,11 @@ CATEGORY_STATUS_SCORES: dict[str, float] = {
     "missing": 0.0,
     "unknown": 0.0,
 }
+
+
+_TIER_SATISFIED_CATEGORY_STATUSES = {"covered", "verified", "fresh"}
+_TIER_INFERRED_CATEGORY_STATUSES = {"inferred", "partial", "conditional"}
+_TIER_BLOCKING_CATEGORY_STATUSES = {"missing", "stale", "conflicting", "inferred", "partial", "conditional"}
 
 _SECTION8_MARKET_CITIES = {
     "detroit",
@@ -291,6 +293,35 @@ class JurisdictionExpectedRuleUniverse:
     critical_categories: list[str]
     optional_categories: list[str]
     category_bundles: dict[str, dict[str, list[str]]]
+    tier_order: list[str] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["tier_order"] = list(self.tier_order or self.jurisdiction_types)
+        return payload
+
+
+@dataclass(frozen=True)
+class JurisdictionTierCoverage:
+    jurisdiction_type: str
+    required_categories: list[str]
+    critical_categories: list[str]
+    optional_categories: list[str]
+    covered_required_categories: list[str]
+    missing_required_categories: list[str]
+    missing_critical_categories: list[str]
+    completeness_ratio: float
+    complete: bool
+    required_category_statuses: dict[str, str] | None = None
+    critical_category_statuses: dict[str, str] | None = None
+    inferred_required_categories: list[str] | None = None
+    stale_required_categories: list[str] | None = None
+    conflicting_required_categories: list[str] | None = None
+    satisfied_required_categories: list[str] | None = None
+    unsatisfied_required_categories: list[str] | None = None
+    optional_category_statuses: dict[str, str] | None = None
+    status_counts: dict[str, int] | None = None
+    blocking_statuses: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -380,6 +411,27 @@ def expected_categories_for_jurisdiction_type(jurisdiction_type: str) -> dict[st
     }
 
 
+def _merge_bundle_categories(
+    bundle: dict[str, list[str]],
+    *,
+    required: Iterable[Any] | None = None,
+    critical: Iterable[Any] | None = None,
+    optional: Iterable[Any] | None = None,
+) -> dict[str, list[str]]:
+    next_required = normalize_categories(list(bundle.get("required", [])) + list(required or []))
+    next_critical = normalize_categories(list(bundle.get("critical", [])) + list(critical or []))
+    next_optional = [
+        category
+        for category in normalize_categories(list(bundle.get("optional", [])) + list(optional or []))
+        if category not in set(next_required)
+    ]
+    return {
+        "required": next_required,
+        "critical": next_critical,
+        "optional": next_optional,
+    }
+
+
 def _scope_should_include_section8(
     *,
     city: str | None,
@@ -411,7 +463,9 @@ def infer_jurisdiction_types(
     include_section8: bool = True,
     tenant_waitlist_depth: str | None = None,
 ) -> list[str]:
-    types: list[str] = [JURISDICTION_TYPE_STATE]
+    types: list[str] = []
+    if state:
+        types.append(JURISDICTION_TYPE_STATE)
     if county:
         types.append(JURISDICTION_TYPE_COUNTY)
     if city:
@@ -446,47 +500,69 @@ def expected_rule_universe_for_scope(
     )
 
     category_bundles: dict[str, dict[str, list[str]]] = {}
+    for jurisdiction_type in jurisdiction_types:
+        category_bundles[jurisdiction_type] = expected_categories_for_jurisdiction_type(jurisdiction_type)
+
+    normalized_city = (city or "").strip().lower()
+    if normalized_city in _LEAD_FOCUSED_CITIES and JURISDICTION_TYPE_CITY in category_bundles:
+        category_bundles[JURISDICTION_TYPE_CITY] = _merge_bundle_categories(
+            category_bundles[JURISDICTION_TYPE_CITY],
+            required=[CATEGORY_LEAD, CATEGORY_PERMITS],
+            critical=[CATEGORY_LEAD],
+        )
+
+    if city and JURISDICTION_TYPE_CITY in category_bundles:
+        category_bundles[JURISDICTION_TYPE_CITY] = _merge_bundle_categories(
+            category_bundles[JURISDICTION_TYPE_CITY],
+            required=[CATEGORY_OCCUPANCY],
+        )
+
+    if county and JURISDICTION_TYPE_COUNTY in category_bundles:
+        category_bundles[JURISDICTION_TYPE_COUNTY] = _merge_bundle_categories(
+            category_bundles[JURISDICTION_TYPE_COUNTY],
+            optional=[CATEGORY_TAX],
+        )
+
+    if pha_name and JURISDICTION_TYPE_SECTION8_OVERLAY in category_bundles:
+        category_bundles[JURISDICTION_TYPE_SECTION8_OVERLAY] = _merge_bundle_categories(
+            category_bundles[JURISDICTION_TYPE_SECTION8_OVERLAY],
+            required=[CATEGORY_SECTION8, CATEGORY_PROGRAM_OVERLAY, CATEGORY_CONTACTS],
+            critical=[CATEGORY_SECTION8, CATEGORY_PROGRAM_OVERLAY],
+        )
+
     required: list[str] = []
     critical: list[str] = []
     optional: list[str] = []
-
     for jurisdiction_type in jurisdiction_types:
-        bundle = expected_categories_for_jurisdiction_type(jurisdiction_type)
-        category_bundles[jurisdiction_type] = bundle
-        required.extend(bundle["required"])
-        critical.extend(bundle["critical"])
-        optional.extend(bundle["optional"])
+        bundle = category_bundles.get(jurisdiction_type, {})
+        required.extend(bundle.get("required", []))
+        critical.extend(bundle.get("critical", []))
+        optional.extend(bundle.get("optional", []))
 
-    normalized_city = (city or "").strip().lower()
-    if normalized_city in _LEAD_FOCUSED_CITIES:
-        required.extend([CATEGORY_LEAD, CATEGORY_PERMITS])
-        critical.append(CATEGORY_LEAD)
+    required_norm = normalize_categories(required)
+    critical_norm = normalize_categories(critical)
+    optional_norm = [
+        category
+        for category in normalize_categories(optional)
+        if category not in set(required_norm)
+    ]
 
-    if city:
-        required.append(CATEGORY_OCCUPANCY)
-
-    if county:
-        optional.append(CATEGORY_TAX)
-
-    if pha_name:
-        required.extend([CATEGORY_SECTION8, CATEGORY_PROGRAM_OVERLAY, CATEGORY_CONTACTS])
-        critical.extend([CATEGORY_SECTION8, CATEGORY_PROGRAM_OVERLAY])
-
-    optional = [category for category in normalize_categories(optional) if category not in set(normalize_categories(required))]
+    normalized_bundles = {
+        key: {
+            "required": normalize_categories(value.get("required", [])),
+            "critical": normalize_categories(value.get("critical", [])),
+            "optional": normalize_categories(value.get("optional", [])),
+        }
+        for key, value in category_bundles.items()
+    }
 
     return JurisdictionExpectedRuleUniverse(
         jurisdiction_types=jurisdiction_types,
-        required_categories=normalize_categories(required),
-        critical_categories=normalize_categories(critical),
-        optional_categories=optional,
-        category_bundles={
-            key: {
-                "required": normalize_categories(value.get("required", [])),
-                "critical": normalize_categories(value.get("critical", [])),
-                "optional": normalize_categories(value.get("optional", [])),
-            }
-            for key, value in category_bundles.items()
-        },
+        required_categories=required_norm,
+        critical_categories=critical_norm,
+        optional_categories=optional_norm,
+        category_bundles=normalized_bundles,
+        tier_order=list(jurisdiction_types),
     )
 
 
@@ -495,6 +571,7 @@ def get_required_categories(
     state: str | None = None,
     county: str | None = None,
     city: str | None = None,
+    pha_name: str | None = None,
     rental_license_required: bool | None = None,
     inspection_authority: str | None = None,
     inspection_frequency: str | None = None,
@@ -507,6 +584,7 @@ def get_required_categories(
         state=state,
         county=county,
         city=city,
+        pha_name=pha_name,
         include_section8=include_section8,
         tenant_waitlist_depth=tenant_waitlist_depth,
     )
@@ -522,6 +600,63 @@ def get_required_categories(
     if include_fees:
         required.append(CATEGORY_FEES)
     return normalize_categories(required)
+
+
+def get_critical_categories(
+    *,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> list[str]:
+    return expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    ).critical_categories
+
+
+def get_optional_categories(
+    *,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> list[str]:
+    return expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    ).optional_categories
+
+
+def get_category_bundle_for_scope(
+    *,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> dict[str, dict[str, list[str]]]:
+    return expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    ).category_bundles
 
 
 def required_categories_for_market(
@@ -541,6 +676,25 @@ def required_categories_for_market(
         include_section8=include_section8,
         tenant_waitlist_depth=tenant_waitlist_depth,
     ).required_categories
+
+
+def required_categories_for_city(
+    city: str | None,
+    *,
+    state: str | None = None,
+    county: str | None = None,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> list[str]:
+    return required_categories_for_market(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
 
 
 def compute_confidence_from_missing(
@@ -574,7 +728,10 @@ def compute_completeness_score(
     covered_set = set(covered)
 
     missing = [category for category in required if category not in covered_set]
-    category_statuses = {category: ("covered" if category in covered_set else "missing") for category in required}
+    category_statuses = {
+        category: ("covered" if category in covered_set else "missing")
+        for category in required
+    }
 
     if not required:
         score = 1.0
@@ -679,6 +836,137 @@ def compute_category_score_from_statuses(
     )
 
 
+def compute_tier_coverage(
+    *,
+    covered_categories: Iterable[Any] | None = None,
+    category_statuses: Mapping[str, Any] | None = None,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> list[JurisdictionTierCoverage]:
+    covered = set(normalize_categories(covered_categories))
+    raw_statuses = category_statuses or {}
+    normalized_statuses: dict[str, str] = {}
+    for key, value in raw_statuses.items():
+        normalized_key = normalize_category(key)
+        if not normalized_key:
+            continue
+        normalized_statuses[normalized_key] = str(value or "missing").strip().lower() or "missing"
+
+    if not normalized_statuses:
+        normalized_statuses = {
+            category: ("covered" if category in covered else "missing")
+            for category in normalize_categories(covered_categories)
+        }
+
+    universe = expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
+
+    tier_rows: list[JurisdictionTierCoverage] = []
+    for jurisdiction_type in universe.jurisdiction_types:
+        bundle = universe.category_bundles.get(jurisdiction_type, {})
+        required = normalize_categories(bundle.get("required", []))
+        critical = normalize_categories(bundle.get("critical", []))
+        optional = normalize_categories(bundle.get("optional", []))
+
+        required_statuses = {
+            category: normalized_statuses.get(category, "missing")
+            for category in required
+        }
+        critical_statuses = {
+            category: required_statuses.get(category, normalized_statuses.get(category, "missing"))
+            for category in critical
+        }
+        optional_statuses = {
+            category: normalized_statuses.get(category, "missing")
+            for category in optional
+        }
+
+        satisfied_required = [
+            category
+            for category, status in required_statuses.items()
+            if status in _TIER_SATISFIED_CATEGORY_STATUSES
+        ]
+        missing_required = [
+            category
+            for category, status in required_statuses.items()
+            if status == "missing"
+        ]
+        stale_required = [
+            category
+            for category, status in required_statuses.items()
+            if status == "stale"
+        ]
+        conflicting_required = [
+            category
+            for category, status in required_statuses.items()
+            if status == "conflicting"
+        ]
+        inferred_required = [
+            category
+            for category, status in required_statuses.items()
+            if status in _TIER_INFERRED_CATEGORY_STATUSES
+        ]
+        unsatisfied_required = [
+            category
+            for category, status in required_statuses.items()
+            if status in _TIER_BLOCKING_CATEGORY_STATUSES
+        ]
+        missing_critical = [
+            category
+            for category, status in critical_statuses.items()
+            if status in _TIER_BLOCKING_CATEGORY_STATUSES
+        ]
+        ratio = len(satisfied_required) / float(len(required) or 1)
+
+        status_counts: dict[str, int] = {}
+        for status in required_statuses.values():
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+        blocking_statuses = sorted(
+            set(
+                status
+                for status in required_statuses.values()
+                if status in _TIER_BLOCKING_CATEGORY_STATUSES
+            )
+        )
+
+        tier_rows.append(
+            JurisdictionTierCoverage(
+                jurisdiction_type=jurisdiction_type,
+                required_categories=required,
+                critical_categories=critical,
+                optional_categories=optional,
+                covered_required_categories=satisfied_required,
+                missing_required_categories=missing_required,
+                missing_critical_categories=missing_critical,
+                completeness_ratio=float(round(ratio, 6)),
+                complete=not bool(unsatisfied_required),
+                required_category_statuses=required_statuses,
+                critical_category_statuses=critical_statuses,
+                inferred_required_categories=inferred_required,
+                stale_required_categories=stale_required,
+                conflicting_required_categories=conflicting_required,
+                satisfied_required_categories=satisfied_required,
+                unsatisfied_required_categories=unsatisfied_required,
+                optional_category_statuses=optional_statuses,
+                status_counts=status_counts,
+                blocking_statuses=blocking_statuses,
+            )
+        )
+
+    return tier_rows
+
+
 def category_coverage_from_rule_keys(
     *,
     verified_rule_keys: Iterable[Any] | None,
@@ -691,16 +979,11 @@ def category_coverage_from_rule_keys(
     conditional.discard(CATEGORY_UNCATEGORIZED)
 
     output: dict[str, str] = {}
-    for raw_category in list(required_categories or []):
-        original = str(raw_category).strip()
-        normalized = normalize_category(raw_category)
-        if normalized is None:
-            output[original or str(raw_category)] = "missing"
-            continue
-        if normalized in verified:
-            output[original or normalized] = "verified"
-        elif normalized in conditional:
-            output[original or normalized] = "conditional"
+    for category in normalize_categories(required_categories):
+        if category in verified:
+            output[category] = "verified"
+        elif category in conditional:
+            output[category] = "conditional"
         else:
-            output[original or normalized] = "missing"
+            output[category] = "missing"
     return output

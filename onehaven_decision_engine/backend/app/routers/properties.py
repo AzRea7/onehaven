@@ -509,6 +509,11 @@ def _snapshot_backed_property_payload(
         property_id=int(prop.id),
     )
 
+    workflow_gate = workflow.get("compliance_gate") or {}
+    workflow_trust = workflow.get("jurisdiction_trust") or workflow_gate.get("jurisdiction_trust") or {}
+    inventory_trust = snapshot.get("jurisdiction_trust") or {}
+    effective_trust = workflow_trust if isinstance(workflow_trust, dict) and workflow_trust else inventory_trust
+
     resolved_market_rent_estimate = snapshot.get("market_rent_estimate")
     if resolved_market_rent_estimate is None and rent_row is not None:
         resolved_market_rent_estimate = rent_row.market_rent_estimate
@@ -615,6 +620,16 @@ def _snapshot_backed_property_payload(
             "stage_completion_summary": state_payload.get("stage_completion_summary"),
             "next_actions": state_payload.get("next_actions") or [],
             "workflow": workflow,
+            "jurisdiction_trust": effective_trust,
+            "safe_for_projection": effective_trust.get("safe_for_projection"),
+            "safe_for_user_reliance": effective_trust.get("safe_for_user_reliance"),
+            "trust_decision_code": effective_trust.get("decision_code"),
+            "trust_blocker_reasons": effective_trust.get("blocker_reasons") or [],
+            "manual_review_reasons": effective_trust.get("manual_review_reasons") or [],
+            "jurisdiction_blocked": not bool(effective_trust.get("safe_for_projection", True)),
+            "workflow_compliance_gate": workflow_gate,
+            "workflow_blocked_reason": workflow_gate.get("blocked_reason"),
+            "workflow_warning_reason": workflow_gate.get("warning_reason"),
             "acquisition_tags": acquisition_tags,
             "acquisition_first_seen_at": acquisition_meta.get("acquisition_first_seen_at"),
             "acquisition_last_seen_at": acquisition_meta.get("acquisition_last_seen_at"),
@@ -1063,6 +1078,13 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
     friction = compute_friction(jr)
     uw = _latest_underwriting(db, org_id=p.org_id, property_id=int(prop.id))
     snapshot = build_property_inventory_snapshot(db, org_id=p.org_id, property_id=int(prop.id))
+   
+    workflow = build_workflow_summary(
+        db,
+        org_id=p.org_id,
+        property_id=int(prop.id),
+        recompute=False,
+    )  
 
     checklist_row = db.scalar(
         select(PropertyChecklist)
@@ -1112,7 +1134,13 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
         },
         last_underwriting_result=UnderwritingResultOut.model_validate(uw) if uw else None,
         checklist=checklist_out,
-        inventory_snapshot=snapshot,
+        inventory_snapshot={
+            **snapshot,
+            "workflow": workflow,
+            "jurisdiction_trust": (workflow.get("jurisdiction_trust") or snapshot.get("jurisdiction_trust") or {}),
+            "workflow_blocked_reason": ((workflow.get("compliance_gate") or {}).get("blocked_reason")),
+            "workflow_warning_reason": ((workflow.get("compliance_gate") or {}).get("warning_reason")),
+        },
     )
 
 

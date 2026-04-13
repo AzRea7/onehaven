@@ -90,6 +90,41 @@ def _inspection_rows(db: Session, *, inspection_id: int) -> list[InspectionItem]
         ).all()
     )
 
+def _projection_jurisdiction_trust(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        return {}
+    projection = snapshot.get("projection") or {}
+    if not isinstance(projection, dict):
+        return {}
+    projection_reason = projection.get("projection_reason") or {}
+    if not isinstance(projection_reason, dict):
+        return {}
+    trust = projection_reason.get("jurisdiction_trust") or {}
+    return trust if isinstance(trust, dict) else {}
+
+
+def _trust_blocked_for_compliance(trust: dict[str, Any]) -> bool:
+    if not isinstance(trust, dict) or not trust:
+        return False
+    if not bool(trust.get("safe_for_projection", True)):
+        return True
+    manual_review_reasons = trust.get("manual_review_reasons") or []
+    return bool(manual_review_reasons)
+
+
+def _trust_reason_payload(trust: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(trust, dict):
+        return {}
+    return {
+        "decision_code": trust.get("decision_code") or trust.get("decision") or trust.get("code"),
+        "safe_for_projection": bool(trust.get("safe_for_projection", False)),
+        "safe_for_user_reliance": bool(trust.get("safe_for_user_reliance", False)),
+        "blocker_reasons": [str(x) for x in (trust.get("blocker_reasons") or []) if str(x).strip()],
+        "manual_review_reasons": [str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()],
+        "missing_critical_categories": list(trust.get("missing_critical_categories") or []),
+        "stale_authoritative_categories": list(trust.get("stale_authoritative_categories") or []),
+        "incomplete_required_tiers": list(trust.get("incomplete_required_tiers") or []),
+    }
 
 def _checklist_rows(db: Session, *, org_id: int, property_id: int) -> list[PropertyChecklistItem]:
     return list(
@@ -794,9 +829,14 @@ def build_property_inspection_readiness(
     rebuild_property_projection(db, org_id=org_id, property_id=property_id)
     projection = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
     document_stack = build_property_document_stack(db, org_id=org_id, property_id=property_id)
-
+    jurisdiction_trust = _projection_jurisdiction_trust(projection)
+    trust_reason_payload = _trust_reason_payload(jurisdiction_trust)
+    trust_blocked = _trust_blocked_for_compliance(jurisdiction_trust)
+        
     overall_status = "ready"
-    if readiness_score.posture in {"critical_failures", "needs_remediation", "not_ready", "reinspection_required"}:
+    if trust_blocked:
+        overall_status = "blocked"
+    elif readiness_score.posture in {"critical_failures", "needs_remediation", "not_ready", "reinspection_required", "jurisdiction_blocked"}:
         overall_status = "blocked"
     elif warnings:
         overall_status = "attention"
@@ -833,6 +873,8 @@ def build_property_inspection_readiness(
             "friction_multiplier": profile_summary.get("friction_multiplier"),
         },
         "coverage": profile_summary.get("coverage") or {},
+        "jurisdiction_trust": trust_reason_payload,
+        "trust_blocked": trust_blocked,
         "overall_status": overall_status,
         "score_pct": float(readiness_score.readiness_score),
         "completion_pct": float(readiness_score.completion_pct),
@@ -847,6 +889,9 @@ def build_property_inspection_readiness(
             "result_status": readiness_score.result_status,
             "latest_inspection_passed": bool(readiness_score.latest_inspection_passed),
             "is_compliant": bool(readiness_score.is_compliant),
+            "jurisdiction_safe_for_projection": bool(trust_reason_payload.get("safe_for_projection", False)),
+            "jurisdiction_safe_for_user_reliance": bool(trust_reason_payload.get("safe_for_user_reliance", False)),
+            "jurisdiction_manual_review_required": bool(trust_reason_payload.get("manual_review_reasons")),
             "reinspect_required": bool(readiness_score.reinspect_required),
         },
         "counts": {
@@ -881,8 +926,11 @@ def build_property_inspection_readiness(
         "effective_hqs_counts": effective_hqs.get("counts") or {},
         "policy_brief": brief,
         "projection": projection,
+        "projection_jurisdiction_trust": trust_reason_payload,
         "documents": document_stack,
         "jurisdiction": profile_summary,
+        "jurisdiction_blockers": trust_reason_payload.get("blocker_reasons") or [],
+        "jurisdiction_manual_review_reasons": trust_reason_payload.get("manual_review_reasons") or [],
         "latest_inspection": latest_inspection_payload,
         "template": {
             "template_key": checklist_sync["template_key"],
@@ -901,6 +949,8 @@ def build_property_inspection_readiness(
             "completion_pct": float(readiness_score.completion_pct),
             "completion_projection_pct": float(readiness_score.completion_projection_pct),
             "posture": readiness_score.posture,
+            "jurisdiction_trust_blocked": trust_blocked,
+            "jurisdiction_trust_decision_code": trust_reason_payload.get("decision_code"),
             "reinspect_required": bool(readiness_score.reinspect_required),
         },
         "readiness_summary": readiness_summary,
@@ -971,6 +1021,15 @@ def apply_inspection_form_results(
                     "workflow_effect": {
                         "blocks_compliance": not bool(
                             (readiness_summary.get("completion") or {}).get("is_compliant", False)
+                        ),
+                        "jurisdiction_trust_blocked": bool(
+                            (readiness_summary.get("trust_blocked") or False)
+                        ),
+                        "jurisdiction_trust_decision_code": (
+                            (readiness_summary.get("jurisdiction_trust") or {}).get("decision_code")
+                        ),
+                        "jurisdiction_blocker_reasons": (
+                            (readiness_summary.get("jurisdiction_trust") or {}).get("blocker_reasons") or []
                         ),
                         "posture": ((readiness_summary.get("readiness") or {}).get("posture")),
                     },
@@ -1132,6 +1191,9 @@ def generate_policy_tasks_for_property(
         "readiness": readiness["readiness"],
         "score_pct": readiness["score_pct"],
         "inspection_failure_tasks": failure_task_result,
+        "jurisdiction_trust": readiness.get("jurisdiction_trust") or {},
+        "trust_blocked": bool(readiness.get("trust_blocked")),
+        "jurisdiction_blockers": readiness.get("jurisdiction_blockers") or [],
         "readiness_summary": readiness_summary,
     }
 
@@ -1199,6 +1261,15 @@ def run_hqs(
                         "blocks_compliance": not bool(
                             (readiness_summary.get("completion") or {}).get("is_compliant", False)
                         ),
+                        "jurisdiction_trust_blocked": bool(
+                            (readiness_summary.get("trust_blocked") or False)
+                        ),
+                        "jurisdiction_trust_decision_code": (
+                            (readiness_summary.get("jurisdiction_trust") or {}).get("decision_code")
+                        ),
+                        "jurisdiction_blocker_reasons": (
+                            (readiness_summary.get("jurisdiction_trust") or {}).get("blocker_reasons") or []
+                        ),
                         "posture": ((readiness_summary.get("readiness") or {}).get("posture")),
                     },
                 }
@@ -1213,6 +1284,9 @@ def run_hqs(
         "legacy_summary": summary,
         "top_fix_candidates": fix_candidates,
         "inspection_readiness": readiness,
+        "jurisdiction_trust": readiness_summary.get("jurisdiction_trust") or {},
+        "trust_blocked": bool(readiness_summary.get("trust_blocked")),
+        "jurisdiction_blockers": readiness_summary.get("trust_blocker_reasons") or [],
         "task_generation": task_info,
         "readiness_summary": readiness_summary,
     }

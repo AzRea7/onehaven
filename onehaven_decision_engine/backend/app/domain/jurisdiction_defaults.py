@@ -44,6 +44,32 @@ DEFAULT_TRUST_MIN_COMPLETENESS_SCORE = 0.80
 DEFAULT_TRUST_LOW_CONFIDENCE_THRESHOLD = 0.60
 DEFAULT_TRUST_READY_CONFIDENCE_THRESHOLD = 0.85
 
+# Chunk 1 additive trust gating defaults.
+DEFAULT_HARD_TRUST_POLICY: dict[str, Any] = {
+    "projection_min_completeness_score": 0.80,
+    "user_reliance_min_completeness_score": 0.90,
+    "block_on_missing_critical_categories": True,
+    "block_on_unresolved_conflicts": True,
+    "block_on_incomplete_required_tiers": True,
+    "block_on_stale_authoritative_sources_for_projection": False,
+    "block_on_stale_authoritative_sources_for_user_reliance": True,
+    "manual_review_on_inferred_critical_categories": True,
+    "manual_review_on_any_inferred_required_categories": False,
+    "manual_review_on_low_authority_required_categories": True,
+    "require_authoritative_sources_for_critical_categories": True,
+    "authoritative_freshness_min_score": 0.60,
+    "authority_min_score_for_user_reliance": 0.70,
+    "governance_min_score_for_projection": 0.60,
+    "governance_min_score_for_user_reliance": 0.75,
+    "minimum_authority_tier_for_critical_categories": "authoritative_official",
+    "minimum_authority_rank_for_critical_categories": 100,
+    "allow_approved_supporting_sources_for_critical_categories": True,
+    "allow_semi_authoritative_for_noncritical_categories": True,
+    "allow_derived_sources_for_gap_detection_only": True,
+    "tier_blocking_statuses": ["missing", "stale", "conflicting", "inferred", "partial", "conditional"],
+    "tier_satisfied_statuses": ["covered", "verified", "fresh"],
+}
+
 
 @dataclass(frozen=True)
 class JurisdictionDefault:
@@ -164,10 +190,7 @@ class JurisdictionDefault:
         }
 
     def default_trust_defaults(self) -> dict[str, Any]:
-        if isinstance(self.trust_defaults, dict) and self.trust_defaults:
-            return dict(self.trust_defaults)
-
-        return {
+        base = {
             "min_completeness_score_for_trust": DEFAULT_TRUST_MIN_COMPLETENESS_SCORE,
             "ready_confidence_threshold": DEFAULT_TRUST_READY_CONFIDENCE_THRESHOLD,
             "low_confidence_threshold": DEFAULT_TRUST_LOW_CONFIDENCE_THRESHOLD,
@@ -177,6 +200,14 @@ class JurisdictionDefault:
             "warn_on_critical_stale": True,
             "warn_on_inferred_critical_categories": True,
         }
+        base.update(DEFAULT_HARD_TRUST_POLICY)
+
+        if isinstance(self.trust_defaults, dict) and self.trust_defaults:
+            merged = dict(base)
+            merged.update(self.trust_defaults)
+            return merged
+
+        return base
 
     def default_freshness_defaults(self) -> dict[str, Any]:
         if isinstance(self.freshness_defaults, dict) and self.freshness_defaults:
@@ -215,6 +246,8 @@ class JurisdictionDefault:
                 "critical_categories": list(universe.get("critical_categories", [])),
                 "optional_categories": list(universe.get("optional_categories", [])),
                 "jurisdiction_types": list(universe.get("jurisdiction_types", [])),
+                "tier_order": list(universe.get("tier_order", universe.get("jurisdiction_types", []))),
+                "expected_tier_rule_universe": dict(universe.get("category_bundles", {})),
             },
             "compliance": {
                 "rental_license_required": "yes" if self.rental_license_required else "no",
@@ -237,6 +270,15 @@ class JurisdictionDefault:
             "trust": {
                 "projection": trust_defaults,
                 "freshness": freshness_defaults,
+                "source_authority": {
+                    "minimum_authority_tier_for_critical_categories": trust_defaults.get("minimum_authority_tier_for_critical_categories"),
+                    "minimum_authority_rank_for_critical_categories": trust_defaults.get("minimum_authority_rank_for_critical_categories"),
+                    "allow_approved_supporting_sources_for_critical_categories": trust_defaults.get("allow_approved_supporting_sources_for_critical_categories"),
+                    "allow_semi_authoritative_for_noncritical_categories": trust_defaults.get("allow_semi_authoritative_for_noncritical_categories"),
+                    "allow_derived_sources_for_gap_detection_only": trust_defaults.get("allow_derived_sources_for_gap_detection_only"),
+                    "tier_blocking_statuses": trust_defaults.get("tier_blocking_statuses", []),
+                    "tier_satisfied_statuses": trust_defaults.get("tier_satisfied_statuses", []),
+                },
             },
             "freshness": {
                 "policy_sources": freshness_defaults,
@@ -266,6 +308,17 @@ def completeness_scoring_defaults() -> dict[str, Any]:
         "category_status_weights": completeness_status_weights(),
         "stale_days": DEFAULT_STALE_DAYS,
     }
+
+
+def hard_trust_defaults() -> dict[str, Any]:
+    return dict(DEFAULT_HARD_TRUST_POLICY)
+
+
+def merged_hard_trust_defaults(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    merged = hard_trust_defaults()
+    if isinstance(overrides, dict) and overrides:
+        merged.update(overrides)
+    return merged
 
 
 def expected_rule_universe_defaults_for_scope(
@@ -477,6 +530,8 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
                 "block_on_critical_missing": True,
                 "warn_on_critical_stale": True,
                 "warn_on_inferred_critical_categories": True,
+                "projection_min_completeness_score": 0.85,
+                "user_reliance_min_completeness_score": 0.92,
             },
             notes="Baseline default. Many older housing stock issues. Needs stronger local rule coverage.",
         ),
@@ -580,6 +635,8 @@ def michigan_global_defaults() -> List[JurisdictionDefault]:
                 "block_on_critical_missing": True,
                 "warn_on_critical_stale": True,
                 "warn_on_inferred_critical_categories": True,
+                "projection_min_completeness_score": 0.75,
+                "user_reliance_min_completeness_score": 0.85,
             },
             notes="Baseline default. Warren should typically resolve with higher confidence because the current codebase already models Warren more deeply.",
         ),
@@ -711,6 +768,7 @@ def default_policy_for_scope(
         "block_on_critical_missing": True,
         "warn_on_critical_stale": True,
         "warn_on_inferred_critical_categories": True,
+        **DEFAULT_HARD_TRUST_POLICY,
     }
     freshness_defaults = {
         "stale_days": DEFAULT_STALE_DAYS,

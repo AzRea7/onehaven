@@ -206,6 +206,22 @@ def _compute_combined_status(
     return "unknown", "pending", True
 
 
+def _jurisdiction_trust_flags(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    try:
+        snapshot = build_property_projection_snapshot(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+    except Exception:
+        return {}
+
+    projection = snapshot.get("projection") or {}
+    projection_reason = projection.get("projection_reason") or {}
+    trust = projection_reason.get("jurisdiction_trust") or {}
+    return trust if isinstance(trust, dict) else {}
+
+
 def compute_property_readiness_score(
     db: Session,
     *,
@@ -229,6 +245,7 @@ def compute_property_readiness_score(
     failed_items = 0
     blocked_items = 0
     na_items = 0
+    unknown_items = 0
     failed_critical_items = 0
 
     if latest is not None:
@@ -258,6 +275,7 @@ def compute_property_readiness_score(
             failed_items = int(scored.failed_items)
             blocked_items = int(scored.blocked_items)
             na_items = int(scored.na_items)
+            unknown_items = int(scored.unknown_items)
             failed_critical_items = int(scored.failed_critical_items)
 
     if total_items == 0:
@@ -273,39 +291,19 @@ def compute_property_readiness_score(
             failed_items = int(scored.failed_items)
             blocked_items = int(scored.blocked_items)
             na_items = int(scored.na_items)
+            unknown_items = int(scored.unknown_items)
             failed_critical_items = int(scored.failed_critical_items)
 
-    summary = summarize_items(checklist_rows, latest_inspection_passed=latest_inspection_passed)
-    completion_pct = float(round(summary.pct_done * 100.0, 2))
-
-    checklist_failed_count = sum(1 for row in checklist_rows if _status_from_checklist_row(row) == "fail")
-    checklist_blocked_count = sum(1 for row in checklist_rows if _status_from_checklist_row(row) == "blocked")
-    unresolved_failure_count = checklist_failed_count
-    unresolved_blocked_count = checklist_blocked_count
-    unresolved_critical_count = sum(
-        1
-        for row in checklist_rows
-        if _status_from_checklist_row(row) in {"fail", "blocked"} and int(getattr(row, "severity", 0) or 0) >= 4
-    )
-
-    evidence_blocking_count = 0
-    evidence_unknown_count = 0
-    evidence_conflicting_count = 0
-    evidence_stale_count = 0
-    try:
-        rebuild_property_projection(db, org_id=org_id, property_id=property_id)
-        projection = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
-        counts = projection.get("counts") or {}
-        evidence_blocking_count = int(counts.get("blocking") or 0)
-        evidence_unknown_count = int(counts.get("unknown") or 0)
-        evidence_conflicting_count = int(counts.get("conflicting") or 0)
-        evidence_stale_count = int(counts.get("stale") or 0)
-    except Exception:
-        projection = {"counts": {}}
-
-    unresolved_failure_count += evidence_blocking_count + evidence_conflicting_count
-    unresolved_blocked_count += evidence_stale_count
-    unresolved_critical_count += evidence_blocking_count
+    checklist_summary = summarize_items(checklist_rows)
+    checklist_failed_count = int(checklist_summary.get("failed_count", 0) or 0)
+    checklist_blocked_count = int(checklist_summary.get("blocked_count", 0) or 0)
+    unresolved_failure_count = int(checklist_summary.get("unresolved_failure_count", checklist_failed_count) or 0)
+    unresolved_blocked_count = int(checklist_summary.get("unresolved_blocked_count", checklist_blocked_count) or 0)
+    unresolved_critical_count = int(checklist_summary.get("unresolved_critical_count", 0) or 0)
+    evidence_blocking_count = int(checklist_summary.get("evidence_blocking_count", 0) or 0)
+    evidence_unknown_count = int(checklist_summary.get("evidence_unknown_count", 0) or 0)
+    evidence_conflicting_count = int(checklist_summary.get("evidence_conflicting_count", 0) or 0)
+    evidence_stale_count = int(checklist_summary.get("evidence_stale_count", 0) or 0)
 
     combined_readiness_status, combined_result_status, combined_reinspect_required = _compute_combined_status(
         latest_result_status=result_status,
@@ -315,19 +313,7 @@ def compute_property_readiness_score(
         unresolved_critical_count=unresolved_critical_count,
     )
 
-    if combined_result_status == "fail":
-        readiness_score_value = max(
-            0.0,
-            float(readiness_score_value)
-            - (float(unresolved_failure_count) * 6.0)
-            - (float(unresolved_blocked_count) * 4.0)
-            - (float(unresolved_critical_count) * 8.0),
-        )
-
-    unknown_items = max(
-        0,
-        int(total_items) - int(passed_items) - int(failed_items) - int(blocked_items) - int(na_items),
-    )
+    completion_pct = round((float(passed_items + na_items) / float(max(total_items, 1))) * 100.0, 2)
 
     hqs_ready = unresolved_failure_count == 0 and unresolved_blocked_count == 0 and combined_result_status != "fail"
     local_ready = unresolved_critical_count == 0 and combined_result_status != "fail"
@@ -341,6 +327,24 @@ def compute_property_readiness_score(
         and latest_inspection_passed
         and not combined_reinspect_required
     )
+
+    trust = _jurisdiction_trust_flags(db, org_id=org_id, property_id=property_id)
+    safe_for_projection = bool(trust.get("safe_for_projection", True))
+    safe_for_user_reliance = bool(trust.get("safe_for_user_reliance", True))
+    trust_blockers = [str(x) for x in (trust.get("blocker_reasons") or []) if str(x).strip()]
+    manual_review_reasons = [str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()]
+    trust_hard_block = (not safe_for_projection) or bool(manual_review_reasons)
+
+    if trust_hard_block:
+        local_ready = False
+        voucher_ready = False
+        lease_up_ready = False
+        is_compliant = False
+        if combined_readiness_status == "ready":
+            combined_readiness_status = "blocked"
+        if combined_result_status == "pass":
+            combined_result_status = "fail"
+        combined_reinspect_required = True
 
     completion_projection_pct = _completion_projection_pct(
         completion_pct=completion_pct,
@@ -360,6 +364,8 @@ def compute_property_readiness_score(
         completion_pct=completion_pct,
         reinspect_required=combined_reinspect_required,
     )
+    if trust_hard_block:
+        posture = "jurisdiction_blocked"
 
     return InspectionReadinessScore(
         property_id=int(property_id),
@@ -410,6 +416,7 @@ def build_property_readiness_summary(
         org_id=org_id,
         property_id=property_id,
     )
+    trust = _jurisdiction_trust_flags(db, org_id=org_id, property_id=property_id)
 
     return {
         "ok": True,
@@ -453,9 +460,12 @@ def build_property_readiness_summary(
             "evidence_conflicting_count": score.evidence_conflicting_count,
             "evidence_stale_count": score.evidence_stale_count,
         },
+        "jurisdiction_trust": trust,
+        "trust_blocked": not bool(trust.get("safe_for_projection", True)),
+        "trust_blocker_reasons": [str(x) for x in (trust.get("blocker_reasons") or []) if str(x).strip()],
+        "manual_review_reasons": [str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()],
         "raw": asdict(score),
     }
-
 
 
 def build_property_readiness_with_schedule(

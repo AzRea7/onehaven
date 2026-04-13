@@ -17,6 +17,14 @@ from app.domain.jurisdiction_categories import category_label
 from app.policy_models import PolicyCatalogEntry, PolicySource, PolicySourceVersion
 
 
+AUTHORITY_TIER_RANKS: dict[str, int] = {
+    "derived_or_inferred": 25,
+    "semi_authoritative_operational": 60,
+    "approved_official_supporting": 85,
+    "authoritative_official": 100,
+}
+
+
 DEFAULT_TIMEOUT_SECONDS = 20.0
 DISCOVERY_NOTE_MARKER = "[discovered]"
 CURATED_NOTE_MARKER = "[curated]"
@@ -34,6 +42,12 @@ class PolicySourceDiscoveryCandidate:
     authority_kind: str
     authority_score: float
     discovered_via: str
+    authority_tier: str = "derived_or_inferred"
+    authority_rank: int = 25
+    authority_class: str | None = None
+    authority_reason: str | None = None
+    publication_type: str | None = None
+    domain_name: str | None = None
     should_fetch: bool = True
 
     def as_dict(self) -> dict[str, Any]:
@@ -46,6 +60,12 @@ class PolicySourceDiscoveryCandidate:
             "search_terms": list(self.search_terms),
             "authority_kind": self.authority_kind,
             "authority_score": float(self.authority_score),
+            "authority_tier": self.authority_tier,
+            "authority_rank": int(self.authority_rank),
+            "authority_class": self.authority_class,
+            "authority_reason": self.authority_reason,
+            "publication_type": self.publication_type,
+            "domain_name": self.domain_name,
             "discovered_via": self.discovered_via,
             "should_fetch": bool(self.should_fetch),
         }
@@ -128,6 +148,76 @@ def _source_name_from_url(url: str) -> str:
     if not host:
         return "unknown_source"
     return host
+
+
+def _publication_type_from_url(url: str) -> str:
+    lower = (url or "").strip().lower()
+    if lower.endswith(".pdf"):
+        return "official_document"
+    if any(token in lower for token in ("ordinance", "code", "statute", "regulation", "ecfr", "federalregister")):
+        return "legal_code"
+    if any(token in lower for token in ("forms", "packet", "application", "checklist")):
+        return "official_form"
+    if any(token in lower for token in ("notice", "bulletin", "faq", "program")):
+        return "guidance_page"
+    return "web_page"
+
+
+def _authority_rank_for_tier(tier: str) -> int:
+    return int(AUTHORITY_TIER_RANKS.get(str(tier or "derived_or_inferred"), 25))
+
+
+def _classify_authority_tier(*, url: str, publisher: Optional[str] = None, title: Optional[str] = None, source_type: Optional[str] = None, source_kind: Optional[str] = None) -> dict[str, Any]:
+    host = urlparse(url).netloc.strip().lower()
+    publisher_text = (publisher or "").strip().lower()
+    title_text = (title or "").strip().lower()
+    source_type_text = (source_type or "").strip().lower()
+    source_kind_text = (source_kind or "").strip().lower()
+    publication_type = _publication_type_from_url(url)
+    authority_tier = "derived_or_inferred"
+    authority_class = "private_site"
+    authority_kind = "private_site"
+    authority_reason = "No government or approved official signal detected."
+    authority_score = 0.35
+    if host.endswith(".gov") or ".gov." in host or host.endswith(".mi.us") or host.endswith(".us"):
+        authority_tier = "authoritative_official"
+        authority_class = "official_government"
+        authority_kind = "official_government"
+        authority_reason = "Official government domain."
+        authority_score = 0.99
+    elif any(token in source_kind_text for token in ("federal_anchor", "state_anchor", "municipal_code")):
+        authority_tier = "authoritative_official"
+        authority_class = "legal_primary"
+        authority_kind = "catalog_primary"
+        authority_reason = "Catalog source kind indicates primary official/legal source."
+        authority_score = 0.96
+    elif any(token in source_kind_text for token in ("city_program_page", "county_program_page", "state_program_page", "housing_authority", "pha_plan", "pha_guidance")) or "housing authority" in publisher_text or "housing commission" in publisher_text or "housing authority" in title_text:
+        authority_tier = "approved_official_supporting"
+        authority_class = "official_supporting"
+        authority_kind = "official_supporting"
+        authority_reason = "Approved supporting official/program source."
+        authority_score = 0.86
+    elif any(token in source_type_text for token in ("program", "city", "county", "state", "federal")) or host.endswith(".org"):
+        authority_tier = "semi_authoritative_operational"
+        authority_class = "operational_program" if source_type_text else "organizational"
+        authority_kind = authority_class
+        authority_reason = "Operational or organizational source, useful but not primary legal authority."
+        authority_score = 0.65
+    authority_rank = _authority_rank_for_tier(authority_tier)
+    return {
+        "authority_kind": authority_kind,
+        "authority_score": float(round(authority_score, 3)),
+        "authority_tier": authority_tier,
+        "authority_rank": authority_rank,
+        "authority_class": authority_class,
+        "authority_reason": authority_reason,
+        "publication_type": publication_type,
+        "domain_name": host,
+        "approved_supporting_source": authority_tier == "approved_official_supporting",
+        "semi_authoritative": authority_tier == "semi_authoritative_operational",
+        "derived_or_inferred": authority_tier == "derived_or_inferred",
+        "is_official": authority_tier == "authoritative_official",
+    }
 
 
 def _fingerprint_for_text(text: str) -> str:
@@ -271,6 +361,29 @@ def _sync_registry_defaults(source: PolicySource) -> None:
         source.fingerprint_algo = "sha256"
     if not getattr(source, "registry_status", None):
         source.registry_status = "active"
+    authority = _classify_authority_tier(
+        url=getattr(source, "url", "") or "",
+        publisher=getattr(source, "publisher", None),
+        title=getattr(source, "title", None),
+        source_type=getattr(source, "source_type", None),
+        source_kind=_json_loads_dict(getattr(source, "registry_meta_json", None)).get("source_kind"),
+    )
+    if not getattr(source, "authority_tier", None):
+        source.authority_tier = authority["authority_tier"]
+    if not getattr(source, "authority_rank", None):
+        source.authority_rank = authority["authority_rank"]
+    if not getattr(source, "authority_class", None):
+        source.authority_class = authority["authority_class"]
+    if not getattr(source, "authority_reason", None):
+        source.authority_reason = authority["authority_reason"]
+    if not getattr(source, "publication_type", None):
+        source.publication_type = authority["publication_type"]
+    if not getattr(source, "domain_name", None):
+        source.domain_name = authority["domain_name"]
+    source.approved_supporting_source = bool(getattr(source, "approved_supporting_source", False) or authority["approved_supporting_source"])
+    source.semi_authoritative = bool(getattr(source, "semi_authoritative", False) or authority["semi_authoritative"])
+    source.derived_or_inferred = bool(authority["derived_or_inferred"])
+    source.authority_score = max(float(getattr(source, "authority_score", 0.0) or 0.0), float(authority["authority_score"]))
     if getattr(source, "next_refresh_due_at", None) is None:
         source.next_refresh_due_at = _compute_next_refresh_due_at(source)
     if getattr(source, "source_metadata_json", None) is None:
@@ -467,40 +580,16 @@ def classify_discovery_authority(
     url: str,
     publisher: Optional[str] = None,
     title: Optional[str] = None,
+    source_type: Optional[str] = None,
+    source_kind: Optional[str] = None,
 ) -> dict[str, Any]:
-    parsed = urlparse(url)
-    host = parsed.netloc.strip().lower()
-    publisher_text = (publisher or "").strip().lower()
-    title_text = (title or "").strip().lower()
-
-    authority_kind = "unknown"
-    authority_score = 0.35
-
-    if host.endswith(".gov") or ".gov." in host:
-        authority_kind = "official_government"
-        authority_score = 0.98
-    elif host.endswith(".mi.us") or ".us" in host:
-        authority_kind = "governmental_local"
-        authority_score = 0.90
-    elif "hud.gov" in host or "ecfr.gov" in host or "legislature.mi.gov" in host or "michigan.gov" in host:
-        authority_kind = "official_government"
-        authority_score = 0.99
-    elif "housing" in publisher_text or "authority" in publisher_text or "housing" in title_text:
-        authority_kind = "program_authority"
-        authority_score = 0.82
-    elif host.endswith(".org"):
-        authority_kind = "organizational"
-        authority_score = 0.72
-    elif host:
-        authority_kind = "private_site"
-        authority_score = 0.50
-
-    return {
-        "authority_kind": authority_kind,
-        "authority_score": float(round(authority_score, 3)),
-        "domain": host,
-        "is_official": authority_score >= 0.85,
-    }
+    return _classify_authority_tier(
+        url=url,
+        publisher=publisher,
+        title=title,
+        source_type=source_type,
+        source_kind=source_kind,
+    )
 
 
 def _probe_discovery_candidate(
@@ -629,6 +718,13 @@ def ensure_policy_source_from_catalog_entry(
     existing = db.scalar(stmt.order_by(PolicySource.id.asc()))
 
     source_type = _source_type_from_entry(entry)
+    authority = _classify_authority_tier(
+        url=entry.url,
+        publisher=entry.publisher,
+        title=entry.title,
+        source_type=source_type,
+        source_kind=entry.source_kind,
+    )
     if existing is None:
         source = PolicySource(
             org_id=org_id,
@@ -648,6 +744,16 @@ def ensure_policy_source_from_catalog_entry(
             extracted_text=None,
             notes=_append_note_marker(entry.notes, CURATED_NOTE_MARKER),
             is_authoritative=bool(entry.is_authoritative),
+            authority_score=float(authority["authority_score"]),
+            authority_tier=str(authority["authority_tier"]),
+            authority_rank=int(authority["authority_rank"]),
+            authority_class=authority.get("authority_class"),
+            authority_reason=authority.get("authority_reason"),
+            publication_type=authority.get("publication_type"),
+            domain_name=authority.get("domain_name"),
+            approved_supporting_source=bool(authority.get("approved_supporting_source", False)),
+            semi_authoritative=bool(authority.get("semi_authoritative", False)),
+            derived_or_inferred=bool(authority.get("derived_or_inferred", False)),
             normalized_categories_json="[]",
             freshness_status="unknown",
             freshness_reason="not_fetched",
@@ -693,6 +799,12 @@ def ensure_policy_source_from_catalog_entry(
                         "mode": "curated",
                         "category_hints": _json_loads_list(getattr(entry, "normalized_categories_json", None)),
                         "authority_kind": "catalog_curated",
+                        "authority_tier": authority["authority_tier"],
+                        "authority_rank": authority["authority_rank"],
+                        "authority_class": authority["authority_class"],
+                        "authority_reason": authority["authority_reason"],
+                        "publication_type": authority["publication_type"],
+                        "domain_name": authority["domain_name"],
                     }
                 }
             ),
@@ -724,6 +836,16 @@ def ensure_policy_source_from_catalog_entry(
     )
     existing.fetch_method = existing.fetch_method or _fetch_method_from_url(entry.url)
     existing.trust_level = max(float(existing.trust_level or 0.0), _trust_level(entry))
+    existing.authority_score = max(float(existing.authority_score or 0.0), float(authority["authority_score"]))
+    existing.authority_tier = authority["authority_tier"]
+    existing.authority_rank = authority["authority_rank"]
+    existing.authority_class = authority["authority_class"]
+    existing.authority_reason = authority["authority_reason"]
+    existing.publication_type = authority["publication_type"]
+    existing.domain_name = authority["domain_name"]
+    existing.approved_supporting_source = bool(authority.get("approved_supporting_source", False))
+    existing.semi_authoritative = bool(authority.get("semi_authoritative", False))
+    existing.derived_or_inferred = bool(authority.get("derived_or_inferred", False))
     existing.refresh_interval_days = max(1, _refresh_interval_days(entry))
 
     meta = _json_loads_dict(existing.registry_meta_json)
@@ -791,7 +913,7 @@ def _candidate_urls_for_scope(
             publisher = base.get("publisher")
             for path in paths:
                 url = f"https://{domain}{path}"
-                authority = classify_discovery_authority(url=url, publisher=publisher, title=category_label(category))
+                authority = classify_discovery_authority(url=url, publisher=publisher, title=category_label(category), source_type=source_type)
                 output.append(
                     PolicySourceDiscoveryCandidate(
                         url=url,
@@ -808,6 +930,12 @@ def _candidate_urls_for_scope(
                         search_terms=list(search_terms),
                         authority_kind=str(authority["authority_kind"]),
                         authority_score=float(authority["authority_score"]),
+                        authority_tier=str(authority["authority_tier"]),
+                        authority_rank=int(authority["authority_rank"]),
+                        authority_class=authority.get("authority_class"),
+                        authority_reason=authority.get("authority_reason"),
+                        publication_type=authority.get("publication_type"),
+                        domain_name=authority.get("domain_name"),
                         discovered_via="missing_category_generation",
                         should_fetch=True,
                     )
@@ -822,7 +950,7 @@ def _candidate_urls_for_scope(
         ):
             domain = f"www.{_slugify(pha_name)}.org"
             url = f"https://{domain}{suffix}"
-            authority = classify_discovery_authority(url=url, publisher=pha_name, title="Section 8 overlay")
+            authority = classify_discovery_authority(url=url, publisher=pha_name, title="Section 8 overlay", source_type="program")
             output.append(
                 PolicySourceDiscoveryCandidate(
                     url=url,
@@ -833,6 +961,12 @@ def _candidate_urls_for_scope(
                     search_terms=["section 8", "housing choice voucher", "administrative plan"],
                     authority_kind=str(authority["authority_kind"]),
                     authority_score=float(authority["authority_score"]),
+                    authority_tier=str(authority["authority_tier"]),
+                    authority_rank=int(authority["authority_rank"]),
+                    authority_class=authority.get("authority_class"),
+                    authority_reason=authority.get("authority_reason"),
+                    publication_type=authority.get("publication_type"),
+                    domain_name=authority.get("domain_name"),
                     discovered_via="pha_overlay_generation",
                     should_fetch=True,
                 )
@@ -877,6 +1011,12 @@ def _upsert_discovered_source(
             "search_terms": list(candidate.search_terms),
             "authority_kind": candidate.authority_kind,
             "authority_score": candidate.authority_score,
+            "authority_tier": candidate.authority_tier,
+            "authority_rank": candidate.authority_rank,
+            "authority_class": candidate.authority_class,
+            "authority_reason": candidate.authority_reason,
+            "publication_type": candidate.publication_type,
+            "domain_name": candidate.domain_name,
             "discovered_via": candidate.discovered_via,
             "discovered_at": _utcnow().isoformat(),
             "probe_result": {
@@ -894,6 +1034,12 @@ def _upsert_discovered_source(
         "category_hints": list(candidate.category_hints),
         "authority_kind": candidate.authority_kind,
         "authority_score": candidate.authority_score,
+        "authority_tier": candidate.authority_tier,
+        "authority_rank": candidate.authority_rank,
+        "authority_class": candidate.authority_class,
+        "authority_reason": candidate.authority_reason,
+        "publication_type": candidate.publication_type,
+        "domain_name": candidate.domain_name,
     }
 
     if existing is None:
@@ -915,6 +1061,16 @@ def _upsert_discovered_source(
             extracted_text=None,
             notes=_append_note_marker(None, DISCOVERY_NOTE_MARKER),
             is_authoritative=bool(candidate.authority_score >= 0.85),
+            authority_score=float(candidate.authority_score),
+            authority_tier=str(candidate.authority_tier),
+            authority_rank=int(candidate.authority_rank),
+            authority_class=candidate.authority_class,
+            authority_reason=candidate.authority_reason,
+            publication_type=candidate.publication_type,
+            domain_name=candidate.domain_name,
+            approved_supporting_source=bool(candidate.authority_tier == "approved_official_supporting"),
+            semi_authoritative=bool(candidate.authority_tier == "semi_authoritative_operational"),
+            derived_or_inferred=bool(candidate.authority_tier == "derived_or_inferred"),
             normalized_categories_json="[]",
             freshness_status="unknown",
             freshness_reason="discovered_not_fetched",
@@ -974,6 +1130,16 @@ def _upsert_discovered_source(
     existing.fetch_method = existing.fetch_method or _fetch_method_from_url(candidate.url)
     existing.trust_level = max(float(existing.trust_level or 0.0), float(candidate.authority_score))
     existing.is_authoritative = bool(existing.is_authoritative or candidate.authority_score >= 0.85)
+    existing.authority_score = max(float(existing.authority_score or 0.0), float(candidate.authority_score))
+    existing.authority_tier = candidate.authority_tier or existing.authority_tier
+    existing.authority_rank = max(int(getattr(existing, "authority_rank", 0) or 0), int(candidate.authority_rank or 0))
+    existing.authority_class = candidate.authority_class or existing.authority_class
+    existing.authority_reason = candidate.authority_reason or existing.authority_reason
+    existing.publication_type = candidate.publication_type or existing.publication_type
+    existing.domain_name = candidate.domain_name or existing.domain_name
+    existing.approved_supporting_source = bool(existing.approved_supporting_source or candidate.authority_tier == "approved_official_supporting")
+    existing.semi_authoritative = bool(existing.semi_authoritative or candidate.authority_tier == "semi_authoritative_operational")
+    existing.derived_or_inferred = bool(candidate.authority_tier == "derived_or_inferred")
     existing.registry_status = existing.registry_status or ("candidate" if not probe_result.get("ok") else "active")
     existing.last_fetch_error = probe_result.get("fetch_error") or existing.last_fetch_error
     existing.last_http_status = probe_result.get("http_status") or existing.last_http_status
@@ -1261,6 +1427,15 @@ def get_policy_source_refresh_snapshot(source: PolicySource) -> dict[str, Any]:
         "url": getattr(source, "url", None),
         "registry_status": getattr(source, "registry_status", None),
         "freshness_status": getattr(source, "freshness_status", None),
+        "authority_tier": getattr(source, "authority_tier", None),
+        "authority_rank": getattr(source, "authority_rank", None),
+        "authority_class": getattr(source, "authority_class", None),
+        "authority_reason": getattr(source, "authority_reason", None),
+        "publication_type": getattr(source, "publication_type", None),
+        "domain_name": getattr(source, "domain_name", None),
+        "approved_supporting_source": bool(getattr(source, "approved_supporting_source", False)),
+        "semi_authoritative": bool(getattr(source, "semi_authoritative", False)),
+        "derived_or_inferred": bool(getattr(source, "derived_or_inferred", False)),
         "last_fetched_at": getattr(source, "last_fetched_at", None).isoformat() if getattr(source, "last_fetched_at", None) else None,
         "next_refresh_due_at": getattr(source, "next_refresh_due_at", None).isoformat() if getattr(source, "next_refresh_due_at", None) else None,
         "current_fingerprint": getattr(source, "current_fingerprint", None) or getattr(source, "content_sha256", None),

@@ -17,6 +17,7 @@ from ..services.property_state_machine import get_state_payload
 from ..services.risk_scoring import compute_risk_adjusted_score
 from ..services.runtime_metrics import METRICS
 from .acquisition_tag_service import list_tags_for_properties
+from .policy_projection_service import build_property_projection_snapshot
 
 log = logging.getLogger("onehaven.inventory_snapshot")
 
@@ -135,6 +136,7 @@ def _latest_uw(db: Session, *, org_id: int, property_id: int) -> UnderwritingRes
         .limit(1)
     )
 
+
 def _latest_rent_assumption(
     db: Session,
     *,
@@ -150,6 +152,7 @@ def _latest_rent_assumption(
         .order_by(desc(RentAssumption.created_at), desc(RentAssumption.id))
         .limit(1)
     )
+
 
 def _attr_float(obj: Any, *names: str) -> float | None:
     if obj is None:
@@ -181,6 +184,7 @@ def _settings_interest_rate() -> float:
         or getattr(settings, "interest_rate", None)
         or 0.07
     )
+
 
 def _settings_utilities_monthly() -> float:
     # Headline investor math intentionally excludes utilities because the
@@ -412,6 +416,31 @@ def _load_property_meta(db: Session, *, org_id: int, property_id: int) -> dict[s
         {"org_id": int(org_id), "property_id": int(property_id)},
     ).fetchone()
     return dict(row._mapping) if row is not None else {}
+
+
+def _projection_jurisdiction_trust(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    try:
+        snapshot = build_property_projection_snapshot(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+    except Exception:
+        return {}
+
+    if not isinstance(snapshot, dict):
+        return {}
+
+    projection = snapshot.get("projection") or {}
+    if not isinstance(projection, dict):
+        return {}
+
+    projection_reason = projection.get("projection_reason") or {}
+    if not isinstance(projection_reason, dict):
+        return {}
+
+    trust = projection_reason.get("jurisdiction_trust") or {}
+    return trust if isinstance(trust, dict) else {}
 
 
 def infer_snapshot_completeness(snapshot: dict[str, Any]) -> str:
@@ -730,6 +759,20 @@ def _cashflow_score(snapshot: dict[str, Any]) -> int:
     return 0
 
 
+def _jurisdiction_trust_score(snapshot: dict[str, Any]) -> int:
+    trust = snapshot.get("jurisdiction_trust") or {}
+    if not isinstance(trust, dict) or not trust:
+        return 0
+
+    if not bool(trust.get("safe_for_projection", False)):
+        return -50
+    if trust.get("manual_review_reasons"):
+        return -18
+    if not bool(trust.get("safe_for_user_reliance", True)):
+        return -10
+    return 8
+
+
 def compute_inventory_relevance(
     snapshot: dict[str, Any],
     search_context: dict[str, Any] | None = None,
@@ -750,6 +793,7 @@ def compute_inventory_relevance(
     score += _completeness_score(snapshot)
     score += _cashflow_score(snapshot)
     score += compute_freshness_score(snapshot)
+    score += _jurisdiction_trust_score(snapshot)
 
     age_days = compute_days_since_seen(snapshot)
     thresholds = get_freshness_thresholds()
@@ -848,6 +892,11 @@ def build_property_inventory_snapshot(
 
     meta = _load_property_meta(db, org_id=org_id, property_id=int(prop.id))
     tags = list_tags_for_properties(db, org_id=org_id, property_ids=[int(prop.id)]).get(int(prop.id), [])
+    jurisdiction_trust = _projection_jurisdiction_trust(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+    )
 
     snapshot = {
         "id": int(prop.id),
@@ -966,6 +1015,13 @@ def build_property_inventory_snapshot(
             "jurisdiction": meta.get("completeness_jurisdiction_status") or "missing",
             "cashflow": meta.get("completeness_cashflow_status") or "missing",
         },
+        "jurisdiction_trust": jurisdiction_trust,
+        "safe_for_projection": jurisdiction_trust.get("safe_for_projection"),
+        "safe_for_user_reliance": jurisdiction_trust.get("safe_for_user_reliance"),
+        "trust_decision_code": jurisdiction_trust.get("decision_code"),
+        "trust_blocker_reasons": jurisdiction_trust.get("blocker_reasons") or [],
+        "manual_review_reasons": jurisdiction_trust.get("manual_review_reasons") or [],
+        "jurisdiction_blocked": not bool(jurisdiction_trust.get("safe_for_projection", True)),
     }
 
     ranking = _ranking_metrics(snapshot)
@@ -983,6 +1039,7 @@ def build_property_inventory_snapshot(
         city=search_context.get("city"),
     )
     buy_box_score = _buy_box_score(snapshot, search_context)
+    jurisdiction_trust_score = _jurisdiction_trust_score(snapshot)
 
     rank_score = (
         _safe_float(snapshot.get("risk_adjusted_score"), 0.0)
@@ -990,12 +1047,14 @@ def build_property_inventory_snapshot(
         + text_match_score
         + market_match_score
         + buy_box_score
+        + jurisdiction_trust_score
     )
 
     snapshot["freshness_score"] = freshness_score
     snapshot["text_match_score"] = text_match_score
     snapshot["market_match_score"] = market_match_score
     snapshot["buy_box_score"] = buy_box_score
+    snapshot["jurisdiction_trust_score"] = jurisdiction_trust_score
     snapshot["rank_score"] = round(rank_score, 2)
 
     snapshot = apply_freshness_policy(snapshot)

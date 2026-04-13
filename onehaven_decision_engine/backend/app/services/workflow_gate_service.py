@@ -87,6 +87,14 @@ def _jurisdiction_trust_payload(projection_snapshot: dict[str, Any] | None) -> d
     return {}
 
 
+def _trust_blocker_reasons(trust: dict[str, Any]) -> list[str]:
+    return [str(x) for x in (trust.get("blocker_reasons") or []) if str(x).strip()]
+
+
+def _trust_manual_review_reasons(trust: dict[str, Any]) -> list[str]:
+    return [str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()]
+
+
 def _build_compliance_gate(
     projection_snapshot: dict[str, Any] | None,
     *,
@@ -119,6 +127,11 @@ def _build_compliance_gate(
             "critical_stale_categories": [],
             "critical_inferred_categories": [],
             "critical_conflicting_categories": [],
+            "trust_decision_code": None,
+            "trust_blocker_reasons": [],
+            "manual_review_reasons": [],
+            "safe_for_projection": None,
+            "safe_for_user_reliance": None,
         }
 
     projection = projection_snapshot.get("projection") or {}
@@ -145,11 +158,21 @@ def _build_compliance_gate(
     critical_inferred_categories = list(jurisdiction_trust.get("critical_inferred_categories") or [])
     critical_conflicting_categories = list(jurisdiction_trust.get("critical_conflicting_categories") or [])
 
+    safe_for_projection = bool(jurisdiction_trust.get("safe_for_projection", False))
+    safe_for_user_reliance = bool(jurisdiction_trust.get("safe_for_user_reliance", False))
+    trust_decision_code = str(jurisdiction_trust.get("decision_code") or "").strip() or None
+    trust_blocker_reasons = _trust_blocker_reasons(jurisdiction_trust)
+    manual_review_reasons = _trust_manual_review_reasons(jurisdiction_trust)
+
     warnings: list[str] = []
     blocked_reason = None
     warning_reason = None
 
-    jurisdiction_blocking = bool(critical_missing_categories or critical_conflicting_categories)
+    jurisdiction_blocking = bool(
+        critical_missing_categories
+        or critical_conflicting_categories
+        or not safe_for_projection
+    )
 
     hard_block = (
         blocking_count > 0
@@ -170,6 +193,8 @@ def _build_compliance_gate(
         or coverage_confidence == "low"
         or completeness_status in {"missing", "partial", "stale", "conflicting"}
         or completeness_score < 0.80
+        or bool(manual_review_reasons)
+        or not safe_for_user_reliance
     )
 
     if blocking_count > 0:
@@ -220,17 +245,27 @@ def _build_compliance_gate(
             f"Jurisdiction completeness is {completeness_status} "
             f"({completeness_score:.2f})."
         )
+    for reason in trust_blocker_reasons:
+        warnings.append(f"Jurisdiction trust blocker: {reason}.")
+    for reason in manual_review_reasons:
+        warnings.append(f"Jurisdiction manual review required: {reason}.")
 
     if hard_block and current_stage in PRE_CLOSE_STAGES:
         if critical_missing_categories:
             blocked_reason = "Critical local jurisdiction coverage is missing before close."
         elif critical_conflicting_categories:
             blocked_reason = "Critical jurisdiction conflicts must be resolved before close."
+        elif trust_decision_code == "blocked_due_to_stale_authoritative_sources":
+            blocked_reason = "Authoritative jurisdiction sources are stale and cannot be trusted."
+        elif trust_decision_code == "blocked_due_to_incomplete_required_tiers":
+            blocked_reason = "Required jurisdiction tiers are incomplete for safe compliance use."
+        elif trust_decision_code == "manual_review_required":
+            blocked_reason = "Critical jurisdiction rules still require manual review before close."
         elif blocking_count > 0:
             blocked_reason = "Pre-close compliance blocker(s) remain unresolved."
         elif conflicting_count > 0:
             blocked_reason = "Conflicting compliance evidence must be resolved before closing."
-        elif production_readiness in {"blocked", "needs_review"}:
+        elif not safe_for_projection or production_readiness in {"blocked", "needs_review"}:
             blocked_reason = "Jurisdiction trust is too weak for a safe pre-close decision."
         else:
             blocked_reason = "Compliance readiness is too low to proceed safely."
@@ -239,6 +274,8 @@ def _build_compliance_gate(
             warning_reason = "Critical jurisdiction proof is stale and should be refreshed before close."
         elif critical_inferred_categories:
             warning_reason = "Critical jurisdiction coverage is inferred-only and needs stronger verification."
+        elif manual_review_reasons:
+            warning_reason = "Jurisdiction trust requires manual review before relying on compliance automation."
         elif coverage_confidence == "low":
             warning_reason = "Jurisdiction trust is weak and should be reviewed before close."
         elif stale_count > 0:
@@ -258,6 +295,8 @@ def _build_compliance_gate(
         or bool(critical_stale_categories)
         or bool(critical_inferred_categories)
         or bool(critical_conflicting_categories)
+        or bool(manual_review_reasons)
+        or not safe_for_user_reliance
     )
 
     ok = not (current_stage in PRE_CLOSE_STAGES and hard_block)
@@ -290,6 +329,11 @@ def _build_compliance_gate(
         "critical_stale_categories": critical_stale_categories,
         "critical_inferred_categories": critical_inferred_categories,
         "critical_conflicting_categories": critical_conflicting_categories,
+        "trust_decision_code": trust_decision_code,
+        "trust_blocker_reasons": trust_blocker_reasons,
+        "manual_review_reasons": manual_review_reasons,
+        "safe_for_projection": safe_for_projection,
+        "safe_for_user_reliance": safe_for_user_reliance,
     }
 
 
@@ -329,6 +373,9 @@ def _build_pre_close_risk_summary(compliance_gate: dict[str, Any], *, current_st
         "projected_compliance_cost": compliance_gate.get("projected_compliance_cost"),
         "projected_days_to_rent": compliance_gate.get("projected_days_to_rent"),
         "jurisdiction_trust": compliance_gate.get("jurisdiction_trust") or {},
+        "trust_decision_code": compliance_gate.get("trust_decision_code"),
+        "trust_blocker_reasons": compliance_gate.get("trust_blocker_reasons") or [],
+        "manual_review_reasons": compliance_gate.get("manual_review_reasons") or [],
     }
 
 
@@ -356,6 +403,8 @@ def _build_post_close_recheck_summary(compliance_gate: dict[str, Any], *, curren
         reason = "Post-close critical jurisdiction proof has gone stale and should be re-evaluated."
     elif compliance_gate.get("critical_inferred_categories"):
         reason = "Post-close critical jurisdiction coverage is still inferred-only."
+    elif compliance_gate.get("manual_review_reasons"):
+        reason = "Post-close jurisdiction trust still requires manual review."
     elif _safe_int(compliance_gate.get("stale_count")) > 0:
         reason = "Post-close compliance proof has gone stale and should be re-evaluated."
     elif _safe_int(compliance_gate.get("unknown_count")) > 0:
@@ -430,101 +479,29 @@ def build_workflow_summary(db, *, org_id: int, property_id: int, principal: Any 
             {
                 "key": stage,
                 "rank": rank,
-                "label": meta["label"],
-                "description": meta["description"],
-                "primary_action": meta["primary_action"],
-                "status": "completed" if is_completed and rank < cur_rank else "current" if is_current else "next" if is_next else "locked",
+                "label": stage_label(stage),
+                "group": meta.get("group"),
                 "is_completed": is_completed,
                 "is_current": is_current,
                 "is_next": is_next,
-                "is_locked": rank > cur_rank and nxt != stage,
             }
         )
 
-    start_gate = ((constraints.get("acquisition") or {}).get("start_gate") or {}) if isinstance(constraints, dict) else {}
-    if cur == "underwritten" and start_gate:
-        primary_action = {
-            "stage": "pursuing",
-            "stage_label": stage_label("pursuing"),
-            "pane": "acquisition",
-            "pane_label": pane["current_pane_label" if pane["current_pane"] == "acquisition" else "suggested_pane_label"],
-            "title": "Start acquisition" if start_gate.get("ok") else "Finish pre-offer criteria",
-            "kind": "start_acquisition" if start_gate.get("ok") else "blocked",
-        }
-    elif not gate.get("ok") and compliance_gate.get("blocked_reason"):
-        primary_action = {
-            "stage": "compliance",
-            "stage_label": stage_label("compliance"),
-            "pane": "compliance",
-            "pane_label": "Compliance",
-            "title": compliance_gate.get("blocked_reason") or "Resolve compliance blockers",
-            "kind": "blocked",
-        }
-    elif next_actions:
-        primary_action = {
-            "stage": cur,
-            "stage_label": stage_label(cur),
-            "pane": pane["current_pane"],
-            "pane_label": pane["current_pane_label"],
-            "title": next_actions[0],
-            "kind": "next_action",
-        }
-    elif gate.get("ok") and gate.get("allowed_next_stage"):
-        allowed = clamp_stage(gate.get("allowed_next_stage"))
-        primary_action = {
-            "stage": allowed,
-            "stage_label": stage_label(allowed),
-            "pane": pane["current_pane"],
-            "pane_label": pane["current_pane_label"],
-            "title": f"Advance to {stage_label(allowed)}",
-            "kind": "advance",
-        }
-    else:
-        primary_action = {
-            "stage": cur,
-            "stage_label": stage_label(cur),
-            "pane": pane["current_pane"],
-            "pane_label": pane["current_pane_label"],
-            "title": "Workflow blocked",
-            "kind": "blocked",
-        }
-
     return {
-        "property_id": property_id,
+        "ok": True,
         "current_stage": cur,
-        "current_stage_label": stage_label(cur),
-        "current_stage_rank": cur_rank,
         "next_stage": nxt,
-        "next_stage_label": stage_label(nxt) if nxt else None,
-        "current_pane": pane["current_pane"],
-        "current_pane_label": pane["current_pane_label"],
-        "suggested_pane": pane["suggested_pane"],
-        "suggested_pane_label": pane["suggested_pane_label"],
-        "suggested_next_pane": pane.get("suggested_next_pane"),
-        "suggested_next_pane_label": pane.get("suggested_next_pane_label"),
-        "visible_pane": pane["visible_pane"],
-        "visible_pane_label": pane["visible_pane_label"],
-        "is_current_pane_visible": pane["is_current_pane_visible"],
-        "allowed_panes": pane["allowed_panes"],
-        "allowed_pane_labels": pane["allowed_pane_labels"],
-        "route_reason": pane["route_reason"],
-        "transition_reason": state.get("transition_reason"),
-        "transition_at": state.get("transition_at") or state.get("last_transitioned_at"),
-        "is_auto_routed": state.get("is_auto_routed", True),
-        "normalized_decision": state.get("normalized_decision"),
+        "current_stage_label": stage_label(cur),
+        "current_stage_meta": stage_meta(cur),
+        "pane": pane,
+        "stage_rows": rows,
         "gate": gate,
-        "gate_status": state.get("gate_status"),
-        "primary_action": primary_action,
+        "pre_close_risk": pre_close_risk,
+        "post_close_recheck": post_close_recheck,
         "next_actions": next_actions,
         "constraints": constraints,
         "outstanding_tasks": outstanding_tasks,
-        "stage_completion_summary": stage_completion_summary,
-        "stages": rows,
-        "catalog": stage_catalog(),
-        "pane_catalog": pane["catalog"],
-        "updated_at": state.get("updated_at"),
-        "compliance_projection": projection_snapshot.get("projection") if projection_snapshot else None,
+        "transition": tx,
         "compliance_gate": compliance_gate,
-        "pre_close_risk": pre_close_risk,
-        "post_close_recheck": post_close_recheck,
+        "jurisdiction_trust": compliance_gate.get("jurisdiction_trust") or {},
     }
