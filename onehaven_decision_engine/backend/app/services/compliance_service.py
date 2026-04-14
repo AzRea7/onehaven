@@ -39,6 +39,7 @@ from ..services.policy_projection_service import (
     rebuild_property_projection,
 )
 from ..services.compliance_document_service import build_property_document_stack
+from ..services.workflow_gate_service import build_property_jurisdiction_blocker
 
 
 STATUS_PASS = "pass"
@@ -829,10 +830,15 @@ def build_property_inspection_readiness(
     rebuild_property_projection(db, org_id=org_id, property_id=property_id)
     projection = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
     document_stack = build_property_document_stack(db, org_id=org_id, property_id=property_id)
-    jurisdiction_trust = _projection_jurisdiction_trust(projection)
+    jurisdiction_blocker = build_property_jurisdiction_blocker(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    jurisdiction_trust = jurisdiction_blocker.get("jurisdiction_trust") or _projection_jurisdiction_trust(projection)
     trust_reason_payload = _trust_reason_payload(jurisdiction_trust)
-    trust_blocked = _trust_blocked_for_compliance(jurisdiction_trust)
-        
+    trust_blocked = bool(jurisdiction_blocker.get("blocking"))
+
     overall_status = "ready"
     if trust_blocked:
         overall_status = "blocked"
@@ -874,7 +880,11 @@ def build_property_inspection_readiness(
         },
         "coverage": profile_summary.get("coverage") or {},
         "jurisdiction_trust": trust_reason_payload,
+        "jurisdiction_blocker": jurisdiction_blocker,
         "trust_blocked": trust_blocked,
+        "trust_blocked_reason": jurisdiction_blocker.get("blocked_reason"),
+        "jurisdiction_lockout_active": bool(jurisdiction_blocker.get("lockout_active")),
+        "jurisdiction_validation_pending": bool(jurisdiction_blocker.get("validation_pending")),
         "overall_status": overall_status,
         "score_pct": float(readiness_score.readiness_score),
         "completion_pct": float(readiness_score.completion_pct),
@@ -892,6 +902,9 @@ def build_property_inspection_readiness(
             "jurisdiction_safe_for_projection": bool(trust_reason_payload.get("safe_for_projection", False)),
             "jurisdiction_safe_for_user_reliance": bool(trust_reason_payload.get("safe_for_user_reliance", False)),
             "jurisdiction_manual_review_required": bool(trust_reason_payload.get("manual_review_reasons")),
+            "jurisdiction_lockout_active": bool(jurisdiction_blocker.get("lockout_active")),
+            "jurisdiction_validation_pending": bool(jurisdiction_blocker.get("validation_pending")),
+            "jurisdiction_blocked_reason": jurisdiction_blocker.get("blocked_reason"),
             "reinspect_required": bool(readiness_score.reinspect_required),
         },
         "counts": {
@@ -929,8 +942,8 @@ def build_property_inspection_readiness(
         "projection_jurisdiction_trust": trust_reason_payload,
         "documents": document_stack,
         "jurisdiction": profile_summary,
-        "jurisdiction_blockers": trust_reason_payload.get("blocker_reasons") or [],
-        "jurisdiction_manual_review_reasons": trust_reason_payload.get("manual_review_reasons") or [],
+        "jurisdiction_blockers": list(jurisdiction_blocker.get("blocking_reasons") or []),
+        "jurisdiction_manual_review_reasons": list(jurisdiction_blocker.get("manual_review_reasons") or []),
         "latest_inspection": latest_inspection_payload,
         "template": {
             "template_key": checklist_sync["template_key"],

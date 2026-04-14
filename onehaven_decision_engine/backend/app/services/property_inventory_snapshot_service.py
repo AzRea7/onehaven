@@ -18,6 +18,7 @@ from ..services.risk_scoring import compute_risk_adjusted_score
 from ..services.runtime_metrics import METRICS
 from .acquisition_tag_service import list_tags_for_properties
 from .policy_projection_service import build_property_projection_snapshot
+from .workflow_gate_service import build_property_jurisdiction_blocker
 
 log = logging.getLogger("onehaven.inventory_snapshot")
 
@@ -897,6 +898,11 @@ def build_property_inventory_snapshot(
         org_id=org_id,
         property_id=int(prop.id),
     )
+    jurisdiction_blocker = build_property_jurisdiction_blocker(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+    )
 
     snapshot = {
         "id": int(prop.id),
@@ -1016,12 +1022,16 @@ def build_property_inventory_snapshot(
             "cashflow": meta.get("completeness_cashflow_status") or "missing",
         },
         "jurisdiction_trust": jurisdiction_trust,
+        "jurisdiction_blocker": jurisdiction_blocker,
         "safe_for_projection": jurisdiction_trust.get("safe_for_projection"),
         "safe_for_user_reliance": jurisdiction_trust.get("safe_for_user_reliance"),
         "trust_decision_code": jurisdiction_trust.get("decision_code"),
-        "trust_blocker_reasons": jurisdiction_trust.get("blocker_reasons") or [],
-        "manual_review_reasons": jurisdiction_trust.get("manual_review_reasons") or [],
-        "jurisdiction_blocked": not bool(jurisdiction_trust.get("safe_for_projection", True)),
+        "trust_blocker_reasons": list(jurisdiction_blocker.get("blocking_reasons") or []),
+        "manual_review_reasons": list(jurisdiction_blocker.get("manual_review_reasons") or []),
+        "jurisdiction_blocked": bool(jurisdiction_blocker.get("blocking")),
+        "jurisdiction_blocked_reason": jurisdiction_blocker.get("blocked_reason"),
+        "jurisdiction_lockout_active": bool(jurisdiction_blocker.get("lockout_active")),
+        "jurisdiction_validation_pending": bool(jurisdiction_blocker.get("validation_pending")),
     }
 
     ranking = _ranking_metrics(snapshot)

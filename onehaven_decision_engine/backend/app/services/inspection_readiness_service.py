@@ -14,6 +14,7 @@ from ..domain.compliance.inspection_rules import (
 )
 from ..models import Inspection, InspectionItem, PropertyChecklistItem
 from ..services.policy_projection_service import build_property_projection_snapshot, rebuild_property_projection
+from ..services.workflow_gate_service import build_property_jurisdiction_blocker
 
 
 @dataclass(frozen=True)
@@ -328,12 +329,13 @@ def compute_property_readiness_score(
         and not combined_reinspect_required
     )
 
-    trust = _jurisdiction_trust_flags(db, org_id=org_id, property_id=property_id)
-    safe_for_projection = bool(trust.get("safe_for_projection", True))
-    safe_for_user_reliance = bool(trust.get("safe_for_user_reliance", True))
-    trust_blockers = [str(x) for x in (trust.get("blocker_reasons") or []) if str(x).strip()]
-    manual_review_reasons = [str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()]
-    trust_hard_block = (not safe_for_projection) or bool(manual_review_reasons)
+    jurisdiction_blocker = build_property_jurisdiction_blocker(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    trust = jurisdiction_blocker.get("jurisdiction_trust") or _jurisdiction_trust_flags(db, org_id=org_id, property_id=property_id)
+    trust_hard_block = bool(jurisdiction_blocker.get("blocking"))
 
     if trust_hard_block:
         local_ready = False
@@ -416,7 +418,12 @@ def build_property_readiness_summary(
         org_id=org_id,
         property_id=property_id,
     )
-    trust = _jurisdiction_trust_flags(db, org_id=org_id, property_id=property_id)
+    jurisdiction_blocker = build_property_jurisdiction_blocker(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    trust = jurisdiction_blocker.get("jurisdiction_trust") or _jurisdiction_trust_flags(db, org_id=org_id, property_id=property_id)
 
     return {
         "ok": True,
@@ -461,9 +468,13 @@ def build_property_readiness_summary(
             "evidence_stale_count": score.evidence_stale_count,
         },
         "jurisdiction_trust": trust,
-        "trust_blocked": not bool(trust.get("safe_for_projection", True)),
-        "trust_blocker_reasons": [str(x) for x in (trust.get("blocker_reasons") or []) if str(x).strip()],
-        "manual_review_reasons": [str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()],
+        "jurisdiction_blocker": jurisdiction_blocker,
+        "trust_blocked": bool(jurisdiction_blocker.get("blocking")),
+        "trust_blocked_reason": jurisdiction_blocker.get("blocked_reason"),
+        "jurisdiction_lockout_active": bool(jurisdiction_blocker.get("lockout_active")),
+        "jurisdiction_validation_pending": bool(jurisdiction_blocker.get("validation_pending")),
+        "trust_blocker_reasons": list(jurisdiction_blocker.get("blocking_reasons") or []),
+        "manual_review_reasons": list(jurisdiction_blocker.get("manual_review_reasons") or []),
         "raw": asdict(score),
     }
 

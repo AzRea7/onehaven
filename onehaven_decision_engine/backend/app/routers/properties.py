@@ -61,7 +61,7 @@ from ..services.property_state_machine import (
     get_state_payload,
     normalize_decision_bucket,
 )
-from ..services.workflow_gate_service import build_workflow_summary
+from ..services.workflow_gate_service import build_workflow_summary, build_property_jurisdiction_blocker
 from ..services.acquisition_tag_service import list_property_tags, replace_property_tags
 from ..services.acquisition_participant_service import list_participants
 from ..services.property_inventory_snapshot_service import (
@@ -513,6 +513,11 @@ def _snapshot_backed_property_payload(
     workflow_trust = workflow.get("jurisdiction_trust") or workflow_gate.get("jurisdiction_trust") or {}
     inventory_trust = snapshot.get("jurisdiction_trust") or {}
     effective_trust = workflow_trust if isinstance(workflow_trust, dict) and workflow_trust else inventory_trust
+    effective_blocker = workflow.get("jurisdiction_blocker") or build_property_jurisdiction_blocker(
+        db,
+        org_id=org_id,
+        property_id=int(prop.id),
+    )
 
     resolved_market_rent_estimate = snapshot.get("market_rent_estimate")
     if resolved_market_rent_estimate is None and rent_row is not None:
@@ -621,12 +626,16 @@ def _snapshot_backed_property_payload(
             "next_actions": state_payload.get("next_actions") or [],
             "workflow": workflow,
             "jurisdiction_trust": effective_trust,
+            "jurisdiction_blocker": effective_blocker,
             "safe_for_projection": effective_trust.get("safe_for_projection"),
             "safe_for_user_reliance": effective_trust.get("safe_for_user_reliance"),
             "trust_decision_code": effective_trust.get("decision_code"),
-            "trust_blocker_reasons": effective_trust.get("blocker_reasons") or [],
-            "manual_review_reasons": effective_trust.get("manual_review_reasons") or [],
-            "jurisdiction_blocked": not bool(effective_trust.get("safe_for_projection", True)),
+            "trust_blocker_reasons": list(effective_blocker.get("blocking_reasons") or []),
+            "manual_review_reasons": list(effective_blocker.get("manual_review_reasons") or []),
+            "jurisdiction_blocked": bool(effective_blocker.get("blocking")),
+            "jurisdiction_blocked_reason": effective_blocker.get("blocked_reason"),
+            "jurisdiction_lockout_active": bool(effective_blocker.get("lockout_active")),
+            "jurisdiction_validation_pending": bool(effective_blocker.get("validation_pending")),
             "workflow_compliance_gate": workflow_gate,
             "workflow_blocked_reason": workflow_gate.get("blocked_reason"),
             "workflow_warning_reason": workflow_gate.get("warning_reason"),
@@ -1138,6 +1147,7 @@ def property_view(property_id: int, db: Session = Depends(get_db), p=Depends(get
             **snapshot,
             "workflow": workflow,
             "jurisdiction_trust": (workflow.get("jurisdiction_trust") or snapshot.get("jurisdiction_trust") or {}),
+            "jurisdiction_blocker": (workflow.get("jurisdiction_blocker") or snapshot.get("jurisdiction_blocker") or {}),
             "workflow_blocked_reason": ((workflow.get("compliance_gate") or {}).get("blocked_reason")),
             "workflow_warning_reason": ((workflow.get("compliance_gate") or {}).get("warning_reason")),
         },

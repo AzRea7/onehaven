@@ -95,6 +95,125 @@ def _trust_manual_review_reasons(trust: dict[str, Any]) -> list[str]:
     return [str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()]
 
 
+def _dedupe_reasons(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _build_jurisdiction_blocker_from_trust(trust: dict[str, Any]) -> dict[str, Any]:
+    trust = trust if isinstance(trust, dict) else {}
+
+    decision_code = str(trust.get("decision_code") or trust.get("decision") or trust.get("code") or "").strip() or None
+    safe_for_projection = bool(trust.get("safe_for_projection", False))
+    safe_for_user_reliance = bool(trust.get("safe_for_user_reliance", False))
+
+    blocker_reasons = _trust_blocker_reasons(trust)
+    manual_review_reasons = _trust_manual_review_reasons(trust)
+
+    critical_missing_categories = list(trust.get("critical_missing_categories") or trust.get("missing_critical_categories") or [])
+    critical_stale_categories = list(trust.get("critical_stale_categories") or [])
+    stale_authoritative_categories = list(trust.get("stale_authoritative_categories") or critical_stale_categories)
+    critical_inferred_categories = list(trust.get("critical_inferred_categories") or [])
+    critical_conflicting_categories = list(trust.get("critical_conflicting_categories") or [])
+    incomplete_required_tiers = list(trust.get("incomplete_required_tiers") or [])
+
+    lockout_active = bool(
+        trust.get("lockout_active")
+        or trust.get("jurisdiction_lockout_active")
+        or decision_code in {"jurisdiction_lockout_active", "locked_out", "blocked_due_to_lockout"}
+    )
+    validation_pending = bool(
+        trust.get("validation_pending")
+        or trust.get("validation_required")
+        or trust.get("validation_blocking")
+        or decision_code in {"validation_pending", "validation_required", "blocked_due_to_validation"}
+    )
+
+    blocking_reasons: list[str] = []
+    if lockout_active:
+        blocking_reasons.append("Jurisdiction lockout is active.")
+    if critical_missing_categories:
+        blocking_reasons.append("Critical jurisdiction coverage is missing for: " + ", ".join(critical_missing_categories) + ".")
+    if stale_authoritative_categories:
+        blocking_reasons.append("Critical authoritative jurisdiction sources are stale for: " + ", ".join(stale_authoritative_categories) + ".")
+    if incomplete_required_tiers:
+        blocking_reasons.append("Required jurisdiction authority tiers are incomplete for: " + ", ".join(incomplete_required_tiers) + ".")
+    if critical_conflicting_categories:
+        blocking_reasons.append("Critical jurisdiction conflicts remain unresolved for: " + ", ".join(critical_conflicting_categories) + ".")
+    if validation_pending:
+        blocking_reasons.append("Required jurisdiction validation has not cleared all required rules.")
+    for reason in blocker_reasons:
+        blocking_reasons.append(reason)
+    for reason in manual_review_reasons:
+        blocking_reasons.append(reason)
+
+    blocking = bool(
+        lockout_active
+        or critical_missing_categories
+        or stale_authoritative_categories
+        or incomplete_required_tiers
+        or critical_conflicting_categories
+        or validation_pending
+        or manual_review_reasons
+        or not safe_for_projection
+    )
+
+    blocked_reason = None
+    if blocking:
+        if lockout_active:
+            blocked_reason = "Jurisdiction lockout is active."
+        elif critical_missing_categories:
+            blocked_reason = "Critical jurisdiction coverage is missing."
+        elif stale_authoritative_categories:
+            blocked_reason = "Critical authoritative jurisdiction sources are stale."
+        elif incomplete_required_tiers:
+            blocked_reason = "Required jurisdiction authority tiers are incomplete."
+        elif validation_pending:
+            blocked_reason = "Required jurisdiction validation has not cleared all required rules."
+        elif critical_conflicting_categories:
+            blocked_reason = "Critical jurisdiction conflicts remain unresolved."
+        elif manual_review_reasons:
+            blocked_reason = "Jurisdiction trust still requires manual review."
+        else:
+            blocked_reason = "Jurisdiction trust is insufficient for safe compliance use."
+
+    return {
+        "blocking": blocking,
+        "blocked_reason": blocked_reason,
+        "decision_code": decision_code,
+        "safe_for_projection": safe_for_projection,
+        "safe_for_user_reliance": safe_for_user_reliance,
+        "lockout_active": lockout_active,
+        "validation_pending": validation_pending,
+        "critical_missing_categories": critical_missing_categories,
+        "critical_stale_categories": critical_stale_categories,
+        "stale_authoritative_categories": stale_authoritative_categories,
+        "critical_inferred_categories": critical_inferred_categories,
+        "critical_conflicting_categories": critical_conflicting_categories,
+        "incomplete_required_tiers": incomplete_required_tiers,
+        "trust_blocker_reasons": _dedupe_reasons(blocker_reasons),
+        "manual_review_reasons": _dedupe_reasons(manual_review_reasons),
+        "blocking_reasons": _dedupe_reasons(blocking_reasons),
+        "jurisdiction_trust": trust,
+    }
+
+
+def build_property_jurisdiction_blocker(db, *, org_id: int, property_id: int) -> dict[str, Any]:
+    projection_snapshot = _projection_payload(db, org_id=org_id, property_id=property_id)
+    trust = _jurisdiction_trust_payload(projection_snapshot)
+    blocker = _build_jurisdiction_blocker_from_trust(trust)
+    blocker["property_id"] = int(property_id)
+    blocker["ok"] = True
+    return blocker
+
+
 def _build_compliance_gate(
     projection_snapshot: dict[str, Any] | None,
     *,
@@ -158,21 +277,18 @@ def _build_compliance_gate(
     critical_inferred_categories = list(jurisdiction_trust.get("critical_inferred_categories") or [])
     critical_conflicting_categories = list(jurisdiction_trust.get("critical_conflicting_categories") or [])
 
-    safe_for_projection = bool(jurisdiction_trust.get("safe_for_projection", False))
-    safe_for_user_reliance = bool(jurisdiction_trust.get("safe_for_user_reliance", False))
-    trust_decision_code = str(jurisdiction_trust.get("decision_code") or "").strip() or None
-    trust_blocker_reasons = _trust_blocker_reasons(jurisdiction_trust)
-    manual_review_reasons = _trust_manual_review_reasons(jurisdiction_trust)
+    jurisdiction_blocker = _build_jurisdiction_blocker_from_trust(jurisdiction_trust)
+    safe_for_projection = bool(jurisdiction_blocker.get("safe_for_projection", False))
+    safe_for_user_reliance = bool(jurisdiction_blocker.get("safe_for_user_reliance", False))
+    trust_decision_code = jurisdiction_blocker.get("decision_code")
+    trust_blocker_reasons = list(jurisdiction_blocker.get("trust_blocker_reasons") or [])
+    manual_review_reasons = list(jurisdiction_blocker.get("manual_review_reasons") or [])
 
     warnings: list[str] = []
     blocked_reason = None
     warning_reason = None
 
-    jurisdiction_blocking = bool(
-        critical_missing_categories
-        or critical_conflicting_categories
-        or not safe_for_projection
-    )
+    jurisdiction_blocking = bool(jurisdiction_blocker.get("blocking"))
 
     hard_block = (
         blocking_count > 0
@@ -251,16 +367,8 @@ def _build_compliance_gate(
         warnings.append(f"Jurisdiction manual review required: {reason}.")
 
     if hard_block and current_stage in PRE_CLOSE_STAGES:
-        if critical_missing_categories:
-            blocked_reason = "Critical local jurisdiction coverage is missing before close."
-        elif critical_conflicting_categories:
-            blocked_reason = "Critical jurisdiction conflicts must be resolved before close."
-        elif trust_decision_code == "blocked_due_to_stale_authoritative_sources":
-            blocked_reason = "Authoritative jurisdiction sources are stale and cannot be trusted."
-        elif trust_decision_code == "blocked_due_to_incomplete_required_tiers":
-            blocked_reason = "Required jurisdiction tiers are incomplete for safe compliance use."
-        elif trust_decision_code == "manual_review_required":
-            blocked_reason = "Critical jurisdiction rules still require manual review before close."
+        if jurisdiction_blocker.get("blocked_reason"):
+            blocked_reason = str(jurisdiction_blocker.get("blocked_reason"))
         elif blocking_count > 0:
             blocked_reason = "Pre-close compliance blocker(s) remain unresolved."
         elif conflicting_count > 0:
@@ -324,7 +432,12 @@ def _build_compliance_gate(
         "unresolved_evidence_gaps": unresolved_gaps,
         "post_close_recheck_needed": post_close_recheck_needed,
         "jurisdiction_trust": jurisdiction_trust,
+        "jurisdiction_blocker": jurisdiction_blocker,
         "jurisdiction_blocking": jurisdiction_blocking,
+        "jurisdiction_lockout_active": bool(jurisdiction_blocker.get("lockout_active")),
+        "jurisdiction_validation_pending": bool(jurisdiction_blocker.get("validation_pending")),
+        "jurisdiction_blocked_reason": jurisdiction_blocker.get("blocked_reason"),
+        "jurisdiction_blocker_reasons": list(jurisdiction_blocker.get("blocking_reasons") or []),
         "critical_missing_categories": critical_missing_categories,
         "critical_stale_categories": critical_stale_categories,
         "critical_inferred_categories": critical_inferred_categories,
