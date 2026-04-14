@@ -450,6 +450,13 @@ def list_sources(
                 "freshness_reason": getattr(s, "freshness_reason", None),
                 "freshness_checked_at": s.freshness_checked_at.isoformat() if getattr(s, "freshness_checked_at", None) else None,
                 "last_verified_at": s.last_verified_at.isoformat() if getattr(s, "last_verified_at", None) else None,
+                "refresh_state": getattr(s, "refresh_state", None),
+                "refresh_status_reason": getattr(s, "refresh_status_reason", None),
+                "validation_state": getattr(s, "validation_state", None),
+                "validation_reason": getattr(s, "validation_reason", None),
+                "validation_due_at": getattr(s, "validation_due_at", None).isoformat() if getattr(s, "validation_due_at", None) else None,
+                "next_refresh_due_at": getattr(s, "next_refresh_due_at", None).isoformat() if getattr(s, "next_refresh_due_at", None) else None,
+                "last_validated_at": getattr(s, "last_validated_at", None).isoformat() if getattr(s, "last_validated_at", None) else None,
             }
             for s in rows
         ]
@@ -897,7 +904,7 @@ def get_coverage_status(
     principal=Depends(get_principal),
 ):
     target_org_id = principal.org_id if org_scope else None
-    return compute_coverage_status(
+    coverage = compute_coverage_status(
         db,
         org_id=target_org_id,
         state=state,
@@ -905,6 +912,17 @@ def get_coverage_status(
         city=city,
         pha_name=pha_name,
     )
+    profile = db.query(JurisdictionProfile).filter(
+        JurisdictionProfile.state == _norm_state(state),
+        JurisdictionProfile.county == _norm_lower(county) if county is not None else JurisdictionProfile.county.is_(None),
+        JurisdictionProfile.city == _norm_lower(city) if city is not None else JurisdictionProfile.city.is_(None),
+        JurisdictionProfile.pha_name == _norm_text(pha_name) if pha_name is not None else JurisdictionProfile.pha_name.is_(None),
+        (JurisdictionProfile.org_id == target_org_id) | (JurisdictionProfile.org_id.is_(None)),
+    ).order_by(JurisdictionProfile.org_id.desc(), JurisdictionProfile.id.desc()).first()
+    return {
+        **coverage,
+        "operational_status": _profile_operational_payload(db, profile, org_id=target_org_id),
+    }
 
 
 @router.get("/coverage/all")
@@ -1203,6 +1221,11 @@ def get_property_resolved_rules(
     )
 
     profile_payload = _profile_summary_payload(db, profile)
+    operational_status = _profile_operational_payload(
+        db,
+        profile,
+        org_id=target_org_id,
+    )
     return {
         "ok": True,
         "property": {
@@ -1219,6 +1242,12 @@ def get_property_resolved_rules(
         "missing_local_rule_areas": (profile_payload or {}).get("missing_local_rule_areas") or [],
         "stale_warning": bool((profile_payload or {}).get("is_stale")),
         "coverage_matrix": (profile_payload or {}).get("coverage_matrix"),
+        "operational_status": operational_status,
+        "operational_health": operational_status,
+        "safe_to_rely_on": operational_status.get("safe_to_rely_on"),
+        "unsafe_reasons": operational_status.get("reasons") or [],
+        "lockout": operational_status.get("lockout"),
+        "next_actions": operational_status.get("next_actions"),
     }
 
 @router.get("/operational-health")
@@ -1231,7 +1260,7 @@ def policy_operational_health(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    return get_jurisdiction_health(
+    result = get_jurisdiction_health(
         db,
         profile_id=profile_id,
         org_id=getattr(principal, "org_id", None),
@@ -1240,6 +1269,15 @@ def policy_operational_health(
         city=city,
         pha_name=pha_name,
     )
+    if not result.get("ok"):
+        return result
+    profile = db.get(JurisdictionProfile, int(result.get("jurisdiction_profile_id"))) if result.get("jurisdiction_profile_id") else None
+    operational_status = _profile_operational_payload(db, profile, org_id=getattr(principal, "org_id", None))
+    result["operational_status"] = operational_status
+    result["source_summary"] = operational_status.get("source_summary")
+    result["safe_to_rely_on"] = operational_status.get("safe_to_rely_on")
+    result["unsafe_reasons"] = operational_status.get("reasons") or []
+    return result
 
 
 @router.get("/sources/stale")
@@ -1266,6 +1304,8 @@ def list_stale_sources(
                 "freshness_status": getattr(s, "freshness_status", None),
                 "refresh_state": getattr(s, "refresh_state", None),
                 "refresh_status_reason": getattr(s, "refresh_status_reason", None),
+                "validation_state": getattr(s, "validation_state", None),
+                "validation_reason": getattr(s, "validation_reason", None),
                 "next_refresh_due_at": s.next_refresh_due_at.isoformat() if getattr(s, "next_refresh_due_at", None) else None,
                 "validation_due_at": s.validation_due_at.isoformat() if getattr(s, "validation_due_at", None) else None,
             }

@@ -25,6 +25,7 @@ import PhotoUploader from "../components/PhotoUploader";
 import PhotoGallery from "../components/PhotoGallery";
 import RehabFromPhotosCTA from "../components/RehabFromPhotosCTA";
 import CompliancePhotoFindingsPanel from "../components/CompliancePhotoFindingsPanel";
+import PropertyJurisdictionRulesPanel from "../components/PropertyJurisdictionRulesPanel";
 import { api } from "../lib/api";
 
 type ComplianceRow = {
@@ -104,6 +105,23 @@ type QueueCounts = {
   by_stage?: Record<string, number>;
   by_status?: Record<string, number>;
   by_urgency?: Record<string, number>;
+};
+
+type PolicyResolvedRulesPayload = {
+  property?: {
+    id?: number;
+    address?: string | null;
+    city?: string | null;
+    county?: string | null;
+    state?: string | null;
+  } | null;
+  profile?: any | null;
+  brief?: any | null;
+  coverage_matrix?: any | null;
+  operational_status?: any | null;
+  operational_health?: any | null;
+  safe_to_rely_on?: boolean | null;
+  unsafe_reasons?: string[] | null;
 };
 
 type PanePayload = {
@@ -228,6 +246,8 @@ export default function CompliancePane() {
   const [selectedReadiness, setSelectedReadiness] = React.useState<any | null>(
     null,
   );
+  const [selectedResolvedRules, setSelectedResolvedRules] =
+    React.useState<PolicyResolvedRulesPayload | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailError, setDetailError] = React.useState<string | null>(null);
 
@@ -341,6 +361,7 @@ export default function CompliancePane() {
     if (!selectedProperty?.id) {
       setSelectedBrief(null);
       setSelectedReadiness(null);
+      setSelectedResolvedRules(null);
       setDetailError(null);
       setScheduleSummary(null);
       setTimelineRows([]);
@@ -362,11 +383,13 @@ export default function CompliancePane() {
       api.get(
         `/compliance/property/${selectedProperty.id}/inspection-readiness`,
       ),
+      api.get(`/policy/property/${selectedProperty.id}/resolved-rules`),
     ])
       .then((results) => {
         if (cancelled) return;
         const briefRes = results[0];
         const readinessRes = results[1];
+        const rulesRes = results[2];
 
         if (briefRes.status === "fulfilled") {
           setSelectedBrief((briefRes.value as any) || null);
@@ -380,11 +403,20 @@ export default function CompliancePane() {
           setSelectedReadiness(null);
         }
 
+        if (rulesRes.status === "fulfilled") {
+          setSelectedResolvedRules(
+            (rulesRes.value as PolicyResolvedRulesPayload) || null,
+          );
+        } else {
+          setSelectedResolvedRules(null);
+        }
+
         if (
           briefRes.status === "rejected" &&
-          readinessRes.status === "rejected"
+          readinessRes.status === "rejected" &&
+          rulesRes.status === "rejected"
         ) {
-          throw briefRes.reason || readinessRes.reason;
+          throw briefRes.reason || readinessRes.reason || rulesRes.reason;
         }
       })
       .catch((e: any) => {
@@ -410,6 +442,24 @@ export default function CompliancePane() {
 
   const selectedAppointment =
     scheduleSummary?.appointment || scheduleSummary?.latest_appointment || null;
+  const selectedJurisdictionProfile =
+    selectedResolvedRules?.profile || selectedBrief?.brief?.coverage || null;
+  const selectedOperationalStatus =
+    selectedResolvedRules?.operational_status ||
+    selectedResolvedRules?.operational_health ||
+    selectedJurisdictionProfile?.operational_status ||
+    null;
+  const selectedSafeToRely = Boolean(
+    selectedResolvedRules?.safe_to_rely_on ??
+    selectedOperationalStatus?.safe_to_rely_on,
+  );
+  const selectedUnsafeReasons = Array.isArray(
+    selectedResolvedRules?.unsafe_reasons,
+  )
+    ? selectedResolvedRules?.unsafe_reasons
+    : Array.isArray(selectedOperationalStatus?.reasons)
+      ? selectedOperationalStatus?.reasons
+      : [];
 
   function syncSelectedFindings(analysis: any) {
     setPhotoAnalysis(analysis);
@@ -905,7 +955,7 @@ export default function CompliancePane() {
                     </div>
                   }
                 >
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                     <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
                         Property
@@ -984,6 +1034,38 @@ export default function CompliancePane() {
 
                     <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        Operational state
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span
+                          className={statusTone(
+                            selectedOperationalStatus?.health_state ||
+                              selectedOperationalStatus?.refresh_state ||
+                              "unknown",
+                          )}
+                        >
+                          {labelize(
+                            selectedOperationalStatus?.health_state ||
+                              selectedOperationalStatus?.refresh_state ||
+                              "unknown",
+                          )}
+                        </span>
+                        <span
+                          className={
+                            selectedSafeToRely
+                              ? "oh-pill oh-pill-good"
+                              : "oh-pill oh-pill-bad"
+                          }
+                        >
+                          {selectedSafeToRely
+                            ? "Safe to rely on"
+                            : "Do not rely on"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
                         Rule version
                       </div>
                       <div className="mt-2 text-sm font-semibold text-app-0">
@@ -1004,15 +1086,37 @@ export default function CompliancePane() {
                     </div>
                   </div>
 
-                  {selectedBrief?.workflow?.compliance_gate?.blocked_reason ? (
+                  {selectedBrief?.workflow?.compliance_gate?.blocked_reason ||
+                  !selectedSafeToRely ||
+                  selectedOperationalStatus?.lockout?.lockout_active ? (
                     <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/[0.04] px-4 py-3">
                       <div className="flex items-start gap-2 text-sm text-red-100">
                         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                        <div>
-                          {
-                            selectedBrief.workflow.compliance_gate
-                              .blocked_reason
-                          }
+                        <div className="space-y-1">
+                          {selectedBrief?.workflow?.compliance_gate
+                            ?.blocked_reason ? (
+                            <div>
+                              {
+                                selectedBrief.workflow.compliance_gate
+                                  .blocked_reason
+                              }
+                            </div>
+                          ) : null}
+                          {selectedOperationalStatus?.lockout
+                            ?.lockout_reason ? (
+                            <div>
+                              {selectedOperationalStatus.lockout.lockout_reason}
+                            </div>
+                          ) : null}
+                          {!selectedSafeToRely &&
+                          !selectedOperationalStatus?.lockout
+                            ?.lockout_reason ? (
+                            <div>
+                              {selectedUnsafeReasons[0] ||
+                                selectedOperationalStatus?.refresh_status_reason ||
+                                "This jurisdiction state is not yet safe to rely on for compliance decisions."}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -1027,6 +1131,30 @@ export default function CompliancePane() {
                           {selectedBrief?.brief?.coverage?.stale_reason ||
                             selectedRow?.jurisdiction?.stale_reason ||
                             "Local rule data is stale and needs review."}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {selectedOperationalStatus?.next_actions?.next_step ? (
+                    <div className="mt-4 rounded-2xl border border-app bg-app-muted px-4 py-3">
+                      <div className="flex items-start gap-2 text-sm text-app-2">
+                        <RefreshCcw className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div>
+                          Next step:{" "}
+                          {labelize(
+                            selectedOperationalStatus.next_actions.next_step,
+                          )}
+                          {selectedOperationalStatus.next_actions
+                            .next_search_retry_due_at ? (
+                            <span className="ml-2 text-app-4">
+                              · due{" "}
+                              {formatDate(
+                                selectedOperationalStatus.next_actions
+                                  .next_search_retry_due_at,
+                              )}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -1110,6 +1238,14 @@ export default function CompliancePane() {
                     </div>
                   ) : null}
                 </Surface>
+
+                <PropertyJurisdictionRulesPanel
+                  profile={
+                    (selectedJurisdictionProfile ||
+                      selectedResolvedRules?.profile ||
+                      null) as any
+                  }
+                />
 
                 <CompliancePhotoFindingsPanel
                   analysis={photoAnalysis}

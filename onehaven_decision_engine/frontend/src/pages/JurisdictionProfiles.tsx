@@ -2,7 +2,17 @@ import React from "react";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
 import GlassCard from "../components/GlassCard";
+import JurisdictionCoverageBadge from "../components/JurisdictionCoverageBadge";
 import { api } from "../lib/api";
+
+type JurisdictionVisibilityPayload = {
+  ok?: boolean;
+  jurisdiction_profile_id?: number;
+  resolved_profile?: any | null;
+  coverage_matrix?: any | null;
+  health?: any | null;
+  operational_status?: any | null;
+};
 
 type ProfileRow = {
   id: number;
@@ -207,6 +217,8 @@ export default function JurisdictionProfiles() {
 
   const [query, setQuery] = React.useState("");
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
+  const [selectedVisibility, setSelectedVisibility] =
+    React.useState<JurisdictionVisibilityPayload | null>(null);
 
   const [testCity, setTestCity] = React.useState("Detroit");
   const [testCounty, setTestCounty] = React.useState("Wayne");
@@ -423,6 +435,29 @@ export default function JurisdictionProfiles() {
     refresh();
   }, [includeGlobal, state]);
 
+  React.useEffect(() => {
+    if (!selected?.id) {
+      setSelectedVisibility(null);
+      return;
+    }
+
+    let cancelled = false;
+    api
+      .get<JurisdictionVisibilityPayload>(
+        `/jurisdictions/${selected.id}/visibility`,
+      )
+      .then((payload) => {
+        if (!cancelled) setSelectedVisibility(payload || null);
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedVisibility(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.id]);
+
   const selectedCompleteness = selected ? completenessFromRow(selected) : null;
   const selectedTasks = Array.isArray(selected?.tasks) ? selected.tasks : [];
   const selectedLayers = Array.isArray(selected?.resolved_layers)
@@ -436,6 +471,19 @@ export default function JurisdictionProfiles() {
       ? selected?.evidence
       : [];
   const selectedPolicy = selected ? policyObject(selected) : {};
+  const selectedOperationalStatus =
+    selectedVisibility?.operational_status ||
+    selectedVisibility?.resolved_profile?.operational_status ||
+    null;
+  const selectedSourceSummary =
+    selectedOperationalStatus?.source_summary || null;
+  const selectedNextActions = selectedOperationalStatus?.next_actions || null;
+  const selectedLockout = selectedOperationalStatus?.lockout || null;
+  const selectedUnsafeReasons = Array.isArray(
+    selectedOperationalStatus?.reasons,
+  )
+    ? selectedOperationalStatus?.reasons
+    : [];
 
   return (
     <PageShell className="space-y-6">
@@ -884,6 +932,16 @@ export default function JurisdictionProfiles() {
                   }
                 />
 
+                <div className="mt-3">
+                  <JurisdictionCoverageBadge
+                    coverage={{
+                      ...(selected || {}),
+                      ...(selectedVisibility?.resolved_profile || {}),
+                      operational_status: selectedOperationalStatus,
+                    }}
+                  />
+                </div>
+
                 <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="rounded-xl border border-white/10 bg-black/30 p-4">
                     <div className="space-y-2">
@@ -948,6 +1006,39 @@ export default function JurisdictionProfiles() {
                           selected.last_refreshed || selected.last_refreshed_at,
                         )}
                       />
+                      <Row
+                        label="Health state"
+                        value={
+                          <Badge
+                            tone={confidenceTone(
+                              selectedOperationalStatus?.health_state ||
+                                selectedOperationalStatus?.refresh_state,
+                            )}
+                          >
+                            {titleize(
+                              selectedOperationalStatus?.health_state ||
+                                selectedOperationalStatus?.refresh_state ||
+                                "unknown",
+                            )}
+                          </Badge>
+                        }
+                      />
+                      <Row
+                        label="Safe to rely on"
+                        value={
+                          <Badge
+                            tone={
+                              selectedOperationalStatus?.safe_to_rely_on
+                                ? "good"
+                                : "bad"
+                            }
+                          >
+                            {selectedOperationalStatus?.safe_to_rely_on
+                              ? "yes"
+                              : "no"}
+                          </Badge>
+                        }
+                      />
                     </div>
                   </div>
 
@@ -1002,8 +1093,87 @@ export default function JurisdictionProfiles() {
                           "This profile is stale and should be refreshed."}
                       </div>
                     ) : null}
+
+                    {selectedLockout?.lockout_active ||
+                    selectedUnsafeReasons.length ||
+                    selectedOperationalStatus?.refresh_status_reason ? (
+                      <div className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-100">
+                        {selectedLockout?.lockout_reason ||
+                          selectedUnsafeReasons[0] ||
+                          selectedOperationalStatus?.refresh_status_reason ||
+                          "This jurisdiction still needs review before it is safe to rely on."}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
+
+                {selectedOperationalStatus ? (
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <div className="text-xs uppercase tracking-wider text-white/45">
+                        Next step
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-white">
+                        {titleize(selectedNextActions?.next_step || "monitor")}
+                      </div>
+                      <div className="mt-1 text-xs text-white/50">
+                        {selectedNextActions?.next_search_retry_due_at
+                          ? `Due ${formatDate(selectedNextActions.next_search_retry_due_at)}`
+                          : "No retry currently due"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <div className="text-xs uppercase tracking-wider text-white/45">
+                        Source freshness
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {Object.entries(
+                          selectedSourceSummary?.freshness_counts || {},
+                        ).map(([key, value]) => (
+                          <Badge
+                            key={key}
+                            tone={norm(key) === "fresh" ? "good" : "warn"}
+                          >
+                            {titleize(key)} · {value as any}
+                          </Badge>
+                        ))}
+                        {!Object.keys(
+                          selectedSourceSummary?.freshness_counts || {},
+                        ).length ? (
+                          <span className="text-sm text-white/55">
+                            No source freshness summary
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <div className="text-xs uppercase tracking-wider text-white/45">
+                        Validation state
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {Object.entries(
+                          selectedSourceSummary?.validation_state_counts || {},
+                        ).map(([key, value]) => (
+                          <Badge
+                            key={key}
+                            tone={norm(key) === "validated" ? "good" : "warn"}
+                          >
+                            {titleize(key)} · {value as any}
+                          </Badge>
+                        ))}
+                        {!Object.keys(
+                          selectedSourceSummary?.validation_state_counts || {},
+                        ).length ? (
+                          <span className="text-sm text-white/55">
+                            No validation summary
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 {selected.notes ? (
                   <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/75">

@@ -2,9 +2,36 @@ import React from "react";
 import {
   AlertTriangle,
   BadgeCheck,
+  Clock3,
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
+
+type LockoutLike = {
+  lockout_active?: boolean | null;
+  lockout_reason?: string | null;
+  critical_stale_categories?: string[] | null;
+  stale_categories?: string[] | null;
+};
+
+type NextActionsLike = {
+  next_step?: string | null;
+  next_search_retry_due_at?: string | null;
+  refresh_state?: string | null;
+};
+
+type OperationalStatusLike = {
+  health_state?: string | null;
+  refresh_state?: string | null;
+  refresh_status_reason?: string | null;
+  reliability_state?: string | null;
+  safe_to_rely_on?: boolean | null;
+  trustworthy_for_projection?: boolean | null;
+  review_required?: boolean | null;
+  reasons?: string[] | null;
+  next_actions?: NextActionsLike | null;
+  lockout?: LockoutLike | null;
+};
 
 type CoverageLike = {
   completeness_status?: string | null;
@@ -19,12 +46,29 @@ type CoverageLike = {
   rule_version?: string | null;
   last_refreshed?: string | null;
   last_refreshed_at?: string | null;
+  trustworthy_for_projection?: boolean | null;
+  completeness?: {
+    completeness_status?: string | null;
+    completeness_score?: number | null;
+    is_stale?: boolean | null;
+    stale_reason?: string | null;
+  } | null;
+  operational_status?: OperationalStatusLike | null;
+  health?: OperationalStatusLike | null;
+  lockout?: LockoutLike | null;
+  next_actions?: NextActionsLike | null;
 };
 
 function norm(value: unknown) {
   return String(value ?? "")
     .trim()
     .toLowerCase();
+}
+
+function titleize(value: unknown) {
+  return String(value ?? "unknown")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 function pct(value: unknown) {
@@ -53,6 +97,8 @@ function toneForValue(value: unknown) {
       "fresh",
       "strong",
       "confirmed",
+      "healthy",
+      "safe_to_rely_on",
     ].includes(v)
   ) {
     return "oh-pill oh-pill-good";
@@ -66,6 +112,9 @@ function toneForValue(value: unknown) {
       "pending",
       "conditional",
       "needs_review",
+      "review_required",
+      "degraded",
+      "validating",
     ].includes(v)
   ) {
     return "oh-pill oh-pill-warn";
@@ -80,11 +129,38 @@ function toneForValue(value: unknown) {
       "bad",
       "critical",
       "weak",
+      "failed",
+      "unsafe_to_rely_on",
     ].includes(v)
   ) {
     return "oh-pill oh-pill-bad";
   }
   return "oh-pill";
+}
+
+function deriveOperationalStatus(c: CoverageLike) {
+  const operational = c.operational_status || c.health || null;
+  const lockout = c.lockout || operational?.lockout || null;
+  const nextActions = c.next_actions || operational?.next_actions || null;
+  const healthState =
+    operational?.health_state || operational?.refresh_state || "unknown";
+  const reliabilityState = operational?.reliability_state || "unknown";
+  const safeToRely = Boolean(
+    operational?.safe_to_rely_on ||
+    (c.trustworthy_for_projection && !lockout?.lockout_active),
+  );
+  const reasons = Array.isArray(operational?.reasons)
+    ? operational?.reasons.filter(Boolean)
+    : [];
+  return {
+    operational,
+    lockout,
+    nextActions,
+    healthState,
+    reliabilityState,
+    safeToRely,
+    reasons,
+  };
 }
 
 export default function JurisdictionCoverageBadge({
@@ -96,28 +172,50 @@ export default function JurisdictionCoverageBadge({
 }) {
   const c = coverage || {};
   const confidence = c.coverage_confidence || c.confidence_label || "unknown";
-  const completeness = c.completeness_status || "unknown";
+  const completeness =
+    c.completeness_status || c.completeness?.completeness_status || "unknown";
   const readiness = c.production_readiness || "unknown";
-  const isStale = Boolean(c.is_stale || c.stale_warning);
+  const isStale = Boolean(
+    c.is_stale || c.stale_warning || c.completeness?.is_stale,
+  );
   const version = c.resolved_rule_version || c.rule_version || "—";
   const refreshed = c.last_refreshed || c.last_refreshed_at || null;
+  const {
+    lockout,
+    nextActions,
+    healthState,
+    reliabilityState,
+    safeToRely,
+    reasons,
+  } = deriveOperationalStatus(c);
 
   if (compact) {
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <span className={toneForValue(confidence)}>
-          {norm(confidence) === "high" ? (
+        <span className={toneForValue(healthState)}>
+          {norm(healthState) === "healthy" ? (
             <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-          ) : norm(confidence) === "low" ? (
+          ) : (
             <ShieldAlert className="mr-1 h-3.5 w-3.5" />
-          ) : null}
-          Confidence: {String(confidence).replace(/_/g, " ")}
+          )}
+          {titleize(healthState)}
         </span>
 
-        <span className={toneForValue(completeness)}>
-          <BadgeCheck className="mr-1 h-3.5 w-3.5" />
-          {String(completeness).replace(/_/g, " ")}
+        <span className={toneForValue(reliabilityState)}>
+          {safeToRely ? (
+            <BadgeCheck className="mr-1 h-3.5 w-3.5" />
+          ) : (
+            <AlertTriangle className="mr-1 h-3.5 w-3.5" />
+          )}
+          {safeToRely ? "Safe to rely on" : titleize(reliabilityState)}
         </span>
+
+        {lockout?.lockout_active ? (
+          <span className="oh-pill oh-pill-bad">
+            <ShieldAlert className="mr-1 h-3.5 w-3.5" />
+            Lockout
+          </span>
+        ) : null}
 
         {isStale ? (
           <span className="oh-pill oh-pill-warn">
@@ -132,25 +230,43 @@ export default function JurisdictionCoverageBadge({
   return (
     <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className={toneForValue(confidence)}>
-          {norm(confidence) === "high" ? (
+        <span className={toneForValue(healthState)}>
+          {norm(healthState) === "healthy" ? (
             <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-          ) : norm(confidence) === "low" ? (
+          ) : (
             <ShieldAlert className="mr-1 h-3.5 w-3.5" />
-          ) : null}
-          Coverage confidence: {String(confidence).replace(/_/g, " ")}
+          )}
+          Health: {titleize(healthState)}
+        </span>
+
+        <span className={toneForValue(confidence)}>
+          Coverage confidence: {titleize(confidence)}
         </span>
 
         <span className={toneForValue(completeness)}>
           <BadgeCheck className="mr-1 h-3.5 w-3.5" />
-          Completeness: {String(completeness).replace(/_/g, " ")}
+          Completeness: {titleize(completeness)}
         </span>
 
         <span className={toneForValue(readiness)}>
-          Production: {String(readiness).replace(/_/g, " ")}
+          Production: {titleize(readiness)}
         </span>
 
-        {isStale ? (
+        <span className={toneForValue(reliabilityState)}>
+          {safeToRely ? (
+            <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+          ) : (
+            <AlertTriangle className="mr-1 h-3.5 w-3.5" />
+          )}
+          {safeToRely ? "Safe to rely on" : titleize(reliabilityState)}
+        </span>
+
+        {lockout?.lockout_active ? (
+          <span className="oh-pill oh-pill-bad">
+            <ShieldAlert className="mr-1 h-3.5 w-3.5" />
+            Lockout active
+          </span>
+        ) : isStale ? (
           <span className="oh-pill oh-pill-warn">
             <AlertTriangle className="mr-1 h-3.5 w-3.5" />
             Stale
@@ -160,13 +276,25 @@ export default function JurisdictionCoverageBadge({
         )}
       </div>
 
-      <div className="mt-3 grid gap-3 md:grid-cols-3">
+      {(lockout?.lockout_reason ||
+        reasons[0] ||
+        c.stale_reason ||
+        c.completeness?.stale_reason) && (
+        <div className="mt-3 rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-1">
+          {lockout?.lockout_reason ||
+            reasons[0] ||
+            c.stale_reason ||
+            c.completeness?.stale_reason}
+        </div>
+      )}
+
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
         <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
           <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
             Completeness score
           </div>
           <div className="mt-2 text-sm font-semibold text-app-0">
-            {pct(c.completeness_score)}
+            {pct(c.completeness_score ?? c.completeness?.completeness_score)}
           </div>
         </div>
 
@@ -185,14 +313,22 @@ export default function JurisdictionCoverageBadge({
             {formatDate(refreshed)}
           </div>
         </div>
-      </div>
 
-      {isStale && c.stale_reason ? (
-        <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-50/90">
-          <span className="font-semibold text-amber-100">Stale warning:</span>{" "}
-          {c.stale_reason}
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Next step
+          </div>
+          <div className="mt-2 text-sm font-semibold text-app-0">
+            {titleize(nextActions?.next_step || "monitor")}
+          </div>
+          {nextActions?.next_search_retry_due_at ? (
+            <div className="mt-1 flex items-center gap-1 text-xs text-app-4">
+              <Clock3 className="h-3.5 w-3.5" />
+              {formatDate(nextActions.next_search_retry_due_at)}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

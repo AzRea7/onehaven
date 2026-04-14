@@ -78,7 +78,173 @@ def _serialize_policy_source(row: PolicySource) -> dict:
         "source_kind": getattr(row, "source_kind", None),
         "is_authoritative": bool(getattr(row, "is_authoritative", False)),
         "freshness_status": getattr(row, "freshness_status", None),
+        "refresh_state": getattr(row, "refresh_state", None),
+        "refresh_status_reason": getattr(row, "refresh_status_reason", None),
+        "validation_state": getattr(row, "validation_state", None),
+        "validation_reason": getattr(row, "validation_reason", None),
+        "next_refresh_due_at": getattr(row, "next_refresh_due_at", None).isoformat() if getattr(row, "next_refresh_due_at", None) else None,
+        "validation_due_at": getattr(row, "validation_due_at", None).isoformat() if getattr(row, "validation_due_at", None) else None,
         "last_verified_at": getattr(row, "last_verified_at", None).isoformat() if getattr(row, "last_verified_at", None) else None,
+        "last_validated_at": getattr(row, "last_validated_at", None).isoformat() if getattr(row, "last_validated_at", None) else None,
+    }
+
+
+def _iso_dt(value: Optional[datetime]) -> Optional[str]:
+    return value.isoformat() if value is not None else None
+
+
+def _profile_source_rows(db: Session, profile: JurisdictionProfile | None) -> list[PolicySource]:
+    if profile is None:
+        return []
+
+    q = db.query(PolicySource).filter(PolicySource.state == getattr(profile, "state", None))
+    if getattr(profile, "county", None) is None:
+        q = q.filter(PolicySource.county.is_(None))
+    else:
+        q = q.filter(PolicySource.county == getattr(profile, "county", None))
+    if getattr(profile, "city", None) is None:
+        q = q.filter(PolicySource.city.is_(None))
+    else:
+        q = q.filter(PolicySource.city == getattr(profile, "city", None))
+    if getattr(profile, "pha_name", None) is None:
+        q = q.filter(PolicySource.pha_name.is_(None))
+    else:
+        q = q.filter(PolicySource.pha_name == getattr(profile, "pha_name", None))
+
+    if getattr(profile, "org_id", None) is None:
+        q = q.filter(PolicySource.org_id.is_(None))
+    else:
+        q = q.filter((PolicySource.org_id == getattr(profile, "org_id", None)) | (PolicySource.org_id.is_(None)))
+
+    return list(q.order_by(PolicySource.is_authoritative.desc(), PolicySource.id.asc()).all())
+
+
+def _source_summary_for_profile(db: Session, profile: JurisdictionProfile | None) -> dict:
+    rows = _profile_source_rows(db, profile)
+    freshness_counts: dict[str, int] = {}
+    refresh_state_counts: dict[str, int] = {}
+    validation_state_counts: dict[str, int] = {}
+    next_refresh_due_at: Optional[datetime] = None
+    next_validation_due_at: Optional[datetime] = None
+    latest_validated_at: Optional[datetime] = None
+    latest_verified_at: Optional[datetime] = None
+    items: list[dict] = []
+
+    for row in rows:
+        freshness = str(getattr(row, "freshness_status", None) or "unknown").strip().lower()
+        refresh_state = str(getattr(row, "refresh_state", None) or "unknown").strip().lower()
+        validation_state = str(getattr(row, "validation_state", None) or "unknown").strip().lower()
+        freshness_counts[freshness] = freshness_counts.get(freshness, 0) + 1
+        refresh_state_counts[refresh_state] = refresh_state_counts.get(refresh_state, 0) + 1
+        validation_state_counts[validation_state] = validation_state_counts.get(validation_state, 0) + 1
+
+        nr = getattr(row, "next_refresh_due_at", None)
+        nv = getattr(row, "validation_due_at", None)
+        lv = getattr(row, "last_validated_at", None)
+        lver = getattr(row, "last_verified_at", None)
+        if nr is not None and (next_refresh_due_at is None or nr < next_refresh_due_at):
+            next_refresh_due_at = nr
+        if nv is not None and (next_validation_due_at is None or nv < next_validation_due_at):
+            next_validation_due_at = nv
+        if lv is not None and (latest_validated_at is None or lv > latest_validated_at):
+            latest_validated_at = lv
+        if lver is not None and (latest_verified_at is None or lver > latest_verified_at):
+            latest_verified_at = lver
+
+        if freshness in {"stale", "unknown"} or refresh_state in {"blocked", "degraded", "failed", "validating"} or validation_state in {"ambiguous", "conflicting", "unsupported", "weak_support", "unknown"}:
+            if len(items) < 8:
+                items.append(_serialize_policy_source(row))
+
+    return {
+        "total": len(rows),
+        "authoritative_count": sum(1 for row in rows if bool(getattr(row, "is_authoritative", False))),
+        "freshness_counts": freshness_counts,
+        "refresh_state_counts": refresh_state_counts,
+        "validation_state_counts": validation_state_counts,
+        "next_refresh_due_at": _iso_dt(next_refresh_due_at),
+        "next_validation_due_at": _iso_dt(next_validation_due_at),
+        "latest_validated_at": _iso_dt(latest_validated_at),
+        "latest_verified_at": _iso_dt(latest_verified_at),
+        "items": items,
+    }
+
+
+def _operational_status_payload(db: Session, profile: JurisdictionProfile | None, *, org_id: int | None = None) -> dict:
+    if profile is None:
+        return {
+            "health_state": "missing",
+            "refresh_state": "missing",
+            "reliability_state": "unsafe_to_rely_on",
+            "safe_to_rely_on": False,
+            "trustworthy_for_projection": False,
+            "review_required": True,
+            "reasons": ["jurisdiction_profile_not_found"],
+            "lockout": {"lockout_active": True, "lockout_reason": "jurisdiction_profile_not_found"},
+            "next_actions": {"next_step": "create_or_refresh_profile"},
+            "source_summary": _source_summary_for_profile(db, None),
+        }
+
+    health = get_jurisdiction_health(db, profile_id=int(profile.id), org_id=org_id)
+    completeness = dict((health or {}).get("completeness") or {})
+    lockout = dict((health or {}).get("lockout") or {})
+    next_actions = dict((health or {}).get("next_actions") or {})
+    source_summary = _source_summary_for_profile(db, profile)
+    refresh_state = str((health or {}).get("refresh_state") or getattr(profile, "refresh_state", None) or "unknown")
+    status_reason = str((health or {}).get("refresh_status_reason") or getattr(profile, "refresh_status_reason", None) or "").strip() or None
+
+    trustworthy = bool(completeness.get("trustworthy_for_projection", False))
+    missing = list(completeness.get("missing_categories") or [])
+    stale = list(completeness.get("stale_categories") or [])
+    conflicting = list(completeness.get("conflicting_categories") or [])
+    inferred = list(completeness.get("inferred_categories") or [])
+    lockout_active = bool(lockout.get("lockout_active"))
+
+    reasons: list[str] = []
+    if lockout.get("lockout_reason"):
+        reasons.append(str(lockout.get("lockout_reason")))
+    if status_reason and status_reason not in reasons:
+        reasons.append(status_reason)
+    if completeness.get("stale_reason"):
+        reasons.append(str(completeness.get("stale_reason")))
+    if missing:
+        reasons.append(f"missing categories: {', '.join(missing[:6])}")
+    if stale:
+        reasons.append(f"stale categories: {', '.join(stale[:6])}")
+    if conflicting:
+        reasons.append(f"conflicting categories: {', '.join(conflicting[:6])}")
+    if inferred and not trustworthy:
+        reasons.append(f"inferred-only categories: {', '.join(inferred[:6])}")
+
+    safe_to_rely_on = bool(
+        trustworthy
+        and not lockout_active
+        and refresh_state == "healthy"
+        and not stale
+        and not conflicting
+    )
+    review_required = bool(not safe_to_rely_on and refresh_state in {"degraded", "pending", "validating", "healthy"})
+    reliability_state = (
+        "safe_to_rely_on"
+        if safe_to_rely_on
+        else "unsafe_to_rely_on"
+        if lockout_active or refresh_state in {"blocked", "failed", "missing"}
+        else "review_required"
+    )
+
+    return {
+        "health_state": "blocked" if lockout_active else refresh_state,
+        "refresh_state": refresh_state,
+        "refresh_status_reason": status_reason,
+        "reliability_state": reliability_state,
+        "safe_to_rely_on": safe_to_rely_on,
+        "trustworthy_for_projection": trustworthy,
+        "review_required": review_required,
+        "reasons": reasons,
+        "lockout": lockout,
+        "next_actions": next_actions,
+        "source_summary": source_summary,
+        "last_refresh_success_at": (health or {}).get("last_refresh_success_at"),
+        "last_refresh_completed_at": (health or {}).get("last_refresh_completed_at"),
     }
 
 
@@ -151,6 +317,11 @@ def _profile_resolution_payload(db: Session, profile: JurisdictionProfile | None
         return None
     completeness = profile_completeness_payload(db, profile)
     meta = _profile_policy_meta(profile)
+    operational_status = _operational_status_payload(
+        db,
+        profile,
+        org_id=getattr(profile, "org_id", None),
+    )
     return {
         "profile_id": int(profile.id),
         "state": profile.state,
@@ -175,9 +346,7 @@ def _profile_resolution_payload(db: Session, profile: JurisdictionProfile | None
         "completeness_score": completeness.get("completeness_score"),
         "completeness_status": completeness.get("completeness_status"),
         "production_readiness": completeness.get("production_readiness"),
-        "trustworthy_for_projection": bool(
-            completeness.get("trustworthy_for_projection", False)
-        ),
+        "trustworthy_for_projection": bool(completeness.get("trustworthy_for_projection", False)),
         "missing_local_rule_areas": completeness.get("missing_local_rule_areas")
         or completeness.get("missing_categories")
         or meta.get("missing_local_rule_areas")
@@ -186,6 +355,8 @@ def _profile_resolution_payload(db: Session, profile: JurisdictionProfile | None
         "stale_categories": completeness.get("stale_categories") or [],
         "inferred_categories": completeness.get("inferred_categories") or [],
         "conflicting_categories": completeness.get("conflicting_categories") or [],
+        "covered_categories": completeness.get("covered_categories") or [],
+        "required_categories": completeness.get("required_categories") or [],
         "source_evidence": meta.get("source_evidence") or meta.get("evidence") or [],
         "last_refresh": completeness.get("last_refresh")
         or meta.get("last_refreshed")
@@ -200,6 +371,12 @@ def _profile_resolution_payload(db: Session, profile: JurisdictionProfile | None
         "stale_reason": completeness.get("stale_reason") or meta.get("stale_reason"),
         "resolved_layers": _profile_layers_payload(profile),
         "coverage_matrix": _coverage_matrix_payload(db, profile),
+        "operational_status": operational_status,
+        "health": operational_status,
+        "lockout": operational_status.get("lockout"),
+        "next_actions": operational_status.get("next_actions"),
+        "safe_to_rely_on": operational_status.get("safe_to_rely_on"),
+        "unsafe_reasons": operational_status.get("reasons"),
     }
 
 
@@ -575,9 +752,16 @@ def get_jurisdiction_completeness(
         coverage = None
 
     payload = profile_completeness_payload(db, profile)
+    operational_status = _operational_status_payload(
+        db,
+        profile,
+        org_id=getattr(p, "org_id", None),
+    )
     return {
         "ok": True,
         "profile": payload,
+        "operational_status": operational_status,
+        "health": operational_status,
         "coverage": {
             "id": getattr(coverage, "id", None),
             "coverage_status": getattr(coverage, "coverage_status", None),
@@ -630,7 +814,17 @@ def get_jurisdiction_coverage_matrix(
     if recompute:
         profile, _ = recompute_profile_and_coverage(db, profile, commit=True)
 
-    return {"ok": True, **(_coverage_matrix_payload(db, profile) or {})}
+    operational_status = _operational_status_payload(
+        db,
+        profile,
+        org_id=getattr(p, "org_id", None),
+    )
+    return {
+        "ok": True,
+        **(_coverage_matrix_payload(db, profile) or {}),
+        "operational_status": operational_status,
+        "health": operational_status,
+    }
 
 
 @router.post("/{jurisdiction_profile_id}/notify-stale", response_model=dict)
@@ -688,6 +882,7 @@ def resolve_property_jurisdiction(
     if profile is not None and recompute:
         profile, _ = recompute_profile_and_coverage(db, profile, commit=True)
 
+    resolved_profile = _profile_resolution_payload(db, profile)
     return {
         "ok": True,
         "property": {
@@ -697,7 +892,10 @@ def resolve_property_jurisdiction(
             "county": getattr(prop, "county", None),
             "state": getattr(prop, "state", None),
         },
-        "resolved_profile": _profile_resolution_payload(db, profile),
+        "resolved_profile": resolved_profile,
+        "operational_status": (resolved_profile or {}).get("operational_status"),
+        "safe_to_rely_on": (resolved_profile or {}).get("safe_to_rely_on"),
+        "unsafe_reasons": (resolved_profile or {}).get("unsafe_reasons") or [],
     }
 
 
@@ -752,6 +950,9 @@ def property_coverage_detail(
             "stale_warning": False,
             "resolved_layers": [],
             "source_evidence": [],
+            "operational_status": _operational_status_payload(db, None, org_id=getattr(p, "org_id", None)),
+            "safe_to_rely_on": False,
+            "unsafe_reasons": ["jurisdiction_profile_not_found"],
         }
 
     return {
@@ -789,7 +990,7 @@ def jurisdiction_health(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    return get_jurisdiction_health(
+    result = get_jurisdiction_health(
         db,
         profile_id=profile_id,
         org_id=getattr(principal, "org_id", None),
@@ -798,6 +999,43 @@ def jurisdiction_health(
         city=city,
         pha_name=pha_name,
     )
+    if not result.get("ok"):
+        return result
+    profile = db.get(JurisdictionProfile, int(result.get("jurisdiction_profile_id"))) if result.get("jurisdiction_profile_id") else None
+    operational_status = _operational_status_payload(
+        db,
+        profile,
+        org_id=getattr(principal, "org_id", None),
+    )
+    result["source_summary"] = operational_status.get("source_summary")
+    result["operational_status"] = operational_status
+    result["safe_to_rely_on"] = operational_status.get("safe_to_rely_on")
+    result["unsafe_reasons"] = operational_status.get("reasons") or []
+    return result
+
+
+@router.get("/{jurisdiction_profile_id}/visibility", response_model=dict)
+def get_jurisdiction_visibility(
+    jurisdiction_profile_id: int,
+    recompute: bool = Query(False),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+    if profile.org_id is not None and profile.org_id != p.org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if recompute:
+        profile, _ = recompute_profile_and_coverage(db, profile, commit=True)
+    return {
+        "ok": True,
+        "jurisdiction_profile_id": int(profile.id),
+        "resolved_profile": _profile_resolution_payload(db, profile),
+        "coverage_matrix": _coverage_matrix_payload(db, profile),
+        "health": get_jurisdiction_health(db, profile_id=int(profile.id), org_id=getattr(p, "org_id", None)),
+        "operational_status": _operational_status_payload(db, profile, org_id=getattr(p, "org_id", None)),
+    }
 
 
 @router.post("/{profile_id}/refresh")
