@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, Optional
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.policy_models import PolicyAssertion, PolicySource
+from app.policy_models import PolicyAssertion, PolicySource, PolicySourceInventory
+from app.services.policy_change_detection_service import compute_next_retry_due, determine_validation_refresh_state
 
 
 VALIDATION_STATE_VALIDATED = "validated"
@@ -27,7 +27,7 @@ def _utcnow() -> datetime:
     return datetime.utcnow()
 
 
-def _loads_dict(value: Any) -> dict[str, Any]:
+def _loads_dict(value):
     if value is None:
         return {}
     if isinstance(value, dict):
@@ -44,25 +44,32 @@ def _loads_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _norm_state(value: Optional[str]) -> str:
+def _dumps(value) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:
+        return "{}"
+
+
+def _norm_state(value):
     return (value or "MI").strip().upper()
 
 
-def _norm_lower(value: Optional[str]) -> Optional[str]:
+def _norm_lower(value):
     if value is None:
         return None
     out = value.strip().lower()
     return out or None
 
 
-def _norm_text(value: Optional[str]) -> Optional[str]:
+def _norm_text(value):
     if value is None:
         return None
     out = value.strip()
     return out or None
 
 
-def _safe_float(v: Any, default: float = 0.0) -> float:
+def _safe_float(v, default: float = 0.0) -> float:
     try:
         return float(v)
     except Exception:
@@ -89,7 +96,7 @@ def _citation_quality_from_assertion(assertion: PolicyAssertion) -> float:
     return round(min(score, 1.0), 6)
 
 
-def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, Any]:
+def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
     confidence = _safe_float(getattr(assertion, "confidence", 0.0))
     extraction_confidence = _safe_float(getattr(assertion, "extraction_confidence", confidence))
     citation_quality = _citation_quality_from_assertion(assertion)
@@ -149,19 +156,123 @@ def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | Non
         "extraction_confidence": round(extraction_confidence, 6),
         "trust_state": trust_state,
         "validated_at": _utcnow(),
+        "blocking_issue": bool(blocking and validation_state != VALIDATION_STATE_VALIDATED),
     }
+
+
+def _apply_validation_state_to_source(
+    db: Session,
+    *,
+    source: PolicySource,
+    assertions: list[PolicyAssertion],
+    counts: dict[str, int],
+    blocking_issue_count: int,
+) -> dict[str, object]:
+    now = _utcnow()
+    state_payload = determine_validation_refresh_state(
+        validated_count=counts.get("validated", 0),
+        weak_support_count=counts.get("weak_support", 0),
+        ambiguous_count=counts.get("ambiguous", 0),
+        conflicting_count=counts.get("conflicting", 0),
+        unsupported_count=counts.get("unsupported", 0),
+        blocking_issue_count=blocking_issue_count,
+    )
+    source.refresh_state = str(state_payload.get("refresh_state") or getattr(source, "refresh_state", None) or "pending")
+    source.refresh_status_reason = str(state_payload.get("status_reason") or "validation_complete")
+    source.revalidation_required = False
+    source.validation_due_at = None
+    source.last_verified_at = now if counts.get("validated", 0) > 0 else getattr(source, "last_verified_at", None)
+    source.last_state_transition_at = now
+    source.last_refresh_completed_at = now
+    if source.refresh_state in {"blocked", "degraded"}:
+        source.registry_status = "warning"
+        source.refresh_retry_count = int(getattr(source, "refresh_retry_count", 0) or 0) + 1
+        if source.refresh_state == "blocked":
+            source.refresh_blocked_reason = source.refresh_status_reason
+        source.next_refresh_due_at = compute_next_retry_due(
+            retry_count=int(getattr(source, "refresh_retry_count", 0) or 0),
+            base_dt=now,
+            min_hours=12,
+            max_days=14,
+        )
+    else:
+        source.registry_status = "active"
+        source.refresh_blocked_reason = None
+        source.refresh_retry_count = 0
+
+    summary = {
+        "validated_count": counts.get("validated", 0),
+        "weak_support_count": counts.get("weak_support", 0),
+        "ambiguous_count": counts.get("ambiguous", 0),
+        "conflicting_count": counts.get("conflicting", 0),
+        "unsupported_count": counts.get("unsupported", 0),
+        "blocking_issue_count": blocking_issue_count,
+        "source_id": int(source.id),
+        "assertion_ids": [int(a.id) for a in assertions],
+        "validation_finished_at": now.isoformat(),
+        "refresh_state": source.refresh_state,
+        "status_reason": source.refresh_status_reason,
+        "next_step": state_payload.get("next_step"),
+    }
+    source.last_refresh_outcome_json = _dumps({
+        **_loads_dict(getattr(source, "last_refresh_outcome_json", None)),
+        "validation_summary": summary,
+    })
+    source.last_change_summary_json = _dumps({
+        **_loads_dict(getattr(source, "last_change_summary_json", None)),
+        "validation_summary": summary,
+    })
+    db.add(source)
+
+    inventory_rows = list(
+        db.scalars(
+            select(PolicySourceInventory).where(PolicySourceInventory.policy_source_id == int(source.id))
+        ).all()
+    )
+    for row in inventory_rows:
+        row.refresh_state = source.refresh_state
+        row.refresh_status_reason = source.refresh_status_reason
+        row.next_refresh_step = str(state_payload.get("next_step") or row.next_refresh_step or "monitor")
+        row.revalidation_required = False
+        row.validation_due_at = None
+        row.last_state_transition_at = now
+        row.last_refresh_outcome_json = _dumps({
+            **_loads_dict(getattr(row, "last_refresh_outcome_json", None)),
+            "validation_summary": summary,
+        })
+        meta = _loads_dict(getattr(row, "inventory_metadata_json", None))
+        meta["last_validation_summary"] = summary
+        row.inventory_metadata_json = _dumps(meta)
+        if source.refresh_state in {"blocked", "degraded"}:
+            row.lifecycle_state = "failed" if source.refresh_state == "blocked" else row.lifecycle_state
+            row.crawl_status = "validation_failed"
+            row.last_failure_at = now
+            row.failure_count = int(getattr(row, "failure_count", 0) or 0) + 1
+            row.next_search_retry_due_at = compute_next_retry_due(
+                retry_count=int(getattr(row, "failure_count", 0) or 0),
+                base_dt=now,
+                min_hours=12,
+                max_days=14,
+            )
+            row.next_crawl_due_at = row.next_search_retry_due_at
+        else:
+            row.crawl_status = "validated"
+            row.lifecycle_state = "active"
+            row.last_success_at = now
+        db.add(row)
+    return summary
 
 
 def validate_market_assertions(
     db: Session,
     *,
-    org_id: Optional[int],
+    org_id: int | None,
     state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str] = None,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
     source_id: int | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     st = _norm_state(state)
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
@@ -192,6 +303,8 @@ def validate_market_assertions(
     rows = list(db.scalars(stmt).all())
     counts = {"validated": 0, "weak_support": 0, "ambiguous": 0, "conflicting": 0, "unsupported": 0}
     updated_ids: list[int] = []
+    blocking_issue_count = 0
+    by_source: dict[int, list[PolicyAssertion]] = {}
 
     for row in rows:
         source = db.get(PolicySource, int(row.source_id)) if getattr(row, "source_id", None) is not None else None
@@ -204,7 +317,24 @@ def validate_market_assertions(
         row.extraction_confidence = payload["extraction_confidence"]
         row.conflict_count = len(_loads_dict(getattr(row, "citation_json", None)).get("conflict_hints") or [])
         counts[row.validation_state] = counts.get(row.validation_state, 0) + 1
+        if payload.get("blocking_issue"):
+            blocking_issue_count += 1
         updated_ids.append(int(row.id))
+        if getattr(row, "source_id", None) is not None:
+            by_source.setdefault(int(row.source_id), []).append(row)
+
+    source_summaries: list[dict[str, object]] = []
+    for sid, source_rows in by_source.items():
+        source = db.get(PolicySource, sid)
+        if source is None:
+            continue
+        local_counts = {"validated": 0, "weak_support": 0, "ambiguous": 0, "conflicting": 0, "unsupported": 0}
+        local_blocking = 0
+        for row in source_rows:
+            local_counts[str(getattr(row, "validation_state", "unsupported"))] = local_counts.get(str(getattr(row, "validation_state", "unsupported")), 0) + 1
+            if bool(getattr(row, "blocking", False)) and str(getattr(row, "validation_state", "")) != VALIDATION_STATE_VALIDATED:
+                local_blocking += 1
+        source_summaries.append(_apply_validation_state_to_source(db, source=source, assertions=source_rows, counts=local_counts, blocking_issue_count=local_blocking))
 
     db.commit()
     return {
@@ -213,5 +343,7 @@ def validate_market_assertions(
         "ambiguous_count": counts.get("ambiguous", 0),
         "conflicting_count": counts.get("conflicting", 0),
         "unsupported_count": counts.get("unsupported", 0),
+        "blocking_issue_count": blocking_issue_count,
         "updated_ids": updated_ids,
+        "source_validation_summaries": source_summaries,
     }

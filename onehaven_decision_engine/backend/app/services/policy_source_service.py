@@ -21,6 +21,7 @@ from app.services.policy_discovery_service import (
     record_discovery_attempt,
     summarize_inventory_for_scope,
     sync_policy_source_into_inventory,
+    upsert_discovery_candidate_inventory,
     upsert_source_inventory_record,
 )
 from app.services.policy_crawl_service import sync_crawl_result_to_inventory
@@ -1408,6 +1409,8 @@ def discover_policy_sources_for_market(
     created_source_ids: list[int] = []
     created_count = 0
     existing_count = 0
+    inventory_hints = expected_inventory_hints(state=st, county=cnty, city=cty, pha_name=pha, include_section8=True)
+    overall_status = "completed"
 
     for candidate in selected:
         probe_result = _probe_discovery_candidate(url=candidate.url, timeout_seconds=timeout_seconds) if probe else {
@@ -1417,12 +1420,34 @@ def discover_policy_sources_for_market(
             "title": None,
             "fetch_error": "probe_skipped",
         }
+        inventory = upsert_discovery_candidate_inventory(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            program_type="section8" if "section8" in set(candidate.category_hints) else None,
+            url=candidate.url,
+            title=probe_result.get("title") or candidate.title,
+            publisher=candidate.publisher,
+            source_type=candidate.source_type,
+            publication_type=candidate.publication_type,
+            category_hints=list(candidate.category_hints),
+            search_terms=list(candidate.search_terms),
+            expected_categories=inventory_hints.get("expected_categories"),
+            expected_tiers=inventory_hints.get("expected_tiers"),
+            authority_tier=candidate.authority_tier,
+            authority_rank=candidate.authority_rank,
+            authority_score=candidate.authority_score,
+            probe_result=probe_result,
+            metadata={"focus": focus, "candidate": candidate.as_dict()},
+        )
 
         should_persist = bool(probe_result.get("ok")) or candidate.authority_score >= 0.85
         persisted_source_id: int | None = None
-
         if should_persist:
-            source = _upsert_discovered_source(
+            source_row = _upsert_discovered_source(
                 db,
                 org_id=org_id,
                 state=st,
@@ -1433,23 +1458,55 @@ def discover_policy_sources_for_market(
                 probe_result=probe_result,
                 focus=focus,
             )
-            persisted_source_id = int(source.id)
+            persisted_source_id = int(source_row.id)
+            inventory.policy_source_id = persisted_source_id
+            db.add(inventory)
             created_source_ids.append(persisted_source_id)
-            if policy_source_origin(source) == "discovered":
+            if policy_source_origin(source_row) == "discovered":
                 created_count += 1
             else:
                 existing_count += 1
+
+        attempt_status = "completed"
+        attempt_error = None
+        if not probe_result.get("ok") and str(probe_result.get("fetch_error") or "") not in {"", "probe_skipped"}:
+            attempt_status = "failed"
+            attempt_error = str(probe_result.get("fetch_error"))
+            overall_status = "degraded"
+        record_discovery_attempt(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            program_type="section8" if "section8" in set(candidate.category_hints) else None,
+            query_text=" | ".join(candidate.search_terms) or candidate.title,
+            searched_categories=list(candidate.category_hints),
+            searched_tiers=inventory_hints.get("expected_tiers"),
+            result_urls=[candidate.url],
+            inventory_id=int(inventory.id),
+            policy_source_id=persisted_source_id,
+            attempt_type="discovery_probe" if probe else "discovery_queue",
+            status=attempt_status,
+            not_found=False,
+            error_message=attempt_error,
+            metadata={"focus": focus, "probe_result": probe_result, "candidate": candidate.as_dict()},
+            next_retry_due_at=getattr(inventory, "next_search_retry_due_at", None),
+        )
 
         results.append(
             {
                 "candidate": candidate.as_dict(),
                 "probe_result": probe_result,
+                "inventory_id": int(inventory.id),
                 "persisted": should_persist,
                 "policy_source_id": persisted_source_id,
+                "inventory_refresh_state": getattr(inventory, "refresh_state", None),
+                "inventory_next_refresh_step": getattr(inventory, "next_refresh_step", None),
             }
         )
 
-    inventory_hints = expected_inventory_hints(state=st, county=cnty, city=cty, pha_name=pha, include_section8=True)
     discovered_urls = [candidate.url for candidate in selected]
     search_query = " | ".join(missing) if missing else None
     record_discovery_attempt(
@@ -1465,7 +1522,7 @@ def discover_policy_sources_for_market(
         searched_tiers=inventory_hints.get("expected_tiers"),
         result_urls=discovered_urls,
         attempt_type="discovery",
-        status="completed",
+        status=overall_status,
         not_found=not bool(discovered_urls),
         metadata={"focus": focus, "probe": probe, "candidate_count": len(selected)},
     )
@@ -1489,6 +1546,7 @@ def discover_policy_sources_for_market(
         "ok": True,
         "discovery_triggered": True,
         "reason": "missing_categories",
+        "status": overall_status,
         "state": st,
         "county": cnty,
         "city": cty,
@@ -1510,7 +1568,6 @@ def discover_policy_sources_for_market(
             program_type="section8" if "section8" in set(missing) else None,
         ),
     }
-
 
 def queue_policy_source_discovery(
     db: Session,

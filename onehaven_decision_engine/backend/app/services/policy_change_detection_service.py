@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 
 def _utcnow() -> datetime:
@@ -66,8 +66,10 @@ def build_source_change_summary(
             "changed": False,
             "change_detected": False,
             "change_kind": "fetch_failed",
+            "change_severity": "failed",
             "requires_revalidation": False,
             "revalidation_reason": None,
+            "actionable_outcome": "retry_fetch",
             "previous_fingerprint": previous_fp,
             "current_fingerprint": current_fp,
             "previous_version_id": previous_version_id,
@@ -90,14 +92,27 @@ def build_source_change_summary(
 
     changed_at = now if changed else None
     requires_revalidation = bool(changed and authoritative)
+    severity = "none"
+    actionable_outcome = "monitor"
+    if changed and authoritative:
+        severity = "high"
+        actionable_outcome = "revalidate"
+    elif changed:
+        severity = "medium"
+        actionable_outcome = "review_changed_content"
+    elif current_fp is None:
+        severity = "low"
+        actionable_outcome = "missing_fingerprint"
 
     return {
         "comparison_state": "compared",
         "changed": changed,
         "change_detected": changed,
         "change_kind": kind,
+        "change_severity": severity,
         "requires_revalidation": requires_revalidation,
         "revalidation_reason": "authoritative_source_changed" if requires_revalidation else None,
+        "actionable_outcome": actionable_outcome,
         "previous_fingerprint": previous_fp,
         "current_fingerprint": current_fp,
         "previous_version_id": previous_version_id,
@@ -160,6 +175,51 @@ def determine_source_refresh_state(
         "status_reason": "no_change_detected",
         "blocked_reason": None,
         "next_step": "monitor",
+        "revalidation_required": False,
+    }
+
+
+def determine_validation_refresh_state(
+    *,
+    validated_count: int,
+    weak_support_count: int,
+    ambiguous_count: int,
+    conflicting_count: int,
+    unsupported_count: int,
+    blocking_issue_count: int = 0,
+) -> dict[str, Any]:
+    if blocking_issue_count > 0 or conflicting_count > 0:
+        return {
+            "refresh_state": "blocked",
+            "status_reason": "validation_blocking_conflicts",
+            "next_step": "manual_review",
+            "revalidation_required": False,
+        }
+    if unsupported_count > 0:
+        return {
+            "refresh_state": "degraded",
+            "status_reason": "validation_missing_support",
+            "next_step": "retry_validation",
+            "revalidation_required": False,
+        }
+    if ambiguous_count > 0 or weak_support_count > 0:
+        return {
+            "refresh_state": "degraded",
+            "status_reason": "validation_needs_review",
+            "next_step": "review_validation_results",
+            "revalidation_required": False,
+        }
+    if validated_count > 0:
+        return {
+            "refresh_state": "healthy",
+            "status_reason": "validation_complete",
+            "next_step": "monitor",
+            "revalidation_required": False,
+        }
+    return {
+        "refresh_state": "pending",
+        "status_reason": "validation_no_assertions",
+        "next_step": "extract_or_retry",
         "revalidation_required": False,
     }
 

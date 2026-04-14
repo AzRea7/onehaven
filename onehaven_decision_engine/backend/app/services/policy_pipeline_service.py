@@ -801,3 +801,118 @@ def mark_source_assertions_stale(
     reason: str = "source_refreshed",
 ) -> dict[str, Any]:
     return mark_assertions_stale_for_source(db, source_id=source_id, reason=reason)
+
+
+from app.services.jurisdiction_health_service import get_jurisdiction_health as _chunk3_pipeline_get_jurisdiction_health
+from app.services.jurisdiction_refresh_service import finalize_jurisdiction_profile_lifecycle as _chunk3_finalize_jurisdiction_profile_lifecycle
+
+_chunk3_original_run_market_policy_pipeline = run_market_policy_pipeline
+_chunk3_original_refresh_market_policy_pipeline = refresh_market_policy_pipeline
+
+
+def run_market_policy_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    result = _chunk3_original_run_market_policy_pipeline(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )
+    if not result.get("ok"):
+        return result
+
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+    profile = _find_matching_profile(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    if profile is None:
+        return result
+
+    refresh_results = []
+    for row in list(result.get("source_runs") or []):
+        if isinstance(row, dict) and isinstance(row.get("refresh"), dict):
+            refresh_results.append(dict(row["refresh"]))
+
+    finalized = _chunk3_finalize_jurisdiction_profile_lifecycle(
+        db,
+        profile=profile,
+        refresh_results=refresh_results,
+        discovery_result=result.get("discovery_result") if isinstance(result.get("discovery_result"), dict) else None,
+        governance_result=result.get("lifecycle_result") if isinstance(result.get("lifecycle_result"), dict) else None,
+    )
+    result["recompute"] = {
+        **dict(result.get("recompute") or {}),
+        "profile": finalized["completeness"],
+        "coverage": finalized["coverage"],
+    }
+    result["health"] = finalized["health"]
+    result["lockout"] = finalized["lockout"]
+    result["sla_summary"] = finalized["sla_summary"]
+    result["requirements"] = finalized["requirements"]
+    return result
+
+
+def refresh_market_policy_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    result = _chunk3_original_refresh_market_policy_pipeline(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )
+    pipeline_result = dict(result.get("pipeline_result") or {})
+    if pipeline_result.get("ok"):
+        st = _norm_state(state)
+        cnty = _norm_lower(county)
+        cty = _norm_lower(city)
+        pha = _norm_text(pha_name)
+        profile = _find_matching_profile(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+        )
+        if profile is not None:
+            pipeline_result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(profile.id))
+    result["pipeline_result"] = pipeline_result
+    return result

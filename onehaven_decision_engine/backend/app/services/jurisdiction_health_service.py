@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -10,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.policy_models import JurisdictionProfile
 from app.services.jurisdiction_completeness_service import profile_completeness_payload
 from app.services.jurisdiction_lockout_service import profile_lockout_payload
-from app.services.jurisdiction_sla_service import profile_next_actions
+from app.services.jurisdiction_sla_service import collect_profile_source_sla_summary, profile_next_actions
 
 
 def _loads_json_dict(value: Any) -> dict[str, Any]:
@@ -62,6 +61,7 @@ def get_jurisdiction_health(
     completeness = profile_completeness_payload(db, profile)
     lockout = profile_lockout_payload(profile, completeness)
     next_actions = profile_next_actions(profile)
+    sla_summary = collect_profile_source_sla_summary(db, profile=profile)
     refresh_outcome = _loads_json_dict(getattr(profile, "last_refresh_outcome_json", None))
 
     return {
@@ -75,6 +75,7 @@ def get_jurisdiction_health(
         "completeness": completeness,
         "lockout": lockout,
         "next_actions": next_actions,
+        "sla_summary": sla_summary,
         "refresh_state": getattr(profile, "refresh_state", None),
         "refresh_status_reason": getattr(profile, "refresh_status_reason", None),
         "last_refresh_success_at": getattr(profile, "last_refresh_success_at", None).isoformat() if getattr(profile, "last_refresh_success_at", None) else None,

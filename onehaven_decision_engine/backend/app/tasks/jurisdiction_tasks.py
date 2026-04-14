@@ -119,6 +119,8 @@ def jurisdiction_health_snapshot() -> dict:
             "ok": True,
             "count": len(items),
             "items": items[:200],
+            "blocked_count": sum(1 for item in items if bool((item.get("lockout") or {}).get("lockout_active"))),
+            "degraded_count": sum(1 for item in items if item.get("refresh_state") == "degraded"),
             "task": "jurisdiction.health_snapshot",
             **flags,
         }

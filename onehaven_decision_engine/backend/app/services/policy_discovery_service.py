@@ -255,6 +255,93 @@ def upsert_source_inventory_record(
     return row
 
 
+def upsert_discovery_candidate_inventory(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    program_type: Optional[str],
+    url: str,
+    title: Optional[str],
+    publisher: Optional[str],
+    source_type: Optional[str],
+    publication_type: Optional[str],
+    category_hints: list[str] | None,
+    search_terms: list[str] | None,
+    expected_categories: list[str] | None,
+    expected_tiers: list[str] | None,
+    authority_tier: Optional[str] = None,
+    authority_rank: int = 0,
+    authority_score: float = 0.0,
+    probe_result: dict[str, Any] | None = None,
+    policy_source_id: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> PolicySourceInventory:
+    now = _utcnow()
+    probe = dict(probe_result or {})
+    fetch_error = probe.get("fetch_error")
+    ok = bool(probe.get("ok"))
+    crawl_status = "queued" if ok else ("failed" if fetch_error and fetch_error != "probe_skipped" else "pending")
+    lifecycle_state = "active" if ok else ("discovered" if not fetch_error or fetch_error == "probe_skipped" else "failed")
+    refresh_state = "healthy" if ok else ("degraded" if fetch_error and fetch_error != "probe_skipped" else "pending")
+    next_step = "crawl" if ok else ("retry_probe" if fetch_error and fetch_error != "probe_skipped" else "crawl")
+    row = upsert_source_inventory_record(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        program_type=program_type,
+        url=url,
+        title=title,
+        publisher=publisher,
+        source_type=source_type,
+        publication_type=publication_type,
+        category_hints=category_hints,
+        search_terms=search_terms,
+        expected_categories=expected_categories,
+        expected_tiers=expected_tiers,
+        authority_tier=authority_tier,
+        authority_rank=authority_rank,
+        authority_score=authority_score,
+        lifecycle_state=lifecycle_state,
+        crawl_status=crawl_status,
+        inventory_origin="discovered",
+        policy_source_id=policy_source_id,
+        is_curated=False,
+        is_official_candidate=bool(int(authority_rank or 0) >= 85),
+        probe_result=probe,
+        metadata=metadata,
+    )
+    row.last_seen_at = now
+    row.refresh_state = refresh_state
+    row.refresh_status_reason = None if ok else (str(fetch_error or "discovered_not_probed"))
+    row.next_refresh_step = next_step
+    row.last_http_status = probe.get("http_status")
+    if fetch_error and fetch_error != "probe_skipped":
+        row.last_failure_at = now
+        row.failure_count = int(row.failure_count or 0) + 1
+        row.next_search_retry_due_at = compute_next_retry_due(
+            retry_count=int(row.failure_count or 0),
+            base_dt=now,
+            min_hours=12,
+            max_days=max(DEFAULT_DISCOVERY_RETRY_DAYS, 14),
+        )
+        row.next_crawl_due_at = row.next_search_retry_due_at
+    else:
+        row.next_crawl_due_at = row.next_crawl_due_at or now
+    meta = _json_loads_dict(getattr(row, "inventory_metadata_json", None))
+    meta["last_probe_result"] = probe
+    row.inventory_metadata_json = _json_dumps(meta)
+    db.add(row)
+    db.flush()
+    return row
+
+
 def sync_policy_source_into_inventory(
     db: Session,
     *,
@@ -379,41 +466,57 @@ def update_inventory_after_fetch(
         row = sync_policy_source_into_inventory(db, source=source, org_id=getattr(source, "org_id", None))
     now = _utcnow()
     ok = bool(fetch_result.get("ok"))
+    fetch_error = fetch_result.get("fetch_error")
+    changed = bool(fetch_result.get("change_detected") or fetch_result.get("changed"))
+    refresh_state = str(fetch_result.get("refresh_state") or getattr(source, "refresh_state", None) or row.refresh_state or "pending")
+    next_step = str(fetch_result.get("next_step") or row.next_refresh_step or "monitor")
     row.policy_source_id = int(getattr(source, "id", 0) or 0) or row.policy_source_id
     row.current_source_version_id = source_version_id or row.current_source_version_id
     row.last_crawled_at = now
     row.last_seen_at = now
     row.last_http_status = fetch_result.get("http_status")
-    row.last_error = fetch_result.get("fetch_error")
+    row.last_error = fetch_error
     row.canonical_fingerprint = fetch_result.get("current_fingerprint") or row.canonical_fingerprint
-    row.refresh_state = str(fetch_result.get("refresh_state") or getattr(source, "refresh_state", None) or row.refresh_state or "pending")
+    row.refresh_state = refresh_state
     row.refresh_status_reason = fetch_result.get("status_reason") or getattr(source, "refresh_status_reason", None)
-    row.next_refresh_step = fetch_result.get("next_step") or row.next_refresh_step
+    row.next_refresh_step = next_step
     row.revalidation_required = bool(fetch_result.get("revalidation_required") or getattr(source, "revalidation_required", False))
-    row.validation_due_at = getattr(source, "validation_due_at", None) or row.validation_due_at
+    row.validation_due_at = fetch_result.get("validation_due_at") or getattr(source, "validation_due_at", None) or row.validation_due_at
     row.last_state_transition_at = getattr(source, "last_state_transition_at", None) or now
-    if fetch_result.get("change_detected") or fetch_result.get("changed"):
+    if changed:
         row.last_change_detected_at = now
     if ok:
         row.crawl_status = "fetched"
         row.lifecycle_state = "active"
         row.last_success_at = now
+        row.last_failure_at = row.last_failure_at
         row.next_crawl_due_at = getattr(source, "next_refresh_due_at", None) or (now + timedelta(days=7))
+        if row.revalidation_required:
+            row.refresh_state = "validating"
+            row.next_refresh_step = "validate"
     else:
         row.crawl_status = "failed"
         row.lifecycle_state = "failed"
         row.last_failure_at = now
         row.failure_count = int(row.failure_count or 0) + 1
         row.next_crawl_due_at = getattr(source, "next_refresh_due_at", None) or compute_next_retry_due(retry_count=int(row.failure_count or 0), base_dt=now)
+        row.next_search_retry_due_at = row.next_crawl_due_at
     meta = _json_loads_dict(row.inventory_metadata_json)
     meta["last_fetch_result"] = dict(fetch_result)
+    meta["last_fetch_stateful_summary"] = {
+        "ok": ok,
+        "fetch_error": fetch_error,
+        "changed": changed,
+        "refresh_state": row.refresh_state,
+        "next_refresh_step": row.next_refresh_step,
+        "current_source_version_id": row.current_source_version_id,
+    }
     row.inventory_metadata_json = _json_dumps(meta)
     row.last_refresh_outcome_json = _json_dumps(fetch_result)
     row.last_change_summary_json = _json_dumps(fetch_result.get("change_summary") or {})
     db.add(row)
     db.flush()
     return row
-
 
 def mark_inventory_not_found(
 

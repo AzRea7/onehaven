@@ -1224,3 +1224,274 @@ def refresh_due_jurisdictions(
     result["blocked_count"] = sum(1 for h in health_items if bool((h.get("lockout") or {}).get("lockout_active")))
     result["degraded_count"] = sum(1 for h in health_items if h.get("refresh_state") == "degraded")
     return result
+
+
+
+from app.services.jurisdiction_health_service import get_jurisdiction_health as _chunk3_get_jurisdiction_health
+from app.services.jurisdiction_lockout_service import profile_lockout_payload as _chunk3_profile_lockout_payload
+from app.services.jurisdiction_sla_service import (
+    build_refresh_requirements as _chunk3_build_refresh_requirements,
+    collect_profile_source_sla_summary as _chunk3_collect_profile_source_sla_summary,
+    source_due_at as _chunk3_source_due_at,
+    source_is_past_sla as _chunk3_source_is_past_sla,
+)
+
+_chunk3_original_refresh_jurisdiction_profile = refresh_jurisdiction_profile
+_chunk3_original_refresh_due_jurisdictions = refresh_due_jurisdictions
+
+
+def _chunk3_refresh_rows(refresh_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in refresh_results or []:
+        if isinstance(row, dict):
+            rows.append({"refresh": dict(row)})
+    return rows
+
+
+def finalize_jurisdiction_profile_lifecycle(
+    db: Session,
+    *,
+    profile: JurisdictionProfile,
+    refresh_results: list[dict[str, Any]] | None,
+    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
+    run_id: str | None = None,
+    discovery_result: dict[str, Any] | None = None,
+    governance_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    refreshed_profile, coverage = recompute_profile_and_coverage(
+        db,
+        profile,
+        stale_days=stale_days,
+        commit=True,
+    )
+    completeness = profile_completeness_payload(db, refreshed_profile, stale_days=stale_days)
+    sla_summary = _chunk3_collect_profile_source_sla_summary(db, profile=refreshed_profile)
+    refresh_rows = _chunk3_refresh_rows(refresh_results or [])
+    state_payload = determine_profile_refresh_state(
+        refresh_runs=refresh_rows,
+        recompute_ok=True,
+        missing_categories=list(completeness.get("missing_categories") or []),
+        stale_categories=list(completeness.get("stale_categories") or []),
+        overdue_categories=list(sla_summary.get("overdue_categories") or []),
+        critical_overdue_categories=list(sla_summary.get("critical_overdue_categories") or []),
+        profile_is_stale=bool(completeness.get("is_stale", False)),
+    )
+
+    inventory_summary = inventory_summary_for_market(
+        db,
+        org_id=getattr(refreshed_profile, "org_id", None),
+        state=_norm_state(getattr(refreshed_profile, "state", None)),
+        county=_norm_lower(getattr(refreshed_profile, "county", None)),
+        city=_norm_lower(getattr(refreshed_profile, "city", None)),
+        pha_name=_norm_text(getattr(refreshed_profile, "pha_name", None)),
+        program_type="section8" if "section8" in set(completeness.get("missing_categories") or []) else None,
+    )
+    retry_due_at = None
+    if state_payload["refresh_state"] in {"pending", "degraded", "validating", "failed"}:
+        retry_due_at = compute_next_retry_due(
+            retry_count=int(getattr(refreshed_profile, "refresh_retry_count", 0) or 0),
+            base_dt=_utcnow(),
+            min_hours=24,
+            max_days=14,
+        )
+
+    requirements = _chunk3_build_refresh_requirements(
+        refreshed_profile,
+        next_step=state_payload["next_step"],
+        missing_categories=list(completeness.get("missing_categories") or []),
+        stale_categories=list(completeness.get("stale_categories") or []),
+        overdue_categories=list(sla_summary.get("overdue_categories") or []),
+        critical_overdue_categories=list(sla_summary.get("critical_overdue_categories") or []),
+        inventory_summary={
+            "inventory_count": inventory_summary.get("inventory_count"),
+            "lifecycle_counts": inventory_summary.get("lifecycle_counts"),
+            "crawl_counts": inventory_summary.get("crawl_counts"),
+        },
+        retry_due_at=retry_due_at,
+    )
+
+    _set_profile_refresh_state(
+        refreshed_profile,
+        refresh_state=state_payload["refresh_state"],
+        reason=state_payload["status_reason"],
+        now=_utcnow(),
+        blocked_reason="critical_authoritative_data_stale" if state_payload["refresh_state"] == "blocked" else None,
+        next_step=state_payload["next_step"],
+        requirements=requirements,
+        retry_count=(0 if state_payload["refresh_state"] == "healthy" else int(getattr(refreshed_profile, "refresh_retry_count", 0) or 0) + 1),
+        run_id=run_id,
+    )
+
+    lockout = _chunk3_profile_lockout_payload(refreshed_profile, completeness)
+    if bool(lockout.get("lockout_active")):
+        _set_profile_refresh_state(
+            refreshed_profile,
+            refresh_state="blocked",
+            reason=str(lockout.get("lockout_reason") or "critical_authoritative_data_stale"),
+            now=_utcnow(),
+            blocked_reason=str(lockout.get("lockout_reason") or "critical_authoritative_data_stale"),
+            next_step="manual_review",
+            requirements=requirements,
+            retry_count=int(getattr(refreshed_profile, "refresh_retry_count", 0) or 0),
+            run_id=run_id,
+        )
+
+    refreshed_profile.last_refresh_completed_at = _utcnow()
+    if getattr(refreshed_profile, "refresh_state", None) in {"healthy", "degraded", "pending", "validating", "blocked"}:
+        refreshed_profile.last_refresh_success_at = _utcnow()
+    refreshed_profile.last_refresh_outcome_json = json.dumps(
+        {
+            "ok": True,
+            "run_id": run_id,
+            "refresh_state": getattr(refreshed_profile, "refresh_state", None),
+            "status_reason": getattr(refreshed_profile, "refresh_status_reason", None),
+            "completeness_status": completeness.get("completeness_status"),
+            "missing_categories": list(completeness.get("missing_categories") or []),
+            "stale_categories": list(completeness.get("stale_categories") or []),
+            "overdue_categories": list(sla_summary.get("overdue_categories") or []),
+            "critical_overdue_categories": list(sla_summary.get("critical_overdue_categories") or []),
+            "discovery_result": discovery_result or {},
+            "governance_result": governance_result or {},
+            "inventory_summary": {
+                "inventory_count": inventory_summary.get("inventory_count"),
+                "lifecycle_counts": inventory_summary.get("lifecycle_counts"),
+                "crawl_counts": inventory_summary.get("crawl_counts"),
+            },
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    db.add(refreshed_profile)
+    db.commit()
+
+    for source in list_sources_for_market(
+        db,
+        org_id=getattr(refreshed_profile, "org_id", None),
+        state=_norm_state(getattr(refreshed_profile, "state", None)),
+        county=_norm_lower(getattr(refreshed_profile, "county", None)),
+        city=_norm_lower(getattr(refreshed_profile, "city", None)),
+        pha_name=_norm_text(getattr(refreshed_profile, "pha_name", None)),
+    ):
+        if getattr(source, "next_refresh_due_at", None) is None:
+            source.next_refresh_due_at = _chunk3_source_due_at(source)
+        if _chunk3_source_is_past_sla(source):
+            source.refresh_state = getattr(source, "refresh_state", None) or "degraded"
+            source.refresh_status_reason = getattr(source, "refresh_status_reason", None) or "source_past_sla"
+        db.add(source)
+    db.commit()
+
+    health = _chunk3_get_jurisdiction_health(db, profile_id=int(refreshed_profile.id))
+    return {
+        "profile": {
+            "id": int(refreshed_profile.id),
+            "org_id": refreshed_profile.org_id,
+            "state": refreshed_profile.state,
+            "county": refreshed_profile.county,
+            "city": refreshed_profile.city,
+            "pha_name": getattr(refreshed_profile, "pha_name", None),
+            "completeness_status": refreshed_profile.completeness_status,
+            "completeness_score": float(refreshed_profile.completeness_score or 0.0),
+            "is_stale": bool(refreshed_profile.is_stale),
+            "stale_reason": refreshed_profile.stale_reason,
+            "last_refresh_success_at": refreshed_profile.last_refresh_success_at.isoformat() if refreshed_profile.last_refresh_success_at else None,
+            "refresh_state": getattr(refreshed_profile, "refresh_state", None),
+            "refresh_status_reason": getattr(refreshed_profile, "refresh_status_reason", None),
+        },
+        "coverage": {
+            "id": int(coverage.id),
+            "coverage_status": getattr(coverage, "coverage_status", None),
+            "production_readiness": getattr(coverage, "production_readiness", None),
+            "completeness_status": getattr(coverage, "completeness_status", None),
+            "is_stale": bool(getattr(coverage, "is_stale", False)),
+        },
+        "completeness": completeness,
+        "lockout": lockout,
+        "health": health,
+        "sla_summary": sla_summary,
+        "requirements": requirements,
+    }
+
+
+def refresh_jurisdiction_profile(
+    db: Session,
+    *,
+    jurisdiction_profile_id: int,
+    reviewer_user_id: int | None = None,
+    force: bool = False,
+    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
+    focus: str = "se_mi_extended",
+) -> dict[str, Any]:
+    result = _chunk3_original_refresh_jurisdiction_profile(
+        db,
+        jurisdiction_profile_id=jurisdiction_profile_id,
+        reviewer_user_id=reviewer_user_id,
+        force=force,
+        stale_days=stale_days,
+        focus=focus,
+    )
+    if not result.get("ok"):
+        return result
+
+    profile = db.get(JurisdictionProfile, int(jurisdiction_profile_id))
+    if profile is None:
+        return result
+
+    finalized = finalize_jurisdiction_profile_lifecycle(
+        db,
+        profile=profile,
+        refresh_results=list(result.get("refresh_results") or []),
+        stale_days=stale_days,
+        run_id=_loads_json_dict(getattr(profile, "last_refresh_outcome_json", None)).get("run_id"),
+        discovery_result=result.get("discovery_result") if isinstance(result.get("discovery_result"), dict) else None,
+        governance_result=result.get("governance_result") if isinstance(result.get("governance_result"), dict) else None,
+    )
+    result["profile"] = finalized["profile"]
+    result["coverage"] = finalized["coverage"]
+    result["lockout"] = finalized["lockout"]
+    result["health"] = finalized["health"]
+    result["sla_summary"] = finalized["sla_summary"]
+    result["requirements"] = finalized["requirements"]
+    result["refresh_confidence"] = _refresh_confidence_from_profile(finalized["profile"])
+    if isinstance(result.get("summary"), dict):
+        result["summary"] = {**result["summary"], "refresh_state": finalized["profile"].get("refresh_state"), "next_step": finalized["requirements"].get("next_step")}
+    return result
+
+
+def refresh_due_jurisdictions(
+    db: Session,
+    *,
+    org_id: int | None = None,
+    reviewer_user_id: int | None = None,
+    batch_size: int | None = None,
+    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
+    focus: str = "se_mi_extended",
+) -> dict[str, Any]:
+    result = _chunk3_original_refresh_due_jurisdictions(
+        db,
+        org_id=org_id,
+        reviewer_user_id=reviewer_user_id,
+        batch_size=batch_size,
+        stale_days=stale_days,
+        focus=focus,
+    )
+    if not result.get("ok"):
+        return result
+
+    health_items = []
+    blocked_count = 0
+    degraded_count = 0
+    for item in result.get("refreshed", []):
+        profile_id = item.get("jurisdiction_profile_id")
+        if profile_id is None:
+            continue
+        health = _chunk3_get_jurisdiction_health(db, profile_id=int(profile_id))
+        health_items.append(health)
+        if bool((health.get("lockout") or {}).get("lockout_active")):
+            blocked_count += 1
+        if health.get("refresh_state") == "degraded":
+            degraded_count += 1
+    result["health_items"] = health_items
+    result["blocked_count"] = blocked_count
+    result["degraded_count"] = degraded_count
+    return result
