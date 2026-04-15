@@ -5,8 +5,13 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from .jurisdiction_categories import (
+    authority_expectations_for_categories,
     expected_rule_universe_for_scope,
     get_required_categories,
+    legally_binding_categories,
+    operational_heuristic_categories,
+    property_proof_required_categories,
+    rule_family_inventory_dict,
 )
 
 
@@ -797,6 +802,12 @@ def default_policy_for_scope(
             "critical_categories": list(universe.get("critical_categories", [])),
             "optional_categories": list(universe.get("optional_categories", [])),
             "jurisdiction_types": list(universe.get("jurisdiction_types", [])),
+            "rule_family_inventory": dict(universe.get("rule_family_inventory", {})),
+            "legally_binding_categories": list(universe.get("legally_binding_categories", [])),
+            "operational_heuristic_categories": list(universe.get("operational_heuristic_categories", [])),
+            "property_proof_required_categories": list(universe.get("property_proof_required_categories", [])),
+            "authority_expectations": dict(universe.get("authority_expectations", {})),
+            "family_bundles": dict(universe.get("family_bundles", {})),
         },
         "compliance": {
             "rental_license_required": "unknown",
@@ -820,6 +831,11 @@ def default_policy_for_scope(
         },
         "source_evidence": [],
         "expected_rule_universe": universe,
+        "rule_family_inventory": dict(universe.get("rule_family_inventory", {})) or rule_family_inventory_dict(),
+        "legally_binding_categories": list(universe.get("legally_binding_categories", [])) or legally_binding_categories(universe.get("required_categories", [])),
+        "operational_heuristic_categories": list(universe.get("operational_heuristic_categories", [])) or operational_heuristic_categories(universe.get("required_categories", [])),
+        "property_proof_required_categories": list(universe.get("property_proof_required_categories", [])) or property_proof_required_categories(universe.get("required_categories", [])),
+        "authority_expectations": dict(universe.get("authority_expectations", {})) or authority_expectations_for_categories(universe.get("required_categories", [])),
         "notes": "No explicit jurisdiction default exists yet.",
     }
 

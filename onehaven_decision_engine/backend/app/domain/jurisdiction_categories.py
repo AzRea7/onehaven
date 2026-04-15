@@ -27,6 +27,10 @@ JURISDICTION_TYPE_STATE = "state"
 JURISDICTION_TYPE_COUNTY = "county"
 JURISDICTION_TYPE_CITY = "city"
 JURISDICTION_TYPE_SECTION8_OVERLAY = "section8_overlay"
+JURISDICTION_TYPE_PHA_PROGRAM_OVERLAY = JURISDICTION_TYPE_SECTION8_OVERLAY
+
+BINDING_TYPE_LEGAL = "legally_binding"
+BINDING_TYPE_OPERATIONAL = "operational_heuristic"
 
 CANONICAL_JURISDICTION_CATEGORIES: tuple[str, ...] = (
     CATEGORY_RENTAL_LICENSE,
@@ -50,19 +54,19 @@ CANONICAL_JURISDICTION_CATEGORIES: tuple[str, ...] = (
 CATEGORY_DISPLAY_NAMES: dict[str, str] = {
     CATEGORY_RENTAL_LICENSE: "Rental license",
     CATEGORY_INSPECTION: "Inspection",
-    CATEGORY_SECTION8: "Section 8",
+    CATEGORY_SECTION8: "Section 8 / HCV",
     CATEGORY_ZONING: "Zoning",
     CATEGORY_TAX: "Tax",
     CATEGORY_UTILITIES: "Utilities",
-    CATEGORY_SAFETY: "Safety",
-    CATEGORY_REGISTRATION: "Registration",
-    CATEGORY_LEAD: "Lead",
+    CATEGORY_SAFETY: "Safety / housing code",
+    CATEGORY_REGISTRATION: "Rental registration",
+    CATEGORY_LEAD: "Lead / environmental health",
     CATEGORY_OCCUPANCY: "Occupancy / certificate",
     CATEGORY_PERMITS: "Permits",
     CATEGORY_PROGRAM_OVERLAY: "Program overlay",
-    CATEGORY_DOCUMENTS: "Documents",
+    CATEGORY_DOCUMENTS: "Documents / packets",
     CATEGORY_FEES: "Fees",
-    CATEGORY_CONTACTS: "Contacts",
+    CATEGORY_CONTACTS: "Contacts / authorities",
     CATEGORY_SOURCE_OF_INCOME: "Source of income",
 }
 
@@ -82,12 +86,14 @@ _CATEGORY_ALIASES: dict[str, str] = {
     "section8": CATEGORY_SECTION8,
     "section_8": CATEGORY_SECTION8,
     "hqs": CATEGORY_SECTION8,
+    "nspire": CATEGORY_SECTION8,
     "voucher": CATEGORY_SECTION8,
     "housing_choice_voucher": CATEGORY_SECTION8,
     "pha": CATEGORY_PROGRAM_OVERLAY,
     "housing_authority": CATEGORY_PROGRAM_OVERLAY,
     "overlay": CATEGORY_PROGRAM_OVERLAY,
     "program_overlay": CATEGORY_PROGRAM_OVERLAY,
+    "pha_program_overlay": CATEGORY_PROGRAM_OVERLAY,
     "documents": CATEGORY_DOCUMENTS,
     "document": CATEGORY_DOCUMENTS,
     "paperwork": CATEGORY_DOCUMENTS,
@@ -156,7 +162,6 @@ CATEGORY_STATUS_SCORES: dict[str, float] = {
     "unknown": 0.0,
 }
 
-
 _TIER_SATISFIED_CATEGORY_STATUSES = {"covered", "verified", "fresh"}
 _TIER_INFERRED_CATEGORY_STATUSES = {"inferred", "partial", "conditional"}
 _TIER_BLOCKING_CATEGORY_STATUSES = {"missing", "stale", "conflicting", "inferred", "partial", "conditional"}
@@ -185,89 +190,24 @@ _LEAD_FOCUSED_CITIES = {
 
 _EXPECTED_CATEGORY_BUNDLES: dict[str, dict[str, tuple[str, ...]]] = {
     JURISDICTION_TYPE_STATE: {
-        "required": (
-            CATEGORY_SAFETY,
-            CATEGORY_LEAD,
-            CATEGORY_SOURCE_OF_INCOME,
-            CATEGORY_PERMITS,
-        ),
-        "critical": (
-            CATEGORY_SAFETY,
-            CATEGORY_LEAD,
-        ),
-        "optional": (
-            CATEGORY_ZONING,
-            CATEGORY_TAX,
-            CATEGORY_UTILITIES,
-            CATEGORY_DOCUMENTS,
-        ),
+        "required": (CATEGORY_SAFETY, CATEGORY_LEAD, CATEGORY_SOURCE_OF_INCOME, CATEGORY_PERMITS),
+        "critical": (CATEGORY_SAFETY, CATEGORY_LEAD),
+        "optional": (CATEGORY_ZONING, CATEGORY_TAX, CATEGORY_UTILITIES, CATEGORY_DOCUMENTS),
     },
     JURISDICTION_TYPE_COUNTY: {
-        "required": (
-            CATEGORY_REGISTRATION,
-            CATEGORY_INSPECTION,
-            CATEGORY_SAFETY,
-            CATEGORY_PERMITS,
-            CATEGORY_DOCUMENTS,
-            CATEGORY_CONTACTS,
-        ),
-        "critical": (
-            CATEGORY_INSPECTION,
-            CATEGORY_SAFETY,
-        ),
-        "optional": (
-            CATEGORY_OCCUPANCY,
-            CATEGORY_FEES,
-            CATEGORY_TAX,
-            CATEGORY_UTILITIES,
-            CATEGORY_ZONING,
-        ),
+        "required": (CATEGORY_REGISTRATION, CATEGORY_INSPECTION, CATEGORY_SAFETY, CATEGORY_PERMITS, CATEGORY_DOCUMENTS, CATEGORY_CONTACTS),
+        "critical": (CATEGORY_INSPECTION, CATEGORY_SAFETY),
+        "optional": (CATEGORY_OCCUPANCY, CATEGORY_FEES, CATEGORY_TAX, CATEGORY_UTILITIES, CATEGORY_ZONING),
     },
     JURISDICTION_TYPE_CITY: {
-        "required": (
-            CATEGORY_RENTAL_LICENSE,
-            CATEGORY_REGISTRATION,
-            CATEGORY_INSPECTION,
-            CATEGORY_OCCUPANCY,
-            CATEGORY_SAFETY,
-            CATEGORY_PERMITS,
-            CATEGORY_DOCUMENTS,
-            CATEGORY_FEES,
-            CATEGORY_CONTACTS,
-        ),
-        "critical": (
-            CATEGORY_RENTAL_LICENSE,
-            CATEGORY_REGISTRATION,
-            CATEGORY_INSPECTION,
-            CATEGORY_OCCUPANCY,
-            CATEGORY_SAFETY,
-        ),
-        "optional": (
-            CATEGORY_LEAD,
-            CATEGORY_ZONING,
-            CATEGORY_TAX,
-            CATEGORY_UTILITIES,
-            CATEGORY_SOURCE_OF_INCOME,
-        ),
+        "required": (CATEGORY_RENTAL_LICENSE, CATEGORY_REGISTRATION, CATEGORY_INSPECTION, CATEGORY_OCCUPANCY, CATEGORY_SAFETY, CATEGORY_PERMITS, CATEGORY_DOCUMENTS, CATEGORY_FEES, CATEGORY_CONTACTS),
+        "critical": (CATEGORY_RENTAL_LICENSE, CATEGORY_REGISTRATION, CATEGORY_INSPECTION, CATEGORY_OCCUPANCY, CATEGORY_SAFETY),
+        "optional": (CATEGORY_LEAD, CATEGORY_ZONING, CATEGORY_TAX, CATEGORY_UTILITIES, CATEGORY_SOURCE_OF_INCOME),
     },
     JURISDICTION_TYPE_SECTION8_OVERLAY: {
-        "required": (
-            CATEGORY_SECTION8,
-            CATEGORY_PROGRAM_OVERLAY,
-            CATEGORY_CONTACTS,
-            CATEGORY_DOCUMENTS,
-            CATEGORY_INSPECTION,
-        ),
-        "critical": (
-            CATEGORY_SECTION8,
-            CATEGORY_PROGRAM_OVERLAY,
-            CATEGORY_CONTACTS,
-        ),
-        "optional": (
-            CATEGORY_OCCUPANCY,
-            CATEGORY_SOURCE_OF_INCOME,
-            CATEGORY_SAFETY,
-        ),
+        "required": (CATEGORY_SECTION8, CATEGORY_PROGRAM_OVERLAY, CATEGORY_CONTACTS, CATEGORY_DOCUMENTS, CATEGORY_INSPECTION),
+        "critical": (CATEGORY_SECTION8, CATEGORY_PROGRAM_OVERLAY, CATEGORY_CONTACTS),
+        "optional": (CATEGORY_OCCUPANCY, CATEGORY_SOURCE_OF_INCOME, CATEGORY_SAFETY),
     },
 }
 
@@ -287,6 +227,22 @@ class JurisdictionCategoryCoverage:
 
 
 @dataclass(frozen=True)
+class JurisdictionRuleFamily:
+    category: str
+    family_key: str
+    display_name: str
+    binding_type: str
+    authority_expectation: str
+    property_proof_expectation: str
+    default_jurisdiction_types: list[str]
+    description: str
+    typical_rule_keys: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class JurisdictionExpectedRuleUniverse:
     jurisdiction_types: list[str]
     required_categories: list[str]
@@ -294,10 +250,22 @@ class JurisdictionExpectedRuleUniverse:
     optional_categories: list[str]
     category_bundles: dict[str, dict[str, list[str]]]
     tier_order: list[str] | None = None
+    rule_family_inventory: dict[str, dict[str, Any]] | None = None
+    legally_binding_categories: list[str] | None = None
+    operational_heuristic_categories: list[str] | None = None
+    authority_expectations: dict[str, str] | None = None
+    property_proof_required_categories: list[str] | None = None
+    family_bundles: dict[str, list[str]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["tier_order"] = list(self.tier_order or self.jurisdiction_types)
+        payload.setdefault("rule_family_inventory", {})
+        payload.setdefault("legally_binding_categories", [])
+        payload.setdefault("operational_heuristic_categories", [])
+        payload.setdefault("authority_expectations", {})
+        payload.setdefault("property_proof_required_categories", [])
+        payload.setdefault("family_bundles", {})
         return payload
 
 
@@ -330,49 +298,39 @@ class JurisdictionTierCoverage:
 def normalize_category(value: Any) -> str | None:
     if value is None:
         return None
-
     raw = str(value).strip().lower()
     if not raw:
         return None
-
     raw = raw.replace("-", "_").replace(" ", "_").replace("/", "_")
     while "__" in raw:
         raw = raw.replace("__", "_")
-
     if raw in CANONICAL_JURISDICTION_CATEGORIES:
         return raw
-
     return _CATEGORY_ALIASES.get(raw)
 
 
 def normalize_categories(values: Iterable[Any] | None) -> list[str]:
     if not values:
         return []
-
     seen: set[str] = set()
     ordered: list[str] = []
-
     for value in values:
         normalized = normalize_category(value)
         if normalized and normalized not in seen:
             seen.add(normalized)
             ordered.append(normalized)
-
     return ordered
 
 
 def normalize_rule_category(rule_key: Any) -> str:
     if rule_key is None:
         return CATEGORY_UNCATEGORIZED
-
     raw = str(rule_key).strip().lower()
     if not raw:
         return CATEGORY_UNCATEGORIZED
-
     raw = raw.replace("-", "_").replace(" ", "_").replace("/", "_")
     while "__" in raw:
         raw = raw.replace("__", "_")
-
     return RULE_KEY_CATEGORY_MAP.get(raw, CATEGORY_UNCATEGORIZED)
 
 
@@ -399,6 +357,233 @@ def category_label(category: Any) -> str:
         raw = str(category or "").strip()
         return raw.replace("_", " ").title() if raw else "Unknown"
     return CATEGORY_DISPLAY_NAMES.get(normalized, normalized.replace("_", " ").title())
+
+
+_RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
+    CATEGORY_RENTAL_LICENSE: JurisdictionRuleFamily(
+        category=CATEGORY_RENTAL_LICENSE,
+        family_key="licensing_and_operator_eligibility",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_RENTAL_LICENSE],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="authoritative_official",
+        property_proof_expectation="license number or issuance evidence usually property-specific",
+        default_jurisdiction_types=[JURISDICTION_TYPE_CITY],
+        description="Whether the operator must hold a rental or landlord license for the property.",
+        typical_rule_keys=["rental_license_required"],
+    ),
+    CATEGORY_REGISTRATION: JurisdictionRuleFamily(
+        category=CATEGORY_REGISTRATION,
+        family_key="registration_and_registry_filing",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_REGISTRATION],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="authoritative_official",
+        property_proof_expectation="registration confirmation, certificate, or registry lookup",
+        default_jurisdiction_types=[JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
+        description="Whether the rental must be registered with a city, county, or other local authority.",
+        typical_rule_keys=["rental_registration_required", "registration_required"],
+    ),
+    CATEGORY_INSPECTION: JurisdictionRuleFamily(
+        category=CATEGORY_INSPECTION,
+        family_key="inspection_program_and_compliance_cycle",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_INSPECTION],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="authoritative_official",
+        property_proof_expectation="inspection pass, scheduled inspection, or cycle evidence",
+        default_jurisdiction_types=[JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_SECTION8_OVERLAY],
+        description="Inspection authority, cadence, triggers, and pass conditions for rental operation.",
+        typical_rule_keys=["inspection_program_exists", "inspection_required"],
+    ),
+    CATEGORY_OCCUPANCY: JurisdictionRuleFamily(
+        category=CATEGORY_OCCUPANCY,
+        family_key="occupancy_and_pre_occupancy_clearance",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_OCCUPANCY],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="authoritative_official",
+        property_proof_expectation="certificate of occupancy or equivalent local clearance",
+        default_jurisdiction_types=[JURISDICTION_TYPE_CITY],
+        description="Certificate of occupancy and similar occupancy-clearance requirements.",
+        typical_rule_keys=["certificate_required_before_occupancy", "occupancy_certificate_required"],
+    ),
+    CATEGORY_SAFETY: JurisdictionRuleFamily(
+        category=CATEGORY_SAFETY,
+        family_key="habitability_and_housing_code_baseline",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_SAFETY],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="authoritative_official",
+        property_proof_expectation="inspection evidence, violations history, or remediation records",
+        default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
+        description="General housing, health, and safety standards that must be met for lawful occupancy.",
+        typical_rule_keys=[],
+    ),
+    CATEGORY_LEAD: JurisdictionRuleFamily(
+        category=CATEGORY_LEAD,
+        family_key="lead_and_environmental_health_controls",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_LEAD],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="authoritative_official",
+        property_proof_expectation="lead disclosure, clearance, abatement, or risk assessment evidence",
+        default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_CITY],
+        description="Lead disclosure, clearance, and related health protections.",
+        typical_rule_keys=["lead_disclosure_required", "lead_clearance_required"],
+    ),
+    CATEGORY_PERMITS: JurisdictionRuleFamily(
+        category=CATEGORY_PERMITS,
+        family_key="rehab_and_trade_permitting",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_PERMITS],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="authoritative_official",
+        property_proof_expectation="permit number, permit status, or final sign-off",
+        default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
+        description="Permit requirements affecting rehab, repair, or rental readiness work.",
+        typical_rule_keys=["permit_required_for_rehab"],
+    ),
+    CATEGORY_SOURCE_OF_INCOME: JurisdictionRuleFamily(
+        category=CATEGORY_SOURCE_OF_INCOME,
+        family_key="tenant_screening_and_soi_protection",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_SOURCE_OF_INCOME],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="authoritative_official",
+        property_proof_expectation="generally not property-specific; applied operationally in screening",
+        default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_SECTION8_OVERLAY],
+        description="Rules protecting voucher holders or other income sources during screening.",
+        typical_rule_keys=["source_of_income_protected"],
+    ),
+    CATEGORY_SECTION8: JurisdictionRuleFamily(
+        category=CATEGORY_SECTION8,
+        family_key="voucher_program_participation_rules",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_SECTION8],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="approved_official_supporting",
+        property_proof_expectation="packet completion, HAP execution, or inspection approval",
+        default_jurisdiction_types=[JURISDICTION_TYPE_SECTION8_OVERLAY],
+        description="Voucher-program rules specific to landlord participation and approval.",
+        typical_rule_keys=["pha_landlord_packet_required", "hap_contract_and_tenancy_addendum_required", "federal_hcv_regulations_anchor", "federal_nspire_anchor"],
+    ),
+    CATEGORY_PROGRAM_OVERLAY: JurisdictionRuleFamily(
+        category=CATEGORY_PROGRAM_OVERLAY,
+        family_key="program_overlay_and_admin_plan_anchors",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_PROGRAM_OVERLAY],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="approved_official_supporting",
+        property_proof_expectation="generally program evidence rather than parcel evidence",
+        default_jurisdiction_types=[JURISDICTION_TYPE_SECTION8_OVERLAY, JURISDICTION_TYPE_STATE],
+        description="PHA, MSHDA, and other administered program overlays that constrain operations.",
+        typical_rule_keys=["mi_statute_anchor", "mshda_program_anchor", "pha_admin_plan_anchor"],
+    ),
+    CATEGORY_DOCUMENTS: JurisdictionRuleFamily(
+        category=CATEGORY_DOCUMENTS,
+        family_key="forms_packets_and_required_documents",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_DOCUMENTS],
+        binding_type=BINDING_TYPE_OPERATIONAL,
+        authority_expectation="approved_official_supporting",
+        property_proof_expectation="forms, packets, checklists, and filing receipts",
+        default_jurisdiction_types=[JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_SECTION8_OVERLAY],
+        description="Operational document package expectations needed to complete a compliant filing path.",
+        typical_rule_keys=[],
+    ),
+    CATEGORY_FEES: JurisdictionRuleFamily(
+        category=CATEGORY_FEES,
+        family_key="fees_payments_and_admin_costs",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_FEES],
+        binding_type=BINDING_TYPE_OPERATIONAL,
+        authority_expectation="approved_official_supporting",
+        property_proof_expectation="fee schedule, receipt, invoice, or payment confirmation",
+        default_jurisdiction_types=[JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_COUNTY],
+        description="Administrative fee expectations that affect readiness but are often operational details.",
+        typical_rule_keys=[],
+    ),
+    CATEGORY_CONTACTS: JurisdictionRuleFamily(
+        category=CATEGORY_CONTACTS,
+        family_key="responsible_contacts_and_escalation_paths",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_CONTACTS],
+        binding_type=BINDING_TYPE_OPERATIONAL,
+        authority_expectation="approved_official_supporting",
+        property_proof_expectation="contact roster or named authority reference",
+        default_jurisdiction_types=[JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_SECTION8_OVERLAY],
+        description="Who administers the program, receives filings, and answers compliance questions.",
+        typical_rule_keys=["pha_administrator_changed"],
+    ),
+    CATEGORY_ZONING: JurisdictionRuleFamily(
+        category=CATEGORY_ZONING,
+        family_key="land_use_and_zoning_constraints",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_ZONING],
+        binding_type=BINDING_TYPE_LEGAL,
+        authority_expectation="authoritative_official",
+        property_proof_expectation="zoning map, zoning district, or use clearance",
+        default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
+        description="Land-use restrictions relevant to rental operation and rehab strategy.",
+        typical_rule_keys=[],
+    ),
+    CATEGORY_TAX: JurisdictionRuleFamily(
+        category=CATEGORY_TAX,
+        family_key="tax_registration_and_charge_expectations",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_TAX],
+        binding_type=BINDING_TYPE_OPERATIONAL,
+        authority_expectation="semi_authoritative_operational",
+        property_proof_expectation="tax bill, assessor record, or city billing program evidence",
+        default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
+        description="Tax-related supporting expectations that matter operationally but may not block licensure.",
+        typical_rule_keys=[],
+    ),
+    CATEGORY_UTILITIES: JurisdictionRuleFamily(
+        category=CATEGORY_UTILITIES,
+        family_key="utility_account_and_service_expectations",
+        display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_UTILITIES],
+        binding_type=BINDING_TYPE_OPERATIONAL,
+        authority_expectation="semi_authoritative_operational",
+        property_proof_expectation="utility account proof or service transfer evidence",
+        default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
+        description="Utility setup or transfer requirements used as operational readiness signals.",
+        typical_rule_keys=[],
+    ),
+}
+
+
+def rule_family_inventory() -> dict[str, JurisdictionRuleFamily]:
+    return {k: v for k, v in _RULE_FAMILY_INVENTORY.items()}
+
+
+def rule_family_inventory_dict() -> dict[str, dict[str, Any]]:
+    return {k: v.to_dict() for k, v in _RULE_FAMILY_INVENTORY.items()}
+
+
+def legally_binding_categories(categories: Iterable[Any] | None = None) -> list[str]:
+    selected = normalize_categories(categories) if categories is not None else list(CANONICAL_JURISDICTION_CATEGORIES)
+    return [c for c in selected if _RULE_FAMILY_INVENTORY.get(c) and _RULE_FAMILY_INVENTORY[c].binding_type == BINDING_TYPE_LEGAL]
+
+
+def operational_heuristic_categories(categories: Iterable[Any] | None = None) -> list[str]:
+    selected = normalize_categories(categories) if categories is not None else list(CANONICAL_JURISDICTION_CATEGORIES)
+    return [c for c in selected if _RULE_FAMILY_INVENTORY.get(c) and _RULE_FAMILY_INVENTORY[c].binding_type == BINDING_TYPE_OPERATIONAL]
+
+
+def authority_expectations_for_categories(categories: Iterable[Any] | None = None) -> dict[str, str]:
+    selected = normalize_categories(categories) if categories is not None else list(CANONICAL_JURISDICTION_CATEGORIES)
+    return {c: _RULE_FAMILY_INVENTORY[c].authority_expectation for c in selected if c in _RULE_FAMILY_INVENTORY}
+
+
+def property_proof_required_categories(categories: Iterable[Any] | None = None) -> list[str]:
+    selected = normalize_categories(categories) if categories is not None else list(CANONICAL_JURISDICTION_CATEGORIES)
+    out: list[str] = []
+    for c in selected:
+        family = _RULE_FAMILY_INVENTORY.get(c)
+        if family and "property" in family.property_proof_expectation.lower():
+            out.append(c)
+    return out
+
+
+def family_bundles_for_jurisdiction_types(jurisdiction_types: Iterable[str]) -> dict[str, list[str]]:
+    bundle_map: dict[str, list[str]] = {}
+    active_types = {str(v).strip().lower() for v in (jurisdiction_types or []) if str(v).strip()}
+    for category, family in _RULE_FAMILY_INVENTORY.items():
+        if set(family.default_jurisdiction_types).intersection(active_types):
+            for jt in family.default_jurisdiction_types:
+                if jt not in active_types:
+                    continue
+                bucket = bundle_map.setdefault(jt, [])
+                if category not in bucket:
+                    bucket.append(category)
+    return bundle_map
 
 
 def expected_categories_for_jurisdiction_type(jurisdiction_type: str) -> dict[str, list[str]]:
@@ -541,11 +726,8 @@ def expected_rule_universe_for_scope(
 
     required_norm = normalize_categories(required)
     critical_norm = normalize_categories(critical)
-    optional_norm = [
-        category
-        for category in normalize_categories(optional)
-        if category not in set(required_norm)
-    ]
+    optional_norm = [category for category in normalize_categories(optional) if category not in set(required_norm)]
+    inventory = {category: _RULE_FAMILY_INVENTORY[category].to_dict() for category in required_norm + optional_norm if category in _RULE_FAMILY_INVENTORY}
 
     normalized_bundles = {
         key: {
@@ -563,6 +745,12 @@ def expected_rule_universe_for_scope(
         optional_categories=optional_norm,
         category_bundles=normalized_bundles,
         tier_order=list(jurisdiction_types),
+        rule_family_inventory=inventory,
+        legally_binding_categories=legally_binding_categories(required_norm + optional_norm),
+        operational_heuristic_categories=operational_heuristic_categories(required_norm + optional_norm),
+        authority_expectations=authority_expectations_for_categories(required_norm + optional_norm),
+        property_proof_required_categories=property_proof_required_categories(required_norm + optional_norm),
+        family_bundles=family_bundles_for_jurisdiction_types(jurisdiction_types),
     )
 
 
@@ -697,41 +885,27 @@ def required_categories_for_city(
     )
 
 
-def compute_confidence_from_missing(
-    required_categories: Iterable[Any] | None,
-    covered_categories: Iterable[Any] | None,
-) -> str:
+def compute_confidence_from_missing(required_categories: Iterable[Any] | None, covered_categories: Iterable[Any] | None) -> str:
     required = normalize_categories(required_categories)
     covered = normalize_categories(covered_categories)
-
     if not required:
         return "high"
-
     matched = len(set(required).intersection(set(covered)))
-    ratio = matched / float(len(set(required)))
-
-    if ratio >= 0.9:
+    ratio = matched / float(max(1, len(required)))
+    if ratio >= 0.8:
         return "high"
     if ratio >= 0.5:
         return "medium"
     return "low"
 
 
-def compute_completeness_score(
-    required_categories: Iterable[Any] | None,
-    covered_categories: Iterable[Any] | None,
-) -> JurisdictionCategoryCoverage:
+def compute_completeness_score(required_categories: Iterable[Any] | None, covered_categories: Iterable[Any] | None) -> JurisdictionCategoryCoverage:
     required = normalize_categories(required_categories)
     covered = normalize_categories(covered_categories)
-
     required_set = set(required)
     covered_set = set(covered)
-
     missing = [category for category in required if category not in covered_set]
-    category_statuses = {
-        category: ("covered" if category in covered_set else "missing")
-        for category in required
-    }
+    category_statuses = {category: ("covered" if category in covered_set else "missing") for category in required}
 
     if not required:
         score = 1.0
@@ -739,7 +913,6 @@ def compute_completeness_score(
     else:
         matched = len(required_set.intersection(covered_set))
         score = matched / float(len(required_set))
-
         if score >= 0.999:
             status = "complete"
         elif score > 0.0:
@@ -748,7 +921,6 @@ def compute_completeness_score(
             status = "missing"
 
     confidence = compute_confidence_from_missing(required, covered)
-
     return JurisdictionCategoryCoverage(
         required_categories=required,
         covered_categories=[category for category in required if category in covered_set],
@@ -763,14 +935,9 @@ def compute_completeness_score(
     )
 
 
-def compute_category_score_from_statuses(
-    *,
-    required_categories: Iterable[Any] | None,
-    category_statuses: Mapping[str, Any] | None,
-) -> JurisdictionCategoryCoverage:
+def compute_category_score_from_statuses(*, required_categories: Iterable[Any] | None, category_statuses: Mapping[str, Any] | None) -> JurisdictionCategoryCoverage:
     required = normalize_categories(required_categories)
     status_map = category_statuses or {}
-
     normalized_statuses: dict[str, str] = {}
     covered: list[str] = []
     missing: list[str] = []
@@ -857,10 +1024,7 @@ def compute_tier_coverage(
         normalized_statuses[normalized_key] = str(value or "missing").strip().lower() or "missing"
 
     if not normalized_statuses:
-        normalized_statuses = {
-            category: ("covered" if category in covered else "missing")
-            for category in normalize_categories(covered_categories)
-        }
+        normalized_statuses = {category: ("covered" if category in covered else "missing") for category in normalize_categories(covered_categories)}
 
     universe = expected_rule_universe_for_scope(
         state=state,
@@ -877,69 +1041,24 @@ def compute_tier_coverage(
         required = normalize_categories(bundle.get("required", []))
         critical = normalize_categories(bundle.get("critical", []))
         optional = normalize_categories(bundle.get("optional", []))
+        required_statuses = {category: normalized_statuses.get(category, "missing") for category in required}
+        critical_statuses = {category: required_statuses.get(category, normalized_statuses.get(category, "missing")) for category in critical}
+        optional_statuses = {category: normalized_statuses.get(category, "missing") for category in optional}
 
-        required_statuses = {
-            category: normalized_statuses.get(category, "missing")
-            for category in required
-        }
-        critical_statuses = {
-            category: required_statuses.get(category, normalized_statuses.get(category, "missing"))
-            for category in critical
-        }
-        optional_statuses = {
-            category: normalized_statuses.get(category, "missing")
-            for category in optional
-        }
-
-        satisfied_required = [
-            category
-            for category, status in required_statuses.items()
-            if status in _TIER_SATISFIED_CATEGORY_STATUSES
-        ]
-        missing_required = [
-            category
-            for category, status in required_statuses.items()
-            if status == "missing"
-        ]
-        stale_required = [
-            category
-            for category, status in required_statuses.items()
-            if status == "stale"
-        ]
-        conflicting_required = [
-            category
-            for category, status in required_statuses.items()
-            if status == "conflicting"
-        ]
-        inferred_required = [
-            category
-            for category, status in required_statuses.items()
-            if status in _TIER_INFERRED_CATEGORY_STATUSES
-        ]
-        unsatisfied_required = [
-            category
-            for category, status in required_statuses.items()
-            if status in _TIER_BLOCKING_CATEGORY_STATUSES
-        ]
-        missing_critical = [
-            category
-            for category, status in critical_statuses.items()
-            if status in _TIER_BLOCKING_CATEGORY_STATUSES
-        ]
+        satisfied_required = [category for category, status in required_statuses.items() if status in _TIER_SATISFIED_CATEGORY_STATUSES]
+        missing_required = [category for category, status in required_statuses.items() if status == "missing"]
+        stale_required = [category for category, status in required_statuses.items() if status == "stale"]
+        conflicting_required = [category for category, status in required_statuses.items() if status == "conflicting"]
+        inferred_required = [category for category, status in required_statuses.items() if status in _TIER_INFERRED_CATEGORY_STATUSES]
+        unsatisfied_required = [category for category, status in required_statuses.items() if status in _TIER_BLOCKING_CATEGORY_STATUSES]
+        missing_critical = [category for category, status in critical_statuses.items() if status in _TIER_BLOCKING_CATEGORY_STATUSES]
         ratio = len(satisfied_required) / float(len(required) or 1)
 
         status_counts: dict[str, int] = {}
         for status in required_statuses.values():
             status_counts[status] = status_counts.get(status, 0) + 1
 
-        blocking_statuses = sorted(
-            set(
-                status
-                for status in required_statuses.values()
-                if status in _TIER_BLOCKING_CATEGORY_STATUSES
-            )
-        )
-
+        blocking_statuses = sorted({status for status in required_statuses.values() if status in _TIER_BLOCKING_CATEGORY_STATUSES})
         tier_rows.append(
             JurisdictionTierCoverage(
                 jurisdiction_type=jurisdiction_type,
@@ -963,16 +1082,10 @@ def compute_tier_coverage(
                 blocking_statuses=blocking_statuses,
             )
         )
-
     return tier_rows
 
 
-def category_coverage_from_rule_keys(
-    *,
-    verified_rule_keys: Iterable[Any] | None,
-    conditional_rule_keys: Iterable[Any] | None = None,
-    required_categories: Iterable[Any] | None = None,
-) -> dict[str, str]:
+def category_coverage_from_rule_keys(*, verified_rule_keys: Iterable[Any] | None, conditional_rule_keys: Iterable[Any] | None = None, required_categories: Iterable[Any] | None = None) -> dict[str, str]:
     verified = {normalize_rule_category(value) for value in (verified_rule_keys or [])}
     conditional = {normalize_rule_category(value) for value in (conditional_rule_keys or [])}
     verified.discard(CATEGORY_UNCATEGORIZED)

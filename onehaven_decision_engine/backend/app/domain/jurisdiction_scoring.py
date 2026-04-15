@@ -6,7 +6,7 @@ import json
 
 from ..models import JurisdictionRule
 from ..policy_models import JurisdictionProfile
-from .jurisdiction_categories import compute_completeness_score, normalize_categories
+from .jurisdiction_categories import compute_completeness_score, expected_rule_universe_for_scope, normalize_categories
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,13 @@ class JurisdictionCompleteness:
     required_categories: list[str]
     covered_categories: list[str]
     missing_categories: list[str]
+    critical_categories: list[str] | None = None
+    optional_categories: list[str] | None = None
+    legally_binding_categories: list[str] | None = None
+    operational_heuristic_categories: list[str] | None = None
+    property_proof_required_categories: list[str] | None = None
+    authority_expectations: dict[str, str] | None = None
+    expected_rule_universe: dict[str, Any] | None = None
 
 
 def _push(
@@ -83,14 +90,37 @@ def compute_category_completeness(
     *,
     required_categories: Iterable[Any] | None,
     covered_categories: Iterable[Any] | None,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
 ) -> JurisdictionCompleteness:
-    coverage = compute_completeness_score(required_categories, covered_categories)
+    universe = expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
+    explicit_required = normalize_categories(required_categories)
+    effective_required = explicit_required or list(universe.required_categories)
+    coverage = compute_completeness_score(effective_required, covered_categories)
     return JurisdictionCompleteness(
         completeness_score=coverage.completeness_score,
         completeness_status=coverage.completeness_status,
         required_categories=coverage.required_categories,
         covered_categories=coverage.covered_categories,
         missing_categories=coverage.missing_categories,
+        critical_categories=list(universe.critical_categories),
+        optional_categories=list(universe.optional_categories),
+        legally_binding_categories=list(universe.legally_binding_categories or []),
+        operational_heuristic_categories=list(universe.operational_heuristic_categories or []),
+        property_proof_required_categories=list(universe.property_proof_required_categories or []),
+        authority_expectations=dict(universe.authority_expectations or {}),
+        expected_rule_universe=universe.to_dict(),
     )
 
 
@@ -104,6 +134,11 @@ def compute_profile_completeness(profile: Optional[JurisdictionProfile]) -> Juri
     return compute_category_completeness(
         required_categories=required,
         covered_categories=covered,
+        state=getattr(profile, "state", None),
+        county=getattr(profile, "county", None),
+        city=getattr(profile, "city", None),
+        pha_name=getattr(profile, "pha_name", None),
+        include_section8=True,
     )
 
 

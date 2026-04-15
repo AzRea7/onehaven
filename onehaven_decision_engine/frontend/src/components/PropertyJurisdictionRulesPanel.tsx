@@ -269,7 +269,12 @@ export default function PropertyJurisdictionRulesPanel({
         />
       ) : (
         <div className="space-y-4">
-          <JurisdictionCoverageBadge coverage={p} />
+          <JurisdictionCoverageBadge coverage={{
+            completeness_status: p.completeness_status,
+            completeness_score: p.completeness_score,
+            is_stale: p.is_stale,
+            stale_reason: p.stale_reason,
+          }} />
 
           {lockout?.lockout_active || reasons.length ? (
             <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">

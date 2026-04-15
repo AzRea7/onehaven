@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..domain.jurisdiction_categories import (
     CATEGORY_UNCATEGORIZED,
+    JurisdictionExpectedRuleUniverse,
     JurisdictionTierCoverage,
     compute_category_score_from_statuses,
     completeness_confidence_label,
@@ -39,6 +40,14 @@ from ..policy_models import (
     PolicySource,
 )
 from .jurisdiction_profile_service import _loads, _dumps, merge_profile_policy_meta
+
+
+AUTHORITY_EXPECTATION_RANKS: dict[str, int] = {
+    "derived_or_inferred": 25,
+    "semi_authoritative_operational": 60,
+    "approved_official_supporting": 85,
+    "authoritative_official": 100,
+}
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,12 @@ class JurisdictionCategoryAssessment:
     stale: bool
     conflicting: bool
     missing: bool
+    undiscovered: bool
+    weak_support: bool
+    authority_unmet: bool
+    unmet_reason: str | None
+    unmet_reasons: list[str]
+    authority_expectation: str | None
     latest_verified_at: datetime | None
     source_ids: list[int]
     assertion_ids: list[int]
@@ -93,6 +108,11 @@ class JurisdictionScoreBreakdown:
     inferred_categories: list[str]
     conflicting_categories: list[str]
     missing_categories: list[str]
+    undiscovered_categories: list[str]
+    weak_support_categories: list[str]
+    authority_unmet_categories: list[str]
+    unmet_categories: list[str]
+    category_unmet_reasons: dict[str, list[str]]
     category_details: dict[str, dict[str, Any]]
     scoring_defaults: dict[str, Any]
 
@@ -433,6 +453,38 @@ def _assertion_conflict_count(assertion: PolicyAssertion) -> int:
     return int(count)
 
 
+def _authority_expectation_for_category(
+    category: str, *, expected_universe: JurisdictionExpectedRuleUniverse | None
+) -> str | None:
+    if expected_universe is None:
+        return None
+    expectations = getattr(expected_universe, "authority_expectations", None) or {}
+    if not isinstance(expectations, dict):
+        return None
+    value = expectations.get(category)
+    return str(value).strip() if value else None
+
+
+def _authority_requirement_met(
+    *,
+    authority_expectation: str | None,
+    authoritative_source_count: int,
+    authority_score: float,
+) -> bool:
+    if not authority_expectation:
+        return True
+    needed = AUTHORITY_EXPECTATION_RANKS.get(str(authority_expectation).strip(), 0)
+    if needed <= 0:
+        return True
+    if needed >= AUTHORITY_EXPECTATION_RANKS["authoritative_official"]:
+        return authoritative_source_count > 0
+    if needed >= AUTHORITY_EXPECTATION_RANKS["approved_official_supporting"]:
+        return authoritative_source_count > 0 or authority_score >= 0.85
+    if needed >= AUTHORITY_EXPECTATION_RANKS["semi_authoritative_operational"]:
+        return authoritative_source_count > 0 or authority_score >= 0.60
+    return authority_score > 0.0
+
+
 def build_category_assessments(
     db: Session,
     *,
@@ -441,8 +493,20 @@ def build_category_assessments(
     city: str | None,
     required_categories: Iterable[str],
     stale_days: int = DEFAULT_STALE_DAYS,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+    expected_universe: JurisdictionExpectedRuleUniverse | None = None,
 ) -> dict[str, JurisdictionCategoryAssessment]:
-    required = normalize_categories(required_categories)
+    universe = expected_universe or expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
+    required = normalize_categories(list(universe.required_categories) + list(required_categories))
     thresholds = completeness_scoring_thresholds()
 
     source_rows = _collect_source_rows_for_scope(db, state=state, county=county, city=city)
@@ -501,6 +565,7 @@ def build_category_assessments(
         )
 
         missing = source_count == 0 and assertion_count == 0
+        undiscovered = missing
         conflicting = conflict_count > 0
         stale = (not missing) and freshness_score < thresholds.get("freshness", 0.60)
         inferred = (
@@ -510,6 +575,41 @@ def build_category_assessments(
             and not conflicting
             and not stale
         )
+        authority_expectation = _authority_expectation_for_category(
+            category,
+            expected_universe=universe,
+        )
+        authority_unmet = (not missing) and (not conflicting) and (not stale) and not _authority_requirement_met(
+            authority_expectation=authority_expectation,
+            authoritative_source_count=authoritative_source_count,
+            authority_score=authority_score,
+        )
+        weak_support = (
+            not missing
+            and not conflicting
+            and not stale
+            and not inferred
+            and (
+                governed_assertion_count <= 0
+                or citation_count <= 0
+                or extraction_score < thresholds.get("citation_quality", 0.55)
+                or governance_score < thresholds.get("governance_quality", 0.70)
+            )
+        )
+
+        unmet_reasons: list[str] = []
+        if undiscovered:
+            unmet_reasons.append("undiscovered")
+        if stale:
+            unmet_reasons.append("stale")
+        if conflicting:
+            unmet_reasons.append("conflicting")
+        if inferred:
+            unmet_reasons.append("inferred")
+        if authority_unmet:
+            unmet_reasons.append("required_authority_not_met")
+        if weak_support:
+            unmet_reasons.append("weak_support")
 
         if missing:
             status = "missing"
@@ -519,6 +619,8 @@ def build_category_assessments(
             status = "stale"
         elif inferred:
             status = "inferred"
+        elif authority_unmet or weak_support:
+            status = "partial"
         elif governed_assertion_count > 0 or authority_score >= thresholds.get("authoritative_source", 0.65):
             status = "covered"
         else:
@@ -547,6 +649,12 @@ def build_category_assessments(
             stale=stale,
             conflicting=conflicting,
             missing=missing,
+            undiscovered=undiscovered,
+            weak_support=weak_support,
+            authority_unmet=authority_unmet,
+            unmet_reason=(unmet_reasons[0] if unmet_reasons else None),
+            unmet_reasons=unmet_reasons,
+            authority_expectation=authority_expectation,
             latest_verified_at=latest_verified_at,
             source_ids=[int(row.id) for row in category_sources if getattr(row, "id", None) is not None],
             assertion_ids=[
@@ -583,6 +691,11 @@ def compute_jurisdiction_score_breakdown(
             inferred_categories=[],
             conflicting_categories=[],
             missing_categories=[],
+            undiscovered_categories=[],
+            weak_support_categories=[],
+            authority_unmet_categories=[],
+            unmet_categories=[],
+            category_unmet_reasons={},
             category_details={},
             scoring_defaults={"weights": weights, "thresholds": thresholds},
         )
@@ -605,6 +718,19 @@ def compute_jurisdiction_score_breakdown(
     missing_categories = [c for c in required if category_statuses.get(c) == "missing"]
 
     assessments = [category_assessments.get(category) for category in required if category in category_assessments]
+    undiscovered_categories = [c for c in required if c in category_assessments and category_assessments[c].undiscovered]
+    weak_support_categories = [c for c in required if c in category_assessments and category_assessments[c].weak_support]
+    authority_unmet_categories = [c for c in required if c in category_assessments and category_assessments[c].authority_unmet]
+    unmet_categories = [
+        c
+        for c in required
+        if c in category_assessments and category_assessments[c].unmet_reasons
+    ]
+    category_unmet_reasons = {
+        c: list(category_assessments[c].unmet_reasons)
+        for c in required
+        if c in category_assessments and category_assessments[c].unmet_reasons
+    }
 
     coverage_subscore = round(len(covered_categories) / max(1, len(required)), 6)
     freshness_subscore = round(
@@ -684,6 +810,12 @@ def compute_jurisdiction_score_breakdown(
             "stale": assessment.stale,
             "conflicting": assessment.conflicting,
             "missing": assessment.missing,
+            "undiscovered": assessment.undiscovered,
+            "weak_support": assessment.weak_support,
+            "authority_unmet": assessment.authority_unmet,
+            "unmet_reason": assessment.unmet_reason,
+            "unmet_reasons": assessment.unmet_reasons,
+            "authority_expectation": assessment.authority_expectation,
             "latest_verified_at": assessment.latest_verified_at.isoformat()
             if assessment.latest_verified_at
             else None,
@@ -710,6 +842,11 @@ def compute_jurisdiction_score_breakdown(
         inferred_categories=inferred_categories,
         conflicting_categories=conflicting_categories,
         missing_categories=missing_categories,
+        undiscovered_categories=undiscovered_categories,
+        weak_support_categories=weak_support_categories,
+        authority_unmet_categories=authority_unmet_categories,
+        unmet_categories=unmet_categories,
+        category_unmet_reasons=category_unmet_reasons,
         category_details=category_details,
         scoring_defaults={"weights": weights, "thresholds": thresholds},
     )
@@ -805,12 +942,27 @@ def compute_profile_score_breakdown(
         state=profile.state,
         county=profile.county,
         city=profile.city,
+        pha_name=getattr(profile, "pha_name", None),
         required_categories=scoped_required_categories,
         stale_days=stale_days,
+        expected_universe=expected_universe,
     )
-    return compute_jurisdiction_score_breakdown(
+    breakdown = compute_jurisdiction_score_breakdown(
         required_categories=scoped_required_categories,
         category_assessments=assessments,
+    )
+    scoring_defaults = dict(breakdown.scoring_defaults or {})
+    scoring_defaults["expected_rule_universe"] = expected_universe.to_dict()
+    scoring_defaults["rule_family_inventory"] = dict(expected_universe.rule_family_inventory or {})
+    scoring_defaults["legally_binding_categories"] = list(expected_universe.legally_binding_categories or [])
+    scoring_defaults["operational_heuristic_categories"] = list(expected_universe.operational_heuristic_categories or [])
+    scoring_defaults["property_proof_required_categories"] = list(expected_universe.property_proof_required_categories or [])
+    scoring_defaults["authority_expectations"] = dict(expected_universe.authority_expectations or {})
+    return JurisdictionScoreBreakdown(
+        **{
+            **breakdown.__dict__,
+            "scoring_defaults": scoring_defaults,
+        }
     )
 
 
@@ -995,7 +1147,15 @@ def compute_jurisdiction_completeness(
     include_section8: bool = True,
     tenant_waitlist_depth: str | None = None,
 ) -> dict[str, Any]:
-    required = normalize_categories(required_categories)
+    expected_universe = expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
+    required = normalize_categories(list(expected_universe.required_categories) + list(required_categories))
     coverage = compute_category_score_from_statuses(
         required_categories=required,
         category_statuses=category_coverage or {},
@@ -1032,10 +1192,21 @@ def compute_jurisdiction_completeness(
         inferred_categories=list(coverage.inferred_categories or []),
         conflicting_categories=list(coverage.conflicting_categories or []),
         missing_categories=list(coverage.missing_categories),
+        undiscovered_categories=[c for c in coverage.missing_categories],
+        weak_support_categories=[],
+        authority_unmet_categories=[],
+        unmet_categories=[c for c in coverage.missing_categories],
+        category_unmet_reasons={c: ["undiscovered"] for c in coverage.missing_categories},
         category_details=category_details,
         scoring_defaults={
             "weights": completeness_score_weights(),
             "thresholds": completeness_scoring_thresholds(),
+            "expected_rule_universe": expected_universe.to_dict(),
+            "rule_family_inventory": dict(expected_universe.rule_family_inventory or {}),
+            "legally_binding_categories": list(expected_universe.legally_binding_categories or []),
+            "operational_heuristic_categories": list(expected_universe.operational_heuristic_categories or []),
+            "property_proof_required_categories": list(expected_universe.property_proof_required_categories or []),
+            "authority_expectations": dict(expected_universe.authority_expectations or {}),
         },
     )
 
@@ -1084,12 +1255,23 @@ def compute_jurisdiction_completeness(
         "conditional_categories": list(coverage.inferred_categories or []),
         "stale_categories": list(coverage.stale_categories or []),
         "conflicting_categories": list(coverage.conflicting_categories or []),
+        "undiscovered_categories": list(breakdown.undiscovered_categories),
+        "weak_support_categories": list(breakdown.weak_support_categories),
+        "authority_unmet_categories": list(breakdown.authority_unmet_categories),
+        "unmet_categories": list(breakdown.unmet_categories),
+        "category_unmet_reasons": dict(breakdown.category_unmet_reasons),
         "category_coverage": dict(category_statuses),
         "completeness_score": float(coverage.completeness_score),
         "completeness_status": breakdown.completeness_status,
         "coverage_confidence": coverage.coverage_confidence,
         "stale_status": stale_status,
         "trust_decision": trust.to_dict(),
+        "expected_rule_universe": expected_universe.to_dict(),
+        "rule_family_inventory": dict(expected_universe.rule_family_inventory or {}),
+        "legally_binding_categories": list(expected_universe.legally_binding_categories or []),
+        "operational_heuristic_categories": list(expected_universe.operational_heuristic_categories or []),
+        "property_proof_required_categories": list(expected_universe.property_proof_required_categories or []),
+        "authority_expectations": dict(expected_universe.authority_expectations or {}),
     }
 
 
@@ -1199,6 +1381,37 @@ def apply_profile_completeness(
     profile.required_categories_json = _dumps(list(breakdown.category_statuses.keys()))
     profile.covered_categories_json = _dumps(breakdown.covered_categories)
     profile.missing_categories_json = _dumps(breakdown.missing_categories)
+    profile.stale_categories_json = _dumps(breakdown.stale_categories)
+    profile.inferred_categories_json = _dumps(breakdown.inferred_categories)
+    profile.conflicting_categories_json = _dumps(breakdown.conflicting_categories)
+    profile.expected_rule_universe_json = _dumps((breakdown.scoring_defaults or {}).get("expected_rule_universe", {})) if hasattr(profile, "expected_rule_universe_json") else getattr(profile, "expected_rule_universe_json", "{}")
+    profile.category_coverage_details_json = _dumps(breakdown.category_details) if hasattr(profile, "category_coverage_details_json") else getattr(profile, "category_coverage_details_json", "{}")
+    profile.category_unmet_reasons_json = _dumps(breakdown.category_unmet_reasons) if hasattr(profile, "category_unmet_reasons_json") else getattr(profile, "category_unmet_reasons_json", "{}")
+    profile.unmet_categories_json = _dumps(breakdown.unmet_categories) if hasattr(profile, "unmet_categories_json") else getattr(profile, "unmet_categories_json", "[]")
+    profile.undiscovered_categories_json = _dumps(breakdown.undiscovered_categories) if hasattr(profile, "undiscovered_categories_json") else getattr(profile, "undiscovered_categories_json", "[]")
+    profile.weak_support_categories_json = _dumps(breakdown.weak_support_categories) if hasattr(profile, "weak_support_categories_json") else getattr(profile, "weak_support_categories_json", "[]")
+    profile.authority_unmet_categories_json = _dumps(breakdown.authority_unmet_categories) if hasattr(profile, "authority_unmet_categories_json") else getattr(profile, "authority_unmet_categories_json", "[]")
+    profile.completeness_snapshot_json = _dumps(
+        {
+            "completeness_status": breakdown.completeness_status,
+            "completeness_score": breakdown.overall_completeness,
+            "confidence_label": breakdown.confidence_label,
+            "required_categories": list(breakdown.category_statuses.keys()),
+            "covered_categories": breakdown.covered_categories,
+            "missing_categories": breakdown.missing_categories,
+            "stale_categories": breakdown.stale_categories,
+            "inferred_categories": breakdown.inferred_categories,
+            "conflicting_categories": breakdown.conflicting_categories,
+            "undiscovered_categories": breakdown.undiscovered_categories,
+            "weak_support_categories": breakdown.weak_support_categories,
+            "authority_unmet_categories": breakdown.authority_unmet_categories,
+            "unmet_categories": breakdown.unmet_categories,
+            "category_statuses": breakdown.category_statuses,
+            "category_details": breakdown.category_details,
+            "category_unmet_reasons": breakdown.category_unmet_reasons,
+            "scoring_defaults": breakdown.scoring_defaults,
+        }
+    )
     profile.completeness_score = breakdown.overall_completeness
     profile.completeness_status = breakdown.completeness_status
     profile.category_norm_version = getattr(profile, "category_norm_version", None) or "v2"
@@ -1272,6 +1485,11 @@ def apply_profile_completeness(
             "trustworthy_for_projection": trust_decision.safe_for_projection,
             "safe_for_user_reliance": trust_decision.safe_for_user_reliance,
             "trust_decision": trust_decision.to_dict(),
+            "undiscovered_categories": breakdown.undiscovered_categories,
+            "weak_support_categories": breakdown.weak_support_categories,
+            "authority_unmet_categories": breakdown.authority_unmet_categories,
+            "unmet_categories": breakdown.unmet_categories,
+            "category_unmet_reasons": breakdown.category_unmet_reasons,
         },
     )
 
@@ -1331,6 +1549,11 @@ def sync_coverage_status_from_profile(
             "stale_categories": detail.get("stale_categories", []),
             "inferred_categories": detail.get("inferred_categories", []),
             "conflicting_categories": detail.get("conflicting_categories", []),
+            "undiscovered_categories": detail.get("undiscovered_categories", []),
+            "weak_support_categories": detail.get("weak_support_categories", []),
+            "authority_unmet_categories": detail.get("authority_unmet_categories", []),
+            "unmet_categories": detail.get("unmet_categories", []),
+            "category_unmet_reasons": detail.get("category_unmet_reasons", {}),
             "trust_decision": trust_decision,
         }
     )

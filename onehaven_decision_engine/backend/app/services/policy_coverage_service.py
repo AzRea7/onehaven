@@ -486,7 +486,9 @@ def compute_coverage_status(
         state=st,
         county=cnty,
         city=cty,
+        pha_name=pha,
         required_categories=required_categories,
+        expected_universe=expected_universe,
     )
     breakdown = compute_jurisdiction_score_breakdown(
         required_categories=required_categories,
@@ -564,6 +566,13 @@ def compute_coverage_status(
         "required_categories": required_categories,
         "critical_categories": critical_categories,
         "optional_categories": optional_categories,
+        "expected_rule_universe": expected_universe.to_dict(),
+        "rule_family_inventory": dict(expected_universe.rule_family_inventory or {}),
+        "legally_binding_categories": list(expected_universe.legally_binding_categories or []),
+        "operational_heuristic_categories": list(expected_universe.operational_heuristic_categories or []),
+        "property_proof_required_categories": list(expected_universe.property_proof_required_categories or []),
+        "authority_expectations": dict(expected_universe.authority_expectations or {}),
+        "family_bundles": dict(expected_universe.family_bundles or {}),
         "covered_categories": normalize_categories(covered_categories),
         "covered_category_presence": covered_presence,
         "expected_category_statuses": dict(breakdown.category_statuses),
@@ -604,6 +613,11 @@ def compute_coverage_status(
         "pha_core_ok": pha_core_ok,
         "category_statuses": breakdown.category_statuses,
         "category_details": breakdown.category_details,
+        "undiscovered_categories": breakdown.undiscovered_categories,
+        "weak_support_categories": breakdown.weak_support_categories,
+        "authority_unmet_categories": breakdown.authority_unmet_categories,
+        "unmet_categories": breakdown.unmet_categories,
+        "category_unmet_reasons": breakdown.category_unmet_reasons,
         "missing_local_rule_areas": breakdown.missing_categories,
         "completeness_score": breakdown.overall_completeness,
         "completeness_status": breakdown.completeness_status,
@@ -696,6 +710,20 @@ def upsert_coverage_status(
     row.required_categories_json = _dumps(payload["required_categories"])
     row.covered_categories_json = _dumps(payload["covered_categories"])
     row.missing_categories_json = _dumps(payload["missing_categories"])
+    if hasattr(row, "stale_categories_json"):
+        row.stale_categories_json = _dumps(payload.get("stale_categories", []))
+    if hasattr(row, "inferred_categories_json"):
+        row.inferred_categories_json = _dumps(payload.get("inferred_categories", []))
+    if hasattr(row, "conflicting_categories_json"):
+        row.conflicting_categories_json = _dumps(payload.get("conflicting_categories", []))
+    if hasattr(row, "undiscovered_categories_json"):
+        row.undiscovered_categories_json = _dumps(payload.get("undiscovered_categories", []))
+    if hasattr(row, "weak_support_categories_json"):
+        row.weak_support_categories_json = _dumps(payload.get("weak_support_categories", []))
+    if hasattr(row, "authority_unmet_categories_json"):
+        row.authority_unmet_categories_json = _dumps(payload.get("authority_unmet_categories", []))
+    if hasattr(row, "unmet_categories_json"):
+        row.unmet_categories_json = _dumps(payload.get("unmet_categories", []))
     row.completeness_score = payload["completeness_score"]
     row.confidence_score = payload["confidence_score"]
     row.completeness_status = payload["completeness_status"]
@@ -718,6 +746,51 @@ def upsert_coverage_status(
         source_ids_json.extend(detail.get("source_ids", []))
     row.source_ids_json = _dumps(sorted(set(source_ids_json)))
     row.source_summary_json = _dumps(payload.get("category_statuses", {}))
+    if hasattr(row, "category_coverage_snapshot_json"):
+        row.category_coverage_snapshot_json = _dumps(payload.get("category_statuses", {}))
+    if hasattr(row, "category_coverage_details_json"):
+        row.category_coverage_details_json = _dumps(payload.get("category_details", {}))
+    if hasattr(row, "category_last_verified_json"):
+        row.category_last_verified_json = _dumps({
+            category: detail.get("latest_verified_at")
+            for category, detail in (payload.get("category_details", {}) or {}).items()
+        })
+    if hasattr(row, "category_source_backing_json"):
+        row.category_source_backing_json = _dumps({
+            category: {
+                "source_ids": detail.get("source_ids", []),
+                "assertion_ids": detail.get("assertion_ids", []),
+                "authoritative_source_count": detail.get("authoritative_source_count", 0),
+                "authority_score": detail.get("authority_score", 0.0),
+                "authority_expectation": detail.get("authority_expectation"),
+                "authority_unmet": detail.get("authority_unmet", False),
+            }
+            for category, detail in (payload.get("category_details", {}) or {}).items()
+        })
+    if hasattr(row, "expected_rule_universe_json"):
+        row.expected_rule_universe_json = _dumps(payload.get("expected_rule_universe", {}))
+    if hasattr(row, "category_unmet_reasons_json"):
+        row.category_unmet_reasons_json = _dumps(payload.get("category_unmet_reasons", {}))
+    if hasattr(row, "completeness_snapshot_json"):
+        row.completeness_snapshot_json = _dumps({
+            "completeness_score": payload.get("completeness_score"),
+            "completeness_status": payload.get("completeness_status"),
+            "confidence_label": payload.get("confidence_label"),
+            "required_categories": payload.get("required_categories", []),
+            "covered_categories": payload.get("covered_categories", []),
+            "missing_categories": payload.get("missing_categories", []),
+            "stale_categories": payload.get("stale_categories", []),
+            "inferred_categories": payload.get("inferred_categories", []),
+            "conflicting_categories": payload.get("conflicting_categories", []),
+            "undiscovered_categories": payload.get("undiscovered_categories", []),
+            "weak_support_categories": payload.get("weak_support_categories", []),
+            "authority_unmet_categories": payload.get("authority_unmet_categories", []),
+            "unmet_categories": payload.get("unmet_categories", []),
+            "category_unmet_reasons": payload.get("category_unmet_reasons", {}),
+            "category_details": payload.get("category_details", {}),
+            "expected_rule_universe": payload.get("expected_rule_universe", {}),
+            "trust_decision": payload.get("trust_decision", {}),
+        })
     row.metadata_json = _dumps(
         {
             "jurisdiction_types": payload.get("jurisdiction_types", []),
@@ -739,6 +812,12 @@ def upsert_coverage_status(
             "stale_categories": payload.get("stale_categories", []),
             "inferred_categories": payload.get("inferred_categories", []),
             "conflicting_categories": payload.get("conflicting_categories", []),
+            "undiscovered_categories": payload.get("undiscovered_categories", []),
+            "weak_support_categories": payload.get("weak_support_categories", []),
+            "authority_unmet_categories": payload.get("authority_unmet_categories", []),
+            "unmet_categories": payload.get("unmet_categories", []),
+            "category_unmet_reasons": payload.get("category_unmet_reasons", {}),
+            "expected_rule_universe": payload.get("expected_rule_universe", {}),
             "trustworthy_assertion_count": payload.get("trustworthy_assertion_count"),
             "active_governed_rule_count": payload.get("active_governed_rule_count"),
             "approved_not_active_count": payload.get("approved_not_active_count"),
