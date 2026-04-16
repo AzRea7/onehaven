@@ -347,6 +347,31 @@ def _refresh_source_batch(
         },
     }
 
+def list_markets_needing_refresh(
+    db: Session,
+    org_id: int | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    rows = list_refresh_targets(
+        db,
+        org_id=org_id,
+        limit=limit or 100,
+    )
+    return [
+        {
+            "jurisdiction_profile_id": int(row.jurisdiction_profile_id),
+            "org_id": row.org_id,
+            "state": row.state,
+            "county": row.county,
+            "city": row.city,
+            "pha_name": row.pha_name,
+            "stale_reason": row.stale_reason,
+            "last_refresh_success_at": row.last_refresh_success_at.isoformat() if row.last_refresh_success_at else None,
+            "last_verified_at": row.last_verified_at.isoformat() if row.last_verified_at else None,
+        }
+        for row in rows
+    ]
+
 
 def list_jurisdictions_needing_refresh(
     db: Session,

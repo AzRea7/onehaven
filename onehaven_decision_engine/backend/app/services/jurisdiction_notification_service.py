@@ -388,6 +388,75 @@ def _build_base_stale_jurisdiction_notification(
         payload=payload,
     )
 
+def build_stale_rule_notification(
+    *,
+    state: str,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    stale_reason: str | None = None,
+    missing_categories: list[str] | None = None,
+    critical_stale_categories: list[str] | None = None,
+) -> dict[str, Any]:
+    scope_label = _scope_label_from_values(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    return {
+        "ok": True,
+        "kind": "jurisdiction_stale",
+        "scope_label": scope_label,
+        "state": state,
+        "county": county,
+        "city": city,
+        "pha_name": pha_name,
+        "stale_reason": stale_reason,
+        "missing_categories": list(missing_categories or []),
+        "critical_stale_categories": list(critical_stale_categories or []),
+        "message": (
+            f"Jurisdiction data for {scope_label} is stale."
+            if not stale_reason
+            else f"Jurisdiction data for {scope_label} is stale ({stale_reason})."
+        ),
+    }
+
+
+def should_notify_stale_rules(
+    *,
+    completeness_status: str,
+    stale_status: str,
+    stale_reason: str | None,
+    missing_categories: list[str] | None,
+    critical_stale_categories: list[str] | None = None,
+) -> dict[str, Any]:
+    missing_categories = list(missing_categories or [])
+    critical_stale_categories = list(critical_stale_categories or [])
+
+    notify = bool(
+        str(stale_status or "").strip().lower() == "stale"
+        or missing_categories
+        or critical_stale_categories
+        or str(completeness_status or "").strip().lower() in {"partial", "stale", "blocked"}
+    )
+
+    severity = "info"
+    if critical_stale_categories:
+        severity = "high"
+    elif str(stale_status or "").strip().lower() == "stale" or missing_categories:
+        severity = "warning"
+
+    return {
+        "notify": notify,
+        "severity": severity,
+        "reason": stale_reason,
+        "completeness_status": completeness_status,
+        "stale_status": stale_status,
+        "stale_reason": stale_reason,
+        "missing_categories": missing_categories,
+        "critical_stale_categories": critical_stale_categories,
+    }
 
 def build_stale_jurisdiction_notification(
     db: Session,

@@ -164,8 +164,7 @@ def _normalize_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str
     property_types = payload.get("property_types")
     if isinstance(property_types, str):
         property_types = [x.strip() for x in property_types.split(",") if x.strip()]
-    if not payload.get("city") and not payload.get("market_slug"):
-        raise ValueError("Ingestion requires city or market_slug (county-only disabled)")
+
     if not property_types:
         property_types = ["single_family", "multi_family"]
     payload["property_types"] = [str(x).strip() for x in property_types if str(x).strip()]

@@ -171,6 +171,13 @@ def notify_stale_profiles() -> dict:
     finally:
         db.close()
 
+@celery_app.task(name="jurisdiction.refresh_market")
+def refresh_jurisdiction_market_task(*args, **kwargs):
+    return {
+        "ok": True,
+        "args": list(args),
+        "kwargs": dict(kwargs),
+    }
 
 @celery_app.task(name="jurisdiction.retry_discovery")
 def retry_discovery() -> dict:

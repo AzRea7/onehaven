@@ -1254,18 +1254,17 @@ def revoke_jurisdiction_override(
 
 
 @router.get("/manual/runbook", response_model=dict)
-def get_manual_jurisdiction_runbook(
-    db: Session = Depends(get_db),
+def get_manual_runbook(
     principal=Depends(get_principal),
 ):
-    snapshot = manual_runbook_snapshot()
-    dashboard = get_manual_stale_review_dashboard(
-        db,
-        org_id=getattr(principal, "org_id", None),
-        limit=100,
-    )
-    return {**snapshot, "dashboard": dashboard, "due_items": list(dashboard.get("rows") or [])[:100]}
+    return manual_runbook_snapshot()
 
+
+@router.post("/manual/refresh-stale", response_model=dict)
+def post_manual_refresh_stale(
+    principal=Depends(require_owner),
+):
+    return manual_refresh_stale_profiles()
 
 @router.get("/manual/stale-review-dashboard", response_model=dict)
 def get_manual_stale_dashboard(

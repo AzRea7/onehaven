@@ -49,6 +49,53 @@ class RentCastListingSource:
             )
         return key
 
+    def _sample_rows_result(
+        self,
+        *,
+        config: dict[str, Any],
+        cursor: dict[str, Any] | None,
+    ) -> RentCastListingFetchResult | None:
+        rows = config.get("sample_rows")
+        if not isinstance(rows, list) or not rows:
+            return None
+
+        normalized_rows = [dict(row) for row in rows if isinstance(row, dict)]
+        page = int((cursor or {}).get("page") or 1)
+        shard = int((cursor or {}).get("shard") or 1)
+        sort_mode = str((cursor or {}).get("sort_mode") or "newest")
+
+        raw = json.dumps(normalized_rows, sort_keys=True, default=str)
+        fingerprint = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+        next_cursor = {
+            **dict(cursor or {}),
+            "page": page,
+            "shard": shard,
+            "sort_mode": sort_mode,
+            "page_fingerprint": fingerprint,
+            "provider_cursor": None,
+        }
+
+        return RentCastListingFetchResult(
+            rows=normalized_rows,
+            next_cursor=next_cursor,
+            raw_count=len(normalized_rows),
+            page_scanned=page,
+            shard_scanned=shard,
+            sort_mode=sort_mode,
+            exhausted=True,
+            page_fingerprint=fingerprint,
+            page_changed=True,
+            provider_cursor=None,
+            query_variant={
+                "key": "sample_rows",
+                "scope": "test",
+                "query": {},
+                "post_filter": {},
+                "strict_zip_match": False,
+            },
+        )
+
     def _headers(self, api_key: str) -> dict[str, str]:
         return {
             "Accept": "application/json",
@@ -515,13 +562,11 @@ class RentCastListingSource:
                 return str(value).strip()
         return None
 
-
     def _safe_iso_datetime(self, value: Any) -> str | None:
         raw = self._normalize_optional_text(value)
         if not raw:
             return None
         try:
-            # Normalize trailing Z for fromisoformat compatibility.
             candidate = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
             return candidate
         except Exception:
@@ -915,7 +960,6 @@ class RentCastListingSource:
         sort_mode: str | None = None,
         limit: int | None = None,
     ) -> RentCastListingFetchResult:
-        api_key = self._get_api_key(credentials or {})
         config = dict(runtime_config or {})
 
         if market_slug is not None:
@@ -934,6 +978,15 @@ class RentCastListingSource:
             explicit_shard=shard,
             explicit_sort_mode=sort_mode,
         )
+
+        sample_result = self._sample_rows_result(
+            config=config,
+            cursor=resolved_cursor,
+        )
+        if sample_result is not None:
+            return sample_result
+
+        api_key = self._get_api_key(credentials or {})
 
         page_num = self._safe_int(resolved_cursor.get("page"), 1) or 1
         shard_num = self._safe_int(resolved_cursor.get("shard"), 1) or 1

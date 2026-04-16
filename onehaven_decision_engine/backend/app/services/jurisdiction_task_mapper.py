@@ -137,6 +137,75 @@ def _priority_for_missing_category(category: str) -> str:
         return TASK_PRIORITY_MEDIUM
     return TASK_PRIORITY_LOW
 
+def build_jurisdiction_tasks(
+    *,
+    market: dict[str, Any],
+    required_categories: Iterable[str],
+    category_coverage: dict[str, Any],
+    stale_status: str = "fresh",
+) -> dict[str, Any]:
+    state = market.get("state")
+    county = market.get("county")
+    city = market.get("city")
+    pha_name = market.get("pha_name")
+
+    required = normalize_categories(required_categories)
+    actions: list[dict[str, Any]] = []
+
+    for category in required:
+        status = str((category_coverage or {}).get(category) or "missing").strip().lower()
+        if status not in {"missing", "conditional"}:
+            continue
+
+        task = build_missing_category_task(
+            category=category,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+
+        actions.append(
+            {
+                "code": f"resolve_{category}",
+                "title": task.title,
+                "category": category,
+                "status": task.status,
+                "priority": task.priority,
+                "reason": task.reason,
+                "metadata": task.metadata,
+            }
+        )
+
+    if str(stale_status or "").strip().lower() == "stale":
+        task = build_refresh_task(
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            stale_reason="source_freshness_expired",
+        )
+        actions.append(
+            {
+                "code": "refresh_stale_rules",
+                "title": task.title,
+                "category": "jurisdiction",
+                "status": task.status,
+                "priority": task.priority,
+                "reason": task.reason,
+                "metadata": task.metadata,
+            }
+        )
+
+    return {
+        "ok": True,
+        "market": dict(market or {}),
+        "required_categories": required,
+        "category_coverage": dict(category_coverage or {}),
+        "stale_status": stale_status,
+        "required_actions": actions,
+        "count": len(actions),
+    }
 
 def build_missing_category_task(
     *,

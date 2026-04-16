@@ -1183,14 +1183,42 @@ def compute_jurisdiction_completeness(
         category_statuses=category_coverage or {},
     )
 
+    authoritative_set = set(normalize_categories(authoritative_categories))
+    critical_set = set(
+        normalize_categories(
+            critical_categories
+            or get_critical_categories(
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                include_section8=include_section8,
+                tenant_waitlist_depth=tenant_waitlist_depth,
+            )
+        )
+    )
+
     category_statuses = coverage.category_statuses or {}
+    conditional_categories = [
+        category for category, status in category_statuses.items()
+        if str(status or "").strip().lower() == "conditional"
+    ]
+    stale_categories = list(
+        coverage.stale_categories
+        or ([] if stale_status != "stale" else list(coverage.covered_categories))
+    )
+    legal_stale_categories = [c for c in stale_categories if c in critical_set]
+    informational_stale_categories = [c for c in stale_categories if c not in critical_set]
+    critical_stale_categories = [c for c in stale_categories if c in critical_set]
+    stale_authoritative_categories = [c for c in stale_categories if c in authoritative_set]
+
     category_details = {
         category: {
             "status": category_statuses.get(category, "missing"),
-            "authoritative_source_count": 1 if category in set(normalize_categories(authoritative_categories)) else 0,
-            "authority_score": 1.0 if category in set(normalize_categories(authoritative_categories)) else 0.0,
+            "authoritative_source_count": 1 if category in authoritative_set else 0,
+            "authority_score": 1.0 if category in authoritative_set else 0.0,
             "governance_score": 1.0 if category_statuses.get(category) in {"covered", "verified"} else 0.35,
-            "freshness_score": 0.0 if stale_status == "stale" else 1.0,
+            "freshness_score": 0.0 if category in set(stale_categories) else 1.0,
         }
         for category in required
     }
@@ -1201,7 +1229,7 @@ def compute_jurisdiction_completeness(
         coverage_subscore=coverage.completeness_score,
         freshness_subscore=0.0 if stale_status == "stale" else 1.0,
         authority_subscore=(
-            len(set(coverage.covered_categories).intersection(set(normalize_categories(authoritative_categories))))
+            len(set(coverage.covered_categories).intersection(authoritative_set))
             / float(max(1, len(required)))
         ),
         extraction_subscore=coverage.completeness_score,
@@ -1210,7 +1238,11 @@ def compute_jurisdiction_completeness(
         confidence_label=coverage.coverage_confidence,
         category_statuses=category_statuses,
         covered_categories=list(coverage.covered_categories),
-        stale_categories=list(coverage.stale_categories or ([] if stale_status != "stale" else coverage.covered_categories)),
+        stale_categories=stale_categories,
+        legal_stale_categories=legal_stale_categories,
+        informational_stale_categories=informational_stale_categories,
+        critical_stale_categories=critical_stale_categories,
+        stale_authoritative_categories=stale_authoritative_categories,
         inferred_categories=list(coverage.inferred_categories or []),
         conflicting_categories=list(coverage.conflicting_categories or []),
         missing_categories=list(coverage.missing_categories),
@@ -1274,28 +1306,31 @@ def compute_jurisdiction_completeness(
         "required_categories": list(coverage.required_categories),
         "covered_categories": list(coverage.covered_categories),
         "missing_categories": list(coverage.missing_categories),
-        "conditional_categories": list(coverage.inferred_categories or []),
-        "stale_categories": list(coverage.stale_categories or []),
-        "conflicting_categories": list(coverage.conflicting_categories or []),
-        "undiscovered_categories": list(breakdown.undiscovered_categories),
-        "weak_support_categories": list(breakdown.weak_support_categories),
-        "authority_unmet_categories": list(breakdown.authority_unmet_categories),
-        "unmet_categories": list(breakdown.unmet_categories),
-        "category_unmet_reasons": dict(breakdown.category_unmet_reasons),
-        "category_coverage": dict(category_statuses),
-        "completeness_score": float(coverage.completeness_score),
-        "completeness_status": breakdown.completeness_status,
-        "coverage_confidence": coverage.coverage_confidence,
+        "conditional_categories": conditional_categories,
+        "stale_categories": stale_categories,
         "stale_status": stale_status,
-        "trust_decision": trust.to_dict(),
-        "expected_rule_universe": expected_universe.to_dict(),
+        "inferred_categories": list(coverage.inferred_categories or []),
+        "conflicting_categories": list(coverage.conflicting_categories or []),
+        "completeness_score": float(coverage.completeness_score),
+        "completeness_status": str(breakdown.completeness_status),
+        "coverage_confidence": str(coverage.coverage_confidence),
+        "category_statuses": dict(category_statuses),
+        "category_coverage": dict(category_statuses),
         "rule_family_inventory": dict(expected_universe.rule_family_inventory or {}),
+        "expected_rule_universe": expected_universe.to_dict(),
         "legally_binding_categories": list(expected_universe.legally_binding_categories or []),
         "operational_heuristic_categories": list(expected_universe.operational_heuristic_categories or []),
         "property_proof_required_categories": list(expected_universe.property_proof_required_categories or []),
         "authority_expectations": dict(expected_universe.authority_expectations or {}),
+        "trust_decision": trust.to_dict(),
+        "safe_for_projection": bool(trust.safe_for_projection),
+        "safe_for_user_reliance": bool(trust.safe_for_user_reliance),
+        "blocked": bool(trust.blocked),
+        "blocker_reasons": list(trust.blocker_reasons),
+        "manual_review_reasons": list(trust.manual_review_reasons),
+        "tier_coverage": list(resolved_tier_coverage),
+        "scoring_defaults": dict(breakdown.scoring_defaults),
     }
-
 
 def _derive_discovery_status(
     profile: JurisdictionProfile,
