@@ -36,6 +36,8 @@ from app.services.policy_change_detection_service import (
     determine_source_refresh_state,
 )
 
+from app.services.policy_catalog import catalog_mi_authoritative, catalog_municipalities
+
 
 AUTHORITY_TIER_RANKS: dict[str, int] = {
     "derived_or_inferred": 25,
@@ -246,7 +248,167 @@ def _classify_authority_tier(*, url: str, publisher: Optional[str] = None, title
         "is_official": authority_tier == "authoritative_official",
     }
 
+@dataclass(frozen=True)
+class PolicyCollectResult:
+    source: PolicySource
+    changed: bool
+    fetch_ok: bool
+    fetch_error: str | None = None
 
+
+def _collect_single_catalog_entry(
+    db: Session,
+    *,
+    entry: PolicyCatalogEntry,
+    org_id: Optional[int],
+    focus: str = "se_mi_extended",
+) -> PolicyCollectResult:
+    before = db.scalar(
+        select(PolicySource).where(PolicySource.url == entry.url).order_by(PolicySource.id.asc())
+    )
+
+    source = ensure_policy_source_from_catalog_entry(
+        db,
+        entry=entry,
+        org_id=org_id,
+        focus=focus,
+    )
+
+    inventory_hints = expected_inventory_hints(
+        state=_norm_state(entry.state),
+        county=_norm_lower(entry.county),
+        city=_norm_lower(entry.city),
+        pha_name=_norm_text(entry.pha_name),
+        include_section8=True,
+    )
+    sync_policy_source_into_inventory(
+        db,
+        source=source,
+        org_id=org_id,
+        expected_categories=inventory_hints.get("expected_categories"),
+        expected_tiers=inventory_hints.get("expected_tiers"),
+        inventory_origin="catalog_sync",
+        is_curated=True,
+    )
+
+    changed = before is None
+    return PolicyCollectResult(
+        source=source,
+        changed=bool(changed),
+        fetch_ok=True,
+        fetch_error=None,
+    )
+
+
+def collect_catalog_for_focus(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    focus: str = "se_mi_extended",
+) -> list[PolicyCollectResult]:
+    items = catalog_mi_authoritative(focus=focus)
+    out: list[PolicyCollectResult] = []
+
+    for entry in items:
+        out.append(
+            _collect_single_catalog_entry(
+                db,
+                entry=entry,
+                org_id=org_id,
+                focus=focus,
+            )
+        )
+
+    db.commit()
+    return out
+
+
+def collect_catalog_all_municipalities(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    focus: str = "se_mi_extended",
+) -> dict[str, Any]:
+    items = catalog_mi_authoritative(focus=focus)
+    municipalities = catalog_municipalities(items)
+
+    total_results: list[PolicyCollectResult] = []
+    seen_urls: set[str] = set()
+
+    for entry in items:
+        url = str(getattr(entry, "url", "") or "").strip().lower()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        total_results.append(
+            _collect_single_catalog_entry(
+                db,
+                entry=entry,
+                org_id=org_id,
+                focus=focus,
+            )
+        )
+
+    db.commit()
+
+    return {
+        "focus": focus,
+        "municipalities": municipalities,
+        "count": len(total_results),
+        "ok_count": sum(1 for r in total_results if r.fetch_ok),
+        "failed_count": sum(1 for r in total_results if not r.fetch_ok),
+        "results": [
+            {
+                "source_id": int(r.source.id),
+                "url": r.source.url,
+                "changed": bool(r.changed),
+                "fetch_ok": bool(r.fetch_ok),
+                "fetch_error": r.fetch_error,
+            }
+            for r in total_results
+        ],
+    }
+
+
+def collect_catalog_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> list[PolicyCollectResult]:
+    items = merged_catalog_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+
+    out: list[PolicyCollectResult] = []
+    seen_urls: set[str] = set()
+
+    for entry in items:
+        url = str(getattr(entry, "url", "") or "").strip().lower()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        out.append(
+            _collect_single_catalog_entry(
+                db,
+                entry=entry,
+                org_id=org_id,
+                focus=focus,
+            )
+        )
+
+    db.commit()
+    return out
 
 
 def _expected_universe_for_source_scope(*, state: Optional[str], county: Optional[str], city: Optional[str], pha_name: Optional[str], program_type: Optional[str] = None):
@@ -259,6 +421,186 @@ def _expected_universe_for_source_scope(*, state: Optional[str], county: Optiona
         include_section8=include_section8,
     )
 
+def collect_url(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    url: str,
+    state: str,
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    pha_name: Optional[str] = None,
+    program_type: Optional[str] = None,
+    publisher: Optional[str] = None,
+    title: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> PolicyCollectResult:
+    """
+    Backward-compatible single-source collect entrypoint expected by routers/policy.py.
+    Creates or updates one PolicySource from a direct URL and returns the old result shape:
+    {source, changed, fetch_ok, fetch_error}.
+    """
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+    program = _norm_text(program_type)
+    clean_url = str(url or "").strip()
+    if not clean_url:
+        raise ValueError("url is required")
+
+    stmt = select(PolicySource).where(PolicySource.url == clean_url)
+    if org_id is None:
+        stmt = stmt.where(PolicySource.org_id.is_(None))
+    else:
+        stmt = stmt.where(or_(PolicySource.org_id == org_id, PolicySource.org_id.is_(None)))
+    existing = db.scalar(stmt.order_by(PolicySource.id.asc()))
+    changed = existing is None
+
+    source_type = "program" if pha or (program and program.lower() == "section8") else ("city" if cty else "county" if cnty else "state")
+    authority = _classify_authority_tier(
+        url=clean_url,
+        publisher=publisher,
+        title=title,
+        source_type=source_type,
+        source_kind=None,
+    )
+
+    if existing is None:
+        row = PolicySource(
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            program_type=program,
+            publisher=publisher,
+            title=title or _source_name_from_url(clean_url),
+            url=clean_url,
+            content_type=None,
+            http_status=None,
+            retrieved_at=None,
+            content_sha256=None,
+            raw_path=None,
+            extracted_text=None,
+            notes=notes,
+            is_authoritative=bool(authority.get("authority_tier") == "authoritative_official"),
+            authority_score=float(authority.get("authority_score", 0.35) or 0.35),
+            authority_tier=str(authority.get("authority_tier") or "derived_or_inferred"),
+            authority_rank=int(authority.get("authority_rank", 25) or 25),
+            authority_class=authority.get("authority_class"),
+            authority_reason=authority.get("authority_reason"),
+            publication_type=authority.get("publication_type"),
+            domain_name=authority.get("domain_name"),
+            approved_supporting_source=bool(authority.get("approved_supporting_source", False)),
+            semi_authoritative=bool(authority.get("semi_authoritative", False)),
+            derived_or_inferred=bool(authority.get("derived_or_inferred", False)),
+            authority_use_type=str(
+                AUTHORITY_POLICY_BY_TIER.get(
+                    str(authority.get("authority_tier") or "derived_or_inferred"),
+                    AUTHORITY_POLICY_BY_TIER["derived_or_inferred"],
+                ).get("use_type")
+                or "weak"
+            ),
+            authority_policy_json="{}",
+            binding_categories_json="[]",
+            supporting_categories_json="[]",
+            unusable_categories_json="[]",
+            normalized_categories_json="[]",
+            freshness_status="unknown",
+            freshness_reason="not_fetched",
+            freshness_checked_at=None,
+            published_at=None,
+            effective_date=None,
+            last_verified_at=None,
+            source_name=publisher or title or _source_name_from_url(clean_url),
+            source_type=source_type,
+            jurisdiction_slug=_jurisdiction_slug(
+                source_type=source_type,
+                state=st,
+                county=cnty,
+                city=cty,
+                pha_name=pha,
+                program_type=program,
+            ),
+            fetch_method=_fetch_method_from_url(clean_url),
+            trust_level=float(round(max(0.35, float(authority.get("authority_score", 0.35) or 0.35)), 3)),
+            refresh_interval_days=30,
+            last_fetched_at=None,
+            registry_status="active",
+            fetch_config_json=_json_dumps({}),
+            registry_meta_json=_json_dumps({"origin_mode": "manual_collect"}),
+            fingerprint_algo="sha256",
+            current_fingerprint=None,
+            last_changed_at=None,
+            next_refresh_due_at=None,
+            last_fetch_error=None,
+            last_http_status=None,
+            last_seen_same_fingerprint_at=None,
+            source_metadata_json=_json_dumps(
+                {
+                    "discovery": {
+                        "mode": "manual_collect",
+                        "authority_kind": authority.get("authority_kind"),
+                        "authority_tier": authority.get("authority_tier"),
+                        "authority_rank": authority.get("authority_rank"),
+                        "authority_class": authority.get("authority_class"),
+                        "authority_reason": authority.get("authority_reason"),
+                        "publication_type": authority.get("publication_type"),
+                        "domain_name": authority.get("domain_name"),
+                    }
+                }
+            ),
+            last_verified_by_user_id=None,
+        )
+        _sync_registry_defaults(row)
+        _apply_authority_policy_to_source(row)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    else:
+        row = existing
+        row.state = st
+        row.county = cnty
+        row.city = cty
+        row.pha_name = pha
+        row.program_type = program
+        row.publisher = publisher or row.publisher
+        row.title = title or row.title or _source_name_from_url(clean_url)
+        if notes is not None:
+            row.notes = notes
+        row.source_name = publisher or title or row.source_name or _source_name_from_url(clean_url)
+        row.source_type = source_type or row.source_type
+        row.jurisdiction_slug = _jurisdiction_slug(
+            source_type=row.source_type,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            program_type=program,
+        )
+        row.authority_score = max(float(row.authority_score or 0.0), float(authority.get("authority_score", 0.35) or 0.35))
+        row.authority_tier = str(authority.get("authority_tier") or row.authority_tier or "derived_or_inferred")
+        row.authority_rank = int(authority.get("authority_rank", row.authority_rank or 25) or 25)
+        row.authority_class = authority.get("authority_class") or row.authority_class
+        row.authority_reason = authority.get("authority_reason") or row.authority_reason
+        row.publication_type = authority.get("publication_type") or row.publication_type
+        row.domain_name = authority.get("domain_name") or row.domain_name
+        row.approved_supporting_source = bool(authority.get("approved_supporting_source", row.approved_supporting_source))
+        row.semi_authoritative = bool(authority.get("semi_authoritative", row.semi_authoritative))
+        row.derived_or_inferred = bool(authority.get("derived_or_inferred", row.derived_or_inferred))
+        _sync_registry_defaults(row)
+        _apply_authority_policy_to_source(row)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+
+    return PolicyCollectResult(
+        source=row,
+        changed=bool(changed),
+        fetch_ok=True,
+        fetch_error=None,
+    )
 
 def authority_policy_for_scope(*, authority_tier: Optional[str], state: Optional[str], county: Optional[str], city: Optional[str], pha_name: Optional[str], program_type: Optional[str] = None, normalized_categories: list[str] | None = None) -> dict[str, Any]:
     tier = str(authority_tier or "derived_or_inferred").strip() or "derived_or_inferred"

@@ -1,4 +1,3 @@
-# backend/app/services/inspection_readiness_service.py
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -14,7 +13,6 @@ from ..domain.compliance.inspection_rules import (
 )
 from ..models import Inspection, InspectionItem, PropertyChecklistItem
 from ..services.policy_projection_service import build_property_projection_snapshot, rebuild_property_projection
-from ..services.workflow_gate_service import build_property_jurisdiction_blocker
 
 
 @dataclass(frozen=True)
@@ -223,6 +221,16 @@ def _jurisdiction_trust_flags(db: Session, *, org_id: int, property_id: int) -> 
     return trust if isinstance(trust, dict) else {}
 
 
+def _build_property_jurisdiction_blocker(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    from ..services.workflow_gate_service import build_property_jurisdiction_blocker
+
+    return build_property_jurisdiction_blocker(
+        db,
+        org_id=int(org_id),
+        property_id=int(property_id),
+    )
+
+
 def compute_property_readiness_score(
     db: Session,
     *,
@@ -329,7 +337,7 @@ def compute_property_readiness_score(
         and not combined_reinspect_required
     )
 
-    jurisdiction_blocker = build_property_jurisdiction_blocker(
+    jurisdiction_blocker = _build_property_jurisdiction_blocker(
         db,
         org_id=org_id,
         property_id=property_id,
@@ -407,8 +415,6 @@ def compute_property_readiness_score(
     )
 
 
-
-
 def _projection_proof_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
     snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
     projection = snapshot.get("projection") or {}
@@ -418,6 +424,7 @@ def _projection_proof_summary(db: Session, *, org_id: int, property_id: int) -> 
         "proof_obligations": list(snapshot.get("proof_obligations") or projection.get("proof_obligations") or []),
         "proof_counts": dict(snapshot.get("proof_counts") or projection.get("proof_counts") or {}),
     }
+
 
 def build_property_readiness_summary(
     db: Session,
@@ -430,68 +437,106 @@ def build_property_readiness_summary(
         org_id=org_id,
         property_id=property_id,
     )
-    jurisdiction_blocker = build_property_jurisdiction_blocker(
+    proof = _projection_proof_summary(db, org_id=org_id, property_id=property_id)
+    jurisdiction_blocker = _build_property_jurisdiction_blocker(
         db,
         org_id=org_id,
         property_id=property_id,
     )
-    trust = jurisdiction_blocker.get("jurisdiction_trust") or _jurisdiction_trust_flags(db, org_id=org_id, property_id=property_id)
-    proof_summary = _projection_proof_summary(db, org_id=org_id, property_id=property_id)
+
+    acquisition_ready = bool(
+        score.readiness_score >= 60.0
+        and score.failed_items == 0
+        and score.blocked_items == 0
+        and not bool(jurisdiction_blocker.get("blocking"))
+    )
+
+    acquisition_blockers: list[str] = []
+    if score.failed_items > 0 or score.unresolved_failure_count > 0:
+        acquisition_blockers.append("inspection_failures")
+    if score.blocked_items > 0 or score.unresolved_blocked_count > 0:
+        acquisition_blockers.append("inspection_blockers")
+    if score.unresolved_critical_count > 0:
+        acquisition_blockers.append("critical_compliance_findings")
+    if bool(jurisdiction_blocker.get("blocking")):
+        acquisition_blockers.append("jurisdiction_blocked")
+
+    acquisition_next_actions: list[str] = []
+    if "inspection_failures" in acquisition_blockers:
+        acquisition_next_actions.append("Resolve failed inspection and checklist items.")
+    if "inspection_blockers" in acquisition_blockers:
+        acquisition_next_actions.append("Clear blocked inspection or evidence items.")
+    if "critical_compliance_findings" in acquisition_blockers:
+        acquisition_next_actions.append("Resolve critical compliance findings before proceeding.")
+    if "jurisdiction_blocked" in acquisition_blockers:
+        acquisition_next_actions.append("Resolve jurisdiction trust blockers or missing proof.")
 
     return {
         "ok": True,
-        "property_id": score.property_id,
-        "latest_inspection_id": score.latest_inspection_id,
-        "template_key": score.template_key,
-        "template_version": score.template_version,
-        "completion": {
-            "pct": score.completion_pct,
-            "projection_pct": score.completion_projection_pct,
-            "is_compliant": score.is_compliant,
-        },
+        "property_id": int(property_id),
         "readiness": {
-            "score": score.readiness_score,
+            "score": float(round(score.readiness_score, 2)),
             "status": score.readiness_status,
             "result_status": score.result_status,
             "posture": score.posture,
-            "latest_inspection_passed": score.latest_inspection_passed,
-            "hqs_ready": score.hqs_ready,
-            "local_ready": score.local_ready,
-            "voucher_ready": score.voucher_ready,
-            "lease_up_ready": score.lease_up_ready,
-            "reinspect_required": score.reinspect_required,
+            "completion_pct": float(round(score.completion_pct, 2)),
+            "completion_projection_pct": float(round(score.completion_projection_pct, 2)),
+            "latest_inspection_passed": bool(score.latest_inspection_passed),
+            "hqs_ready": bool(score.hqs_ready),
+            "local_ready": bool(score.local_ready),
+            "voucher_ready": bool(score.voucher_ready),
+            "lease_up_ready": bool(score.lease_up_ready),
+            "is_compliant": bool(score.is_compliant),
+            "reinspect_required": bool(score.reinspect_required),
+            "acquisition_ready": acquisition_ready,
+            "acquisition_blockers": acquisition_blockers,
+            "acquisition_next_actions": acquisition_next_actions,
         },
         "counts": {
-            "total_items": score.total_items,
-            "scored_items": score.scored_items,
-            "passed_items": score.passed_items,
-            "failed_items": score.failed_items,
-            "blocked_items": score.blocked_items,
-            "na_items": score.na_items,
-            "unknown_items": score.unknown_items,
-            "failed_critical_items": score.failed_critical_items,
-            "checklist_failed_count": score.checklist_failed_count,
-            "checklist_blocked_count": score.checklist_blocked_count,
-            "unresolved_failure_count": score.unresolved_failure_count,
-            "unresolved_blocked_count": score.unresolved_blocked_count,
-            "unresolved_critical_count": score.unresolved_critical_count,
-            "evidence_blocking_count": score.evidence_blocking_count,
-            "evidence_unknown_count": score.evidence_unknown_count,
-            "evidence_conflicting_count": score.evidence_conflicting_count,
-            "evidence_stale_count": score.evidence_stale_count,
+            "total_items": int(score.total_items),
+            "scored_items": int(score.scored_items),
+            "passed_items": int(score.passed_items),
+            "failed_items": int(score.failed_items),
+            "blocked_items": int(score.blocked_items),
+            "na_items": int(score.na_items),
+            "unknown_items": int(score.unknown_items),
+            "failed_critical_items": int(score.failed_critical_items),
+            "checklist_failed_count": int(score.checklist_failed_count),
+            "checklist_blocked_count": int(score.checklist_blocked_count),
+            "unresolved_failure_count": int(score.unresolved_failure_count),
+            "unresolved_blocked_count": int(score.unresolved_blocked_count),
+            "unresolved_critical_count": int(score.unresolved_critical_count),
+            "evidence_blocking_count": int(score.evidence_blocking_count),
+            "evidence_unknown_count": int(score.evidence_unknown_count),
+            "evidence_conflicting_count": int(score.evidence_conflicting_count),
+            "evidence_stale_count": int(score.evidence_stale_count),
         },
-        "jurisdiction_trust": trust,
-        "proof_obligations": proof_summary.get("proof_obligations") or [],
-        "proof_counts": proof_summary.get("proof_counts") or {},
-        "jurisdiction_blocker": jurisdiction_blocker,
-        "trust_blocked": bool(jurisdiction_blocker.get("blocking")),
-        "trust_blocked_reason": jurisdiction_blocker.get("blocked_reason"),
-        "jurisdiction_lockout_active": bool(jurisdiction_blocker.get("lockout_active")),
-        "jurisdiction_validation_pending": bool(jurisdiction_blocker.get("validation_pending")),
+        "completion": {
+            "proof_obligations": list(proof.get("proof_obligations") or []),
+            "proof_counts": dict(proof.get("proof_counts") or {}),
+        },
         "trust_blocker_reasons": list(jurisdiction_blocker.get("blocking_reasons") or []),
         "manual_review_reasons": list(jurisdiction_blocker.get("manual_review_reasons") or []),
         "raw": asdict(score),
     }
+
+
+def rebuild_and_summarize_property_readiness(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    rebuild_property_projection(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    return build_property_readiness_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
 
 
 def build_property_readiness_with_schedule(

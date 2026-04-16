@@ -261,6 +261,19 @@ class ImportSnapshotOut(ImportSnapshotBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ImportErrorRow(BaseModel):
+    row: int
+    error: str
+
+
+class ImportResultOut(BaseModel):
+    snapshot_id: int
+    source: str
+    imported: int = 0
+    skipped_duplicates: int = 0
+    errors: list[ImportErrorRow] = Field(default_factory=list)
+
+
 # --------------------
 # Compliance documents
 # --------------------
@@ -850,15 +863,157 @@ class InspectionItemOut(BaseModel):
     id: int
     inspection_id: int
     code: str
-    category: Optional[str] = None
-    status: str
-    notes: Optional[str] = None
-    severity: Optional[str] = None
-    evidence_json: Optional[str] = None
-    created_at: Optional[datetime] = None
+    failed: bool
+    severity: int
+    location: str | None = None
+    details: str | None = None
+    resolved_at: datetime | None = None
+    resolution_notes: str | None = None
+    category: str | None = None
+    result_status: str | None = None
+    fail_reason: str | None = None
+    remediation_guidance: str | None = None
+    evidence_json: str | None = None
+    photo_references_json: str | None = None
+    standard_label: str | None = None
+    standard_citation: str | None = None
+    readiness_impact: str | None = None
+    requires_reinspection: bool | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
+# --------------------
+# Agents router compatibility DTOs
+# --------------------
+
+class AgentMessageCreate(BaseModel):
+    thread_key: str
+    sender: str
+    recipient: str | None = None
+    message: str
+
+
+class AgentMessageOut(BaseModel):
+    id: int
+    org_id: int | None = None
+    thread_key: str
+    sender: str
+    recipient: str | None = None
+    message: str
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentRunCreate(BaseModel):
+    agent_key: str
+    property_id: int | None = None
+    input_json: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = None
+    dispatch: bool = True
+
+
+class AgentSpecOut(BaseModel):
+    agent_key: str
+    title: str
+    description: str | None = None
+    needs_human: bool = False
+    category: str | None = None
+    sidebar_slots: list[str] = Field(default_factory=list)
+
+# --------------------
+# Auth router compatibility DTOs
+# --------------------
+
+class PrincipalOut(BaseModel):
+    org_id: int
+    org_slug: str
+    user_id: int
+    email: str
+    role: str
+
+class AgentSlotSpecOut(BaseModel):
+    slot_key: str
+    title: str
+    description: str | None = None
+    owner_type: str
+    default_status: str
+
+# --------------------
+# Workflow router compatibility DTOs
+# --------------------
+
+class WorkflowEventCreate(BaseModel):
+    property_id: int | None = None
+    event_type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowEventOut(BaseModel):
+    id: int
+    org_id: int | None = None
+    property_id: int | None = None
+    actor_user_id: int | None = None
+    event_type: str
+    payload_json: str | None = None
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PropertyStateUpsert(BaseModel):
+    property_id: int
+    current_stage: str | None = None
+    constraints: dict[str, Any] | None = None
+    outstanding_tasks: dict[str, Any] | None = None
+
+class AgentSlotAssignmentUpsert(BaseModel):
+    slot_key: str
+    property_id: int | None = None
+    owner_type: str | None = None
+    assignee: str | None = None
+    status: str | None = None
+    notes: str | None = None
+
+
+class AgentSlotAssignmentOut(BaseModel):
+    id: int
+    org_id: int | None = None
+    slot_key: str
+    property_id: int | None = None
+    owner_type: str
+    assignee: str | None = None
+    status: str
+    notes: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+# --------------------
+# Equity / valuation compatibility DTOs
+# --------------------
+
+class ValuationCreate(BaseModel):
+    property_id: int
+    as_of: datetime | None = None
+    estimated_value: float
+    loan_balance: float | None = None
+    notes: str | None = None
+
+
+class ValuationOut(BaseModel):
+    id: int
+    org_id: int | None = None
+    property_id: int
+    as_of: datetime | None = None
+    estimated_value: float | None = None
+    loan_balance: float | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 class InspectionOut(BaseModel):
     id: int
@@ -909,6 +1064,53 @@ class PropertyChecklistItemOut(BaseModel):
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+# --------------------
+# Compliance router compatibility DTOs
+# --------------------
+
+class ChecklistItemUpdateIn(BaseModel):
+    status: str | None = None
+    notes: str | None = None
+    proof_url: str | None = None
+
+
+class ChecklistTemplateItemUpsert(BaseModel):
+    strategy: str = "section8"
+    version: str = "v1"
+    code: str
+    category: str
+    description: str
+    applies_if: dict[str, Any] | None = None
+    severity: int = 1
+    common_fail: bool = True
+
+
+class ChecklistTemplateItemOut(BaseModel):
+    id: int
+    strategy: str
+    version: str
+    code: str
+    category: str
+    description: str
+    applies_if_json: str | None = None
+    severity: int
+    common_fail: bool
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PropertyChecklistOut(BaseModel):
+    id: int
+    org_id: int
+    property_id: int
+    strategy: str
+    version: str
+    generated_at: datetime | None = None
+    items: list[ChecklistItemOut] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1471,6 +1673,481 @@ class PhotoUploadOut(BaseModel):
 # Ingestion / Markets / Sources
 # --------------------
 
+
+
+# --------------------
+# Legacy / compatibility DTOs still imported by routers
+# --------------------
+
+class PropertyPhotoCreate(BaseModel):
+    url: str
+    kind: str | None = None
+    label: str | None = None
+
+
+class PropertyPhotoOut(BaseModel):
+    id: int
+    property_id: int
+    source: str | None = None
+    kind: str | None = None
+    label: str | None = None
+    url: str | None = None
+    storage_key: str | None = None
+    content_type: str | None = None
+    sort_order: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IngestionOverviewOut(BaseModel):
+    ok: bool = True
+
+    total_sources: int = 0
+    sources_enabled: int = 0
+
+    success_runs_24h: int = 0
+    failed_runs_24h: int = 0
+
+    records_imported_24h: int = 0
+    duplicates_skipped_24h: int = 0
+
+    properties_created_7d: int = 0
+    properties_updated_7d: int = 0
+
+    last_sync_at: datetime | None = None
+
+    daily_markets: list[dict[str, Any]] = Field(default_factory=list)
+    ui_mode: str | None = None
+    normal_path: str | None = None
+    legacy_snapshot_flow_enabled: bool | None = None
+
+
+class IngestionRunListItem(BaseModel):
+    id: int
+    source_id: int
+    source_label: str | None = None
+    provider: str | None = None
+
+    trigger_type: str | None = None
+    status: str
+
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+    records_seen: int = 0
+    records_imported: int = 0
+    properties_created: int = 0
+    properties_updated: int = 0
+    duplicates_skipped: int = 0
+    invalid_rows: int = 0
+
+    error_summary: str | None = None
+    summary_json: dict[str, Any] = Field(default_factory=dict)
+
+    new_listings_imported: int = 0
+    already_seen_skipped: int = 0
+    provider_pages_scanned: int = 0
+    market_slug: str | None = None
+    market_exhausted: bool = False
+    sync_mode: str | None = None
+    stop_reason: str | None = None
+    max_pages_budget: int | None = None
+
+
+class IngestionSourceCreate(BaseModel):
+    provider: str
+    name: str
+    source_type: str = "listing"
+    is_enabled: bool = True
+    config_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class IngestionSourceUpdate(BaseModel):
+    name: str | None = None
+    is_enabled: bool | None = None
+    config_json: dict[str, Any] | None = None
+
+
+class CeilingCandidate(BaseModel):
+    type: str
+    value: float
+
+
+class ChecklistItemOut(BaseModel):
+    id: int | None = None
+    property_id: int | None = None
+    category: str | None = None
+    item_code: str
+    description: str | None = None
+    severity: int = 1
+    common_fail: bool = True
+    applies_if: dict[str, Any] | None = None
+    status: str = "todo"
+    marked_at: datetime | None = None
+    proof_url: str | None = None
+    notes: str | None = None
+    marked_by: str | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ChecklistOut(BaseModel):
+    property_id: int | None = None
+    strategy: str | None = None
+    city: str | None = None
+    state: str | None = None
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    total: int = 0
+    todo: int = 0
+    in_progress: int = 0
+    blocked: int = 0
+    failed: int = 0
+    done: int = 0
+    pct_done: float = 0.0
+    items: list[ChecklistItemOut] = Field(default_factory=list)
+
+# --------------------
+# Inspections router compatibility DTOs
+# --------------------
+
+class InspectorUpsert(BaseModel):
+    name: str
+    agency: str | None = None
+
+
+class InspectorOut(BaseModel):
+    id: int
+    name: str
+    agency: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InspectionItemResolve(BaseModel):
+    resolution_notes: str | None = None
+    resolved_at: datetime | None = None
+
+
+class PredictFailPointOut(BaseModel):
+    code: str | None = None
+    label: str | None = None
+    count: int = 0
+    rate: float | None = None
+    category: str | None = None
+    severity: str | None = None
+
+
+class PredictFailPointsOut(BaseModel):
+    city: str
+    inspector: str | None = None
+    window_inspections: int = 0
+    top_fail_points: list[dict[str, Any] | PredictFailPointOut] = Field(default_factory=list)
+
+
+class ComplianceStatsOut(BaseModel):
+    city: str
+    inspections: int = 0
+    pass_rate: float = 0.0
+    reinspect_rate: float = 0.0
+    top_fail_points: list[dict[str, Any] | PredictFailPointOut] = Field(default_factory=list)
+
+class DealCreate(BaseModel):
+    property_id: int
+    snapshot_id: int | None = None
+    strategy: str | None = None
+    decision: str | None = None
+    purchase_price: float | None = None
+    closing_date: datetime | None = None
+    loan_amount: float | None = None
+    asking_price: float | None = None
+    list_price: float | None = None
+    price: float | None = None
+    offer_price: float | None = None
+    rehab_budget: float | None = None
+    estimated_rehab_cost: float | None = None
+    monthly_rent: float | None = None
+    target_rent: float | None = None
+    contract_rent: float | None = None
+    taxes_monthly: float | None = None
+    insurance_monthly: float | None = None
+
+
+class DealOut(BaseModel):
+    id: int
+    org_id: int | None = None
+    property_id: int
+    snapshot_id: int | None = None
+    strategy: str | None = None
+    decision: str | None = None
+    purchase_price: float | None = None
+    closing_date: datetime | None = None
+    loan_amount: float | None = None
+    asking_price: float | None = None
+    list_price: float | None = None
+    price: float | None = None
+    offer_price: float | None = None
+    rehab_budget: float | None = None
+    estimated_rehab_cost: float | None = None
+    monthly_rent: float | None = None
+    target_rent: float | None = None
+    contract_rent: float | None = None
+    taxes_monthly: float | None = None
+    insurance_monthly: float | None = None
+    source: str | None = None
+    source_url: str | None = None
+    source_raw_json: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+# --------------------
+# Rent router compatibility DTOs
+# --------------------
+
+class RentCompIn(BaseModel):
+    source: str
+    address: str | None = None
+    url: str | None = None
+    rent: float
+    bedrooms: int | None = None
+    bathrooms: float | None = None
+    square_feet: int | None = None
+    notes: str | None = None
+
+
+class RentCompOut(BaseModel):
+    id: int
+    property_id: int
+    source: str
+    address: str | None = None
+    url: str | None = None
+    rent: float
+    bedrooms: int | None = None
+    bathrooms: float | None = None
+    square_feet: int | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RentCompsBatchIn(BaseModel):
+    comps: list[RentCompIn] = Field(default_factory=list)
+
+
+class RentCompsSummaryOut(BaseModel):
+    property_id: int
+    count: int = 0
+    median_rent: float | None = None
+    mean_rent: float | None = None
+    min_rent: float | None = None
+    max_rent: float | None = None
+
+
+class RentObservationCreate(BaseModel):
+    property_id: int
+    strategy: str = "section8"
+    achieved_rent: float
+    tenant_portion: float | None = None
+    hap_portion: float | None = None
+    lease_start: datetime | None = None
+    lease_end: datetime | None = None
+    notes: str | None = None
+
+
+class RentObservationOut(BaseModel):
+    id: int
+    property_id: int
+    strategy: str
+    achieved_rent: float
+    tenant_portion: float | None = None
+    hap_portion: float | None = None
+    lease_start: datetime | None = None
+    lease_end: datetime | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RentCalibrationOut(BaseModel):
+    id: int
+    zip: str | None = None
+    bedrooms: int | None = None
+    strategy: str | None = None
+    adjustment_factor: float | None = None
+    sample_size: int | None = None
+    mean_error: float | None = None
+    median_error: float | None = None
+    updated_at: datetime | None = None
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+
+class RentRecomputeOut(BaseModel):
+    property_id: int
+    market_rent_estimate: float | None = None
+    section8_fmr: float | None = None
+    rent_reasonableness_comp: float | None = None
+    approved_rent_ceiling: float | None = None
+    calibrated_market_rent: float | None = None
+    strategy: str
+    rent_used: float | None = None
+
+# --------------------
+# Deals / Rent assumptions compatibility DTOs
+# --------------------
+
+class DealIntakeIn(BaseModel):
+    snapshot_id: int | None = None
+
+    address: str
+    city: str
+    state: str = "MI"
+    zip: str
+
+    bedrooms: int
+    bathrooms: float
+
+    purchase_price: float
+    est_rehab: float | None = 0.0
+
+    strategy: str | None = "section8"
+    financing_type: str | None = "dscr"
+    interest_rate: float = 0.0
+    term_years: int = 30
+    down_payment_pct: float = 0.0
+
+    square_feet: int | None = None
+    year_built: int | None = None
+    has_garage: bool = False
+    property_type: str | None = "single_family"
+
+
+class RentAssumptionUpsert(BaseModel):
+    market_rent_estimate: float | None = None
+    section8_fmr: float | None = None
+    rent_reasonableness_comp: float | None = None
+    approved_rent_ceiling: float | None = None
+    calibrated_market_rent: float | None = None
+    rent_used: float | None = None
+    rent_cap_reason: str | None = None
+    explanation: str | None = None
+    strategy: str | None = None
+    payment_standard_pct: float | None = None
+    notes: str | None = None
+
+
+class RentAssumptionOut(BaseModel):
+    id: int
+    property_id: int
+    org_id: int | None = None
+
+    market_rent_estimate: float | None = None
+    section8_fmr: float | None = None
+    rent_reasonableness_comp: float | None = None
+    approved_rent_ceiling: float | None = None
+    calibrated_market_rent: float | None = None
+    rent_used: float | None = None
+    rent_cap_reason: str | None = None
+    explanation: str | None = None
+    strategy: str | None = None
+    payment_standard_pct: float | None = None
+    notes: str | None = None
+
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SurvivorOut(BaseModel):
+    deal_id: int
+    property_id: int
+    address: str
+    city: str | None = None
+    zip: str | None = None
+
+    decision: str | None = None
+    score: float | None = None
+    reasons: list[Any] = Field(default_factory=list)
+
+    dscr: float | None = None
+    cash_flow: float | None = None
+    gross_rent_used: float | None = None
+    asking_price: float | None = None
+
+
+class JurisdictionRuleOut(BaseModel):
+    id: int
+    org_id: int | None = None
+    city: str | None = None
+    state: str | None = None
+    county: str | None = None
+    rule_key: str | None = None
+    rule_name: str | None = None
+    category: str | None = None
+    rule_type: str | None = None
+    description: str | None = None
+    source_url: str | None = None
+    citation: str | None = None
+    metadata_json: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+
+class PropertyViewOut(BaseModel):
+    property: PropertyOut
+    deal: DealOut | None = None
+    rent_explain: RentExplainOut | None = None
+    jurisdiction_rule: JurisdictionRuleOut | None = None
+    jurisdiction_friction: dict[str, Any] = Field(default_factory=dict)
+    last_underwriting_result: UnderwritingResultOut | None = None
+    checklist: ChecklistOut | None = None
+    inventory_snapshot: dict[str, Any] = Field(default_factory=dict)
+
+
+class FinancialEnrichmentBatchIn(BaseModel):
+    property_ids: list[int] = Field(default_factory=list)
+    include_insurance: bool = True
+    include_tax: bool = True
+    force: bool = False
+
+
+class PropertyTaxEnrichmentOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    property_tax_annual: float | None = None
+    property_tax_rate_annual: float | None = None
+    property_tax_source: str | None = None
+    property_tax_confidence: float | None = None
+    property_tax_year: int | None = None
+    monthly_taxes: float | None = None
+    tax_lookup_status: str | None = None
+    tax_lookup_provider: str | None = None
+    tax_lookup_url: str | None = None
+    tax_last_verified_at: datetime | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class FinancialEnrichmentOut(BaseModel):
+    ok: bool = True
+    property_id: int
+    tax: PropertyTaxEnrichmentOut | dict[str, Any] | None = None
+    insurance: dict[str, Any] | None = None
+
+
+class FinancialEnrichmentBatchOut(BaseModel):
+    ok: bool = True
+    rows: list[FinancialEnrichmentOut] = Field(default_factory=list)
+    count: int = 0
+
 class IngestionSourceOut(BaseModel):
     id: int
     provider: str
@@ -1567,14 +2244,21 @@ class DashboardPanesOut(BaseModel):
 
 
 class RentExplainOut(BaseModel):
-    ok: bool = True
     property_id: int
-    market_rent_estimate: Optional[float] = None
-    section8_fmr: Optional[float] = None
-    approved_rent_ceiling: Optional[float] = None
-    rent_used: Optional[float] = None
-    rent_reason: Optional[str] = None
-    notes: list[str] = Field(default_factory=list)
+    strategy: str
+    payment_standard_pct: float | None = None
+    fmr_adjusted: float | None = None
+    market_rent_estimate: float | None = None
+    section8_fmr: float | None = None
+    rent_reasonableness_comp: float | None = None
+    approved_rent_ceiling: float | None = None
+    calibrated_market_rent: float | None = None
+    rent_used: float | None = None
+    ceiling_candidates: list[CeilingCandidate | dict[str, Any]] = Field(default_factory=list)
+    cap_reason: str
+    explanation: str
+    run_id: int | None = None
+    created_at: datetime | None = None
 
 
 class ValuationOut(BaseModel):

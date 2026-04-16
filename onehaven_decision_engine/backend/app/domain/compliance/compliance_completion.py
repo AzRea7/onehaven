@@ -1,12 +1,9 @@
-# backend/app/domain/compliance/compliance_completion.py
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.orm import Session
-
-from ...services.inspection_readiness_service import compute_property_readiness_score
 
 
 @dataclass(frozen=True)
@@ -55,6 +52,8 @@ def compute_compliance_status(
     org_id: int,
     property_id: int,
 ) -> ComplianceStatus:
+    from ...services.inspection_readiness_service import compute_property_readiness_score
+
     readiness = compute_property_readiness_score(
         db,
         org_id=org_id,

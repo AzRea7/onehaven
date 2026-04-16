@@ -1677,6 +1677,162 @@ def sync_checklist_evidence_for_property(
         "evidence_rows": created_or_updated,
     }
 
+def project_verified_assertions_to_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> JurisdictionProfile:
+    """
+    Compatibility wrapper used by routers/policy.py and policy_pipeline_service.py.
+
+    It projects currently effective verified / approved assertions for a market into a
+    JurisdictionProfile.policy_json payload, then upserts the matching jurisdiction profile.
+    """
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
+    assertions = _query_inherited_assertions(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+
+    summary = build_policy_summary(
+        db,
+        assertions,
+        org_id,
+        st,
+        cnty,
+        cty,
+        pha,
+    )
+
+    existing_policy: dict[str, Any] = {}
+    existing_row: JurisdictionProfile | None = None
+
+    stmt = select(JurisdictionProfile).where(JurisdictionProfile.state == st)
+    if org_id is None:
+        stmt = stmt.where(JurisdictionProfile.org_id.is_(None))
+    else:
+        stmt = stmt.where(
+            or_(
+                JurisdictionProfile.org_id == org_id,
+                JurisdictionProfile.org_id.is_(None),
+            )
+        )
+
+    rows = list(db.scalars(stmt).all())
+    for row in rows:
+        if _norm_lower(getattr(row, "county", None)) not in {None, cnty}:
+            continue
+        if _norm_lower(getattr(row, "city", None)) not in {None, cty}:
+            continue
+        if _norm_text(getattr(row, "pha_name", None)) not in {None, pha}:
+            continue
+        existing_row = row
+        break
+
+    if existing_row is not None:
+        existing_policy = _loads(getattr(existing_row, "policy_json", None), {})
+        if not isinstance(existing_policy, dict):
+            existing_policy = {}
+
+    policy = dict(existing_policy)
+    policy["coverage"] = dict(summary.get("coverage") or {})
+    policy["verified_rules"] = list(summary.get("verified_rules") or [])
+    policy["required_actions"] = list(summary.get("required_actions") or [])
+    policy["blocking_items"] = list(summary.get("blocking_items") or [])
+    policy["evidence_links"] = list(summary.get("evidence_links") or [])
+    policy["local_rule_statuses"] = dict(summary.get("local_rule_statuses") or {})
+    policy["required_categories"] = list(summary.get("required_categories") or [])
+    policy["category_coverage"] = dict(summary.get("category_coverage") or {})
+    policy["jurisdiction_trust"] = dict(summary.get("jurisdiction_trust") or {})
+
+    meta = policy.get("meta") or {}
+    if not isinstance(meta, dict):
+        meta = {}
+    meta["resolved_rule_version"] = summary.get("coverage", {}).get("resolved_rule_version")
+    meta["coverage_confidence"] = summary.get("coverage", {}).get("confidence_label")
+    meta["completeness"] = {
+        "completeness_status": summary.get("completeness_status"),
+        "completeness_score": summary.get("completeness_score"),
+        "stale_status": summary.get("stale_status"),
+        "required_categories": list(summary.get("required_categories") or []),
+        "category_coverage": dict(summary.get("category_coverage") or {}),
+        "missing_categories": list((summary.get("coverage") or {}).get("missing_categories") or []),
+        "stale_categories": list((summary.get("coverage") or {}).get("stale_categories") or []),
+        "inferred_categories": list((summary.get("coverage") or {}).get("inferred_categories") or []),
+        "conflicting_categories": list((summary.get("coverage") or {}).get("conflicting_categories") or []),
+        "critical_categories": list((summary.get("coverage") or {}).get("critical_categories") or []),
+        "critical_missing_categories": list((summary.get("coverage") or {}).get("critical_missing_categories") or []),
+        "critical_stale_categories": list((summary.get("coverage") or {}).get("critical_stale_categories") or []),
+        "critical_inferred_categories": list((summary.get("coverage") or {}).get("critical_inferred_categories") or []),
+        "critical_conflicting_categories": list((summary.get("coverage") or {}).get("critical_conflicting_categories") or []),
+        "trustworthy_for_projection": bool((summary.get("coverage") or {}).get("trustworthy_for_projection", False)),
+        "coverage_confidence": (summary.get("coverage") or {}).get("confidence_label"),
+        "production_readiness": (summary.get("coverage") or {}).get("production_readiness"),
+        "resolved_rule_version": (summary.get("coverage") or {}).get("resolved_rule_version"),
+    }
+    policy["meta"] = meta
+
+    friction_multiplier = 1.0
+    if existing_row is not None and getattr(existing_row, "friction_multiplier", None) is not None:
+        friction_multiplier = float(existing_row.friction_multiplier or 1.0)
+
+    row_to_write = existing_row
+    now = _utcnow()
+
+    if row_to_write is None:
+        row_to_write = JurisdictionProfile(
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            friction_multiplier=float(friction_multiplier),
+            policy_json=_dumps(policy),
+            notes=notes,
+        )
+        if hasattr(row_to_write, "updated_at"):
+            row_to_write.updated_at = now
+        if hasattr(row_to_write, "created_at") and getattr(row_to_write, "created_at", None) is None:
+            row_to_write.created_at = now
+        db.add(row_to_write)
+        db.commit()
+        db.refresh(row_to_write)
+    else:
+        row_to_write.org_id = org_id if getattr(row_to_write, "org_id", None) is not None or org_id is not None else None
+        row_to_write.state = st
+        row_to_write.county = cnty
+        row_to_write.city = cty
+        row_to_write.pha_name = pha
+        row_to_write.friction_multiplier = float(friction_multiplier)
+        row_to_write.policy_json = _dumps(policy)
+        if notes is not None:
+            row_to_write.notes = notes
+        if hasattr(row_to_write, "updated_at"):
+            row_to_write.updated_at = now
+        db.add(row_to_write)
+        db.commit()
+        db.refresh(row_to_write)
+
+    try:
+        row_to_write, _ = recompute_profile_and_coverage(db, row_to_write, commit=True)
+    except Exception:
+        pass
+
+    return row_to_write
+
 
 def _current_projection(db: Session, *, org_id: int, property_id: int) -> PropertyComplianceProjection | None:
     return db.scalar(

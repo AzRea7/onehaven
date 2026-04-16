@@ -919,6 +919,155 @@ def run_market_policy_pipeline(
     return result
 
 
+def run_market_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    """
+    Backward-compatible alias expected by routers/policy.py.
+    """
+    return run_market_policy_pipeline(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )
+
+
+def cleanup_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    archive_extracted_duplicates: bool = True,
+) -> dict[str, Any]:
+    """
+    Backward-compatible cleanup entrypoint expected by routers/policy.py.
+    """
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
+    archive_result = archive_stale_market_sources(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        focus=focus,
+    )
+
+    stale_cleanup = cleanup_market_stale_assertions(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+
+    governance = _governance_summary(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+
+    return {
+        "ok": True,
+        "state": st,
+        "county": cnty,
+        "city": cty,
+        "pha_name": pha,
+        "focus": focus,
+        "archive_extracted_duplicates": bool(archive_extracted_duplicates),
+        "archive_result": archive_result,
+        "stale_assertion_cleanup": stale_cleanup,
+        "governance_summary": governance,
+    }
+
+
+def repair_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    archive_extracted_duplicates: bool = True,
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    """
+    Backward-compatible repair entrypoint expected by routers/policy.py.
+    Performs cleanup, normalization/governance repair, and recomputation.
+    """
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
+    cleanup_result = cleanup_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        focus=focus,
+        archive_extracted_duplicates=archive_extracted_duplicates,
+    )
+
+    pipeline_result = run_market_policy_pipeline(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        focus=focus,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )
+
+    return {
+        "ok": True,
+        "state": st,
+        "county": cnty,
+        "city": cty,
+        "pha_name": pha,
+        "focus": focus,
+        "cleanup_result": cleanup_result,
+        "pipeline_result": pipeline_result,
+        "recompute": (pipeline_result or {}).get("recompute"),
+        "review_queue": (pipeline_result or {}).get("review_queue"),
+        "refresh_state": (pipeline_result or {}).get("refresh_state"),
+        "refresh_summary": (pipeline_result or {}).get("refresh_summary"),
+    }
+
 def refresh_market_policy_pipeline(
     db: Session,
     *,
