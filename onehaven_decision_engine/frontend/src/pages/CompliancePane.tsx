@@ -67,6 +67,15 @@ type ComplianceRow = {
     resolved_rule_version?: string | null;
     last_refreshed?: string | null;
     last_refreshed_at?: string | null;
+    health_state?: string | null;
+    reliability_state?: string | null;
+    safe_to_rely_on?: boolean | null;
+    lockout_causing_categories?: string[] | null;
+    informational_gap_categories?: string[] | null;
+    validation_pending_categories?: string[] | null;
+    authority_gap_categories?: string[] | null;
+    last_validation_at?: string | null;
+    next_due_step?: string | null;
   };
 };
 
@@ -236,6 +245,30 @@ function formatDate(v: any) {
   return d.toLocaleString();
 }
 
+function BoundaryNotice({
+  title,
+  children,
+  tone = "warn",
+}: {
+  title: string;
+  children: React.ReactNode;
+  tone?: "warn" | "bad" | "good";
+}) {
+  const cls =
+    tone === "bad"
+      ? "border-red-400/25 bg-red-500/10 text-red-100"
+      : tone === "good"
+        ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+        : "border-amber-300/25 bg-amber-500/10 text-amber-100";
+
+  return (
+    <div className={`rounded-2xl border px-4 py-4 ${cls}`}>
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mt-2 text-sm leading-6">{children}</div>
+    </div>
+  );
+}
+
 export default function CompliancePane() {
   const [data, setData] = React.useState<PanePayload | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -267,6 +300,10 @@ export default function CompliancePane() {
   >([]);
   const [markPhotoTasksBlocking, setMarkPhotoTasksBlocking] =
     React.useState(false);
+  const [manualLifecycleResult, setManualLifecycleResult] = React.useState<
+    any | null
+  >(null);
+  const [manualLifecycleBusy, setManualLifecycleBusy] = React.useState(false);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -461,6 +498,28 @@ export default function CompliancePane() {
       ? selectedOperationalStatus?.reasons
       : [];
 
+  async function runManualPolicyAction(action: string) {
+    if (!selectedProperty) return;
+    setManualLifecycleBusy(true);
+    try {
+      const payload = {
+        state: selectedProperty.state || "MI",
+        county: selectedProperty.county || null,
+        city: selectedProperty.city || null,
+        focus: "se_mi_extended",
+        org_scope: false,
+        auto_activate: true,
+      };
+      const out = await api.post(`/policy/manual/${action}`, payload);
+      setManualLifecycleResult(out || null);
+      await refresh();
+    } catch (e: any) {
+      setDetailError(String(e?.message || e));
+    } finally {
+      setManualLifecycleBusy(false);
+    }
+  }
+
   function syncSelectedFindings(analysis: any) {
     setPhotoAnalysis(analysis);
     const codes = (Array.isArray(analysis?.findings) ? analysis.findings : [])
@@ -571,6 +630,10 @@ export default function CompliancePane() {
             <div className="text-sm text-red-300">{err}</div>
           </Surface>
         ) : null}
+
+        <BoundaryNotice title="Operational trust boundary" tone="warn">
+          OneHaven shows whether this workflow is operationally safe to rely on based on the rules, proof, freshness, and validation currently in the system. It does <strong>not</strong> provide legal advice or guarantee legal compliance. Verify critical requirements like registration, inspections, occupancy approval, lead documents, and subsidy paperwork with the authoritative source before acting.
+        </BoundaryNotice>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           <Surface
@@ -850,6 +913,28 @@ export default function CompliancePane() {
                               </span>
                             ) : null}
 
+                            {row.jurisdiction?.health_state ? (
+                              <span
+                                className={statusTone(
+                                  row.jurisdiction.health_state,
+                                )}
+                              >
+                                {labelize(row.jurisdiction.health_state)}
+                              </span>
+                            ) : null}
+                            {row.jurisdiction?.validation_pending_categories
+                              ?.length ? (
+                              <span className="oh-pill oh-pill-warn">
+                                Validation pending
+                              </span>
+                            ) : null}
+                            {row.jurisdiction?.authority_gap_categories
+                              ?.length ? (
+                              <span className="oh-pill oh-pill-bad">
+                                Authority gap
+                              </span>
+                            ) : null}
+
                             {row.jurisdiction?.completeness_status &&
                             row.jurisdiction?.completeness_status !==
                               "complete" ? (
@@ -912,13 +997,22 @@ export default function CompliancePane() {
                 />
               </Surface>
             ) : detailError ? (
-              <Surface
-                tone="danger"
-                title="Selected property"
-                subtitle="Could not load details"
-              >
-                <div className="text-sm text-red-300">{detailError}</div>
-              </Surface>
+              <><Surface
+                  tone="danger"
+                  title="Selected property"
+                  subtitle="Could not load details"
+                >
+                  <div className="text-sm text-red-300">{detailError}</div>
+                </Surface><BoundaryNotice
+                  title={selectedSafeToRely ? "Operationally usable, not legal advice" : "Human review still needed"}
+                  tone={selectedSafeToRely ? "good" : "bad"}
+                >
+                    {selectedSafeToRely
+                      ? "The system currently sees enough governed rule and proof coverage to support operations, but you should still verify critical requirements before representing the property as legally compliant."
+                      : "This property should not be represented as cleared. Resolve the blocking proof, trust, freshness, or review issues first, and verify critical requirements with the authoritative jurisdiction source or qualified legal/compliance review."}
+                    <div className="mt-2">Any copied, exported, or shared compliance summary should keep this same boundary language.</div>
+                  </BoundaryNotice></>
+
             ) : detailLoading && !selectedReadiness && !selectedBrief ? (
               <Surface
                 title="Selected property"
@@ -932,6 +1026,62 @@ export default function CompliancePane() {
               </Surface>
             ) : (
               <>
+                <Surface
+                  title="Manual jurisdiction lifecycle"
+                  subtitle="Run discovery refresh, crawl refresh, validation retry, recompute, and health recompute manually while automation stays disabled."
+                >
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() =>
+                        void runManualPolicyAction("discovery-refresh")
+                      }
+                      className="oh-btn oh-btn-secondary"
+                      disabled={manualLifecycleBusy || !selectedProperty}
+                    >
+                      Discovery refresh
+                    </button>
+                    <button
+                      onClick={() =>
+                        void runManualPolicyAction("crawl-refresh")
+                      }
+                      className="oh-btn oh-btn-secondary"
+                      disabled={manualLifecycleBusy || !selectedProperty}
+                    >
+                      Crawl refresh
+                    </button>
+                    <button
+                      onClick={() =>
+                        void runManualPolicyAction("validation-retry")
+                      }
+                      className="oh-btn oh-btn-secondary"
+                      disabled={manualLifecycleBusy || !selectedProperty}
+                    >
+                      Validation retry
+                    </button>
+                    <button
+                      onClick={() => void runManualPolicyAction("recompute")}
+                      className="oh-btn oh-btn-secondary"
+                      disabled={manualLifecycleBusy || !selectedProperty}
+                    >
+                      Recompute
+                    </button>
+                    <button
+                      onClick={() =>
+                        void runManualPolicyAction("health-recompute")
+                      }
+                      className="oh-btn oh-btn-secondary"
+                      disabled={manualLifecycleBusy || !selectedProperty}
+                    >
+                      Health recompute
+                    </button>
+                  </div>
+                  {manualLifecycleResult ? (
+                    <pre className="mt-3 overflow-auto rounded-2xl border border-app bg-black/20 p-4 text-xs text-app-1">
+                      {JSON.stringify(manualLifecycleResult, null, 2)}
+                    </pre>
+                  ) : null}
+                </Surface>
+
                 <Surface
                   title="Selected property"
                   subtitle="Latest inspection, projection blockers, readiness summary, jurisdiction coverage, workflow gate, scheduling state, and evidence uploads for the active property."
@@ -1089,7 +1239,9 @@ export default function CompliancePane() {
                   {selectedBrief?.workflow?.compliance_gate?.blocked_reason ||
                   !selectedSafeToRely ||
                   selectedOperationalStatus?.lockout?.lockout_active ? (
-                    <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/[0.04] px-4 py-3">
+                    <div
+                      className={`mt-4 oh-state-banner ${selectedOperationalStatus?.lockout?.lockout_active ? "oh-state-banner-bad" : !selectedSafeToRely ? "oh-state-banner-warn" : "oh-state-banner-good"}`}
+                    >
                       <div className="flex items-start gap-2 text-sm text-red-100">
                         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                         <div className="space-y-1">

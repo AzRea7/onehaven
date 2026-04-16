@@ -5,6 +5,21 @@ import GlassCard from "../components/GlassCard";
 import JurisdictionCoverageBadge from "../components/JurisdictionCoverageBadge";
 import { api } from "../lib/api";
 
+type ReviewQueuePayload = {
+  ok?: boolean;
+  count?: number;
+  severity_counts?: Record<string, number>;
+  entries?: any[];
+};
+
+type StaleReviewDashboardPayload = {
+  ok?: boolean;
+  filter?: string;
+  count?: number;
+  summary?: Record<string, number>;
+  rows?: any[];
+};
+
 type JurisdictionVisibilityPayload = {
   ok?: boolean;
   jurisdiction_profile_id?: number;
@@ -54,6 +69,15 @@ type ProfileRow = {
   completeness_score?: number | null;
   is_stale?: boolean | null;
   stale_reason?: string | null;
+  operational_status?: any | null;
+  health?: any | null;
+  safe_to_rely_on?: boolean | null;
+  lockout_causing_categories?: string[] | null;
+  informational_gap_categories?: string[] | null;
+  validation_pending_categories?: string[] | null;
+  authority_gap_categories?: string[] | null;
+  last_validation_at?: string | null;
+  next_due_step?: string | null;
 };
 
 function pretty(v: any) {
@@ -177,6 +201,29 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function BoundaryPanel({
+  title,
+  body,
+  tone = "warn",
+}: {
+  title: string;
+  body: React.ReactNode;
+  tone?: "warn" | "bad" | "good";
+}) {
+  const cls =
+    tone === "bad"
+      ? "border-red-400/25 bg-red-500/10 text-red-100"
+      : tone === "good"
+        ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+        : "border-amber-300/25 bg-amber-500/10 text-amber-100";
+  return (
+    <div className={`rounded-2xl border px-4 py-4 ${cls}`}>
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mt-2 text-sm leading-6">{body}</div>
+    </div>
+  );
+}
+
 function profileKey(
   row: Pick<ProfileRow, "state" | "county" | "city" | "pha_name" | "id">,
 ) {
@@ -223,6 +270,12 @@ export default function JurisdictionProfiles() {
   const [testCity, setTestCity] = React.useState("Detroit");
   const [testCounty, setTestCounty] = React.useState("Wayne");
   const [resolved, setResolved] = React.useState<any | null>(null);
+  const [reviewQueue, setReviewQueue] =
+    React.useState<ReviewQueuePayload | null>(null);
+  const [overrideRows, setOverrideRows] = React.useState<any[]>([]);
+  const [overrideReason, setOverrideReason] = React.useState("");
+  const [overrideRuleCategory, setOverrideRuleCategory] = React.useState("");
+  const [overrideCritical, setOverrideCritical] = React.useState(false);
   const [resolveBusy, setResolveBusy] = React.useState(false);
 
   const [city, setCity] = React.useState("");
@@ -252,6 +305,49 @@ export default function JurisdictionProfiles() {
   const [recomputeBusyId, setRecomputeBusyId] = React.useState<number | null>(
     null,
   );
+  const [staleFilter, setStaleFilter] = React.useState("all");
+  const [staleDashboard, setStaleDashboard] =
+    React.useState<StaleReviewDashboardPayload | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function loadOverrides() {
+      if (!selectedId) {
+        setOverrideRows([]);
+        return;
+      }
+      try {
+        const out = await api.get(
+          `/jurisdictions/${selectedId}/overrides?include_inactive=true`,
+        );
+        if (!cancelled)
+          setOverrideRows(Array.isArray(out?.items) ? out.items : []);
+      } catch {
+        if (!cancelled) setOverrideRows([]);
+      }
+    }
+    void loadOverrides();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
+
+  async function createOverrideForSelected() {
+    if (!selectedId || !overrideReason.trim()) return;
+    await api.post(`/jurisdictions/${selectedId}/overrides`, {
+      reason: overrideReason.trim(),
+      rule_category: overrideRuleCategory || null,
+      carrying_critical_rule: overrideCritical,
+      trust_impact: overrideCritical ? "review_required" : "reduced_confidence",
+    });
+    setOverrideReason("");
+    setOverrideRuleCategory("");
+    setOverrideCritical(false);
+    const out = await api.get(
+      `/jurisdictions/${selectedId}/overrides?include_inactive=true`,
+    );
+    setOverrideRows(Array.isArray(out?.items) ? out.items : []);
+  }
 
   const selected = React.useMemo(
     () => rows.find((r) => r.id === selectedId) ?? null,
@@ -305,8 +401,14 @@ export default function JurisdictionProfiles() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.listJurisdictionProfiles(includeGlobal, state);
+      const [data, queue] = await Promise.all([
+        api.listJurisdictionProfiles(includeGlobal, state),
+        api.get(
+          `/jurisdictions/review-queue?state=${encodeURIComponent(state)}`,
+        ),
+      ]);
       const list = Array.isArray(data) ? data : [];
+      setReviewQueue(queue || null);
       setRows(list);
       if (list.length > 0) {
         const stillExists = selectedId && list.some((r) => r.id === selectedId);
@@ -433,7 +535,7 @@ export default function JurisdictionProfiles() {
 
   React.useEffect(() => {
     refresh();
-  }, [includeGlobal, state]);
+  }, [includeGlobal, state, staleFilter]);
 
   React.useEffect(() => {
     if (!selected?.id) {
@@ -485,6 +587,19 @@ export default function JurisdictionProfiles() {
     ? selectedOperationalStatus?.reasons
     : [];
 
+  const staleDashboardRows = Array.isArray(staleDashboard?.rows)
+    ? staleDashboard.rows
+    : [];
+  const staleDashboardSummary = staleDashboard?.summary || {};
+  const staleFilterOptions = [
+    "all",
+    "blocked",
+    "degraded",
+    "stale",
+    "review-required",
+    "missing-proof",
+  ];
+
   return (
     <PageShell className="space-y-6">
       <PageHero
@@ -509,6 +624,234 @@ export default function JurisdictionProfiles() {
           </div>
         }
       />
+
+      <GlassCard>
+        <div className="flex flex-col gap-4">
+          <SectionTitle
+            title="Stale-review dashboard"
+            right={
+              <div className="flex flex-wrap items-center gap-2">
+                {staleFilterOptions.map((item) => (
+                  <button
+                    key={item}
+                    onClick={() => setStaleFilter(item)}
+                    className={[
+                      "rounded-full border px-3 py-1.5 text-xs",
+                      staleFilter === item
+                        ? "border-cyan-400/30 bg-cyan-500/15 text-cyan-100"
+                        : "border-white/10 bg-white/[0.04] text-white/70",
+                    ].join(" ")}
+                  >
+                    {titleize(item)}
+                    {typeof staleDashboardSummary[item.replace("-", "_")] ===
+                    "number"
+                      ? ` · ${staleDashboardSummary[item.replace("-", "_")]}`
+                      : ""}
+                  </button>
+                ))}
+              </div>
+            }
+          />
+          <div className="grid gap-3 md:grid-cols-6">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/80">
+              <div className="text-white/55">Blocked</div>
+              <div className="mt-2 text-2xl font-semibold text-red-200">
+                {Number(staleDashboardSummary.blocked || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/80">
+              <div className="text-white/55">Degraded</div>
+              <div className="mt-2 text-2xl font-semibold text-amber-100">
+                {Number(staleDashboardSummary.degraded || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/80">
+              <div className="text-white/55">Review required</div>
+              <div className="mt-2 text-2xl font-semibold text-amber-100">
+                {Number(staleDashboardSummary.review_required || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/80">
+              <div className="text-white/55">Stale</div>
+              <div className="mt-2 text-2xl font-semibold text-amber-100">
+                {Number(staleDashboardSummary.stale || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/80">
+              <div className="text-white/55">Missing proof</div>
+              <div className="mt-2 text-2xl font-semibold text-red-100">
+                {Number(staleDashboardSummary.missing_proof || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/80">
+              <div className="text-white/55">Rows</div>
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {Number(staleDashboard?.count || 0)}
+              </div>
+            </div>
+          </div>
+
+          {!staleDashboardRows.length ? (
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+              No jurisdictions currently match this stale-review filter.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {staleDashboardRows.slice(0, 20).map((row: any) => (
+                <div
+                  key={`stale-${row.jurisdiction_profile_id}`}
+                  className="rounded-2xl border border-white/10 bg-black/30 p-4"
+                >
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-white">
+                        {row.city || row.county || row.pha_name || row.state}
+                      </div>
+                      <div className="mt-1 text-xs text-white/50">
+                        {[row.city, row.county, row.state, row.pha_name]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge
+                          tone={
+                            row.health_status === "blocked"
+                              ? "bad"
+                              : row.health_status === "degraded"
+                                ? "warn"
+                                : "neutral"
+                          }
+                        >
+                          {titleize(row.health_status || "unknown")}
+                        </Badge>
+                        <Badge tone={row.safe_to_rely_on ? "good" : "bad"}>
+                          {row.safe_to_rely_on
+                            ? "Safe to rely on"
+                            : "Not safe now"}
+                        </Badge>
+                        {(row.tags || []).map((tag: string) => (
+                          <Badge
+                            key={tag}
+                            tone={
+                              tag === "blocked" || tag === "missing-proof"
+                                ? "bad"
+                                : "warn"
+                            }
+                          >
+                            {titleize(tag)}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid gap-2 text-sm text-white/75 xl:min-w-[360px]">
+                      <Row
+                        label="Why due now"
+                        value={
+                          (row.why_due_now || []).join(", ") ||
+                          row.operational_reason ||
+                          "—"
+                        }
+                      />
+                      <Row
+                        label="What to do next"
+                        value={titleize(
+                          row.what_to_do_next || "review_jurisdiction_state",
+                        )}
+                      />
+                      <Row
+                        label="Last successful refresh"
+                        value={formatDate(row.last_refresh_success_at)}
+                      />
+                      <Row
+                        label="Last validation"
+                        value={formatDate(row.last_validation_at)}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-4">
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                      <div className="text-[11px] uppercase tracking-wider text-white/45">
+                        Stale authoritative
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(row.stale_authoritative_categories || []).length ? (
+                          (row.stale_authoritative_categories || []).map(
+                            (item: string) => (
+                              <Badge key={item} tone="warn">
+                                {titleize(item)}
+                              </Badge>
+                            ),
+                          )
+                        ) : (
+                          <span className="text-sm text-white/55">None</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                      <div className="text-[11px] uppercase tracking-wider text-white/45">
+                        Conflicts
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(row.conflicting_categories || []).length ? (
+                          (row.conflicting_categories || []).map(
+                            (item: string) => (
+                              <Badge key={item} tone="bad">
+                                {titleize(item)}
+                              </Badge>
+                            ),
+                          )
+                        ) : (
+                          <span className="text-sm text-white/55">None</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                      <div className="text-[11px] uppercase tracking-wider text-white/45">
+                        Validation pending
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(row.validation_pending_categories || []).length ? (
+                          (row.validation_pending_categories || []).map(
+                            (item: string) => (
+                              <Badge key={item} tone="warn">
+                                {titleize(item)}
+                              </Badge>
+                            ),
+                          )
+                        ) : (
+                          <span className="text-sm text-white/55">None</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                      <div className="text-[11px] uppercase tracking-wider text-white/45">
+                        Blocking / missing proof
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(row.lockout_causing_categories || [])
+                          .concat(row.authority_gap_categories || [])
+                          .concat(row.missing_categories || []).length ? (
+                          (row.lockout_causing_categories || [])
+                            .concat(row.authority_gap_categories || [])
+                            .concat(row.missing_categories || [])
+                            .slice(0, 8)
+                            .map((item: string) => (
+                              <Badge key={item} tone="bad">
+                                {titleize(item)}
+                              </Badge>
+                            ))
+                        ) : (
+                          <span className="text-sm text-white/55">None</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </GlassCard>
 
       <GlassCard>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -538,6 +881,20 @@ export default function JurisdictionProfiles() {
           {error}
         </div>
       ) : null}
+
+      <BoundaryPanel
+        title="Operator trust boundary"
+        body={
+          <>
+            These jurisdiction profiles are operational trust views. They help
+            you understand freshness, authority, proof, and review state, but
+            they do <strong>not</strong> replace legal advice. A profile marked
+            safe to rely on operationally still requires you to verify critical
+            requirements with the authoritative jurisdiction source before
+            treating it as legal clearance.
+          </>
+        }
+      />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-8">
         <GlassCard>
@@ -1107,6 +1464,126 @@ export default function JurisdictionProfiles() {
                   </div>
                 </div>
 
+                {selectedOperationalStatus?.lockout?.lockout_active ||
+                selectedOperationalStatus?.reasons?.length ? (
+                  <div
+                    className={`mt-3 oh-state-banner ${selectedOperationalStatus?.lockout?.lockout_active ? "oh-state-banner-bad" : selectedOperationalStatus?.safe_to_rely_on ? "oh-state-banner-good" : "oh-state-banner-warn"}`}
+                  >
+                    <div className="oh-state-banner-title">
+                      {selectedOperationalStatus?.safe_to_rely_on
+                        ? "Healthy and safe to rely on"
+                        : selectedOperationalStatus?.lockout?.lockout_active
+                          ? "Legally unsafe right now"
+                          : "Review required before reliance"}
+                    </div>
+                    <div className="oh-state-banner-body">
+                      {(selectedOperationalStatus?.reasons || [])[0] ||
+                        "This jurisdiction still needs more review before it should be treated as cleared."}
+                    </div>
+                  </div>
+                ) : null}
+
+                <BoundaryPanel
+                  title={
+                    selectedOperationalStatus?.safe_to_rely_on
+                      ? "Operationally usable, not legal advice"
+                      : "Legal / human review still needed"
+                  }
+                  tone={
+                    selectedOperationalStatus?.safe_to_rely_on
+                      ? "good"
+                      : selectedOperationalStatus?.lockout?.lockout_active
+                        ? "bad"
+                        : "warn"
+                  }
+                  body={
+                    <>
+                      {selectedOperationalStatus?.safe_to_rely_on
+                        ? "This profile currently looks usable for operations, but it is still not a legal opinion or legal guarantee."
+                        : "This profile should not be treated as legally cleared until the blocking or review-required items are resolved."}{" "}
+                      Shared/exported summaries should keep this same boundary
+                      language.
+                    </>
+                  }
+                />
+
+                {selected?.lockout_causing_categories?.length ||
+                selected?.validation_pending_categories?.length ||
+                selected?.authority_gap_categories?.length ||
+                selected?.informational_gap_categories?.length ? (
+                  <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <div className="text-xs uppercase tracking-wider text-white/45">
+                        Blocking categories
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(selected?.lockout_causing_categories || []).map(
+                          (item: string) => (
+                            <Badge key={item} tone="bad">
+                              {titleize(item)}
+                            </Badge>
+                          ),
+                        )}
+                        {!(selected?.lockout_causing_categories || [])
+                          .length ? (
+                          <span className="text-sm text-white/55">None</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <div className="text-xs uppercase tracking-wider text-white/45">
+                        Validation pending
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(selected?.validation_pending_categories || []).map(
+                          (item: string) => (
+                            <Badge key={item} tone="warn">
+                              {titleize(item)}
+                            </Badge>
+                          ),
+                        )}
+                        {!(selected?.validation_pending_categories || [])
+                          .length ? (
+                          <span className="text-sm text-white/55">None</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <div className="text-xs uppercase tracking-wider text-white/45">
+                        Authority gaps
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(selected?.authority_gap_categories || []).map(
+                          (item: string) => (
+                            <Badge key={item} tone="bad">
+                              {titleize(item)}
+                            </Badge>
+                          ),
+                        )}
+                        {!(selected?.authority_gap_categories || []).length ? (
+                          <span className="text-sm text-white/55">None</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <div className="text-xs uppercase tracking-wider text-white/45">
+                        Needed next
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-white">
+                        {titleize(
+                          selected?.next_due_step ||
+                            selectedNextActions?.next_step ||
+                            "monitor",
+                        )}
+                      </div>
+                      <div className="mt-1 text-xs text-white/50">
+                        Last validation{" "}
+                        {formatDate(selected?.last_validation_at)}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
                 {selectedOperationalStatus ? (
                   <div className="mt-3 grid gap-3 md:grid-cols-3">
                     <div className="rounded-xl border border-white/10 bg-black/30 p-4">
@@ -1310,6 +1787,92 @@ export default function JurisdictionProfiles() {
                             {task.detail}
                           </div>
                         ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </GlassCard>
+
+              <GlassCard>
+                <SectionTitle
+                  title="Override Ledger"
+                  right={
+                    <Badge tone={overrideRows.length ? "warn" : "neutral"}>
+                      {overrideRows.length} records
+                    </Badge>
+                  }
+                />
+                <div className="mt-3 grid gap-3 md:grid-cols-4">
+                  <input
+                    className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+                    placeholder="Rule category"
+                    value={overrideRuleCategory}
+                    onChange={(e) => setOverrideRuleCategory(e.target.value)}
+                  />
+                  <input
+                    className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white md:col-span-2"
+                    placeholder="Why is the override needed?"
+                    value={overrideReason}
+                    onChange={(e) => setOverrideReason(e.target.value)}
+                  />
+                  <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80">
+                    <input
+                      type="checkbox"
+                      checked={overrideCritical}
+                      onChange={(e) => setOverrideCritical(e.target.checked)}
+                    />{" "}
+                    Critical rule
+                  </label>
+                </div>
+                <div className="mt-3">
+                  <button
+                    className="rounded-xl border border-amber-400/30 bg-amber-500/15 px-3 py-2 text-sm text-amber-100"
+                    onClick={() => void createOverrideForSelected()}
+                  >
+                    Add override
+                  </button>
+                </div>
+                {!overrideRows.length ? (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+                    No override records for this profile.
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {overrideRows.map((row: any) => (
+                      <div
+                        key={row.id}
+                        className="rounded-xl border border-white/10 bg-black/30 p-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-white">
+                            {row.rule_category ||
+                              row.rule_key ||
+                              row.override_type ||
+                              `Override ${row.id}`}
+                          </div>
+                          <div className="flex gap-2">
+                            <Badge
+                              tone={
+                                row.is_currently_effective ? "warn" : "neutral"
+                              }
+                            >
+                              {row.is_currently_effective
+                                ? "Active"
+                                : "Expired"}
+                            </Badge>
+                            {row.carrying_critical_rule ? (
+                              <Badge tone="bad">Critical</Badge>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="mt-2 text-sm text-white/75">
+                          {row.reason}
+                        </div>
+                        <div className="mt-3 grid gap-2 text-xs text-white/60 md:grid-cols-3">
+                          <div>Trust impact: {titleize(row.trust_impact)}</div>
+                          <div>Expires: {formatDate(row.expires_at)}</div>
+                          <div>Created: {formatDate(row.created_at)}</div>
+                        </div>
                       </div>
                     ))}
                   </div>

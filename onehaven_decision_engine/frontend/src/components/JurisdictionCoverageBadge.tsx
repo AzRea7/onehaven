@@ -57,6 +57,12 @@ type CoverageLike = {
   health?: OperationalStatusLike | null;
   lockout?: LockoutLike | null;
   next_actions?: NextActionsLike | null;
+  lockout_causing_categories?: string[] | null;
+  informational_gap_categories?: string[] | null;
+  validation_pending_categories?: string[] | null;
+  authority_gap_categories?: string[] | null;
+  last_validation_at?: string | null;
+  next_due_step?: string | null;
 };
 
 function norm(value: unknown) {
@@ -163,12 +169,40 @@ function deriveOperationalStatus(c: CoverageLike) {
   };
 }
 
+function dueNowSummary(
+  lockoutCausing: string[],
+  informationalGaps: string[],
+  validationPending: string[],
+  authorityGaps: string[],
+  isStale: boolean,
+) {
+  const parts: string[] = [];
+  if (lockoutCausing.length)
+    parts.push(
+      `${lockoutCausing.length} blocking categor${lockoutCausing.length === 1 ? "y" : "ies"}`,
+    );
+  if (validationPending.length)
+    parts.push(`${validationPending.length} validation pending`);
+  if (authorityGaps.length)
+    parts.push(
+      `${authorityGaps.length} authority gap${authorityGaps.length === 1 ? "" : "s"}`,
+    );
+  if (informationalGaps.length)
+    parts.push(
+      `${informationalGaps.length} informational gap${informationalGaps.length === 1 ? "" : "s"}`,
+    );
+  if (isStale) parts.push("freshness follow-up needed");
+  return parts.join(" · ");
+}
+
 export default function JurisdictionCoverageBadge({
   coverage,
   compact = false,
+  reviewQueueCount,
 }: {
   coverage?: CoverageLike | null;
   compact?: boolean;
+  reviewQueueCount?: number | null;
 }) {
   const c = coverage || {};
   const confidence = c.coverage_confidence || c.confidence_label || "unknown";
@@ -188,6 +222,26 @@ export default function JurisdictionCoverageBadge({
     safeToRely,
     reasons,
   } = deriveOperationalStatus(c);
+  const lockoutCausing = Array.isArray((c as any).lockout_causing_categories)
+    ? (c as any).lockout_causing_categories
+    : [];
+  const informationalGaps = Array.isArray(
+    (c as any).informational_gap_categories,
+  )
+    ? (c as any).informational_gap_categories
+    : [];
+  const validationPending = Array.isArray(
+    (c as any).validation_pending_categories,
+  )
+    ? (c as any).validation_pending_categories
+    : [];
+  const authorityGaps = Array.isArray((c as any).authority_gap_categories)
+    ? (c as any).authority_gap_categories
+    : [];
+  const lastValidationAt =
+    (c as any).last_validation_at || null;
+  const nextDueStep =
+    (c as any).next_due_step || nextActions?.next_step || null;
 
   if (compact) {
     return (
@@ -210,6 +264,28 @@ export default function JurisdictionCoverageBadge({
           {safeToRely ? "Safe to rely on" : titleize(reliabilityState)}
         </span>
 
+        {Number(reviewQueueCount || 0) > 0 ? (
+          <span className="oh-pill oh-pill-warn">
+            Review Queue · {reviewQueueCount}
+          </span>
+        ) : null}
+
+        {!!lockoutCausing.length ? (
+          <span className="oh-pill oh-pill-bad">
+            Lockout cats · {lockoutCausing.length}
+          </span>
+        ) : null}
+        {!!validationPending.length ? (
+          <span className="oh-pill oh-pill-warn">
+            Validation pending · {validationPending.length}
+          </span>
+        ) : null}
+        {!!authorityGaps.length ? (
+          <span className="oh-pill oh-pill-bad">
+            Authority gaps · {authorityGaps.length}
+          </span>
+        ) : null}
+
         {lockout?.lockout_active ? (
           <span className="oh-pill oh-pill-bad">
             <ShieldAlert className="mr-1 h-3.5 w-3.5" />
@@ -222,6 +298,16 @@ export default function JurisdictionCoverageBadge({
             <AlertTriangle className="mr-1 h-3.5 w-3.5" />
             Stale
           </span>
+        ) : null}
+
+        {dueNowSummary(
+          lockoutCausing,
+          informationalGaps,
+          validationPending,
+          authorityGaps,
+          isStale,
+        ) ? (
+          <span className="oh-pill">Due now</span>
         ) : null}
       </div>
     );
@@ -261,6 +347,12 @@ export default function JurisdictionCoverageBadge({
           {safeToRely ? "Safe to rely on" : titleize(reliabilityState)}
         </span>
 
+        {Number(reviewQueueCount || 0) > 0 ? (
+          <span className="oh-pill oh-pill-warn">
+            Review Queue · {reviewQueueCount}
+          </span>
+        ) : null}
+
         {lockout?.lockout_active ? (
           <span className="oh-pill oh-pill-bad">
             <ShieldAlert className="mr-1 h-3.5 w-3.5" />
@@ -288,7 +380,28 @@ export default function JurisdictionCoverageBadge({
         </div>
       )}
 
-      <div className="mt-3 grid gap-3 md:grid-cols-4">
+      {dueNowSummary(
+        lockoutCausing,
+        informationalGaps,
+        validationPending,
+        authorityGaps,
+        isStale,
+      ) ? (
+        <div className="mt-3 rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-1">
+          <div className="font-semibold text-app-0">Why due now</div>
+          <div className="mt-1">
+            {dueNowSummary(
+              lockoutCausing,
+              informationalGaps,
+              validationPending,
+              authorityGaps,
+              isStale,
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-3 grid gap-3 md:grid-cols-5">
         <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
           <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
             Completeness score
@@ -311,6 +424,15 @@ export default function JurisdictionCoverageBadge({
           </div>
           <div className="mt-2 text-sm font-semibold text-app-0">
             {formatDate(refreshed)}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Last validation
+          </div>
+          <div className="mt-2 text-sm font-semibold text-app-0">
+            {formatDate(lastValidationAt)}
           </div>
         </div>
 

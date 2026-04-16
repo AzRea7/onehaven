@@ -17,3 +17,12 @@ It is not for nationwide landlords (yet), not for realtors, and not for wholesal
 - MLS automation
 - Full ingestion scale + auto rejection rules
 - Predictive inspection failures (Phase 6)
+
+
+
+
+## Trust and legal boundary
+- OneHaven can indicate when a workflow is **operationally safe to rely on** based on the rules, proofs, freshness, and validation currently present in the system.
+- That status is **not a legal opinion** and is **not a guarantee of legal compliance**.
+- When a requirement is marked critical, stale, blocked, review-required, or pending validation, you should verify it with the authoritative source and, where needed, a qualified attorney, local compliance professional, inspector, or jurisdiction contact.
+- Any copied, exported, or shared compliance summary should keep the same boundary language so recipients do not confuse operational trust with legal clearance.

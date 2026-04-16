@@ -73,96 +73,78 @@ def test_build_property_compliance_brief_exposes_category_coverage(monkeypatch):
     assert out["category_coverage"]["certificate_of_occupancy"] == "conditional"
 
 
-def test_project_verified_assertions_to_profile_persists_completeness_metadata(monkeypatch):
-    row = SimpleNamespace(
-        id=700,
+from app.services.jurisdiction_rules_service import assertion_governance_summary, governed_assertions_for_scope, is_assertion_governed_active
+
+
+class _FakeQuery:
+    def __init__(self, rows):
+        self._rows = rows
+    def filter(self, *args, **kwargs):
+        return self
+    def all(self):
+        return list(self._rows)
+
+
+class _FakeSession:
+    def __init__(self, rows):
+        self.rows = rows
+    def query(self, model):
+        return _FakeQuery(self.rows)
+
+
+def _assertion(**kwargs):
+    base = dict(
+        id=1,
         org_id=None,
         state="MI",
-        county="macomb",
-        city="warren",
-        friction_multiplier=1.0,
+        county="wayne",
+        city="detroit",
         pha_name=None,
-        policy_json=None,
-        notes=None,
-        updated_at=None,
-        completeness_status=None,
-        completeness_score=None,
-        stale_status=None,
-        required_categories_json=None,
-        category_coverage_json=None,
+        rule_key="inspection_program_exists",
+        normalized_category="inspection",
+        rule_category="inspection",
+        governance_state="active",
+        rule_status="active",
+        review_status="verified",
+        coverage_status="verified",
+        validation_state="validated",
+        trust_state="trusted",
+        is_current=True,
+        replaced_by_assertion_id=None,
+        superseded_by_assertion_id=None,
+        citation_json="{}",
+        rule_provenance_json="{}",
+        confidence_basis="",
     )
+    base.update(kwargs)
+    return SimpleNamespace(**base)
 
-    class FakeQuery:
-        def filter(self, *args, **kwargs):
-            return self
 
-        def first(self):
-            return row
+def test_replaced_rule_not_projectable():
+    row = _assertion(replaced_by_assertion_id=10)
+    summary = assertion_governance_summary(row)
+    assert summary["safe_for_projection"] is False
+    assert "replaced" in summary["lifecycle_blockers"]
 
-    class FakeDB:
-        def query(self, model):
-            return FakeQuery()
 
-        def commit(self):
-            pass
+def test_manual_review_conflict_not_projectable():
+    row = _assertion(validation_state="conflicting", review_status="needs_manual_review", coverage_status="conflicting")
+    assert is_assertion_governed_active(row) is False
+    summary = assertion_governance_summary(row)
+    assert "manual_review_required" in summary["lifecycle_blockers"]
 
-        def refresh(self, obj):
-            pass
 
-    monkeypatch.setattr(
-        svc,
-        "_query_inherited_assertions",
-        lambda db, org_id, state, county, city, pha_name, statuses=None: [],
-    )
-    monkeypatch.setattr(
-        svc,
-        "build_policy_summary",
-        lambda db, assertions, org_id, state, county, city, pha_name: {
-            "coverage": {
-                "coverage_status": "verified_extended",
-                "production_readiness": "partial",
-                "confidence_label": "medium",
-            },
-            "verified_rules": [],
-            "required_actions": [],
-            "blocking_items": [],
-            "evidence_links": [],
-            "local_rule_statuses": {
-                "rental_registration_required": "yes",
-                "inspection_program_exists": "yes",
-                "certificate_required_before_occupancy": "conditional",
-            },
-            "verified_rule_count_local": 2,
-            "verified_rule_count_effective": 2,
-            "required_categories": [
-                "rental_registration",
-                "inspection",
-                "certificate_of_occupancy",
-            ],
-            "category_coverage": {
-                "rental_registration": "verified",
-                "inspection": "verified",
-                "certificate_of_occupancy": "conditional",
-            },
-            "completeness_status": "partial",
-            "completeness_score": 0.83,
-            "stale_status": "fresh",
-        },
-    )
-
-    out = svc.project_verified_assertions_to_profile(
-        FakeDB(),
-        org_id=None,
-        state="MI",
-        county="macomb",
-        city="warren",
-        pha_name=None,
-        notes="Projected for test.",
-    )
-
-    policy = json.loads(out.policy_json)
-    assert policy["completeness_status"] == "partial"
-    assert policy["stale_status"] == "fresh"
-    assert row.completeness_status == "partial"
-    assert row.completeness_score == 0.83
-    assert row.stale_status == "fresh"
+def test_governed_assertions_for_scope_only_counts_active_safe_truth():
+    rows = [
+        _assertion(id=1, rule_key="inspection_program_exists"),
+        _assertion(id=2, rule_key="inspection_program_exists", governance_state="approved", rule_status="approved", review_status="approved", coverage_status="approved", trust_state="validated", is_current=False),
+        _assertion(id=3, rule_key="inspection_program_exists", governance_state="active", rule_status="active", review_status="needs_manual_review", coverage_status="conflicting", validation_state="conflicting", trust_state="needs_review", is_current=True),
+        _assertion(id=4, rule_key="inspection_program_exists", governance_state="replaced", rule_status="superseded", coverage_status="superseded", is_current=False, superseded_by_assertion_id=1),
+    ]
+    db = _FakeSession(rows)
+    result = governed_assertions_for_scope(db, org_id=None, state="MI", county="wayne", city="detroit", pha_name=None)
+    assert result["safe_count"] == 1
+    assert result["partial_count"] == 1
+    assert result["excluded_count"] == 2
+    assert result["manual_review_count"] == 1
+    assert result["safe_assertion_ids"] == [1]

@@ -17,6 +17,61 @@ from app.services.jurisdiction_completeness_service import profile_completeness_
 NOTIFICATION_ENTITY_TYPE = "jurisdiction_profile"
 
 
+
+
+@dataclass(frozen=True)
+class JurisdictionReviewQueueEntry:
+    jurisdiction_profile_id: int
+    org_id: int | None
+    state: str | None
+    county: str | None
+    city: str | None
+    pha_name: str | None
+    scope_label: str
+    severity: str
+    severity_rank: int
+    queue_status: str
+    decision_needed: str
+    changed_sources: list[dict[str, Any]]
+    failed_validations: list[dict[str, Any]]
+    review_required_categories: list[str]
+    conflicting_categories: list[str]
+    source_change_count: int
+    validation_failure_count: int
+    expires_at: str | None
+    reviewer_action: str | None
+    reviewer_rationale: str | None
+    reviewed_by_user_id: int | None
+    reviewed_at: str | None
+    payload: dict[str, Any]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "jurisdiction_profile_id": self.jurisdiction_profile_id,
+            "org_id": self.org_id,
+            "state": self.state,
+            "county": self.county,
+            "city": self.city,
+            "pha_name": self.pha_name,
+            "scope_label": self.scope_label,
+            "severity": self.severity,
+            "severity_rank": self.severity_rank,
+            "queue_status": self.queue_status,
+            "decision_needed": self.decision_needed,
+            "changed_sources": self.changed_sources,
+            "failed_validations": self.failed_validations,
+            "review_required_categories": self.review_required_categories,
+            "conflicting_categories": self.conflicting_categories,
+            "source_change_count": self.source_change_count,
+            "validation_failure_count": self.validation_failure_count,
+            "expires_at": self.expires_at,
+            "reviewer_action": self.reviewer_action,
+            "reviewer_rationale": self.reviewer_rationale,
+            "reviewed_by_user_id": self.reviewed_by_user_id,
+            "reviewed_at": self.reviewed_at,
+            "payload": self.payload,
+        }
+
 @dataclass(frozen=True)
 class JurisdictionNotification:
     action: str
@@ -1098,3 +1153,237 @@ def notify_if_profile_locked(
 ) -> dict[str, Any]:
     payload = build_critical_stale_lockout_notification(profile=profile, categories=categories)
     return record_notification_event(db, payload=payload)
+
+
+
+def _review_queue_meta(profile: JurisdictionProfile) -> dict[str, Any]:
+    meta = _loads(getattr(profile, "metadata_json", None), {})
+    review = meta.get("jurisdiction_review_queue") or {}
+    return review if isinstance(review, dict) else {}
+
+
+def _set_review_queue_meta(profile: JurisdictionProfile, payload: dict[str, Any]) -> None:
+    meta = _loads(getattr(profile, "metadata_json", None), {})
+    if not isinstance(meta, dict):
+        meta = {}
+    meta["jurisdiction_review_queue"] = payload
+    profile.metadata_json = _dumps(meta)
+
+
+def _source_change_rows(db: Session, *, profile: JurisdictionProfile, limit: int = 8) -> list[dict[str, Any]]:
+    stmt = select(PolicySource).where(PolicySource.state == getattr(profile, "state", None))
+    if getattr(profile, "county", None) is None:
+        stmt = stmt.where(PolicySource.county.is_(None))
+    else:
+        stmt = stmt.where(PolicySource.county == getattr(profile, "county", None))
+    if getattr(profile, "city", None) is None:
+        stmt = stmt.where(PolicySource.city.is_(None))
+    else:
+        stmt = stmt.where(PolicySource.city == getattr(profile, "city", None))
+    if getattr(profile, "pha_name", None) is None:
+        stmt = stmt.where(or_(PolicySource.pha_name.is_(None), PolicySource.pha_name == ""))
+    else:
+        stmt = stmt.where(PolicySource.pha_name == getattr(profile, "pha_name", None))
+    if getattr(profile, "org_id", None) is None:
+        stmt = stmt.where(PolicySource.org_id.is_(None))
+    else:
+        stmt = stmt.where(or_(PolicySource.org_id == getattr(profile, "org_id", None), PolicySource.org_id.is_(None)))
+    rows = list(db.scalars(stmt.order_by(PolicySource.last_refresh_completed_at.desc().nullslast(), PolicySource.last_changed_at.desc().nullslast(), PolicySource.id.desc())).all())
+    out=[]
+    for row in rows:
+        change_summary = _loads(getattr(row, "last_change_summary_json", None), {})
+        refresh_outcome = _loads(getattr(row, "last_refresh_outcome_json", None), {})
+        change_kind = str(change_summary.get("change_kind") or refresh_outcome.get("change_kind") or "").strip()
+        refresh_state = str(getattr(row, "refresh_state", None) or "").strip().lower()
+        if not change_kind and refresh_state not in {"failed", "blocked", "degraded", "validating"}:
+            continue
+        out.append({
+            "source_id": int(getattr(row, "id", 0) or 0),
+            "title": getattr(row, "title", None),
+            "publisher": getattr(row, "publisher", None),
+            "url": getattr(row, "url", None),
+            "change_kind": change_kind or refresh_state or "changed",
+            "refresh_state": getattr(row, "refresh_state", None),
+            "refresh_status_reason": getattr(row, "refresh_status_reason", None),
+            "validation_due_at": getattr(row, "validation_due_at", None).isoformat() if getattr(row, "validation_due_at", None) else None,
+            "last_refresh_completed_at": getattr(row, "last_refresh_completed_at", None).isoformat() if getattr(row, "last_refresh_completed_at", None) else None,
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _validation_failure_rows(db: Session, *, profile: JurisdictionProfile, limit: int = 12) -> list[dict[str, Any]]:
+    stmt = select(PolicyAssertion).where(PolicyAssertion.state == getattr(profile, "state", None))
+    if hasattr(PolicyAssertion, "county"):
+        if getattr(profile, "county", None) is None:
+            stmt = stmt.where(PolicyAssertion.county.is_(None))
+        else:
+            stmt = stmt.where(PolicyAssertion.county == getattr(profile, "county", None))
+    if hasattr(PolicyAssertion, "city"):
+        if getattr(profile, "city", None) is None:
+            stmt = stmt.where(PolicyAssertion.city.is_(None))
+        else:
+            stmt = stmt.where(PolicyAssertion.city == getattr(profile, "city", None))
+    if hasattr(PolicyAssertion, "pha_name"):
+        if getattr(profile, "pha_name", None) is None:
+            stmt = stmt.where(or_(PolicyAssertion.pha_name.is_(None), PolicyAssertion.pha_name == ""))
+        else:
+            stmt = stmt.where(PolicyAssertion.pha_name == getattr(profile, "pha_name", None))
+    if hasattr(PolicyAssertion, "org_id"):
+        if getattr(profile, "org_id", None) is None:
+            stmt = stmt.where(PolicyAssertion.org_id.is_(None))
+        else:
+            stmt = stmt.where(or_(PolicyAssertion.org_id == getattr(profile, "org_id", None), PolicyAssertion.org_id.is_(None)))
+    rows = list(db.scalars(stmt.order_by(PolicyAssertion.reviewed_at.desc().nullslast(), PolicyAssertion.id.desc())).all())
+    out=[]
+    for row in rows:
+        validation_state = str(getattr(row, "validation_state", None) or "").strip().lower()
+        trust_state = str(getattr(row, "trust_state", None) or "").strip().lower()
+        if validation_state not in {"conflicting", "unsupported", "ambiguous", "weak_support"} and trust_state not in {"needs_review", "downgraded"}:
+            continue
+        out.append({
+            "assertion_id": int(getattr(row, "id", 0) or 0),
+            "rule_key": getattr(row, "rule_key", None),
+            "rule_category": getattr(row, "normalized_category", None) or getattr(row, "rule_category", None),
+            "validation_state": getattr(row, "validation_state", None),
+            "validation_reason": getattr(row, "validation_reason", None),
+            "trust_state": getattr(row, "trust_state", None),
+            "review_status": getattr(row, "review_status", None),
+            "source_id": getattr(row, "source_id", None),
+            "reviewed_at": getattr(row, "reviewed_at", None).isoformat() if getattr(row, "reviewed_at", None) else None,
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def build_review_queue_entries(
+    db: Session,
+    *,
+    org_id: int | None = None,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+) -> dict[str, Any]:
+    stmt = select(JurisdictionProfile)
+    if state:
+        stmt = stmt.where(JurisdictionProfile.state == str(state).strip().upper())
+    if county is not None:
+        stmt = stmt.where(JurisdictionProfile.county == ((county or '').strip().lower() or None))
+    if city is not None:
+        stmt = stmt.where(JurisdictionProfile.city == ((city or '').strip().lower() or None))
+    if pha_name is not None and hasattr(JurisdictionProfile, 'pha_name'):
+        stmt = stmt.where(JurisdictionProfile.pha_name == ((pha_name or '').strip() or None))
+    if org_id is None:
+        stmt = stmt.where(JurisdictionProfile.org_id.is_(None))
+    else:
+        stmt = stmt.where(or_(JurisdictionProfile.org_id == int(org_id), JurisdictionProfile.org_id.is_(None)))
+    profiles = list(db.scalars(stmt.order_by(JurisdictionProfile.id.desc())).all())
+    entries=[]
+    severity_counts={"high":0,"medium":0,"low":0}
+    grouped={}
+    for profile in profiles:
+        evaluation = evaluate_jurisdiction_gap_escalations(db, profile=profile)
+        completeness = evaluation.get("completeness") or {}
+        lockout = completeness.get("lockout") or {}
+        review_required_categories = sorted(set(list(completeness.get("supporting_only_categories") or []) + list(completeness.get("authority_unmet_categories") or []) + list(completeness.get("critical_stale_categories") or [])))
+        conflicting_categories = list(evaluation.get("conflicting_categories") or [])
+        changed_sources = _source_change_rows(db, profile=profile)
+        failed_validations = _validation_failure_rows(db, profile=profile)
+        needs_review = bool(evaluation.get("needs_escalation") or review_required_categories or conflicting_categories or changed_sources or failed_validations)
+        if not needs_review:
+            continue
+        queue_meta = _review_queue_meta(profile)
+        queue_status = str(queue_meta.get("queue_status") or "open").strip().lower() or "open"
+        reviewer_action = queue_meta.get("reviewer_action")
+        reviewer_rationale = queue_meta.get("reviewer_rationale")
+        reviewed_by_user_id = _safe_int(queue_meta.get("reviewed_by_user_id"), 0) or None
+        reviewed_at = queue_meta.get("reviewed_at")
+        expires_at = queue_meta.get("expires_at")
+        severity = "medium"
+        if evaluation.get("critical_missing_categories") or evaluation.get("critical_stale_categories") or evaluation.get("authoritative_conflict") or bool(lockout.get("lockout_active")):
+            severity = "high"
+        elif changed_sources or failed_validations or evaluation.get("discovery_retries_exhausted"):
+            severity = "medium"
+        else:
+            severity = "low"
+        severity_rank = {"high":3,"medium":2,"low":1}.get(severity,1)
+        decision_needed = "Resolve conflicting authority and choose governing rule" if conflicting_categories else "Confirm reviewer disposition and expiry" if changed_sources or failed_validations else "Review missing or stale critical categories"
+        entry = JurisdictionReviewQueueEntry(
+            jurisdiction_profile_id=int(profile.id),
+            org_id=getattr(profile, "org_id", None),
+            state=getattr(profile, "state", None),
+            county=getattr(profile, "county", None),
+            city=getattr(profile, "city", None),
+            pha_name=getattr(profile, "pha_name", None),
+            scope_label=evaluation.get("scope_label") or _scope_label(profile),
+            severity=severity,
+            severity_rank=severity_rank,
+            queue_status=queue_status,
+            decision_needed=decision_needed,
+            changed_sources=changed_sources,
+            failed_validations=failed_validations,
+            review_required_categories=review_required_categories,
+            conflicting_categories=conflicting_categories,
+            source_change_count=len(changed_sources),
+            validation_failure_count=len(failed_validations),
+            expires_at=expires_at,
+            reviewer_action=reviewer_action,
+            reviewer_rationale=reviewer_rationale,
+            reviewed_by_user_id=reviewed_by_user_id,
+            reviewed_at=reviewed_at,
+            payload={
+                "completeness": completeness,
+                "escalation_reasons": evaluation.get("escalation_reasons") or [],
+                "lockout": lockout,
+            },
+        )
+        entries.append(entry.as_dict())
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        grouped.setdefault(entry.scope_label, []).append(entry.as_dict())
+    entries.sort(key=lambda row: (-int(row.get("severity_rank") or 0), row.get("scope_label") or "", -(row.get("source_change_count") or 0), -(row.get("validation_failure_count") or 0)))
+    return {
+        "ok": True,
+        "count": len(entries),
+        "severity_counts": severity_counts,
+        "entries": entries,
+        "grouped": [{"scope_label": key, "items": value} for key, value in sorted(grouped.items())],
+    }
+
+
+def persist_review_queue_decision(
+    db: Session,
+    *,
+    profile: JurisdictionProfile,
+    reviewer_user_id: int | None,
+    reviewer_action: str,
+    reviewer_rationale: str | None = None,
+    expires_at: datetime | None = None,
+) -> dict[str, Any]:
+    now = _utcnow()
+    payload = {
+        "queue_status": "resolved" if reviewer_action in {"approved", "waived", "rejected", "resolved"} else "open",
+        "reviewer_action": str(reviewer_action or "").strip() or None,
+        "reviewer_rationale": str(reviewer_rationale or "").strip() or None,
+        "reviewed_by_user_id": int(reviewer_user_id) if reviewer_user_id is not None else None,
+        "reviewed_at": now.isoformat(),
+        "expires_at": expires_at.isoformat() if expires_at is not None else None,
+    }
+    _set_review_queue_meta(profile, payload)
+    db.add(profile)
+    db.flush()
+    audit = AuditEvent(
+        org_id=getattr(profile, "org_id", None),
+        entity_type=NOTIFICATION_ENTITY_TYPE,
+        entity_id=str(getattr(profile, "id")),
+        action="jurisdiction_review_queue_decision",
+        before_json=_dumps({"previous_review_queue": _review_queue_meta(profile)}),
+        after_json=_dumps(payload),
+        created_at=now,
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(profile)
+    return {"ok": True, "jurisdiction_profile_id": int(profile.id), **payload}

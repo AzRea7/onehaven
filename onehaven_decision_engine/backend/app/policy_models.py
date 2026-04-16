@@ -285,6 +285,11 @@ class PolicySource(Base):
     approved_supporting_source: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     semi_authoritative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     derived_or_inferred: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    authority_use_type: Mapped[str] = mapped_column(String(40), nullable=False, default="weak")
+    authority_policy_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    binding_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    supporting_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    unusable_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
     normalized_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     category_hints_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
@@ -365,6 +370,15 @@ class PolicySourceVersion(Base):
         server_default=sa.text("now()"),
     )
 
+    @property
+    def fingerprint(self) -> str | None:
+        return self.content_sha256
+
+    @property
+    def fetch_succeeded(self) -> bool:
+        return not bool(self.fetch_error)
+
+
 
 class PolicySourceInventory(Base):
     __tablename__ = "policy_source_inventory"
@@ -405,6 +419,8 @@ class PolicySourceInventory(Base):
     lifecycle_state: Mapped[str] = mapped_column(String(40), nullable=False, default="discovered")
     crawl_status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
     inventory_origin: Mapped[str] = mapped_column(String(40), nullable=False, default="discovered")
+    candidate_origin_type: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    candidate_status_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_curated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_official_candidate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
@@ -415,6 +431,8 @@ class PolicySourceInventory(Base):
     authority_tier: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     authority_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     authority_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    authority_use_type: Mapped[str] = mapped_column(String(40), nullable=False, default="weak")
+    authority_policy_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
     expected_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     expected_tiers_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
@@ -432,6 +450,9 @@ class PolicySourceInventory(Base):
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     searched_not_found_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    superseded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     inventory_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     refresh_state: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
@@ -448,6 +469,11 @@ class PolicySourceInventory(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"))
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"), onupdate=func.now())
+
+    @property
+    def current_fingerprint(self) -> str | None:
+        return self.canonical_fingerprint
+
 
 
 class PolicyDiscoveryAttempt(Base):
@@ -597,6 +623,14 @@ class PolicyAssertion(Base):
     trust_state: Mapped[str] = mapped_column(String(40), nullable=False, default="extracted")
     validated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    @property
+    def is_validation_trusted(self) -> bool:
+        return (self.validation_state or "").lower() == "validated" and (self.trust_state or "").lower() in {"validated", "trusted"}
+
+    @property
+    def needs_manual_validation_review(self) -> bool:
+        return (self.trust_state or "").lower() == "needs_review"
+
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     approved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     activated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -696,6 +730,61 @@ class JurisdictionCoverageStatus(Base):
         onupdate=datetime.utcnow,
     )
 
+
+
+class PolicyOverrideLedger(Base):
+    __tablename__ = "policy_override_ledger"
+    __table_args__ = (
+        Index("ix_policy_override_ledger_scope", "state", "county", "city"),
+        Index("ix_policy_override_ledger_profile", "jurisdiction_profile_id"),
+        Index("ix_policy_override_ledger_active", "is_active", "expires_at"),
+        Index("ix_policy_override_ledger_rule_key", "rule_key"),
+        Index("ix_policy_override_ledger_rule_category", "rule_category"),
+        Index("ix_policy_override_ledger_severity", "severity"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    jurisdiction_profile_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("jurisdiction_profiles.id", ondelete="SET NULL"), nullable=True, index=True)
+    assertion_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("policy_assertions.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    state: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    county: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    pha_name: Mapped[Optional[str]] = mapped_column(String(180), nullable=True)
+    program_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+
+    override_scope: Mapped[str] = mapped_column(String(40), nullable=False, default="jurisdiction")
+    override_type: Mapped[str] = mapped_column(String(40), nullable=False, default="interim_operational_override")
+    rule_key: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    rule_category: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    severity: Mapped[str] = mapped_column(String(40), nullable=False, default="medium")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    carrying_critical_rule: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    trust_impact: Mapped[str] = mapped_column(String(40), nullable=False, default="review_required")
+
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    linked_evidence_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    approved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"), onupdate=func.now())
+
+    @property
+    def is_currently_effective(self) -> bool:
+        if not bool(self.is_active):
+            return False
+        if self.revoked_at is not None:
+            return False
+        if self.expires_at is not None and self.expires_at <= datetime.utcnow():
+            return False
+        return True
 
 class PropertyComplianceProjection(Base):
     __tablename__ = "property_compliance_projections"

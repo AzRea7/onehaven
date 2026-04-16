@@ -300,6 +300,20 @@ def _policy_item_to_rule(
     )
 
 
+
+
+def _ensure_proof_gap_tasks(db: Session, *, org_id: int, property_id: int, proof_obligations: list[dict[str, Any]]) -> dict[str, Any]:
+    created = []
+    for item in proof_obligations or []:
+        status = str(item.get("proof_status") or "").strip().lower()
+        if status not in {"missing", "expired", "mismatched"}:
+            continue
+        title = f"Upload proof: {item.get('proof_label') or item.get('rule_key') or 'compliance evidence'}"
+        notes = item.get("evidence_gap") or f"Resolve required property proof for rule {item.get('rule_key')}."
+        if _ensure_policy_task(db, org_id=org_id, property_id=property_id, title=title, category="compliance_proof", priority="high" if item.get("blocking") else "med", notes=notes):
+            created.append(title)
+    return {"created_count": len(created), "created_titles": created}
+
 def _build_warren_fallback_rules(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
     policy = profile_summary.get("policy") or {}
     if not isinstance(policy, dict):

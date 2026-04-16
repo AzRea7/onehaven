@@ -37,6 +37,20 @@ type Source = {
   notes?: string | null;
 };
 
+type JurisdictionQueueEntry = {
+  jurisdiction_profile_id: number;
+  scope_label?: string | null;
+  severity?: string | null;
+  decision_needed?: string | null;
+  changed_sources?: any[];
+  failed_validations?: any[];
+  review_required_categories?: string[];
+  conflicting_categories?: string[];
+  reviewer_action?: string | null;
+  reviewer_rationale?: string | null;
+  expires_at?: string | null;
+};
+
 type Coverage = {
   coverage_status: string;
   production_readiness: string;
@@ -93,6 +107,13 @@ export default function PolicyReview() {
     {},
   );
   const [coverage, setCoverage] = React.useState<Coverage | null>(null);
+  const [jurisdictionQueue, setJurisdictionQueue] = React.useState<
+    JurisdictionQueueEntry[]
+  >([]);
+  const [overrideRows, setOverrideRows] = React.useState<any[]>([]);
+  const [overrideReason, setOverrideReason] = React.useState("");
+  const [overrideRuleCategory, setOverrideRuleCategory] = React.useState("");
+  const [overrideCritical, setOverrideCritical] = React.useState(false);
 
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -131,6 +152,16 @@ export default function PolicyReview() {
         map[s.id] = s;
       }
       setSourcesById(map);
+
+      const queue = await api.get(
+        `/policy/jurisdictions/review-queue?state=${encodeURIComponent(state)}${county ? `&county=${encodeURIComponent(county)}` : ""}${city ? `&city=${encodeURIComponent(city)}` : ""}${phaName ? `&pha_name=${encodeURIComponent(phaName)}` : ""}`,
+      );
+      setJurisdictionQueue(Array.isArray(queue?.entries) ? queue.entries : []);
+
+      const overrides = await api.get(
+        `/policy/overrides?state=${encodeURIComponent(state)}${county ? `&county=${encodeURIComponent(county)}` : ""}${city ? `&city=${encodeURIComponent(city)}` : ""}${phaName ? `&pha_name=${encodeURIComponent(phaName)}` : ""}&include_inactive=true`,
+      );
+      setOverrideRows(Array.isArray(overrides?.items) ? overrides.items : []);
 
       const cov = await api.policyCoverage({
         state,
@@ -194,6 +225,24 @@ export default function PolicyReview() {
       review_notes: "Verified as current winner for this market/rule family",
     });
 
+    await refresh();
+  }
+
+  async function createOverride() {
+    if (!overrideReason.trim()) return;
+    await api.post(`/policy/overrides`, {
+      state,
+      county: county || null,
+      city: city || null,
+      pha_name: phaName || null,
+      rule_category: overrideRuleCategory || null,
+      reason: overrideReason.trim(),
+      carrying_critical_rule: overrideCritical,
+      trust_impact: overrideCritical ? "review_required" : "reduced_confidence",
+    });
+    setOverrideReason("");
+    setOverrideRuleCategory("");
+    setOverrideCritical(false);
     await refresh();
   }
 
@@ -516,6 +565,126 @@ export default function PolicyReview() {
         {!loading && assertions.length === 0 && (
           <div className="mt-6 text-sm opacity-70">
             No assertions found for this filter.
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="mb-3 text-lg font-semibold text-white">
+          Override Ledger
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <input
+            className="rounded-md border border-white/10 bg-black/40 px-2 py-2"
+            placeholder="Rule category"
+            value={overrideRuleCategory}
+            onChange={(e) => setOverrideRuleCategory(e.target.value)}
+          />
+          <input
+            className="rounded-md border border-white/10 bg-black/40 px-2 py-2 md:col-span-2"
+            placeholder="Override reason"
+            value={overrideReason}
+            onChange={(e) => setOverrideReason(e.target.value)}
+          />
+          <label className="flex items-center gap-2 rounded-md border border-white/10 bg-black/40 px-2 py-2 text-sm">
+            <input
+              type="checkbox"
+              checked={overrideCritical}
+              onChange={(e) => setOverrideCritical(e.target.checked)}
+            />{" "}
+            Critical
+          </label>
+        </div>
+        <button
+          className="mt-3 rounded-md border border-amber-400/30 bg-amber-500/20 px-3 py-2 text-sm hover:bg-amber-500/25"
+          onClick={() => void createOverride()}
+        >
+          Create Override
+        </button>
+        {!overrideRows.length ? (
+          <div className="mt-3 text-sm opacity-70">
+            No override records for this scope.
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {overrideRows.map((row: any) => (
+              <div
+                key={row.id}
+                className="rounded-xl border border-white/10 bg-black/20 p-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-white">
+                      {row.rule_category ||
+                        row.rule_key ||
+                        row.override_type ||
+                        `Override ${row.id}`}
+                    </div>
+                    <div className="text-xs text-white/60">{row.reason}</div>
+                  </div>
+                  <span
+                    className={`inline-flex rounded-full border px-2 py-1 text-xs ${row.carrying_critical_rule ? "border-red-400/30 bg-red-500/10 text-red-200" : "border-amber-400/30 bg-amber-500/10 text-amber-200"}`}
+                  >
+                    {row.carrying_critical_rule
+                      ? "critical"
+                      : row.trust_impact || "override"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="mb-3 text-lg font-semibold text-white">
+          Jurisdiction Legal Review Queue
+        </div>
+        {!jurisdictionQueue.length ? (
+          <div className="text-sm text-white/60">
+            No unresolved jurisdiction reviews for the current scope.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {jurisdictionQueue.map((item) => (
+              <div
+                key={item.jurisdiction_profile_id}
+                className="rounded-xl border border-white/10 bg-black/20 p-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-white">
+                      {item.scope_label ||
+                        `Profile ${item.jurisdiction_profile_id}`}
+                    </div>
+                    <div className="text-xs text-white/60">
+                      {item.decision_needed || "Reviewer decision required"}
+                    </div>
+                  </div>
+                  <span
+                    className={`inline-flex rounded-full border px-2 py-1 text-xs ${String(item.severity || "").toLowerCase() === "high" ? "border-red-400/30 bg-red-500/10 text-red-200" : String(item.severity || "").toLowerCase() === "medium" ? "border-amber-400/30 bg-amber-500/10 text-amber-200" : "border-white/10 bg-white/5 text-white/80"}`}
+                  >
+                    {item.severity || "low"}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 text-xs text-white/70 md:grid-cols-2">
+                  <div>
+                    Review categories:{" "}
+                    {(item.review_required_categories || []).join(", ") || "—"}
+                  </div>
+                  <div>
+                    Conflicts:{" "}
+                    {(item.conflicting_categories || []).join(", ") || "—"}
+                  </div>
+                  <div>
+                    Changed sources: {item.changed_sources?.length || 0}
+                  </div>
+                  <div>
+                    Validation failures: {item.failed_validations?.length || 0}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

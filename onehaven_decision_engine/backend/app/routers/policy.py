@@ -15,6 +15,7 @@ from app.models import Property
 from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
 from app.services.jurisdiction_completeness_service import profile_completeness_payload
 from app.services.jurisdiction_health_service import get_jurisdiction_health
+from app.services.jurisdiction_notification_service import build_review_queue_entries, persist_review_queue_decision
 from app.services.policy_catalog import (
     catalog_for_market,
     catalog_mi_authoritative,
@@ -42,6 +43,9 @@ from app.services.policy_projection_service import (
 )
 from app.services.policy_review_service import (
     auto_verify_market_assertions,
+    create_policy_override,
+    list_policy_overrides,
+    revoke_policy_override,
     supersede_replaced_assertions,
 )
 from app.services.policy_source_service import (
@@ -159,6 +163,73 @@ class MarketRepairIn(BaseModel):
     focus: str = "se_mi_extended"
     archive_extracted_duplicates: bool = True
 
+
+class JurisdictionReviewDecisionIn(BaseModel):
+    reviewer_action: str
+    reviewer_rationale: Optional[str] = None
+    expires_at: Optional[str] = None
+
+
+class PolicyOverrideIn(BaseModel):
+    jurisdiction_profile_id: int | None = None
+    assertion_id: int | None = None
+    state: str | None = None
+    county: str | None = None
+    city: str | None = None
+    pha_name: str | None = None
+    program_type: str | None = None
+    override_scope: str = "jurisdiction"
+    override_type: str = "interim_operational_override"
+    rule_key: str | None = None
+    rule_category: str | None = None
+    severity: str = "medium"
+    carrying_critical_rule: bool = False
+    trust_impact: str = "review_required"
+    reason: str
+    linked_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    expires_at: str | None = None
+
+
+class PolicyOverrideRevokeIn(BaseModel):
+    revoked_reason: str | None = None
+
+
+class ManualPolicyMarketIn(BaseModel):
+    state: str = "MI"
+    county: Optional[str] = None
+    city: Optional[str] = None
+    pha_name: Optional[str] = None
+    focus: str = "se_mi_extended"
+    org_scope: bool = False
+    auto_activate: bool = True
+
+
+
+def _manual_market_target_org_id(principal: Any, org_scope: bool) -> int | None:
+    return getattr(principal, "org_id", None) if org_scope else None
+
+
+def _manual_market_result(
+    *,
+    action: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "action": action,
+        "manual": True,
+        "result": result,
+        "summary": {
+            "discovery_result": result.get("discovery_result"),
+            "refresh_summary": result.get("refresh_summary"),
+            "refresh_state": result.get("refresh_state"),
+            "lifecycle_result": result.get("lifecycle_result"),
+            "recompute": result.get("recompute"),
+            "review_queue": result.get("review_queue"),
+            "health": ((result.get("pipeline_result") or {}).get("health") if isinstance(result.get("pipeline_result"), dict) else None) or result.get("health"),
+        },
+    }
 
 def _loads(s: Optional[str], default: Any = None) -> Any:
     if default is None:
@@ -1116,6 +1187,52 @@ def _profile_summary_payload(db: Session, profile: JurisdictionProfile | None) -
     }
 
 
+
+def _profile_operational_payload(db: Session, profile: JurisdictionProfile | None, *, org_id: int | None = None) -> dict[str, Any]:
+    if profile is None:
+        return {
+            "health_state": "missing",
+            "refresh_state": "missing",
+            "reliability_state": "unsafe_to_rely_on",
+            "safe_to_rely_on": False,
+            "trustworthy_for_projection": False,
+            "review_required": True,
+            "reasons": ["jurisdiction_profile_not_found"],
+            "lockout": {"lockout_active": True, "lockout_reason": "jurisdiction_profile_not_found"},
+            "next_actions": {"next_step": "create_or_refresh_profile"},
+            "source_summary": {},
+            "last_validation_at": None,
+            "next_due_step": "create_or_refresh_profile",
+            "lockout_causing_categories": [],
+            "informational_gap_categories": [],
+            "validation_pending_categories": [],
+            "authority_gap_categories": [],
+        }
+    health = get_jurisdiction_health(db, profile_id=int(profile.id), org_id=org_id)
+    return {
+        "health_state": (health or {}).get("health_status") or (health or {}).get("operational_state") or "unknown",
+        "refresh_state": (health or {}).get("refresh_state"),
+        "refresh_status_reason": (health or {}).get("refresh_status_reason"),
+        "reliability_state": "safe_to_rely_on" if (health or {}).get("safe_to_rely_on") else ("unsafe_to_rely_on" if ((health or {}).get("lockout") or {}).get("lockout_active") else "review_required"),
+        "safe_to_rely_on": bool((health or {}).get("safe_to_rely_on") or (health or {}).get("safe_for_user_reliance")),
+        "trustworthy_for_projection": bool((health or {}).get("safe_for_projection")),
+        "review_required": bool((health or {}).get("review_required") or (health or {}).get("validation_pending_categories") or (health or {}).get("authority_gap_categories")),
+        "reasons": list(((health or {}).get("lockout") or {}).get("informational_gap_categories") or []) or list((health or {}).get("completeness", {}).get("missing_categories") or []),
+        "lockout": dict((health or {}).get("lockout") or {}),
+        "next_actions": dict((health or {}).get("next_actions") or {}),
+        "source_summary": dict((health or {}).get("sla_summary") or {}),
+        "last_refresh_success_at": (health or {}).get("last_refresh_success_at"),
+        "last_refresh_completed_at": (health or {}).get("last_refresh_completed_at"),
+        "last_validation_at": (health or {}).get("last_validation_at"),
+        "next_due_step": (health or {}).get("next_due_step"),
+        "lockout_causing_categories": list((health or {}).get("lockout_causing_categories") or []),
+        "informational_gap_categories": list((health or {}).get("informational_gap_categories") or []),
+        "validation_pending_categories": list((health or {}).get("validation_pending_categories") or []),
+        "authority_gap_categories": list((health or {}).get("authority_gap_categories") or []),
+        "operational_reason": (health or {}).get("operational_reason"),
+    }
+
+
 @router.get("/profiles/{jurisdiction_profile_id}/coverage-matrix")
 def get_policy_profile_coverage_matrix(
     jurisdiction_profile_id: int,
@@ -1277,6 +1394,10 @@ def policy_operational_health(
     result["source_summary"] = operational_status.get("source_summary")
     result["safe_to_rely_on"] = operational_status.get("safe_to_rely_on")
     result["unsafe_reasons"] = operational_status.get("reasons") or []
+    result["lockout_causing_categories"] = operational_status.get("lockout_causing_categories") or []
+    result["informational_gap_categories"] = operational_status.get("informational_gap_categories") or []
+    result["validation_pending_categories"] = operational_status.get("validation_pending_categories") or []
+    result["authority_gap_categories"] = operational_status.get("authority_gap_categories") or []
     return result
 
 
@@ -1312,3 +1433,270 @@ def list_stale_sources(
             for s in rows
         ]
     }
+
+
+@router.get("/property/{property_id}/compliance-safety")
+def get_property_policy_compliance_safety(
+    property_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    property_row = db.get(Property, int(property_id))
+    if property_row is None or int(getattr(property_row, "org_id", 0) or 0) != int(principal.org_id):
+        raise HTTPException(status_code=404, detail="Property not found")
+    brief = build_property_compliance_brief(db, org_id=principal.org_id, property_id=property_id, property=property_row)
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "safe_to_rely_on": bool(brief.get("safe_to_rely_on")),
+        "legally_unsafe": bool(brief.get("legally_unsafe")),
+        "informationally_incomplete": bool(brief.get("informationally_incomplete")),
+        "unsafe_reasons": list(brief.get("unsafe_reasons") or []),
+        "informational_reasons": list(brief.get("informational_reasons") or []),
+        "brief": brief,
+    }
+
+
+@router.get("/jurisdictions/review-queue")
+def get_jurisdiction_review_queue(
+    state: Optional[str] = Query(None),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    return build_review_queue_entries(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+
+
+@router.post("/jurisdictions/{profile_id}/review-decision")
+def post_jurisdiction_review_decision(
+    profile_id: int,
+    payload: JurisdictionReviewDecisionIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    profile = db.get(JurisdictionProfile, int(profile_id))
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+    if getattr(profile, "org_id", None) not in {None, getattr(principal, "org_id", None)}:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    expires_at = datetime.fromisoformat(payload.expires_at) if payload.expires_at else None
+    return persist_review_queue_decision(
+        db,
+        profile=profile,
+        reviewer_user_id=getattr(principal, "user_id", None),
+        reviewer_action=payload.reviewer_action,
+        reviewer_rationale=payload.reviewer_rationale,
+        expires_at=expires_at,
+    )
+
+
+@router.get("/overrides")
+def get_policy_overrides(
+    state: Optional[str] = Query(None),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    jurisdiction_profile_id: Optional[int] = Query(None),
+    include_inactive: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    return list_policy_overrides(
+        db,
+        org_id=principal.org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        jurisdiction_profile_id=jurisdiction_profile_id,
+        include_inactive=include_inactive,
+    )
+
+
+@router.post("/overrides")
+def create_override(
+    payload: PolicyOverrideIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    actor_user_id = getattr(principal, "user_id", None) or getattr(principal, "id", None)
+    return create_policy_override(
+        db,
+        org_id=principal.org_id,
+        created_by_user_id=int(actor_user_id) if actor_user_id is not None else None,
+        jurisdiction_profile_id=payload.jurisdiction_profile_id,
+        assertion_id=payload.assertion_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        program_type=payload.program_type,
+        override_scope=payload.override_scope,
+        override_type=payload.override_type,
+        rule_key=payload.rule_key,
+        rule_category=payload.rule_category,
+        severity=payload.severity,
+        carrying_critical_rule=payload.carrying_critical_rule,
+        trust_impact=payload.trust_impact,
+        reason=payload.reason,
+        linked_evidence=payload.linked_evidence,
+        metadata=payload.metadata,
+        expires_at=payload.expires_at,
+    )
+
+
+@router.post("/overrides/{override_id}/revoke")
+def revoke_override(
+    override_id: int,
+    payload: PolicyOverrideRevokeIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    actor_user_id = getattr(principal, "user_id", None) or getattr(principal, "id", None)
+    return revoke_policy_override(
+        db,
+        override_id=int(override_id),
+        revoked_reason=payload.revoked_reason,
+        approved_by_user_id=int(actor_user_id) if actor_user_id is not None else None,
+    )
+
+@router.get("/manual/runbook")
+def get_manual_policy_runbook(
+    state: Optional[str] = Query(None),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    health = None
+    if state:
+        health = get_jurisdiction_health(
+            db,
+            org_id=getattr(principal, "org_id", None),
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+    return {
+        "ok": True,
+        "manual_mode": True,
+        "automation_enabled": False,
+        "scope": {"state": state, "county": county, "city": city, "pha_name": pha_name},
+        "next_due_step": (health or {}).get("next_actions", {}).get("next_step") if isinstance((health or {}).get("next_actions"), dict) else None,
+        "health": health,
+        "actions": [
+            "discovery_refresh",
+            "crawl_refresh",
+            "validation_retry",
+            "recompute",
+            "health_recompute",
+        ],
+    }
+
+
+@router.post("/manual/discovery-refresh")
+def post_manual_discovery_refresh(
+    payload: ManualPolicyMarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    result = run_market_pipeline(
+        db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+        reviewer_user_id=getattr(principal, "user_id", None),
+        auto_activate=payload.auto_activate,
+    )
+    return _manual_market_result(action="discovery_refresh", result=result)
+
+
+@router.post("/manual/crawl-refresh")
+def post_manual_crawl_refresh(
+    payload: ManualPolicyMarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    result = run_market_pipeline(
+        db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+        reviewer_user_id=getattr(principal, "user_id", None),
+        auto_activate=payload.auto_activate,
+    )
+    return _manual_market_result(action="crawl_refresh", result=result)
+
+
+@router.post("/manual/validation-retry")
+def post_manual_validation_retry(
+    payload: ManualPolicyMarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    result = run_market_pipeline(
+        db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+        reviewer_user_id=getattr(principal, "user_id", None),
+        auto_activate=payload.auto_activate,
+    )
+    return _manual_market_result(action="validation_retry", result=result)
+
+
+@router.post("/manual/recompute")
+def post_manual_market_recompute(
+    payload: ManualPolicyMarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    result = run_market_pipeline(
+        db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+        reviewer_user_id=getattr(principal, "user_id", None),
+        auto_activate=payload.auto_activate,
+    )
+    return _manual_market_result(action="recompute", result=result)
+
+
+@router.post("/manual/health-recompute")
+def post_manual_market_health_recompute(
+    payload: ManualPolicyMarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    health = get_jurisdiction_health(
+        db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+    )
+    return {"ok": True, "manual": True, "action": "health_recompute", "health": health}

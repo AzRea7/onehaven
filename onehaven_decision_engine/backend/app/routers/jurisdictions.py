@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -19,11 +20,44 @@ from ..services.jurisdiction_completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
 )
-from ..services.jurisdiction_notification_service import notify_if_jurisdiction_stale
-from ..services.jurisdiction_health_service import get_jurisdiction_health
+from ..services.jurisdiction_notification_service import notify_if_jurisdiction_stale, build_review_queue_entries, persist_review_queue_decision
+from ..services.jurisdiction_health_service import get_jurisdiction_health, get_manual_stale_review_dashboard
+from ..services.policy_review_service import create_policy_override, list_policy_overrides, revoke_policy_override
 from ..services.jurisdiction_refresh_service import refresh_jurisdiction_profile
+from ..tasks.jurisdiction_tasks import (
+    manual_health_snapshot,
+    manual_notify_stale_profiles,
+    manual_recompute_due_profiles,
+    manual_refresh_stale_profiles,
+    manual_retry_discovery,
+    manual_retry_validation,
+    manual_runbook_snapshot,
+)
 
 router = APIRouter(prefix="/jurisdictions", tags=["jurisdictions"])
+
+
+class JurisdictionReviewDecisionIn(BaseModel):
+    reviewer_action: str
+    reviewer_rationale: str | None = None
+    expires_at: str | None = None
+
+
+class JurisdictionOverrideIn(BaseModel):
+    rule_key: str | None = None
+    rule_category: str | None = None
+    severity: str = "medium"
+    carrying_critical_rule: bool = False
+    trust_impact: str = "review_required"
+    reason: str
+    linked_evidence: list[dict] = []
+    metadata: dict = {}
+    expires_at: str | None = None
+
+
+class JurisdictionOverrideRevokeIn(BaseModel):
+    revoked_reason: str | None = None
+
 
 
 def _json_loads(value, default=None):
@@ -182,6 +216,12 @@ def _operational_status_payload(db: Session, profile: JurisdictionProfile | None
             "lockout": {"lockout_active": True, "lockout_reason": "jurisdiction_profile_not_found"},
             "next_actions": {"next_step": "create_or_refresh_profile"},
             "source_summary": _source_summary_for_profile(db, None),
+            "last_validation_at": None,
+            "next_due_step": "create_or_refresh_profile",
+            "lockout_causing_categories": [],
+            "informational_gap_categories": [],
+            "validation_pending_categories": [],
+            "authority_gap_categories": [],
         }
 
     health = get_jurisdiction_health(db, profile_id=int(profile.id), org_id=org_id)
@@ -215,12 +255,21 @@ def _operational_status_payload(db: Session, profile: JurisdictionProfile | None
     if inferred and not trustworthy:
         reasons.append(f"inferred-only categories: {', '.join(inferred[:6])}")
 
+    validation_pending_categories = list((health or {}).get("validation_pending_categories") or [])
+    authority_gap_categories = list((health or {}).get("authority_gap_categories") or [])
+    lockout_causing_categories = list((health or {}).get("lockout_causing_categories") or [])
+    informational_gap_categories = list((health or {}).get("informational_gap_categories") or [])
+    last_validation_at = (health or {}).get("last_validation_at")
+    next_due_step = (health or {}).get("next_due_step") or (next_actions.get("next_step") if isinstance(next_actions, dict) else None)
+
     safe_to_rely_on = bool(
         trustworthy
         and not lockout_active
         and refresh_state == "healthy"
         and not stale
         and not conflicting
+        and not validation_pending_categories
+        and not authority_gap_categories
     )
     review_required = bool(not safe_to_rely_on and refresh_state in {"degraded", "pending", "validating", "healthy"})
     reliability_state = (
@@ -240,11 +289,18 @@ def _operational_status_payload(db: Session, profile: JurisdictionProfile | None
         "trustworthy_for_projection": trustworthy,
         "review_required": review_required,
         "reasons": reasons,
+        "operational_reason": (health or {}).get("operational_reason"),
         "lockout": lockout,
         "next_actions": next_actions,
         "source_summary": source_summary,
         "last_refresh_success_at": (health or {}).get("last_refresh_success_at"),
         "last_refresh_completed_at": (health or {}).get("last_refresh_completed_at"),
+        "last_validation_at": last_validation_at,
+        "next_due_step": next_due_step,
+        "lockout_causing_categories": lockout_causing_categories,
+        "informational_gap_categories": informational_gap_categories,
+        "validation_pending_categories": validation_pending_categories,
+        "authority_gap_categories": authority_gap_categories,
     }
 
 
@@ -377,6 +433,12 @@ def _profile_resolution_payload(db: Session, profile: JurisdictionProfile | None
         "next_actions": operational_status.get("next_actions"),
         "safe_to_rely_on": operational_status.get("safe_to_rely_on"),
         "unsafe_reasons": operational_status.get("reasons"),
+        "lockout_causing_categories": operational_status.get("lockout_causing_categories") or [],
+        "informational_gap_categories": operational_status.get("informational_gap_categories") or [],
+        "validation_pending_categories": operational_status.get("validation_pending_categories") or [],
+        "authority_gap_categories": operational_status.get("authority_gap_categories") or [],
+        "last_validation_at": operational_status.get("last_validation_at"),
+        "next_due_step": operational_status.get("next_due_step"),
     }
 
 
@@ -896,6 +958,10 @@ def resolve_property_jurisdiction(
         "operational_status": (resolved_profile or {}).get("operational_status"),
         "safe_to_rely_on": (resolved_profile or {}).get("safe_to_rely_on"),
         "unsafe_reasons": (resolved_profile or {}).get("unsafe_reasons") or [],
+        "lockout_causing_categories": (resolved_profile or {}).get("lockout_causing_categories") or [],
+        "informational_gap_categories": (resolved_profile or {}).get("informational_gap_categories") or [],
+        "validation_pending_categories": (resolved_profile or {}).get("validation_pending_categories") or [],
+        "authority_gap_categories": (resolved_profile or {}).get("authority_gap_categories") or [],
     }
 
 
@@ -1011,6 +1077,10 @@ def jurisdiction_health(
     result["operational_status"] = operational_status
     result["safe_to_rely_on"] = operational_status.get("safe_to_rely_on")
     result["unsafe_reasons"] = operational_status.get("reasons") or []
+    result["lockout_causing_categories"] = operational_status.get("lockout_causing_categories") or []
+    result["informational_gap_categories"] = operational_status.get("informational_gap_categories") or []
+    result["validation_pending_categories"] = operational_status.get("validation_pending_categories") or []
+    result["authority_gap_categories"] = operational_status.get("authority_gap_categories") or []
     return result
 
 
@@ -1062,3 +1132,234 @@ def notify_stale_jurisdiction(
     if profile is None:
         raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
     return notify_if_jurisdiction_stale(db, profile=profile, force=True)
+
+
+@router.get("/review-queue", response_model=dict)
+def jurisdiction_review_queue(
+    state: str | None = Query(None),
+    county: str | None = Query(None),
+    city: str | None = Query(None),
+    pha_name: str | None = Query(None),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    return build_review_queue_entries(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+
+
+@router.post("/{profile_id}/review-decision", response_model=dict)
+def save_jurisdiction_review_decision(
+    profile_id: int,
+    payload: JurisdictionReviewDecisionIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    profile = db.get(JurisdictionProfile, int(profile_id))
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+    if getattr(profile, "org_id", None) not in {None, getattr(principal, "org_id", None)}:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    expires_at = None
+    if payload.expires_at:
+        expires_at = datetime.fromisoformat(payload.expires_at)
+    return persist_review_queue_decision(
+        db,
+        profile=profile,
+        reviewer_user_id=getattr(principal, "user_id", None),
+        reviewer_action=payload.reviewer_action,
+        reviewer_rationale=payload.reviewer_rationale,
+        expires_at=expires_at,
+    )
+
+
+@router.get("/{profile_id}/overrides")
+def get_jurisdiction_overrides(
+    profile_id: int,
+    include_inactive: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    profile = db.get(JurisdictionProfile, int(profile_id))
+    if profile is None:
+        raise HTTPException(status_code=404, detail="jurisdiction profile not found")
+    return list_policy_overrides(
+        db,
+        org_id=principal.org_id,
+        jurisdiction_profile_id=int(profile_id),
+        state=getattr(profile, "state", None),
+        county=getattr(profile, "county", None),
+        city=getattr(profile, "city", None),
+        pha_name=getattr(profile, "pha_name", None),
+        include_inactive=include_inactive,
+    )
+
+
+@router.post("/{profile_id}/overrides")
+def create_jurisdiction_override(
+    profile_id: int,
+    payload: JurisdictionOverrideIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    profile = db.get(JurisdictionProfile, int(profile_id))
+    if profile is None:
+        raise HTTPException(status_code=404, detail="jurisdiction profile not found")
+    actor_user_id = getattr(principal, "user_id", None) or getattr(principal, "id", None)
+    return create_policy_override(
+        db,
+        org_id=principal.org_id,
+        created_by_user_id=int(actor_user_id) if actor_user_id is not None else None,
+        jurisdiction_profile_id=int(profile_id),
+        state=getattr(profile, "state", None),
+        county=getattr(profile, "county", None),
+        city=getattr(profile, "city", None),
+        pha_name=getattr(profile, "pha_name", None),
+        program_type=None,
+        override_scope="jurisdiction",
+        override_type="controlled_override",
+        rule_key=payload.rule_key,
+        rule_category=payload.rule_category,
+        severity=payload.severity,
+        carrying_critical_rule=payload.carrying_critical_rule,
+        trust_impact=payload.trust_impact,
+        reason=payload.reason,
+        linked_evidence=payload.linked_evidence,
+        metadata=payload.metadata,
+        expires_at=payload.expires_at,
+    )
+
+
+@router.post("/{profile_id}/overrides/{override_id}/revoke")
+def revoke_jurisdiction_override(
+    profile_id: int,
+    override_id: int,
+    payload: JurisdictionOverrideRevokeIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    _ = profile_id
+    actor_user_id = getattr(principal, "user_id", None) or getattr(principal, "id", None)
+    return revoke_policy_override(
+        db,
+        override_id=int(override_id),
+        revoked_reason=payload.revoked_reason,
+        approved_by_user_id=int(actor_user_id) if actor_user_id is not None else None,
+    )
+
+
+@router.get("/manual/runbook", response_model=dict)
+def get_manual_jurisdiction_runbook(
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    snapshot = manual_runbook_snapshot()
+    dashboard = get_manual_stale_review_dashboard(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        limit=100,
+    )
+    return {**snapshot, "dashboard": dashboard, "due_items": list(dashboard.get("rows") or [])[:100]}
+
+
+@router.get("/manual/stale-review-dashboard", response_model=dict)
+def get_manual_stale_dashboard(
+    state: str | None = Query(None),
+    county: str | None = Query(None),
+    city: str | None = Query(None),
+    pha_name: str | None = Query(None),
+    status_filter: str = Query("all", alias="filter"),
+    limit: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    return get_manual_stale_review_dashboard(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        status_filter=status_filter,
+        limit=limit,
+    )
+
+
+@router.post("/manual/refresh-stale", response_model=dict)
+def post_manual_refresh_stale(
+    principal=Depends(require_owner),
+):
+    _ = principal
+    return manual_refresh_stale_profiles()
+
+
+@router.post("/manual/retry-discovery", response_model=dict)
+def post_manual_retry_discovery(
+    principal=Depends(require_owner),
+):
+    _ = principal
+    return manual_retry_discovery()
+
+
+@router.post("/manual/retry-validation", response_model=dict)
+def post_manual_retry_validation(
+    principal=Depends(require_owner),
+):
+    _ = principal
+    return manual_retry_validation()
+
+
+@router.post("/manual/recompute-due", response_model=dict)
+def post_manual_recompute_due(
+    principal=Depends(require_owner),
+):
+    _ = principal
+    return manual_recompute_due_profiles()
+
+
+@router.post("/manual/health-snapshot", response_model=dict)
+def post_manual_health_snapshot(
+    principal=Depends(require_owner),
+):
+    _ = principal
+    return manual_health_snapshot()
+
+
+@router.post("/manual/notify-stale", response_model=dict)
+def post_manual_notify_stale(
+    principal=Depends(require_owner),
+):
+    _ = principal
+    return manual_notify_stale_profiles()
+
+
+@router.post("/{profile_id}/manual/recompute", response_model=dict)
+def post_manual_profile_recompute(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    profile = db.get(JurisdictionProfile, int(profile_id))
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+    profile, coverage = recompute_profile_and_coverage(db, profile, commit=True)
+    health = get_jurisdiction_health(db, profile_id=int(profile.id), org_id=getattr(principal, "org_id", None))
+    return {"ok": True, "action": "manual_recompute", "jurisdiction_profile_id": int(profile.id), "coverage": coverage, "health": health}
+
+
+@router.post("/{profile_id}/manual/health-recompute", response_model=dict)
+def post_manual_profile_health_recompute(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    profile = db.get(JurisdictionProfile, int(profile_id))
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+    health = get_jurisdiction_health(db, profile_id=int(profile.id), org_id=getattr(principal, "org_id", None))
+    return {"ok": True, "action": "manual_health_recompute", "jurisdiction_profile_id": int(profile.id), "health": health}

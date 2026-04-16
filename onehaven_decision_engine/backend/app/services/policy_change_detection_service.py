@@ -55,6 +55,8 @@ def build_source_change_summary(
     fetch_error: str | None = None,
     authoritative: bool = False,
     previous_last_changed_at: datetime | None = None,
+    raw_path: str | None = None,
+    retry_due_at: datetime | None = None,
 ) -> dict[str, Any]:
     now = _utcnow()
     previous_fp = (previous_fingerprint or "").strip() or None
@@ -78,6 +80,8 @@ def build_source_change_summary(
             "fetch_error": fetch_error,
             "changed_at": None,
             "last_changed_at": previous_last_changed_at.isoformat() if previous_last_changed_at else None,
+            "raw_path": raw_path,
+            "retry_due_at": retry_due_at.isoformat() if retry_due_at else None,
         }
 
     if previous_fp is None and current_fp is not None:
@@ -104,8 +108,9 @@ def build_source_change_summary(
         severity = "low"
         actionable_outcome = "missing_fingerprint"
 
+    comparison_state = "first_fetch" if kind == "first_fetch" else ("changed" if changed else "unchanged")
     return {
-        "comparison_state": "compared",
+        "comparison_state": comparison_state,
         "changed": changed,
         "change_detected": changed,
         "change_kind": kind,
@@ -121,6 +126,8 @@ def build_source_change_summary(
         "fetch_error": None,
         "changed_at": changed_at.isoformat() if changed_at else None,
         "last_changed_at": changed_at.isoformat() if changed_at else (previous_last_changed_at.isoformat() if previous_last_changed_at else None),
+        "raw_path": raw_path,
+        "retry_due_at": retry_due_at.isoformat() if retry_due_at else None,
     }
 
 
@@ -159,7 +166,7 @@ def determine_source_refresh_state(
             "refresh_state": "validating",
             "status_reason": summary.get("revalidation_reason") or "authoritative_change_detected",
             "blocked_reason": None,
-            "next_step": "recompute",
+            "next_step": "revalidate_and_recompute",
             "revalidation_required": True,
         }
     if changed:
@@ -167,7 +174,7 @@ def determine_source_refresh_state(
             "refresh_state": "healthy",
             "status_reason": change_kind or "content_changed",
             "blocked_reason": None,
-            "next_step": "monitor",
+            "next_step": "recompute" if summary.get("current_version_id") else "monitor",
             "revalidation_required": False,
         }
     return {

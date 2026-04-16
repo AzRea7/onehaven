@@ -31,6 +31,7 @@ _ALLOWED_CATEGORIES = {
     "approval_letter",
     "denial_letter",
     "photo_evidence",
+    "registration_certificate",
     "other_evidence",
 }
 
@@ -485,6 +486,8 @@ def build_property_document_stack(
         "by_inspection": by_inspection,
         "by_checklist_item": by_checklist_item,
         "proof_summary": proof_summary,
+        "proof_obligations": projection.get("proof_obligations") or ((projection.get("projection") or {}).get("proof_obligations") if isinstance(projection.get("projection"), dict) else []),
+        "proof_counts": projection.get("proof_counts") or ((projection.get("projection") or {}).get("proof_counts") if isinstance(projection.get("projection"), dict) else {}),
         "projection": projection.get("projection"),
         "projection_items": projection.get("items") or [],
         "blockers": projection.get("blockers") or [],

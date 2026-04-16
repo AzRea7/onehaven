@@ -13,9 +13,14 @@ import httpx
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.jurisdiction_categories import category_label
+from app.domain.jurisdiction_categories import category_label, expected_rule_universe_for_scope, normalize_categories
 from app.policy_models import PolicyCatalogEntry, PolicySource, PolicySourceVersion
 from app.services.policy_discovery_service import (
+    INVENTORY_CRAWL_PENDING,
+    INVENTORY_CRAWL_QUEUED,
+    INVENTORY_LIFECYCLE_ACCEPTED,
+    INVENTORY_LIFECYCLE_DISCOVERED,
+    INVENTORY_LIFECYCLE_PENDING_CRAWL,
     expected_inventory_hints,
     mark_inventory_not_found,
     record_discovery_attempt,
@@ -44,6 +49,13 @@ DEFAULT_TIMEOUT_SECONDS = 20.0
 DISCOVERY_NOTE_MARKER = "[discovered]"
 CURATED_NOTE_MARKER = "[curated]"
 DEFAULT_DISCOVERY_MAX_CANDIDATES = 24
+
+AUTHORITY_POLICY_BY_TIER: dict[str, dict[str, Any]] = {
+    "authoritative_official": {"use_type": "binding", "binding_sufficient": True, "supporting_only": False, "usable": True},
+    "approved_official_supporting": {"use_type": "supporting", "binding_sufficient": False, "supporting_only": True, "usable": True},
+    "semi_authoritative_operational": {"use_type": "supporting", "binding_sufficient": False, "supporting_only": True, "usable": True},
+    "derived_or_inferred": {"use_type": "weak", "binding_sufficient": False, "supporting_only": False, "usable": False},
+}
 
 
 @dataclass(frozen=True)
@@ -235,6 +247,72 @@ def _classify_authority_tier(*, url: str, publisher: Optional[str] = None, title
     }
 
 
+
+
+def _expected_universe_for_source_scope(*, state: Optional[str], county: Optional[str], city: Optional[str], pha_name: Optional[str], program_type: Optional[str] = None):
+    include_section8 = bool(pha_name or str(program_type or "").strip().lower() == "section8")
+    return expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+    )
+
+
+def authority_policy_for_scope(*, authority_tier: Optional[str], state: Optional[str], county: Optional[str], city: Optional[str], pha_name: Optional[str], program_type: Optional[str] = None, normalized_categories: list[str] | None = None) -> dict[str, Any]:
+    tier = str(authority_tier or "derived_or_inferred").strip() or "derived_or_inferred"
+    tier_policy = dict(AUTHORITY_POLICY_BY_TIER.get(tier, AUTHORITY_POLICY_BY_TIER["derived_or_inferred"]))
+    universe = _expected_universe_for_source_scope(state=state, county=county, city=city, pha_name=pha_name, program_type=program_type)
+    categories = normalize_categories(list(normalized_categories or []))
+    authority_expectations = dict(getattr(universe, "authority_expectations", {}) or {})
+    legally_binding = set(normalize_categories(getattr(universe, "legally_binding_categories", []) or []))
+
+    binding_categories: list[str] = []
+    supporting_categories: list[str] = []
+    unusable_categories: list[str] = []
+    for category in categories:
+        expected = str(authority_expectations.get(category) or "").strip()
+        requires_binding = category in legally_binding or expected == "authoritative_official"
+        if tier_policy.get("binding_sufficient"):
+            binding_categories.append(category)
+        elif tier_policy.get("usable"):
+            supporting_categories.append(category)
+            if requires_binding:
+                unusable_categories.append(category)
+        else:
+            unusable_categories.append(category)
+
+    return {
+        "authority_tier": tier,
+        "authority_rank": _authority_rank_for_tier(tier),
+        **tier_policy,
+        "binding_categories": sorted(set(binding_categories)),
+        "supporting_categories": sorted(set(supporting_categories)),
+        "unusable_categories": sorted(set(unusable_categories)),
+        "legally_binding_categories": sorted(legally_binding.intersection(set(categories))),
+        "authority_expectations": {k: authority_expectations[k] for k in categories if k in authority_expectations},
+    }
+
+
+def _apply_authority_policy_to_source(source: PolicySource, *, normalized_categories: list[str] | None = None) -> dict[str, Any]:
+    categories = normalize_categories(list(normalized_categories or _json_loads_list(getattr(source, "normalized_categories_json", None))))
+    policy = authority_policy_for_scope(
+        authority_tier=getattr(source, "authority_tier", None),
+        state=getattr(source, "state", None),
+        county=getattr(source, "county", None),
+        city=getattr(source, "city", None),
+        pha_name=getattr(source, "pha_name", None),
+        program_type=getattr(source, "program_type", None),
+        normalized_categories=categories,
+    )
+    source.authority_use_type = str(policy.get("use_type") or getattr(source, "authority_use_type", None) or "weak")
+    source.authority_policy_json = _json_dumps(policy)
+    source.binding_categories_json = _json_dumps(policy.get("binding_categories") or [])
+    source.supporting_categories_json = _json_dumps(policy.get("supporting_categories") or [])
+    source.unusable_categories_json = _json_dumps(policy.get("unusable_categories") or [])
+    return policy
+
 def _fingerprint_for_text(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
@@ -412,6 +490,15 @@ def _sync_registry_defaults(source: PolicySource) -> None:
         source.fetch_config_json = "{}"
     if getattr(source, "registry_meta_json", None) is None:
         source.registry_meta_json = "{}"
+    if getattr(source, "authority_policy_json", None) is None:
+        source.authority_policy_json = "{}"
+    if getattr(source, "binding_categories_json", None) is None:
+        source.binding_categories_json = "[]"
+    if getattr(source, "supporting_categories_json", None) is None:
+        source.supporting_categories_json = "[]"
+    if getattr(source, "unusable_categories_json", None) is None:
+        source.unusable_categories_json = "[]"
+    _apply_authority_policy_to_source(source)
 
 
 def _append_note_marker(existing_notes: Optional[str], marker: str) -> str:
@@ -785,6 +872,11 @@ def ensure_policy_source_from_catalog_entry(
             approved_supporting_source=bool(authority.get("approved_supporting_source", False)),
             semi_authoritative=bool(authority.get("semi_authoritative", False)),
             derived_or_inferred=bool(authority.get("derived_or_inferred", False)),
+            authority_use_type=str(AUTHORITY_POLICY_BY_TIER.get(str(authority.get("authority_tier") or "derived_or_inferred"), AUTHORITY_POLICY_BY_TIER["derived_or_inferred"]).get("use_type") or "weak"),
+            authority_policy_json="{}",
+            binding_categories_json="[]",
+            supporting_categories_json="[]",
+            unusable_categories_json="[]",
             normalized_categories_json="[]",
             freshness_status="unknown",
             freshness_reason="not_fetched",
@@ -842,6 +934,7 @@ def ensure_policy_source_from_catalog_entry(
             last_verified_by_user_id=None,
         )
         _sync_registry_defaults(source)
+        _apply_authority_policy_to_source(source, normalized_categories=_json_loads_list(getattr(entry, "normalized_categories_json", None)))
         db.add(source)
         db.flush()
         inventory_hints = expected_inventory_hints(state=_norm_state(state), county=county, city=city, pha_name=pha_name, include_section8=True)
@@ -865,8 +958,8 @@ def ensure_policy_source_from_catalog_entry(
             authority_tier=candidate.authority_tier,
             authority_rank=candidate.authority_rank,
             authority_score=candidate.authority_score,
-            lifecycle_state="active" if probe_result.get("ok") else "discovered",
-            crawl_status="pending" if not probe_result.get("ok") else "queued",
+            lifecycle_state=INVENTORY_LIFECYCLE_PENDING_CRAWL if probe_result.get("ok") else INVENTORY_LIFECYCLE_DISCOVERED,
+            crawl_status=INVENTORY_CRAWL_PENDING if not probe_result.get("ok") else INVENTORY_CRAWL_QUEUED,
             inventory_origin="discovered",
             policy_source_id=int(source.id),
             is_curated=False,
@@ -907,6 +1000,7 @@ def ensure_policy_source_from_catalog_entry(
     existing.approved_supporting_source = bool(authority.get("approved_supporting_source", False))
     existing.semi_authoritative = bool(authority.get("semi_authoritative", False))
     existing.derived_or_inferred = bool(authority.get("derived_or_inferred", False))
+    existing.authority_use_type = str(AUTHORITY_POLICY_BY_TIER.get(str(authority.get("authority_tier") or "derived_or_inferred"), AUTHORITY_POLICY_BY_TIER["derived_or_inferred"]).get("use_type") or existing.authority_use_type or "weak")
     existing.refresh_interval_days = max(1, _refresh_interval_days(entry))
 
     meta = _json_loads_dict(existing.registry_meta_json)
@@ -930,6 +1024,7 @@ def ensure_policy_source_from_catalog_entry(
     existing.source_metadata_json = _json_dumps(source_metadata)
 
     _sync_registry_defaults(existing)
+    _apply_authority_policy_to_source(existing, normalized_categories=_json_loads_list(getattr(entry, "normalized_categories_json", None)))
     db.flush()
     inventory_hints = expected_inventory_hints(state=_norm_state(state), county=county, city=city, pha_name=pha_name, include_section8=True)
     upsert_source_inventory_record(
@@ -952,8 +1047,8 @@ def ensure_policy_source_from_catalog_entry(
         authority_tier=existing.authority_tier,
         authority_rank=existing.authority_rank,
         authority_score=existing.authority_score,
-        lifecycle_state=(existing.registry_status or "active").lower(),
-        crawl_status="queued" if probe_result.get("ok") else "pending",
+        lifecycle_state=INVENTORY_LIFECYCLE_PENDING_CRAWL if probe_result.get("ok") else INVENTORY_LIFECYCLE_DISCOVERED,
+        crawl_status=INVENTORY_CRAWL_QUEUED if probe_result.get("ok") else INVENTORY_CRAWL_PENDING,
         inventory_origin="discovered",
         policy_source_id=int(existing.id),
         is_curated=bool(policy_source_origin(existing) == "curated"),
@@ -1162,6 +1257,11 @@ def _upsert_discovered_source(
             approved_supporting_source=bool(candidate.authority_tier == "approved_official_supporting"),
             semi_authoritative=bool(candidate.authority_tier == "semi_authoritative_operational"),
             derived_or_inferred=bool(candidate.authority_tier == "derived_or_inferred"),
+            authority_use_type=str(AUTHORITY_POLICY_BY_TIER.get(str(candidate.authority_tier or "derived_or_inferred"), AUTHORITY_POLICY_BY_TIER["derived_or_inferred"]).get("use_type") or "weak"),
+            authority_policy_json="{}",
+            binding_categories_json="[]",
+            supporting_categories_json="[]",
+            unusable_categories_json="[]",
             normalized_categories_json="[]",
             freshness_status="unknown",
             freshness_reason="discovered_not_fetched",
@@ -1197,6 +1297,7 @@ def _upsert_discovered_source(
             last_verified_by_user_id=None,
         )
         _sync_registry_defaults(source)
+        _apply_authority_policy_to_source(source, normalized_categories=list(candidate.category_hints))
         db.add(source)
         db.flush()
         inventory_hints = expected_inventory_hints(state=_norm_state(state), county=county, city=city, pha_name=pha_name, include_section8=True)
@@ -1220,8 +1321,8 @@ def _upsert_discovered_source(
             authority_tier=candidate.authority_tier,
             authority_rank=candidate.authority_rank,
             authority_score=candidate.authority_score,
-            lifecycle_state="active" if probe_result.get("ok") else "discovered",
-            crawl_status="pending" if not probe_result.get("ok") else "queued",
+            lifecycle_state=INVENTORY_LIFECYCLE_PENDING_CRAWL if probe_result.get("ok") else INVENTORY_LIFECYCLE_DISCOVERED,
+            crawl_status=INVENTORY_CRAWL_PENDING if not probe_result.get("ok") else INVENTORY_CRAWL_QUEUED,
             inventory_origin="discovered",
             policy_source_id=int(source.id),
             is_curated=False,
@@ -1261,6 +1362,7 @@ def _upsert_discovered_source(
     existing.approved_supporting_source = bool(existing.approved_supporting_source or candidate.authority_tier == "approved_official_supporting")
     existing.semi_authoritative = bool(existing.semi_authoritative or candidate.authority_tier == "semi_authoritative_operational")
     existing.derived_or_inferred = bool(candidate.authority_tier == "derived_or_inferred")
+    existing.authority_use_type = str(AUTHORITY_POLICY_BY_TIER.get(str(existing.authority_tier or "derived_or_inferred"), AUTHORITY_POLICY_BY_TIER["derived_or_inferred"]).get("use_type") or existing.authority_use_type or "weak")
     existing.registry_status = existing.registry_status or ("candidate" if not probe_result.get("ok") else "active")
     existing.last_fetch_error = probe_result.get("fetch_error") or existing.last_fetch_error
     existing.last_http_status = probe_result.get("http_status") or existing.last_http_status
@@ -1283,6 +1385,7 @@ def _upsert_discovered_source(
     existing.source_metadata_json = _json_dumps(source_metadata)
 
     _sync_registry_defaults(existing)
+    _apply_authority_policy_to_source(existing, normalized_categories=merged_hints)
     db.flush()
     inventory_hints = expected_inventory_hints(state=_norm_state(state), county=county, city=city, pha_name=pha_name, include_section8=True)
     upsert_source_inventory_record(
@@ -1305,8 +1408,8 @@ def _upsert_discovered_source(
         authority_tier=existing.authority_tier,
         authority_rank=existing.authority_rank,
         authority_score=existing.authority_score,
-        lifecycle_state=(existing.registry_status or "active").lower(),
-        crawl_status="queued" if probe_result.get("ok") else "pending",
+        lifecycle_state=INVENTORY_LIFECYCLE_PENDING_CRAWL if probe_result.get("ok") else INVENTORY_LIFECYCLE_DISCOVERED,
+        crawl_status=INVENTORY_CRAWL_QUEUED if probe_result.get("ok") else INVENTORY_CRAWL_PENDING,
         inventory_origin="discovered",
         policy_source_id=int(existing.id),
         is_curated=bool(policy_source_origin(existing) == "curated"),
@@ -1460,6 +1563,9 @@ def discover_policy_sources_for_market(
             )
             persisted_source_id = int(source_row.id)
             inventory.policy_source_id = persisted_source_id
+            inventory.lifecycle_state = INVENTORY_LIFECYCLE_ACCEPTED
+            inventory.candidate_status_reason = "accepted_as_policy_source"
+            inventory.accepted_at = _utcnow()
             db.add(inventory)
             created_source_ids.append(persisted_source_id)
             if policy_source_origin(source_row) == "discovered":
@@ -1702,6 +1808,11 @@ def get_policy_source_refresh_snapshot(source: PolicySource) -> dict[str, Any]:
         "approved_supporting_source": bool(getattr(source, "approved_supporting_source", False)),
         "semi_authoritative": bool(getattr(source, "semi_authoritative", False)),
         "derived_or_inferred": bool(getattr(source, "derived_or_inferred", False)),
+        "authority_use_type": getattr(source, "authority_use_type", None),
+        "authority_policy": _json_loads_dict(getattr(source, "authority_policy_json", None)),
+        "binding_categories": _json_loads_list(getattr(source, "binding_categories_json", None)),
+        "supporting_categories": _json_loads_list(getattr(source, "supporting_categories_json", None)),
+        "unusable_categories": _json_loads_list(getattr(source, "unusable_categories_json", None)),
         "last_fetched_at": getattr(source, "last_fetched_at", None).isoformat() if getattr(source, "last_fetched_at", None) else None,
         "next_refresh_due_at": getattr(source, "next_refresh_due_at", None).isoformat() if getattr(source, "next_refresh_due_at", None) else None,
         "current_fingerprint": getattr(source, "current_fingerprint", None) or getattr(source, "content_sha256", None),
@@ -1716,6 +1827,7 @@ def get_policy_source_refresh_snapshot(source: PolicySource) -> dict[str, Any]:
         "last_refresh_attempt_at": getattr(source, "last_refresh_attempt_at", None).isoformat() if getattr(source, "last_refresh_attempt_at", None) else None,
         "last_refresh_completed_at": getattr(source, "last_refresh_completed_at", None).isoformat() if getattr(source, "last_refresh_completed_at", None) else None,
         "current_refresh_run_id": getattr(source, "current_refresh_run_id", None),
+        "current_source_version_id": int(getattr(source, "current_source_version_id", 0) or 0) if hasattr(source, "current_source_version_id") and getattr(source, "current_source_version_id", None) is not None else None,
     }
 
 
@@ -1796,6 +1908,10 @@ def fetch_policy_source(
                 "status_reason": blocked_reason,
                 "next_step": "manual_unblock",
                 "revalidation_required": False,
+                "comparison_state": "fetch_failed",
+                "change_kind": "fetch_failed",
+                "raw_path": getattr(source, "raw_path", None),
+                "retry_due_at": source.next_refresh_due_at.isoformat() if getattr(source, "next_refresh_due_at", None) else None,
             },
         )
         db.commit()
@@ -1880,6 +1996,12 @@ def fetch_policy_source(
         fetch_error=fetch_error,
         authoritative=authoritative,
         previous_last_changed_at=getattr(source, "last_changed_at", None),
+        raw_path=getattr(source, "raw_path", None),
+        retry_due_at=(
+            compute_next_retry_due(retry_count=int(getattr(source, "refresh_retry_count", 0) or 0), base_dt=now)
+            if fetch_error is not None
+            else None
+        ),
     )
     state_payload = determine_source_refresh_state(
         fetch_ok=(fetch_error is None),
@@ -1894,6 +2016,8 @@ def fetch_policy_source(
     source.extracted_text = extracted_text
     source.content_sha256 = fingerprint[:64] if fingerprint else None
     source.current_fingerprint = fingerprint or None
+    if hasattr(source, "current_source_version_id"):
+        setattr(source, "current_source_version_id", int(version.id))
     source.freshness_checked_at = now
     source.last_fetch_error = fetch_error
     source.next_refresh_due_at = (
@@ -1946,15 +2070,24 @@ def fetch_policy_source(
         "ok": fetch_error is None,
         "source_id": int(source.id),
         "source_version_id": int(version.id),
+        "previous_version_id": previous_version_id,
         "fetch_error": fetch_error,
         "changed": bool(change_summary.get("changed")),
         "change_detected": bool(change_summary.get("change_detected")),
+        "comparison_state": change_summary.get("comparison_state"),
+        "change_kind": change_summary.get("change_kind"),
+        "actionable_outcome": change_summary.get("actionable_outcome"),
         "change_summary": change_summary,
+        "previous_fingerprint": previous_fingerprint,
         "current_fingerprint": fingerprint or None,
+        "content_sha256": fingerprint[:64] if fingerprint else None,
+        "raw_path": getattr(source, "raw_path", None),
         "http_status": http_status,
+        "content_type": content_type,
         "refresh_state": state_payload["refresh_state"],
         "status_reason": state_payload["status_reason"],
         "next_step": state_payload["next_step"],
+        "retry_due_at": source.next_refresh_due_at.isoformat() if getattr(source, "next_refresh_due_at", None) else None,
         "revalidation_required": bool(state_payload.get("revalidation_required", False)),
     }
     crawl_sync = sync_crawl_result_to_inventory(db, source=source, fetch_result=fetch_payload)
@@ -1975,6 +2108,10 @@ def fetch_policy_source(
         "change_summary": change_summary,
         "previous_fingerprint": previous_fingerprint,
         "current_fingerprint": fingerprint or None,
+        "comparison_state": change_summary.get("comparison_state"),
+        "change_kind": change_summary.get("change_kind"),
+        "actionable_outcome": change_summary.get("actionable_outcome"),
+        "raw_path": getattr(source, "raw_path", None),
         "http_status": http_status,
         "content_type": content_type,
         "next_refresh_due_at": source.next_refresh_due_at.isoformat() if getattr(source, "next_refresh_due_at", None) else None,

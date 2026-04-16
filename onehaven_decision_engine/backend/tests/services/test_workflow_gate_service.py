@@ -1,4 +1,3 @@
-# backend/tests/services/test_workflow_gate_service.py
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -233,3 +232,38 @@ def test_build_workflow_summary_requires_post_close_recheck_for_owned_property(
     assert result["post_close_recheck"]["needed"] is True
     assert result["post_close_recheck"]["status"] == "recheck_required"
     assert "stale" in (result["post_close_recheck"]["reason"] or "").lower()
+
+
+
+def test_build_workflow_summary_includes_proof_gap_blockers(monkeypatch: pytest.MonkeyPatch, patched_workflow: None):
+    monkeypatch.setattr(
+        svc,
+        "build_property_projection_snapshot",
+        lambda db, org_id, property_id: {
+            "projection": {
+                "projection_status": "blocked",
+                "blocking_count": 0,
+                "unknown_count": 0,
+                "stale_count": 0,
+                "conflicting_count": 0,
+                "readiness_score": 55.0,
+                "confidence_score": 0.72,
+                "projected_compliance_cost": 900.0,
+                "projected_days_to_rent": 7,
+                "proof_obligations": [
+                    {"rule_key": "certificate_required_before_occupancy", "proof_label": "Certificate before occupancy", "proof_status": "missing", "blocking": True, "evidence_gap": "Missing certificate before occupancy."}
+                ],
+                "projection_reason": {"jurisdiction_trust": {"safe_for_projection": True, "safe_for_user_reliance": True, "blocker_reasons": [], "manual_review_reasons": []}},
+            },
+            "proof_obligations": [
+                {"rule_key": "certificate_required_before_occupancy", "proof_label": "Certificate before occupancy", "proof_status": "missing", "blocking": True, "evidence_gap": "Missing certificate before occupancy."}
+            ],
+            "proof_counts": {"missing": 1, "verified": 0},
+            "blockers": [],
+        },
+    )
+    summary = svc.build_workflow_summary(db=None, org_id=1, property_id=99, principal=SimpleNamespace(org_id=1))
+    assert summary["gate"]["ok"] is False
+    compliance_gate = summary.get("compliance_gate") or {}
+    assert compliance_gate.get("proof_gap_count") == 1
+    assert compliance_gate.get("unresolved_evidence_gaps")

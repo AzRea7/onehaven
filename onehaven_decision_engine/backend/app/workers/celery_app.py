@@ -131,6 +131,23 @@ def _beat_schedule() -> dict[str, dict[str, Any]]:
     return schedule
 
 
+
+def jurisdiction_manual_mode_payload() -> dict[str, Any]:
+    flags = _jurisdiction_runtime_flags()
+    return {
+        **flags,
+        "manual_mode": not bool(flags.get("jurisdiction_automation_enabled")),
+        "jurisdiction_schedule_keys": [
+            "jurisdiction.refresh_stale_profiles",
+            "jurisdiction.retry_discovery",
+            "jurisdiction.retry_validation",
+            "jurisdiction.recompute_due_profiles",
+            "jurisdiction.health_snapshot",
+            "jurisdiction.notify_stale_profiles",
+        ],
+        "active_beat_schedule_keys": sorted(list((_beat_schedule() or {}).keys())),
+    }
+
 celery_app = Celery(
     "onehaven_agents",
     broker=broker,

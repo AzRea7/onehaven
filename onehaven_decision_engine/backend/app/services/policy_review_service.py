@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import normalize_category
-from app.policy_models import PolicyAssertion, PolicySource
+from app.policy_models import PolicyAssertion, PolicyOverrideLedger, PolicySource
 from app.services.policy_rule_normalizer import (
     NormalizedRuleCandidate,
     assertion_fingerprint,
@@ -622,11 +622,14 @@ def apply_governance_lifecycle(
         keeper = ordered[0]
 
         validation_state = (getattr(keeper, "validation_state", None) or "pending").lower()
+        trust_state = (getattr(keeper, "trust_state", None) or "extracted").lower()
         target_state = "draft"
         if validation_state == "validated":
             target_state = "approved"
-            if auto_activate and float(keeper.confidence or 0.0) >= 0.85:
+            if auto_activate and trust_state in {"validated", "trusted"} and float(keeper.confidence or 0.0) >= 0.85:
                 target_state = "active"
+        elif validation_state in {"weak_support", "ambiguous", "unsupported", "conflicting"}:
+            target_state = "draft"
 
         _set_lifecycle_state(keeper, governance_state=target_state, reviewer_user_id=reviewer_user_id, reviewed_at=now)
         if target_state == "active":
@@ -645,7 +648,13 @@ def apply_governance_lifecycle(
                 replaced_ids.append(int(row.id))
 
     db.commit()
+    validation_gate_counts = {
+        "validated_ids": sorted({int(row.id) for row in rows if (getattr(row, "validation_state", None) or "").lower() == "validated"}),
+        "needs_review_ids": sorted({int(row.id) for row in rows if (getattr(row, "trust_state", None) or "").lower() == "needs_review"}),
+        "downgraded_ids": sorted({int(row.id) for row in rows if (getattr(row, "trust_state", None) or "").lower() == "downgraded"}),
+    }
     return {
+        **validation_gate_counts,
         "approved_count": len(sorted(set(approved_ids))),
         "approved_ids": sorted(set(approved_ids)),
         "active_count": len(sorted(set(active_ids))),
@@ -837,3 +846,431 @@ def diff_active_rules_for_source(
         "missing_count": len(missing_from_new_snapshot),
         "missing": missing_from_new_snapshot,
     }
+
+# --- Story 4.2 additive lifecycle governance overlays ---
+
+MANUAL_REVIEW_REVIEW_STATUS = "needs_manual_review"
+HIGH_RISK_VALIDATION_STATES = {"conflicting"}
+NON_PROJECTABLE_VALIDATION_STATES = {"weak_support", "ambiguous", "unsupported", "conflicting"}
+
+
+def _governance_conflict_hints(row: PolicyAssertion) -> list[str]:
+    hints: list[str] = []
+    for attr in ("citation_json", "rule_provenance_json"):
+        raw = getattr(row, attr, None)
+        try:
+            parsed = {} if raw in {None, ""} else (raw if isinstance(raw, dict) else __import__("json").loads(raw))
+        except Exception:
+            parsed = {}
+        if isinstance(parsed, dict):
+            maybe = parsed.get("conflict_hints")
+            if isinstance(maybe, list):
+                hints.extend(str(x).strip() for x in maybe if str(x).strip())
+    if (getattr(row, "coverage_status", None) or "").strip().lower() == "conflicting":
+        hints.append("coverage_status_conflicting")
+    if (getattr(row, "rule_status", None) or "").strip().lower() == "conflicting":
+        hints.append("rule_status_conflicting")
+    return sorted(set(hints))
+
+
+def _requires_manual_review(row: PolicyAssertion) -> bool:
+    validation_state = (getattr(row, "validation_state", None) or "pending").strip().lower()
+    review_status = (getattr(row, "review_status", None) or "").strip().lower()
+    trust_state = (getattr(row, "trust_state", None) or "").strip().lower()
+    return bool(
+        validation_state in HIGH_RISK_VALIDATION_STATES
+        or review_status == MANUAL_REVIEW_REVIEW_STATUS
+        or trust_state == "needs_review" and bool(_governance_conflict_hints(row))
+    )
+
+
+def _lifecycle_target_for_row(row: PolicyAssertion, *, auto_activate: bool) -> str:
+    validation_state = (getattr(row, "validation_state", None) or "pending").strip().lower()
+    trust_state = (getattr(row, "trust_state", None) or "extracted").strip().lower()
+    confidence = float(getattr(row, "confidence", 0.0) or 0.0)
+    if _requires_manual_review(row):
+        return "draft"
+    if validation_state == "validated":
+        if auto_activate and trust_state in {"validated", "trusted"} and confidence >= 0.85:
+            return "active"
+        return "approved"
+    if validation_state in NON_PROJECTABLE_VALIDATION_STATES:
+        return "draft"
+    return "draft"
+
+
+_chunk42_original_set_lifecycle_state = _set_lifecycle_state
+
+def _set_lifecycle_state(
+    row: PolicyAssertion,
+    *,
+    governance_state: str,
+    reviewer_user_id: int | None,
+    reviewed_at: datetime | None = None,
+) -> None:
+    now = reviewed_at or _utcnow()
+    if governance_state == "active" and _requires_manual_review(row):
+        governance_state = "draft"
+        row.review_status = MANUAL_REVIEW_REVIEW_STATUS
+        row.coverage_status = "conflicting" if _governance_conflict_hints(row) else "partial"
+        if hasattr(row, "trust_state"):
+            row.trust_state = "needs_review"
+    _chunk42_original_set_lifecycle_state(
+        row,
+        governance_state=governance_state,
+        reviewer_user_id=reviewer_user_id,
+        reviewed_at=now,
+    )
+    if governance_state == "replaced":
+        row.review_status = "superseded"
+        row.rule_status = "superseded"
+        row.coverage_status = "superseded"
+        row.is_current = False
+    if _requires_manual_review(row):
+        row.review_status = MANUAL_REVIEW_REVIEW_STATUS
+        if governance_state != "replaced":
+            row.is_current = False
+
+
+_chunk42_original_auto_verify_market_assertions = auto_verify_market_assertions
+
+def auto_verify_market_assertions(*args, **kwargs):
+    result = _chunk42_original_auto_verify_market_assertions(*args, **kwargs)
+    db = args[0] if args else kwargs.get("db")
+    rows = _market_assertions(
+        db,
+        org_id=kwargs.get("org_id"),
+        state=kwargs.get("state"),
+        county=kwargs.get("county"),
+        city=kwargs.get("city"),
+        pha_name=kwargs.get("pha_name"),
+    )
+    manual_review_ids = []
+    for row in rows:
+        if _requires_manual_review(row):
+            row.review_status = MANUAL_REVIEW_REVIEW_STATUS
+            row.is_current = False
+            if hasattr(row, "trust_state"):
+                row.trust_state = "needs_review"
+            manual_review_ids.append(int(row.id))
+            db.add(row)
+    db.commit()
+    result["manual_review_count"] = len(manual_review_ids)
+    result["manual_review_ids"] = sorted(set(manual_review_ids))
+    return result
+
+
+_chunk42_original_apply_governance_lifecycle = apply_governance_lifecycle
+
+def apply_governance_lifecycle(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    rows = _market_assertions(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name)
+    now = _utcnow()
+    approved_ids: list[int] = []
+    active_ids: list[int] = []
+    rejected_ids: list[int] = []
+    replaced_ids: list[int] = []
+    manual_review_ids: list[int] = []
+    by_group: dict[tuple[str, str], list[PolicyAssertion]] = {}
+    for row in rows:
+        key = ((getattr(row, "version_group", None) or ""), (getattr(row, "rule_key", None) or ""))
+        by_group.setdefault(key, []).append(row)
+
+    for _, group in by_group.items():
+        ordered = sorted(group, key=lambda x: (float(getattr(x, "confidence", 0.0) or 0.0), int(getattr(x, "version_number", 0) or 0), int(getattr(x, "id", 0) or 0)), reverse=True)
+        keeper = ordered[0]
+        target_state = _lifecycle_target_for_row(keeper, auto_activate=auto_activate)
+        _set_lifecycle_state(keeper, governance_state=target_state, reviewer_user_id=reviewer_user_id, reviewed_at=now)
+        if _requires_manual_review(keeper):
+            manual_review_ids.append(int(keeper.id))
+        if target_state == "active":
+            active_ids.append(int(keeper.id))
+            replaced_ids.extend(_replace_previous_current(group, keeper=keeper, reviewer_user_id=reviewer_user_id))
+        elif target_state == "approved":
+            approved_ids.append(int(keeper.id))
+        else:
+            rejected_ids.append(int(keeper.id))
+
+        for row in ordered[1:]:
+            if row.id == keeper.id:
+                continue
+            if (getattr(row, "governance_state", None) or "").lower() != "replaced":
+                row.replaced_by_assertion_id = keeper.id
+                row.superseded_by_assertion_id = keeper.id
+                _set_lifecycle_state(row, governance_state="replaced", reviewer_user_id=reviewer_user_id, reviewed_at=now)
+                replaced_ids.append(int(row.id))
+
+    db.commit()
+    return {
+        "approved_count": len(sorted(set(approved_ids))),
+        "approved_ids": sorted(set(approved_ids)),
+        "active_count": len(sorted(set(active_ids))),
+        "active_ids": sorted(set(active_ids)),
+        "rejected_count": len(sorted(set(rejected_ids))),
+        "rejected_ids": sorted(set(rejected_ids)),
+        "replaced_count": len(sorted(set(replaced_ids))),
+        "replaced_ids": sorted(set(replaced_ids)),
+        "manual_review_count": len(sorted(set(manual_review_ids))),
+        "manual_review_ids": sorted(set(manual_review_ids)),
+        "validated_ids": sorted({int(row.id) for row in rows if (getattr(row, "validation_state", None) or "").lower() == "validated"}),
+        "needs_review_ids": sorted({int(row.id) for row in rows if _requires_manual_review(row) or (getattr(row, "trust_state", None) or "").lower() == "needs_review"}),
+        "downgraded_ids": sorted({int(row.id) for row in rows if (getattr(row, "trust_state", None) or "").lower() == "downgraded"}),
+    }
+
+
+_chunk42_original_cleanup_market_stale_assertions = cleanup_market_stale_assertions
+
+def cleanup_market_stale_assertions(*args, **kwargs):
+    result = _chunk42_original_cleanup_market_stale_assertions(*args, **kwargs)
+    db = args[0] if args else kwargs.get("db")
+    rows = _market_assertions(
+        db,
+        org_id=kwargs.get("org_id"),
+        state=kwargs.get("state"),
+        county=kwargs.get("county"),
+        city=kwargs.get("city"),
+        pha_name=kwargs.get("pha_name"),
+    )
+    manual_review_ids = []
+    for row in rows:
+        if _requires_manual_review(row):
+            row.review_status = MANUAL_REVIEW_REVIEW_STATUS
+            row.coverage_status = "conflicting" if _governance_conflict_hints(row) else (getattr(row, "coverage_status", None) or "partial")
+            row.is_current = False
+            manual_review_ids.append(int(row.id))
+            db.add(row)
+    db.commit()
+    result["manual_review_count"] = len(sorted(set(manual_review_ids)))
+    result["manual_review_ids"] = sorted(set(manual_review_ids))
+    return result
+
+
+
+def _loads_json(value: Any, default: Any) -> Any:
+    import json
+    if value in (None, ""):
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        parsed = json.loads(value)
+        return parsed if parsed is not None else default
+    except Exception:
+        return default
+
+
+def _dumps_json(value: Any) -> str:
+    import json
+    try:
+        return json.dumps(value, sort_keys=True, default=str)
+    except Exception:
+        return json.dumps([] if isinstance(value, list) else {})
+
+
+def _parse_datetime_value(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _override_matches_scope(override: PolicyOverrideLedger, *, state: str | None, county: str | None, city: str | None, pha_name: str | None) -> bool:
+    st = _norm_state(state) if state is not None else None
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+    if st is not None and _norm_state(getattr(override, "state", None)) != st:
+        return False
+    if getattr(override, "county", None) is not None and _norm_lower(getattr(override, "county", None)) != cnty:
+        return False
+    if getattr(override, "city", None) is not None and _norm_lower(getattr(override, "city", None)) != cty:
+        return False
+    if getattr(override, "pha_name", None) is not None and _norm_text(getattr(override, "pha_name", None)) != pha:
+        return False
+    return True
+
+
+def _override_to_dict(row: PolicyOverrideLedger) -> dict[str, Any]:
+    return {
+        "id": int(getattr(row, "id", 0) or 0),
+        "org_id": getattr(row, "org_id", None),
+        "jurisdiction_profile_id": getattr(row, "jurisdiction_profile_id", None),
+        "assertion_id": getattr(row, "assertion_id", None),
+        "state": getattr(row, "state", None),
+        "county": getattr(row, "county", None),
+        "city": getattr(row, "city", None),
+        "pha_name": getattr(row, "pha_name", None),
+        "program_type": getattr(row, "program_type", None),
+        "override_scope": getattr(row, "override_scope", None),
+        "override_type": getattr(row, "override_type", None),
+        "rule_key": getattr(row, "rule_key", None),
+        "rule_category": getattr(row, "rule_category", None),
+        "severity": getattr(row, "severity", None),
+        "is_active": bool(getattr(row, "is_active", False)),
+        "carrying_critical_rule": bool(getattr(row, "carrying_critical_rule", False)),
+        "trust_impact": getattr(row, "trust_impact", None),
+        "reason": getattr(row, "reason", None),
+        "linked_evidence": _loads_json(getattr(row, "linked_evidence_json", None), []),
+        "metadata": _loads_json(getattr(row, "metadata_json", None), {}),
+        "created_by_user_id": getattr(row, "created_by_user_id", None),
+        "approved_by_user_id": getattr(row, "approved_by_user_id", None),
+        "expires_at": getattr(row, "expires_at", None).isoformat() if getattr(row, "expires_at", None) else None,
+        "revoked_at": getattr(row, "revoked_at", None).isoformat() if getattr(row, "revoked_at", None) else None,
+        "revoked_reason": getattr(row, "revoked_reason", None),
+        "created_at": getattr(row, "created_at", None).isoformat() if getattr(row, "created_at", None) else None,
+        "updated_at": getattr(row, "updated_at", None).isoformat() if getattr(row, "updated_at", None) else None,
+        "is_currently_effective": bool(getattr(row, "is_currently_effective", False)),
+    }
+
+
+def list_policy_overrides(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: Optional[str] = None,
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    pha_name: Optional[str] = None,
+    jurisdiction_profile_id: int | None = None,
+    include_inactive: bool = False,
+) -> dict[str, Any]:
+    stmt = select(PolicyOverrideLedger)
+    if org_id is None:
+        stmt = stmt.where(PolicyOverrideLedger.org_id.is_(None))
+    else:
+        stmt = stmt.where(or_(PolicyOverrideLedger.org_id == org_id, PolicyOverrideLedger.org_id.is_(None)))
+    if jurisdiction_profile_id is not None:
+        stmt = stmt.where(PolicyOverrideLedger.jurisdiction_profile_id == int(jurisdiction_profile_id))
+    rows = list(db.scalars(stmt.order_by(PolicyOverrideLedger.created_at.desc(), PolicyOverrideLedger.id.desc())).all())
+    out = []
+    for row in rows:
+        if not include_inactive and not bool(getattr(row, "is_currently_effective", False)):
+            continue
+        if not _override_matches_scope(row, state=state, county=county, city=city, pha_name=pha_name):
+            continue
+        out.append(_override_to_dict(row))
+    return {"ok": True, "count": len(out), "items": out}
+
+
+def summarize_policy_overrides(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: Optional[str] = None,
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    pha_name: Optional[str] = None,
+    jurisdiction_profile_id: int | None = None,
+) -> dict[str, Any]:
+    listing = list_policy_overrides(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        jurisdiction_profile_id=jurisdiction_profile_id,
+        include_inactive=False,
+    )
+    items = list(listing.get("items") or [])
+    critical = [row for row in items if bool(row.get("carrying_critical_rule"))]
+    review_required = [row for row in items if str(row.get("trust_impact") or "").strip().lower() in {"review_required", "reduced_confidence", "blocked"}]
+    return {
+        "count": len(items),
+        "items": items,
+        "critical_count": len(critical),
+        "critical_items": critical,
+        "review_required": bool(review_required),
+        "reduces_legal_confidence": bool(items),
+        "carrying_critical_override": bool(critical),
+        "reasons": [str(row.get("reason") or "").strip() for row in items if str(row.get("reason") or "").strip()],
+    }
+
+
+def create_policy_override(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    created_by_user_id: int | None,
+    jurisdiction_profile_id: int | None = None,
+    assertion_id: int | None = None,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    program_type: str | None = None,
+    override_scope: str = "jurisdiction",
+    override_type: str = "interim_operational_override",
+    rule_key: str | None = None,
+    rule_category: str | None = None,
+    severity: str = "medium",
+    carrying_critical_rule: bool = False,
+    trust_impact: str = "review_required",
+    reason: str = "",
+    linked_evidence: list[dict[str, Any]] | list[Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    expires_at: Any = None,
+) -> dict[str, Any]:
+    row = PolicyOverrideLedger(
+        org_id=org_id,
+        jurisdiction_profile_id=jurisdiction_profile_id,
+        assertion_id=assertion_id,
+        state=_norm_state(state) if state else None,
+        county=_norm_lower(county),
+        city=_norm_lower(city),
+        pha_name=_norm_text(pha_name),
+        program_type=_norm_text(program_type),
+        override_scope=_norm_text(override_scope) or "jurisdiction",
+        override_type=_norm_text(override_type) or "interim_operational_override",
+        rule_key=_norm_text(rule_key),
+        rule_category=normalize_category(rule_category) if rule_category else None,
+        severity=_norm_text(severity) or "medium",
+        is_active=True,
+        carrying_critical_rule=bool(carrying_critical_rule),
+        trust_impact=_norm_text(trust_impact) or "review_required",
+        reason=_norm_text(reason) or "Override reason required",
+        linked_evidence_json=_dumps_json(list(linked_evidence or [])),
+        metadata_json=_dumps_json(dict(metadata or {})),
+        created_by_user_id=created_by_user_id,
+        expires_at=_parse_datetime_value(expires_at),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"ok": True, "item": _override_to_dict(row)}
+
+
+def revoke_policy_override(
+    db: Session,
+    *,
+    override_id: int,
+    revoked_reason: str | None = None,
+    approved_by_user_id: int | None = None,
+) -> dict[str, Any]:
+    row = db.get(PolicyOverrideLedger, int(override_id))
+    if row is None:
+        return {"ok": False, "error": "policy_override_not_found"}
+    row.is_active = False
+    row.revoked_at = _utcnow()
+    row.revoked_reason = _norm_text(revoked_reason)
+    row.approved_by_user_id = approved_by_user_id or getattr(row, "approved_by_user_id", None)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"ok": True, "item": _override_to_dict(row)}

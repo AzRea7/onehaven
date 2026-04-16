@@ -524,3 +524,143 @@ def resolve_layered_rules(
         },
         "governed_assertions": governed,
     }
+
+# --- Story 4.2 additive governed truth overlays ---
+
+def assertion_governance_summary(assertion: PolicyAssertion) -> dict[str, Any]:
+    governance_state = (getattr(assertion, "governance_state", None) or "").strip().lower()
+    rule_status = (getattr(assertion, "rule_status", None) or "").strip().lower()
+    review_status = (getattr(assertion, "review_status", None) or "").strip().lower()
+    coverage_status = (getattr(assertion, "coverage_status", None) or "").strip().lower()
+    validation_state = (getattr(assertion, "validation_state", None) or "pending").strip().lower()
+    trust_state = (getattr(assertion, "trust_state", None) or "extracted").strip().lower()
+    superseded = getattr(assertion, "superseded_by_assertion_id", None) is not None
+    replaced = getattr(assertion, "replaced_by_assertion_id", None) is not None
+    is_current = bool(getattr(assertion, "is_current", False))
+    conflict_hints = _conflict_hints_for_assertion(assertion)
+    manual_review_required = review_status == "needs_manual_review" or validation_state == "conflicting" or bool(conflict_hints)
+
+    safe_for_projection = (
+        governance_state in SAFE_GOVERNANCE_STATES
+        and rule_status == "active"
+        and review_status == "verified"
+        and validation_state == "validated"
+        and trust_state in {"validated", "trusted"}
+        and coverage_status not in {"conflicting", "candidate", "partial", "inferred", "stale", "superseded"}
+        and not superseded
+        and not replaced
+        and not manual_review_required
+        and is_current
+    )
+
+    lifecycle_blockers: list[str] = []
+    if governance_state not in SAFE_GOVERNANCE_STATES:
+        lifecycle_blockers.append(f"governance_state={governance_state or 'unknown'}")
+    if rule_status != "active":
+        lifecycle_blockers.append(f"rule_status={rule_status or 'unknown'}")
+    if review_status != "verified":
+        lifecycle_blockers.append(f"review_status={review_status or 'unknown'}")
+    if validation_state != "validated":
+        lifecycle_blockers.append(f"validation_state={validation_state or 'unknown'}")
+    if trust_state not in {"validated", "trusted"}:
+        lifecycle_blockers.append(f"trust_state={trust_state or 'unknown'}")
+    if coverage_status in {"candidate", "partial", "inferred", "conflicting", "stale", "superseded"}:
+        lifecycle_blockers.append(f"coverage_status={coverage_status}")
+    if superseded:
+        lifecycle_blockers.append("superseded")
+    if replaced:
+        lifecycle_blockers.append("replaced")
+    if not is_current:
+        lifecycle_blockers.append("not_current")
+    if manual_review_required:
+        lifecycle_blockers.append("manual_review_required")
+    lifecycle_blockers.extend(conflict_hints)
+
+    return {
+        "assertion_id": int(getattr(assertion, "id", 0) or 0),
+        "rule_key": getattr(assertion, "rule_key", None),
+        "normalized_category": getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None),
+        "governance_state": governance_state,
+        "rule_status": rule_status,
+        "review_status": review_status,
+        "validation_state": validation_state,
+        "trust_state": trust_state,
+        "coverage_status": coverage_status,
+        "is_current": is_current,
+        "safe_for_projection": safe_for_projection,
+        "manual_review_required": manual_review_required,
+        "lifecycle_blockers": lifecycle_blockers,
+    }
+
+
+def governed_assertions_for_scope(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    pha_name: Optional[str] = None,
+) -> dict[str, Any]:
+    st = _norm_state(state)
+    cnty = _norm_rule_scope_value(county)
+    cty = _norm_rule_scope_value(city)
+    pha = (pha_name or "").strip() or None
+
+    assertions_q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
+    if org_id is None:
+        assertions_q = assertions_q.filter(PolicyAssertion.org_id.is_(None))
+    else:
+        assertions_q = assertions_q.filter(or_(PolicyAssertion.org_id == int(org_id), PolicyAssertion.org_id.is_(None)))
+
+    scoped: list[PolicyAssertion] = []
+    for a in assertions_q.all():
+        if getattr(a, "county", None) is not None and _norm_rule_scope_value(a.county) != cnty:
+            continue
+        if getattr(a, "city", None) is not None and _norm_rule_scope_value(a.city) != cty:
+            continue
+        if getattr(a, "pha_name", None) is not None and (a.pha_name or "").strip() != (pha or ""):
+            continue
+        scoped.append(a)
+
+    safe: list[PolicyAssertion] = []
+    partial: list[PolicyAssertion] = []
+    excluded: list[PolicyAssertion] = []
+    manual_review: list[PolicyAssertion] = []
+    summaries: list[dict[str, Any]] = []
+
+    for assertion in scoped:
+        summary = assertion_governance_summary(assertion)
+        summaries.append(summary)
+        if summary["manual_review_required"]:
+            manual_review.append(assertion)
+            excluded.append(assertion)
+        elif summary["safe_for_projection"]:
+            safe.append(assertion)
+        elif summary["governance_state"] == "approved" and summary["validation_state"] == "validated" and not summary["manual_review_required"]:
+            partial.append(assertion)
+        else:
+            excluded.append(assertion)
+
+    category_counts: dict[str, dict[str, int]] = {}
+    for row, bucket in [(a, "safe") for a in safe] + [(a, "partial") for a in partial] + [(a, "excluded") for a in excluded]:
+        category = getattr(row, "normalized_category", None) or getattr(row, "rule_category", None) or "uncategorized"
+        bucket_counts = category_counts.setdefault(category, {"safe": 0, "partial": 0, "excluded": 0})
+        bucket_counts[bucket] += 1
+
+    return {
+        "state": st,
+        "county": cnty,
+        "city": cty,
+        "pha_name": pha,
+        "safe_assertion_ids": [int(a.id) for a in safe if getattr(a, "id", None) is not None],
+        "partial_assertion_ids": [int(a.id) for a in partial if getattr(a, "id", None) is not None],
+        "excluded_assertion_ids": [int(a.id) for a in excluded if getattr(a, "id", None) is not None],
+        "manual_review_ids": [int(a.id) for a in manual_review if getattr(a, "id", None) is not None],
+        "safe_count": len(safe),
+        "partial_count": len(partial),
+        "excluded_count": len(excluded),
+        "manual_review_count": len(manual_review),
+        "category_counts": category_counts,
+        "assertion_summaries": summaries,
+    }

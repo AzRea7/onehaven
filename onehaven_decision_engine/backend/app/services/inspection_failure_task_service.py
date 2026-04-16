@@ -428,3 +428,36 @@ def create_tasks_from_photo_findings(
         "created_task_ids": created_task_ids,
         "rows": rows,
     }
+
+
+def create_proof_gap_tasks_from_projection(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    from ..services.policy_projection_service import build_property_projection_snapshot
+
+    snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
+    obligations = list(snapshot.get("proof_obligations") or ((snapshot.get("projection") or {}).get("proof_obligations") if isinstance(snapshot.get("projection"), dict) else []) or [])
+    created = []
+    for item in obligations:
+        status = str(item.get("proof_status") or "").strip().lower()
+        if status not in {"missing", "expired", "mismatched"}:
+            continue
+        title = f"Upload proof: {item.get('proof_label') or item.get('rule_key') or 'compliance evidence'}"
+        if _task_exists(db, org_id=org_id, property_id=property_id, title=title):
+            continue
+        task = RehabTask(
+            org_id=int(org_id),
+            property_id=int(property_id),
+            title=title,
+            category="compliance_proof",
+            status="todo",
+            notes=str(item.get("evidence_gap") or f"Resolve required proof for {item.get('rule_key')}"),
+            created_at=_now(),
+        )
+        if hasattr(task, "inspection_relevant"):
+            task.inspection_relevant = True
+        if hasattr(task, "priority"):
+            task.priority = "high" if bool(item.get("blocking")) else "med"
+        db.add(task)
+        db.flush()
+        created.append(int(getattr(task, "id", 0) or 0))
+    db.commit()
+    return {"created_count": len(created), "created_ids": created}

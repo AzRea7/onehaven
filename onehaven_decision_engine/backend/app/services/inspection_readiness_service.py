@@ -407,6 +407,18 @@ def compute_property_readiness_score(
     )
 
 
+
+
+def _projection_proof_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
+    projection = snapshot.get("projection") or {}
+    if not isinstance(projection, dict):
+        projection = {}
+    return {
+        "proof_obligations": list(snapshot.get("proof_obligations") or projection.get("proof_obligations") or []),
+        "proof_counts": dict(snapshot.get("proof_counts") or projection.get("proof_counts") or {}),
+    }
+
 def build_property_readiness_summary(
     db: Session,
     *,
@@ -424,6 +436,7 @@ def build_property_readiness_summary(
         property_id=property_id,
     )
     trust = jurisdiction_blocker.get("jurisdiction_trust") or _jurisdiction_trust_flags(db, org_id=org_id, property_id=property_id)
+    proof_summary = _projection_proof_summary(db, org_id=org_id, property_id=property_id)
 
     return {
         "ok": True,
@@ -468,6 +481,8 @@ def build_property_readiness_summary(
             "evidence_stale_count": score.evidence_stale_count,
         },
         "jurisdiction_trust": trust,
+        "proof_obligations": proof_summary.get("proof_obligations") or [],
+        "proof_counts": proof_summary.get("proof_counts") or {},
         "jurisdiction_blocker": jurisdiction_blocker,
         "trust_blocked": bool(jurisdiction_blocker.get("blocking")),
         "trust_blocked_reason": jurisdiction_blocker.get("blocked_reason"),

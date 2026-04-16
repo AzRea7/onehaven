@@ -102,6 +102,115 @@ RULE_CATEGORY_COST_DEFAULTS: dict[str, float] = {
     "other": 150.0,
 }
 
+
+
+PROPERTY_PROOF_RULE_MAP: dict[str, dict[str, Any]] = {
+    "rental_registration_required": {"proof_key": "registration_certificate", "label": "Registration certificate", "document_categories": ["registration_certificate", "local_jurisdiction_document"], "required_status": "verified", "category": "registration"},
+    "inspection_required": {"proof_key": "inspection_pass", "label": "Inspection pass evidence", "document_categories": ["inspection_report", "pass_certificate", "reinspection_notice"], "required_status": "verified", "category": "inspection"},
+    "pass_inspection_required": {"proof_key": "inspection_pass", "label": "Inspection pass evidence", "document_categories": ["inspection_report", "pass_certificate"], "required_status": "verified", "category": "inspection"},
+    "certificate_required_before_occupancy": {"proof_key": "certificate_before_occupancy", "label": "Certificate before occupancy", "document_categories": ["certificate_of_occupancy", "certificate_of_compliance", "pass_certificate", "approval_letter"], "required_status": "verified", "category": "occupancy"},
+    "certificate_of_occupancy_required": {"proof_key": "certificate_before_occupancy", "label": "Certificate of occupancy", "document_categories": ["certificate_of_occupancy", "approval_letter"], "required_status": "verified", "category": "occupancy"},
+    "certificate_of_compliance_required": {"proof_key": "certificate_before_occupancy", "label": "Certificate of compliance", "document_categories": ["certificate_of_compliance", "approval_letter"], "required_status": "verified", "category": "occupancy"},
+    "lead_based_paint_paperwork_required": {"proof_key": "lead_docs", "label": "Lead documentation", "document_categories": ["lead_based_paint_paperwork", "lead_clearance_doc"], "required_status": "verified", "category": "safety"},
+    "lead_clearance_required": {"proof_key": "lead_docs", "label": "Lead clearance", "document_categories": ["lead_clearance_doc", "lead_based_paint_paperwork"], "required_status": "verified", "category": "safety"},
+    "hap_contract_and_tenancy_addendum_required": {"proof_key": "voucher_packet", "label": "Voucher packet", "document_categories": ["voucher_packet", "approval_letter"], "required_status": "verified", "category": "program_overlay"},
+    "pha_landlord_packet_required": {"proof_key": "voucher_packet", "label": "Landlord voucher packet", "document_categories": ["voucher_packet", "approval_letter"], "required_status": "verified", "category": "program_overlay"},
+    "local_contact_required": {"proof_key": "local_contact_proof", "label": "Local contact proof", "document_categories": ["local_contact_proof", "local_jurisdiction_document"], "required_status": "verified", "category": "contacts"},
+}
+
+def _property_proof_definition(rule_key: str, rule_category: str | None = None) -> dict[str, Any] | None:
+    definition = PROPERTY_PROOF_RULE_MAP.get(str(rule_key or '').strip())
+    if definition:
+        return dict(definition)
+    cat = str(rule_category or '').strip().lower()
+    fallback = {
+        'registration': {"proof_key": "registration_certificate", "label": "Registration certificate", "document_categories": ["registration_certificate", "local_jurisdiction_document"], "required_status": "verified", "category": "registration"},
+        'inspection': {"proof_key": "inspection_pass", "label": "Inspection pass evidence", "document_categories": ["inspection_report", "pass_certificate", "reinspection_notice"], "required_status": "verified", "category": "inspection"},
+        'occupancy': {"proof_key": "certificate_before_occupancy", "label": "Certificate before occupancy", "document_categories": ["certificate_of_occupancy", "certificate_of_compliance", "approval_letter"], "required_status": "verified", "category": "occupancy"},
+        'lead': {"proof_key": "lead_docs", "label": "Lead documentation", "document_categories": ["lead_based_paint_paperwork", "lead_clearance_doc"], "required_status": "verified", "category": "lead"},
+        'program_overlay': {"proof_key": "voucher_packet", "label": "Voucher packet", "document_categories": ["voucher_packet", "approval_letter"], "required_status": "verified", "category": "program_overlay"},
+        'section8': {"proof_key": "voucher_packet", "label": "Voucher packet", "document_categories": ["voucher_packet", "approval_letter"], "required_status": "verified", "category": "section8"},
+        'contacts': {"proof_key": "local_contact_proof", "label": "Local contact proof", "document_categories": ["local_contact_proof", "local_jurisdiction_document"], "required_status": "verified", "category": "contacts"},
+    }
+    return dict(fallback.get(cat) or {}) or None
+
+def _determine_property_proof_state(*, item: dict[str, Any], evidence_rows: list[Any]) -> tuple[str, str | None]:
+    proof_state = str(item.get('proof_state') or item.get('evidence_status') or '').strip().lower()
+    if proof_state in {'verified','uploaded','expired','mismatched','missing'}:
+        gap = item.get('evidence_gap')
+        return proof_state, (str(gap).strip() if gap else None)
+    eval_status = str(item.get('evaluation_status') or '').strip().lower()
+    if eval_status in {'pass','verified','satisfied'}:
+        return 'verified', None
+    if eval_status in {'stale','expired'}:
+        return 'expired', str(item.get('evidence_gap') or 'Proof is stale or expired.')
+    if eval_status in {'conflicting','mismatch'}:
+        return 'mismatched', str(item.get('evidence_gap') or 'Uploaded proof does not match current rule requirement.')
+    if evidence_rows:
+        return 'uploaded', str(item.get('evidence_gap') or '') or None
+    return 'missing', str(item.get('evidence_gap') or 'Required proof has not been uploaded.')
+
+def build_property_proof_obligations(db: Session, *, org_id: int | None, property_id: int | None = None, property: Any | None = None, state: str | None = None, county: str | None = None, city: str | None = None, pha_name: str | None = None) -> dict[str, Any]:
+    scope = _build_property_scope(db, org_id=org_id, property_id=property_id, property=property, state=state, county=county, city=city, pha_name=pha_name)
+    assertions = _query_inherited_assertions(db, org_id=org_id, state=scope.state, county=scope.county, city=scope.city, pha_name=scope.pha_name)
+    merged = _merge_effective_assertions(assertions)
+    evidence_rows = _evidence_rows(db, org_id=int(org_id), property_id=int(scope.property_id)) if org_id is not None and scope.property_id is not None else []
+    by_category = {}
+    for ev in evidence_rows:
+        by_category.setdefault(str(getattr(ev,'evidence_type',None) or getattr(ev,'document_category',None) or getattr(ev,'category',None) or '').strip().lower(), []).append(ev)
+    obligations=[]
+    counts={"missing":0,"uploaded":0,"expired":0,"mismatched":0,"verified":0}
+    blockers=[]
+    for rule_key,row in merged.items():
+        if not _is_effective_assertion(row):
+            continue
+        value_state = _rule_value_state(row)
+        if value_state not in {'yes','conditional'}:
+            continue
+        proof_def=_property_proof_definition(rule_key, _category_for_assertion(row))
+        if not proof_def:
+            continue
+        candidate_rows=[]
+        for cat in proof_def.get('document_categories') or []:
+            candidate_rows.extend(by_category.get(str(cat).strip().lower(), []))
+        item={"evaluation_status": 'pass' if bool(candidate_rows) else 'fail', "proof_state": None, "evidence_status": None, "evidence_gap": None}
+        proof_state, gap = _determine_property_proof_state(item=item, evidence_rows=candidate_rows)
+        if candidate_rows and proof_state == 'uploaded':
+            proof_state='uploaded'
+        elif candidate_rows and proof_state == 'missing':
+            proof_state='uploaded'
+            gap=None
+        if proof_state=='verified' and not candidate_rows:
+            proof_state='missing'
+        counts[proof_state]=counts.get(proof_state,0)+1
+        obligation={
+            'rule_key': rule_key,
+            'rule_category': _category_for_assertion(row),
+            'proof_key': proof_def.get('proof_key'),
+            'proof_label': proof_def.get('label'),
+            'document_categories': list(proof_def.get('document_categories') or []),
+            'required_status': proof_def.get('required_status') or 'verified',
+            'proof_status': proof_state,
+            'blocking': bool(getattr(row,'blocking',False)) or _category_for_assertion(row) in {'registration','inspection','occupancy','lead','program_overlay','section8'},
+            'evidence_gap': gap,
+            'matched_document_count': len(candidate_rows),
+            'matched_evidence_ids': [int(getattr(ev,'id')) for ev in candidate_rows if getattr(ev,'id',None) is not None],
+            'source_assertion_id': int(getattr(row,'id',0) or 0),
+            'source_level': getattr(row,'source_level',None),
+            'confidence': float(getattr(row,'confidence',0.0) or 0.0),
+        }
+        obligations.append(obligation)
+        if obligation['blocking'] and proof_state != 'verified':
+            blockers.append(obligation)
+    return {
+        'property_id': int(scope.property_id) if scope.property_id is not None else None,
+        'scope': {'state': scope.state, 'county': scope.county, 'city': scope.city, 'pha_name': scope.pha_name},
+        'required_proofs': obligations,
+        'counts': counts,
+        'blocking_proofs': blockers,
+    }
+
+
 RULE_CATEGORY_DAYS_DEFAULTS: dict[str, int] = {
     "registration": 7,
     "inspection": 10,
@@ -1238,6 +1347,11 @@ def sync_document_evidence_for_property(
         )
 
     db.commit()
+    product_safety = _property_product_safety_payload(
+        projection_reason=((projection_snapshot or {}).get("projection") or {}).get("projection_reason") if projection_snapshot else {},
+        proof_obligations=((projection_snapshot or {}).get("proof_obligations") or build_property_proof_obligations(db, org_id=org_id, property_id=scope.property_id, property=property, state=scope.state, county=scope.county, city=scope.city, pha_name=scope.pha_name).get("required_proofs", [])),
+    )
+
     return {
         "ok": True,
         "property_id": int(property_id),
@@ -2266,6 +2380,43 @@ def rebuild_property_projection(
     return build_property_projection_snapshot(db, org_id=org_id, property_id=property_id, projection=projection)
 
 
+
+
+
+def _property_product_safety_payload(*, projection_reason: dict[str, Any] | None, proof_obligations: list[dict[str, Any]] | None) -> dict[str, Any]:
+    reason = projection_reason if isinstance(projection_reason, dict) else {}
+    trust = reason.get("jurisdiction_trust") if isinstance(reason.get("jurisdiction_trust"), dict) else {}
+    proof_rows = list(proof_obligations or [])
+    lockout_active = bool(trust.get("lockout_active") or trust.get("jurisdiction_lockout_active"))
+    safe_for_projection = bool(trust.get("safe_for_projection", False))
+    safe_for_user_reliance = bool(trust.get("safe_for_user_reliance", False))
+    proof_blockers = [
+        row for row in proof_rows
+        if bool(row.get("blocking")) and str(row.get("proof_status") or "").strip().lower() in {"missing", "expired", "mismatched"}
+    ]
+    info_gaps = [
+        row for row in proof_rows
+        if str(row.get("proof_status") or "").strip().lower() in {"missing", "expired", "mismatched"} and not bool(row.get("blocking"))
+    ]
+    unsafe_reasons: list[str] = []
+    unsafe_reasons.extend([str(x) for x in (trust.get("blocker_reasons") or []) if str(x).strip()])
+    unsafe_reasons.extend([str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()])
+    for row in proof_blockers:
+        unsafe_reasons.append(str(row.get("evidence_gap") or f"{row.get('proof_label') or row.get('rule_key') or 'Required proof'} is {row.get('proof_status') or 'missing'}."))
+    informational_reasons = [str(row.get("evidence_gap") or f"{row.get('proof_label') or row.get('rule_key') or 'Required proof'} is {row.get('proof_status') or 'missing'}." ) for row in info_gaps]
+    legally_unsafe = bool(lockout_active or not safe_for_projection or proof_blockers)
+    informationally_incomplete = bool((not legally_unsafe) and (informational_reasons or not safe_for_user_reliance))
+    safe_to_rely_on = bool((not legally_unsafe) and safe_for_user_reliance and not proof_blockers)
+    return {
+        "lockout_active": lockout_active,
+        "safe_for_projection": safe_for_projection,
+        "safe_for_user_reliance": safe_for_user_reliance,
+        "safe_to_rely_on": safe_to_rely_on,
+        "legally_unsafe": legally_unsafe,
+        "informationally_incomplete": informationally_incomplete,
+        "unsafe_reasons": unsafe_reasons,
+        "informational_reasons": informational_reasons,
+    }
 def build_property_projection_snapshot(
     db: Session,
     *,
@@ -2285,7 +2436,12 @@ def build_property_projection_snapshot(
             "counts": {"blocking": 0, "unknown": 0, "stale": 0, "conflicting": 0},
             "evidence_summary": {"count": 0, "linked_documents": 0, "inspection_links": 0},
             "blockers": [],
-            "jurisdiction": (_loads(row.projection_reason_json, {}) or {}).get("jurisdiction_trust", {}),
+            "jurisdiction": {},
+            "safe_to_rely_on": False,
+            "legally_unsafe": False,
+            "informationally_incomplete": True,
+            "unsafe_reasons": ["Compliance projection has not been built yet."],
+            "informational_reasons": [],
         }
 
     items = _current_projection_items(db, org_id=org_id, property_id=property_id, projection_id=int(row.id))
@@ -2303,6 +2459,12 @@ def build_property_projection_snapshot(
         for item in items
         if item.evaluation_status in {"fail", "blocked", "conflicting", "stale"} and bool(item.blocking)
     ]
+
+    proof_payload = build_property_proof_obligations(db, org_id=org_id, property_id=property_id)
+    product_safety = _property_product_safety_payload(
+        projection_reason=_loads(row.projection_reason_json, {}),
+        proof_obligations=proof_payload.get("required_proofs", []),
+    )
 
     return {
         "ok": True,
@@ -2330,6 +2492,13 @@ def build_property_projection_snapshot(
             "projection_reason": _loads(row.projection_reason_json, {}),
             "jurisdiction": (_loads(row.projection_reason_json, {}) or {}).get("jurisdiction_trust", {}),
             "jurisdiction_penalties": (_loads(row.projection_reason_json, {}) or {}).get("jurisdiction_penalties", {}),
+            "proof_obligations": proof_payload.get("required_proofs", []),
+            "proof_counts": proof_payload.get("counts", {}),
+            "safe_to_rely_on": product_safety.get("safe_to_rely_on"),
+            "legally_unsafe": product_safety.get("legally_unsafe"),
+            "informationally_incomplete": product_safety.get("informationally_incomplete"),
+            "unsafe_reasons": product_safety.get("unsafe_reasons") or [],
+            "informational_reasons": product_safety.get("informational_reasons") or [],
             "rules_effective_at": row.rules_effective_at,
             "last_rule_change_at": row.last_rule_change_at,
             "last_projected_at": row.last_projected_at,
@@ -2444,7 +2613,13 @@ def build_property_projection_snapshot(
             "failing": sum(1 for e in evidence if str(getattr(e, "evidence_status", "") or "").lower() in FAILING_EVIDENCE),
         },
         "blockers": blockers,
-        
+        "proof_obligations": proof_payload.get("required_proofs", []),
+        "proof_counts": proof_payload.get("counts", {}),
+        "safe_to_rely_on": product_safety.get("safe_to_rely_on"),
+        "legally_unsafe": product_safety.get("legally_unsafe"),
+        "informationally_incomplete": product_safety.get("informationally_incomplete"),
+        "unsafe_reasons": product_safety.get("unsafe_reasons") or [],
+        "informational_reasons": product_safety.get("informational_reasons") or [],
     }
 
 
@@ -2527,6 +2702,8 @@ def build_property_compliance_brief(
         "verified_rules": summary.get("verified_rules") or [],
         "required_actions": summary.get("required_actions") or [],
         "blocking_items": deduped_blockers,
+        "proof_obligations": (projection_snapshot or {}).get("proof_obligations") or build_property_proof_obligations(db, org_id=org_id, property_id=scope.property_id, property=property, state=scope.state, county=scope.county, city=scope.city, pha_name=scope.pha_name).get("required_proofs", []),
+        "proof_counts": (projection_snapshot or {}).get("proof_counts") or build_property_proof_obligations(db, org_id=org_id, property_id=scope.property_id, property=property, state=scope.state, county=scope.county, city=scope.city, pha_name=scope.pha_name).get("counts", {}),
         "evidence_links": summary.get("evidence_links") or [],
         "projection": projection_snapshot.get("projection") if projection_snapshot else None,
         "projection_counts": projection_snapshot.get("counts") if projection_snapshot else None,

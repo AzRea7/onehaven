@@ -75,6 +75,10 @@ class JurisdictionCategoryAssessment:
     authority_score: float
     governance_score: float
     freshness_score: float
+    stale_source_count: int
+    authoritative_stale_source_count: int
+    legal_stale: bool
+    informational_stale: bool
     conflict_count: int
     inferred: bool
     stale: bool
@@ -105,6 +109,10 @@ class JurisdictionScoreBreakdown:
     category_statuses: dict[str, str]
     covered_categories: list[str]
     stale_categories: list[str]
+    legal_stale_categories: list[str]
+    informational_stale_categories: list[str]
+    critical_stale_categories: list[str]
+    stale_authoritative_categories: list[str]
     inferred_categories: list[str]
     conflicting_categories: list[str]
     missing_categories: list[str]
@@ -129,6 +137,9 @@ class JurisdictionTrustDecision:
     missing_required_categories: list[str]
     stale_categories: list[str]
     stale_authoritative_categories: list[str]
+    legal_stale_categories: list[str]
+    critical_legal_stale_categories: list[str]
+    informational_stale_categories: list[str]
     conflicting_categories: list[str]
     inferred_categories: list[str]
     inferred_critical_categories: list[str]
@@ -262,6 +273,15 @@ def _assertion_category(assertion: PolicyAssertion) -> str | None:
     return None if fallback == CATEGORY_UNCATEGORIZED else fallback
 
 
+
+
+def _assertion_is_validation_trusted(assertion: PolicyAssertion) -> bool:
+    validation_state = (getattr(assertion, "validation_state", None) or "pending").strip().lower()
+    trust_state = (getattr(assertion, "trust_state", None) or "extracted").strip().lower()
+    if validation_state != "validated":
+        return False
+    return trust_state in {"validated", "trusted"}
+
 def _collect_source_rows_for_scope(
     db: Session, *, state: str | None, county: str | None, city: str | None
 ) -> list[PolicySource]:
@@ -304,7 +324,7 @@ def _collect_covered_categories_from_assertions(
             "candidate",
             "conditional",
             "inferred",
-        }:
+        } and _assertion_is_validation_trusted(row):
             categories.append(category)
     return normalize_categories(categories)
 
@@ -377,6 +397,38 @@ def _source_freshness_score(source: PolicySource, *, stale_days: int) -> float:
     if freshness_status in {"aging", "warning", "needs_refresh"}:
         return 0.5
     return 0.75
+
+
+
+def _category_freshness_snapshot(
+    source: PolicySource,
+    *,
+    category: str,
+    stale_days: int,
+) -> dict[str, Any]:
+    category = normalize_category(category) or str(category or '').strip().lower()
+    try:
+        from app.services.jurisdiction_sla_service import (
+            category_stale_kind_for_source,
+            source_category_due_at,
+            source_category_is_past_sla,
+        )
+
+        due_at = source_category_due_at(source, category=category)
+        is_stale = source_category_is_past_sla(source, category=category)
+        stale_kind = category_stale_kind_for_source(source, category=category)
+    except Exception:
+        due_at = None
+        is_stale = _source_is_stale(source, stale_days=stale_days)
+        stale_kind = 'legal' if category in set(get_critical_categories(state=None, county=None, city=None, pha_name=None, include_section8=True, tenant_waitlist_depth=None)) else 'informational'
+    freshness_score = 0.0 if is_stale else _source_freshness_score(source, stale_days=stale_days)
+    return {
+        'category': category,
+        'due_at': due_at,
+        'is_stale': bool(is_stale),
+        'stale_kind': stale_kind,
+        'freshness_score': float(freshness_score),
+    }
 
 
 def _assertion_is_governed(assertion: PolicyAssertion) -> bool:
@@ -511,120 +563,105 @@ def build_category_assessments(
 
     source_rows = _collect_source_rows_for_scope(db, state=state, county=county, city=city)
     assertion_rows = _collect_assertion_rows_for_scope(db, state=state, county=county, city=city)
+    critical_categories = set(get_critical_categories(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    ))
 
     assessments: dict[str, JurisdictionCategoryAssessment] = {}
     for category in required:
         category_sources = [row for row in source_rows if category in _source_categories(row)]
-        category_assertions = [
-            row for row in assertion_rows if _assertion_category(row) == category
-        ]
+        category_assertions = [row for row in assertion_rows if _assertion_category(row) == category]
+        freshness_rows = [_category_freshness_snapshot(row, category=category, stale_days=stale_days) for row in category_sources]
+        stale_rows = [snap for snap in freshness_rows if snap['is_stale']]
+        legal_stale_rows = [snap for snap in stale_rows if snap['stale_kind'] == 'legal']
+        info_stale_rows = [snap for snap in stale_rows if snap['stale_kind'] != 'legal']
 
         source_count = len(category_sources)
-        authoritative_source_count = sum(
-            1 for row in category_sources if bool(getattr(row, "is_authoritative", False))
+        authoritative_source_count = sum(1 for row in category_sources if bool(getattr(row, 'is_authoritative', False)))
+        authoritative_stale_source_count = sum(
+            1
+            for row, snap in zip(category_sources, freshness_rows)
+            if bool(getattr(row, 'is_authoritative', False)) and snap['is_stale']
         )
         assertion_count = len(category_assertions)
-        governed_assertion_count = sum(
-            1 for row in category_assertions if _assertion_is_governed(row)
-        )
-        citation_count = sum(
-            1 for row in category_assertions if _assertion_citation_quality(row) > 0.0
-        )
+        governed_assertion_count = sum(1 for row in category_assertions if _assertion_is_governed(row) and _assertion_is_validation_trusted(row))
+        citation_count = sum(1 for row in category_assertions if _assertion_citation_quality(row) > 0.0)
         authority_score = round(
-            (
-                sum(_source_authority_score(row) for row in category_sources)
-                / float(max(1, len(category_sources)))
-            ),
+            sum(_source_authority_score(row) for row in category_sources) / float(max(1, len(category_sources))),
             6,
         ) if category_sources else 0.0
         freshness_score = round(
-            (
-                sum(_source_freshness_score(row, stale_days=stale_days) for row in category_sources)
-                / float(max(1, len(category_sources)))
-            ),
+            sum(float(snap['freshness_score']) for snap in freshness_rows) / float(max(1, len(category_sources))),
             6,
         ) if category_sources else 0.0
         governance_score = round(
-            (
-                sum(_assertion_governance_score(row) for row in category_assertions)
-                / float(max(1, len(category_assertions)))
-            ),
+            sum(_assertion_governance_score(row) for row in category_assertions) / float(max(1, len(category_assertions))),
             6,
         ) if category_assertions else 0.0
         extraction_score = round(
-            (
-                sum(_assertion_citation_quality(row) for row in category_assertions)
-                / float(max(1, len(category_assertions)))
-            ),
+            sum(_assertion_citation_quality(row) for row in category_assertions) / float(max(1, len(category_assertions))),
             6,
         ) if category_assertions else 0.0
         conflict_count = sum(_assertion_conflict_count(row) for row in category_assertions)
-        latest_verified_at = max(
-            [ts for ts in [_source_timestamp(row) for row in category_sources] if ts is not None],
-            default=None,
-        )
+        latest_verified_at = max([ts for ts in [_source_timestamp(row) for row in category_sources] if ts is not None], default=None)
 
         missing = source_count == 0 and assertion_count == 0
         undiscovered = missing
         conflicting = conflict_count > 0
-        stale = (not missing) and freshness_score < thresholds.get("freshness", 0.60)
-        inferred = (
-            not missing
-            and governed_assertion_count <= 0
-            and assertion_count > 0
-            and not conflicting
-            and not stale
-        )
-        authority_expectation = _authority_expectation_for_category(
-            category,
-            expected_universe=universe,
-        )
-        authority_unmet = (not missing) and (not conflicting) and (not stale) and not _authority_requirement_met(
+        legal_stale = bool(legal_stale_rows)
+        informational_stale = bool(info_stale_rows)
+        stale = (not missing) and bool(stale_rows)
+        inferred = not missing and governed_assertion_count <= 0 and assertion_count > 0 and not conflicting and not stale
+        authority_expectation = _authority_expectation_for_category(category, expected_universe=universe)
+        authority_unmet = (not missing) and (not conflicting) and (not legal_stale) and not _authority_requirement_met(
             authority_expectation=authority_expectation,
             authoritative_source_count=authoritative_source_count,
             authority_score=authority_score,
         )
         weak_support = (
-            not missing
-            and not conflicting
-            and not stale
-            and not inferred
-            and (
+            not missing and not conflicting and not legal_stale and not inferred and (
                 governed_assertion_count <= 0
                 or citation_count <= 0
-                or extraction_score < thresholds.get("citation_quality", 0.55)
-                or governance_score < thresholds.get("governance_quality", 0.70)
+                or extraction_score < thresholds.get('citation_quality', 0.55)
+                or governance_score < thresholds.get('governance_quality', 0.70)
             )
         )
 
         unmet_reasons: list[str] = []
         if undiscovered:
-            unmet_reasons.append("undiscovered")
-        if stale:
-            unmet_reasons.append("stale")
+            unmet_reasons.append('undiscovered')
+        if legal_stale:
+            unmet_reasons.append('legal_stale')
+        elif informational_stale:
+            unmet_reasons.append('informational_stale')
         if conflicting:
-            unmet_reasons.append("conflicting")
+            unmet_reasons.append('conflicting')
         if inferred:
-            unmet_reasons.append("inferred")
+            unmet_reasons.append('inferred')
         if authority_unmet:
-            unmet_reasons.append("required_authority_not_met")
+            unmet_reasons.append('required_authority_not_met')
         if weak_support:
-            unmet_reasons.append("weak_support")
+            unmet_reasons.append('weak_support')
 
         if missing:
-            status = "missing"
+            status = 'missing'
         elif conflicting:
-            status = "conflicting"
-        elif stale:
-            status = "stale"
+            status = 'conflicting'
+        elif legal_stale or informational_stale:
+            status = 'stale'
         elif inferred:
-            status = "inferred"
+            status = 'inferred'
         elif authority_unmet or weak_support:
-            status = "partial"
-        elif governed_assertion_count > 0 or authority_score >= thresholds.get("authoritative_source", 0.65):
-            status = "covered"
+            status = 'partial'
+        elif governed_assertion_count > 0 or authority_score >= thresholds.get('authoritative_source', 0.65):
+            status = 'covered'
         else:
-            status = "partial"
+            status = 'partial'
 
         confidence_score = compute_category_score_from_statuses(
             required_categories=[category],
@@ -644,6 +681,10 @@ def build_category_assessments(
             authority_score=authority_score,
             governance_score=governance_score,
             freshness_score=freshness_score,
+            stale_source_count=len(stale_rows),
+            authoritative_stale_source_count=authoritative_stale_source_count,
+            legal_stale=legal_stale,
+            informational_stale=informational_stale,
             conflict_count=conflict_count,
             inferred=inferred,
             stale=stale,
@@ -656,14 +697,11 @@ def build_category_assessments(
             unmet_reasons=unmet_reasons,
             authority_expectation=authority_expectation,
             latest_verified_at=latest_verified_at,
-            source_ids=[int(row.id) for row in category_sources if getattr(row, "id", None) is not None],
-            assertion_ids=[
-                int(row.id) for row in category_assertions if getattr(row, "id", None) is not None
-            ],
+            source_ids=[int(row.id) for row in category_sources if getattr(row, 'id', None) is not None],
+            assertion_ids=[int(row.id) for row in category_assertions if getattr(row, 'id', None) is not None],
         )
 
     return assessments
-
 
 def compute_jurisdiction_score_breakdown(
     *,
@@ -677,17 +715,21 @@ def compute_jurisdiction_score_breakdown(
     if not required:
         return JurisdictionScoreBreakdown(
             overall_completeness=0.0,
-            completeness_status="missing",
+            completeness_status='missing',
             coverage_subscore=0.0,
             freshness_subscore=0.0,
             authority_subscore=0.0,
             extraction_subscore=0.0,
             governance_subscore=0.0,
             conflict_penalty=0.0,
-            confidence_label="low",
+            confidence_label='low',
             category_statuses={},
             covered_categories=[],
             stale_categories=[],
+            legal_stale_categories=[],
+            informational_stale_categories=[],
+            critical_stale_categories=[],
+            stale_authoritative_categories=[],
             inferred_categories=[],
             conflicting_categories=[],
             missing_categories=[],
@@ -697,134 +739,90 @@ def compute_jurisdiction_score_breakdown(
             unmet_categories=[],
             category_unmet_reasons={},
             category_details={},
-            scoring_defaults={"weights": weights, "thresholds": thresholds},
+            scoring_defaults={'weights': weights, 'thresholds': thresholds},
         )
 
-    category_statuses = {
-        category: (
-            category_assessments.get(category).status
-            if category in category_assessments
-            else "missing"
-        )
-        for category in required
-    }
-
-    covered_categories = [
-        c for c in required if category_statuses.get(c) in {"covered", "partial"}
-    ]
-    stale_categories = [c for c in required if category_statuses.get(c) == "stale"]
-    inferred_categories = [c for c in required if category_statuses.get(c) == "inferred"]
-    conflicting_categories = [c for c in required if category_statuses.get(c) == "conflicting"]
-    missing_categories = [c for c in required if category_statuses.get(c) == "missing"]
-
+    category_statuses = {category: (category_assessments.get(category).status if category in category_assessments else 'missing') for category in required}
     assessments = [category_assessments.get(category) for category in required if category in category_assessments]
+
+    covered_categories = [c for c in required if category_statuses.get(c) in {'covered', 'partial'}]
+    stale_categories = [c for c in required if c in category_assessments and category_assessments[c].stale]
+    legal_stale_categories = [c for c in required if c in category_assessments and category_assessments[c].legal_stale]
+    informational_stale_categories = [c for c in required if c in category_assessments and category_assessments[c].informational_stale]
+    critical_stale_categories = [c for c in required if c in category_assessments and category_assessments[c].legal_stale]
+    stale_authoritative_categories = [c for c in required if c in category_assessments and int(category_assessments[c].authoritative_stale_source_count or 0) > 0]
+    inferred_categories = [c for c in required if category_statuses.get(c) == 'inferred']
+    conflicting_categories = [c for c in required if category_statuses.get(c) == 'conflicting']
+    missing_categories = [c for c in required if category_statuses.get(c) == 'missing']
     undiscovered_categories = [c for c in required if c in category_assessments and category_assessments[c].undiscovered]
     weak_support_categories = [c for c in required if c in category_assessments and category_assessments[c].weak_support]
     authority_unmet_categories = [c for c in required if c in category_assessments and category_assessments[c].authority_unmet]
-    unmet_categories = [
-        c
-        for c in required
-        if c in category_assessments and category_assessments[c].unmet_reasons
-    ]
-    category_unmet_reasons = {
-        c: list(category_assessments[c].unmet_reasons)
-        for c in required
-        if c in category_assessments and category_assessments[c].unmet_reasons
-    }
+    unmet_categories = [c for c in required if c in category_assessments and category_assessments[c].unmet_reasons]
+    category_unmet_reasons = {c: list(category_assessments[c].unmet_reasons) for c in required if c in category_assessments and category_assessments[c].unmet_reasons}
 
     coverage_subscore = round(len(covered_categories) / max(1, len(required)), 6)
-    freshness_subscore = round(
-        sum(a.freshness_score for a in assessments if a is not None) / float(max(1, len(required))),
-        6,
-    )
-    authority_subscore = round(
-        sum(a.authority_score for a in assessments if a is not None) / float(max(1, len(required))),
-        6,
-    )
-    extraction_subscore = round(
-        sum(a.extraction_score for a in assessments if a is not None) / float(max(1, len(required))),
-        6,
-    )
-    governance_subscore = round(
-        sum(a.governance_score for a in assessments if a is not None) / float(max(1, len(required))),
-        6,
-    )
-    conflict_penalty = round(
-        min(
-            0.40,
-            sum(
-                0.10 if a.conflicting else 0.0
-                for a in assessments
-                if a is not None
-            ),
-        ),
-        6,
-    )
+    freshness_subscore = round(sum(a.freshness_score for a in assessments if a is not None) / float(max(1, len(required))), 6)
+    authority_subscore = round(sum(a.authority_score for a in assessments if a is not None) / float(max(1, len(required))), 6)
+    extraction_subscore = round(sum(a.extraction_score for a in assessments if a is not None) / float(max(1, len(required))), 6)
+    governance_subscore = round(sum(a.governance_score for a in assessments if a is not None) / float(max(1, len(required))), 6)
+    conflict_penalty = round(min(0.40, sum(0.10 if a.conflicting else 0.0 for a in assessments if a is not None)), 6)
+    legal_stale_penalty = round(min(0.35, 0.08 * len(legal_stale_categories)), 6)
+    informational_stale_penalty = round(min(0.15, 0.03 * len(informational_stale_categories)), 6)
 
-    overall = round(
-        max(
-            0.0,
-            min(
-                1.0,
-                (
-                    (weights["coverage"] * coverage_subscore)
-                    + (weights["freshness"] * freshness_subscore)
-                    + (weights["authority"] * authority_subscore)
-                    + (weights["extraction"] * extraction_subscore)
-                    + (weights["governance"] * governance_subscore)
-                    - conflict_penalty
-                ),
-            ),
-        ),
-        6,
-    )
+    overall = round(max(0.0, min(1.0, ((weights['coverage'] * coverage_subscore) + (weights['freshness'] * freshness_subscore) + (weights['authority'] * authority_subscore) + (weights['extraction'] * extraction_subscore) + (weights['governance'] * governance_subscore) - conflict_penalty - legal_stale_penalty - informational_stale_penalty))), 6)
 
     if conflicting_categories:
-        completeness_status = "conflicting"
-    elif stale_categories:
-        completeness_status = "stale"
+        completeness_status = 'conflicting'
+    elif legal_stale_categories or informational_stale_categories:
+        completeness_status = 'stale'
     elif missing_categories and covered_categories:
-        completeness_status = "partial"
+        completeness_status = 'partial'
     elif missing_categories:
-        completeness_status = "missing"
+        completeness_status = 'missing'
     elif inferred_categories:
-        completeness_status = "partial"
+        completeness_status = 'partial'
     else:
-        completeness_status = "complete"
+        completeness_status = 'complete'
 
-    category_details = {
-        category: {
-            "status": assessment.status,
-            "source_count": assessment.source_count,
-            "authoritative_source_count": assessment.authoritative_source_count,
-            "assertion_count": assessment.assertion_count,
-            "governed_assertion_count": assessment.governed_assertion_count,
-            "citation_count": assessment.citation_count,
-            "confidence_score": assessment.confidence_score,
-            "extraction_score": assessment.extraction_score,
-            "authority_score": assessment.authority_score,
-            "governance_score": assessment.governance_score,
-            "freshness_score": assessment.freshness_score,
-            "conflict_count": assessment.conflict_count,
-            "inferred": assessment.inferred,
-            "stale": assessment.stale,
-            "conflicting": assessment.conflicting,
-            "missing": assessment.missing,
-            "undiscovered": assessment.undiscovered,
-            "weak_support": assessment.weak_support,
-            "authority_unmet": assessment.authority_unmet,
-            "unmet_reason": assessment.unmet_reason,
-            "unmet_reasons": assessment.unmet_reasons,
-            "authority_expectation": assessment.authority_expectation,
-            "latest_verified_at": assessment.latest_verified_at.isoformat()
-            if assessment.latest_verified_at
-            else None,
-            "source_ids": assessment.source_ids,
-            "assertion_ids": assessment.assertion_ids,
+    category_details = {}
+    for category, assessment in category_assessments.items():
+        if category not in set(required):
+            continue
+        category_details[category] = {
+            'status': assessment.status,
+            'source_count': assessment.source_count,
+            'authoritative_source_count': assessment.authoritative_source_count,
+            'assertion_count': assessment.assertion_count,
+            'governed_assertion_count': assessment.governed_assertion_count,
+            'citation_count': assessment.citation_count,
+            'confidence_score': assessment.confidence_score,
+            'extraction_score': assessment.extraction_score,
+            'authority_score': assessment.authority_score,
+            'governance_score': assessment.governance_score,
+            'freshness_score': assessment.freshness_score,
+            'stale_source_count': assessment.stale_source_count,
+            'authoritative_stale_source_count': assessment.authoritative_stale_source_count,
+            'legal_stale': assessment.legal_stale,
+            'informational_stale': assessment.informational_stale,
+            'conflict_count': assessment.conflict_count,
+            'inferred': assessment.inferred,
+            'stale': assessment.stale,
+            'conflicting': assessment.conflicting,
+            'missing': assessment.missing,
+            'undiscovered': assessment.undiscovered,
+            'weak_support': assessment.weak_support,
+            'authority_unmet': assessment.authority_unmet,
+            'supporting_only': bool(assessment.authority_unmet and int(assessment.source_count or 0) > 0 and int(assessment.authoritative_source_count or 0) == 0),
+            'binding_authority_unmet': bool(assessment.authority_unmet and str(assessment.authority_expectation or '').strip() == 'authoritative_official' and int(assessment.authoritative_source_count or 0) == 0),
+            'legally_binding': bool(str(assessment.authority_expectation or '').strip() == 'authoritative_official'),
+            'unmet_reason': assessment.unmet_reason,
+            'unmet_reasons': assessment.unmet_reasons,
+            'authority_expectation': assessment.authority_expectation,
+            'latest_verified_at': assessment.latest_verified_at.isoformat() if assessment.latest_verified_at else None,
+            'source_ids': assessment.source_ids,
+            'assertion_ids': assessment.assertion_ids,
+            'trusted_assertion_count': assessment.governed_assertion_count,
         }
-        for category, assessment in category_assessments.items()
-        if category in set(required)
-    }
 
     return JurisdictionScoreBreakdown(
         overall_completeness=overall,
@@ -834,11 +832,15 @@ def compute_jurisdiction_score_breakdown(
         authority_subscore=authority_subscore,
         extraction_subscore=extraction_subscore,
         governance_subscore=governance_subscore,
-        conflict_penalty=conflict_penalty,
+        conflict_penalty=round(conflict_penalty + legal_stale_penalty + informational_stale_penalty, 6),
         confidence_label=completeness_confidence_label(overall),
         category_statuses=category_statuses,
         covered_categories=covered_categories,
         stale_categories=stale_categories,
+        legal_stale_categories=legal_stale_categories,
+        informational_stale_categories=informational_stale_categories,
+        critical_stale_categories=critical_stale_categories,
+        stale_authoritative_categories=stale_authoritative_categories,
         inferred_categories=inferred_categories,
         conflicting_categories=conflicting_categories,
         missing_categories=missing_categories,
@@ -848,9 +850,8 @@ def compute_jurisdiction_score_breakdown(
         unmet_categories=unmet_categories,
         category_unmet_reasons=category_unmet_reasons,
         category_details=category_details,
-        scoring_defaults={"weights": weights, "thresholds": thresholds},
+        scoring_defaults={'weights': weights, 'thresholds': thresholds},
     )
-
 
 def compute_scope_freshness_summary(
     db: Session,
@@ -862,7 +863,7 @@ def compute_scope_freshness_summary(
 ) -> JurisdictionFreshnessSummary:
     rows = _collect_source_rows_for_scope(db, state=state, county=county, city=city)
     source_count = len(rows)
-    authoritative_rows = [row for row in rows if bool(getattr(row, "is_authoritative", False))]
+    authoritative_rows = [row for row in rows if bool(getattr(row, 'is_authoritative', False))]
     authoritative_source_count = len(authoritative_rows)
 
     timestamps = [ts for ts in (_source_timestamp(row) for row in rows) if ts is not None]
@@ -870,23 +871,58 @@ def compute_scope_freshness_summary(
     oldest = min(timestamps) if timestamps else None
 
     stale_rows = [row for row in rows if _source_is_stale(row, stale_days=stale_days)]
+    category_payload: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        for category in _source_categories(row):
+            snap = _category_freshness_snapshot(row, category=category, stale_days=stale_days)
+            entry = category_payload.setdefault(category, {
+                'category': category,
+                'source_count': 0,
+                'authoritative_source_count': 0,
+                'stale_source_count': 0,
+                'authoritative_stale_source_count': 0,
+                'legal_stale': False,
+                'informational_stale': False,
+            })
+            entry['source_count'] += 1
+            if bool(getattr(row, 'is_authoritative', False)):
+                entry['authoritative_source_count'] += 1
+            if snap['is_stale']:
+                entry['stale_source_count'] += 1
+                if bool(getattr(row, 'is_authoritative', False)):
+                    entry['authoritative_stale_source_count'] += 1
+                if snap['stale_kind'] == 'legal':
+                    entry['legal_stale'] = True
+                else:
+                    entry['informational_stale'] = True
+
+    legal_stale_categories = sorted([c for c,v in category_payload.items() if v['legal_stale']])
+    informational_stale_categories = sorted([c for c,v in category_payload.items() if v['informational_stale']])
+    authoritative_stale_categories = sorted([c for c,v in category_payload.items() if int(v['authoritative_stale_source_count'] or 0) > 0])
+
     is_stale = source_count == 0 or bool(stale_rows)
     stale_reason = None
     if source_count == 0:
-        stale_reason = "no_sources"
+        stale_reason = 'no_sources'
+    elif legal_stale_categories:
+        stale_reason = 'critical_authoritative_categories_past_sla'
     elif authoritative_rows and all(_source_is_stale(row, stale_days=stale_days) for row in authoritative_rows):
-        stale_reason = "authoritative_sources_stale"
+        stale_reason = 'authoritative_sources_stale'
     elif stale_rows:
-        stale_reason = "one_or_more_sources_stale"
+        stale_reason = 'one_or_more_sources_stale'
 
     payload = {
-        "source_count": source_count,
-        "authoritative_source_count": authoritative_source_count,
-        "freshest_source_at": freshest.isoformat() if freshest else None,
-        "oldest_source_at": oldest.isoformat() if oldest else None,
-        "stale_source_count": len(stale_rows),
-        "stale_reason": stale_reason,
-        "is_stale": is_stale,
+        'source_count': source_count,
+        'authoritative_source_count': authoritative_source_count,
+        'freshest_source_at': freshest.isoformat() if freshest else None,
+        'oldest_source_at': oldest.isoformat() if oldest else None,
+        'stale_source_count': len(stale_rows),
+        'stale_reason': stale_reason,
+        'is_stale': is_stale,
+        'category_freshness': category_payload,
+        'legal_stale_categories': legal_stale_categories,
+        'informational_stale_categories': informational_stale_categories,
+        'authoritative_stale_categories': authoritative_stale_categories,
     }
 
     return JurisdictionFreshnessSummary(
@@ -898,7 +934,6 @@ def compute_scope_freshness_summary(
         is_stale=is_stale,
         stale_reason=stale_reason,
     )
-
 
 def compute_profile_completeness(
     db: Session, profile: JurisdictionProfile, *, stale_days: int = DEFAULT_STALE_DAYS
@@ -990,15 +1025,14 @@ def evaluate_jurisdiction_trust_decision(
 
     missing_required = list(breakdown.missing_categories)
     stale_categories = list(breakdown.stale_categories)
+    legal_stale_categories = list(breakdown.legal_stale_categories)
+    informational_stale_categories = list(breakdown.informational_stale_categories)
     conflicting_categories = list(breakdown.conflicting_categories)
     inferred_categories = list(breakdown.inferred_categories)
 
     missing_critical = [c for c in critical_categories if c in set(missing_required)]
-    stale_authoritative = [
-        c
-        for c, detail in (breakdown.category_details or {}).items()
-        if detail.get("status") == "stale" and int(detail.get("authoritative_source_count", 0) or 0) > 0
-    ]
+    stale_authoritative = list(breakdown.stale_authoritative_categories)
+    critical_legal_stale = [c for c in critical_categories if c in set(legal_stale_categories)]
     inferred_critical = [c for c in critical_categories if c in set(inferred_categories)]
 
     tier_rows = compute_tier_coverage(
@@ -1011,77 +1045,63 @@ def evaluate_jurisdiction_trust_decision(
         include_section8=include_section8,
         tenant_waitlist_depth=tenant_waitlist_depth,
     )
-    incomplete_required_tiers = [
-        row.jurisdiction_type
-        for row in tier_rows
-        if not row.complete
-    ]
+    incomplete_required_tiers = [row.jurisdiction_type for row in tier_rows if not row.complete]
 
     blocker_reasons: list[str] = []
     manual_review_reasons: list[str] = []
 
-    if policy.get("block_on_missing_critical_categories", True) and missing_critical:
-        blocker_reasons.append("missing_critical_categories")
-    if policy.get("block_on_unresolved_conflicts", True) and conflicting_categories:
-        blocker_reasons.append("unresolved_conflicts")
-    if (
-        policy.get("block_on_incomplete_required_tiers", True)
-        and incomplete_required_tiers
-    ):
-        blocker_reasons.append("incomplete_required_tiers")
-    if breakdown.overall_completeness < float(policy.get("projection_min_completeness_score", 0.80)):
-        blocker_reasons.append("completeness_below_projection_threshold")
+    if policy.get('block_on_missing_critical_categories', True) and missing_critical:
+        blocker_reasons.append('missing_critical_categories')
+    if policy.get('block_on_unresolved_conflicts', True) and conflicting_categories:
+        blocker_reasons.append('unresolved_conflicts')
+    if policy.get('block_on_incomplete_required_tiers', True) and incomplete_required_tiers:
+        blocker_reasons.append('incomplete_required_tiers')
+    if critical_legal_stale:
+        blocker_reasons.append('critical_legal_authority_stale')
+    if breakdown.overall_completeness < float(policy.get('projection_min_completeness_score', 0.80)):
+        blocker_reasons.append('completeness_below_projection_threshold')
 
     user_reliance_blockers: list[str] = []
-    if breakdown.overall_completeness < float(policy.get("user_reliance_min_completeness_score", 0.90)):
-        user_reliance_blockers.append("completeness_below_user_reliance_threshold")
-    if (
-        policy.get("block_on_stale_authoritative_sources_for_user_reliance", True)
-        and stale_authoritative
-    ):
-        user_reliance_blockers.append("stale_authoritative_sources")
-    if breakdown.authority_subscore < float(policy.get("authority_min_score_for_user_reliance", 0.70)):
-        user_reliance_blockers.append("authority_below_user_reliance_threshold")
-    if breakdown.governance_subscore < float(policy.get("governance_min_score_for_user_reliance", 0.75)):
-        user_reliance_blockers.append("governance_below_user_reliance_threshold")
+    if breakdown.overall_completeness < float(policy.get('user_reliance_min_completeness_score', 0.90)):
+        user_reliance_blockers.append('completeness_below_user_reliance_threshold')
+    if critical_legal_stale:
+        user_reliance_blockers.append('critical_legal_authority_stale')
+    elif policy.get('block_on_stale_authoritative_sources_for_user_reliance', True) and stale_authoritative:
+        user_reliance_blockers.append('stale_authoritative_sources')
+    if breakdown.authority_subscore < float(policy.get('authority_min_score_for_user_reliance', 0.70)):
+        user_reliance_blockers.append('authority_below_user_reliance_threshold')
+    if breakdown.governance_subscore < float(policy.get('governance_min_score_for_user_reliance', 0.75)):
+        user_reliance_blockers.append('governance_below_user_reliance_threshold')
     if conflicting_categories:
-        user_reliance_blockers.append("unresolved_conflicts")
+        user_reliance_blockers.append('unresolved_conflicts')
 
-    if (
-        policy.get("manual_review_on_inferred_critical_categories", True)
-        and inferred_critical
-    ):
-        manual_review_reasons.append("inferred_critical_categories")
-    if (
-        policy.get("manual_review_on_any_inferred_required_categories", False)
-        and inferred_categories
-    ):
-        manual_review_reasons.append("inferred_required_categories")
-    if (
-        policy.get("manual_review_on_low_authority_required_categories", True)
-        and breakdown.authority_subscore < float(policy.get("authority_min_score_for_user_reliance", 0.70))
-        and not blocker_reasons
-    ):
-        manual_review_reasons.append("low_authority_required_coverage")
+    if policy.get('manual_review_on_inferred_critical_categories', True) and inferred_critical:
+        manual_review_reasons.append('inferred_critical_categories')
+    if policy.get('manual_review_on_any_inferred_required_categories', False) and inferred_categories:
+        manual_review_reasons.append('inferred_required_categories')
+    if policy.get('manual_review_on_low_authority_required_categories', True) and breakdown.authority_subscore < float(policy.get('authority_min_score_for_user_reliance', 0.70)) and not blocker_reasons:
+        manual_review_reasons.append('low_authority_required_coverage')
+    if informational_stale_categories and not critical_legal_stale:
+        manual_review_reasons.append('informational_staleness_present')
 
     safe_for_projection = not bool(blocker_reasons)
-    safe_for_user_reliance = safe_for_projection and not bool(user_reliance_blockers)
+    safe_for_user_reliance = safe_for_projection and not bool(user_reliance_blockers) and not bool(critical_legal_stale)
 
-    if policy.get("block_on_missing_critical_categories", True) and missing_critical:
-        decision_code = "blocked_due_to_missing_critical_coverage"
+    if missing_critical:
+        decision_code = 'blocked_due_to_missing_critical_coverage'
+    elif critical_legal_stale:
+        decision_code = 'blocked_due_to_critical_stale_authority'
     elif conflicting_categories:
-        decision_code = "blocked_due_to_unresolved_conflicts"
-    elif stale_authoritative and policy.get("block_on_stale_authoritative_sources_for_user_reliance", True):
-        decision_code = "blocked_due_to_stale_authoritative_sources"
-    elif incomplete_required_tiers and policy.get("block_on_incomplete_required_tiers", True):
-        decision_code = "blocked_due_to_incomplete_required_tiers"
+        decision_code = 'blocked_due_to_unresolved_conflicts'
+    elif incomplete_required_tiers and policy.get('block_on_incomplete_required_tiers', True):
+        decision_code = 'blocked_due_to_incomplete_required_tiers'
     elif manual_review_reasons:
-        decision_code = "manual_review_required"
+        decision_code = 'manual_review_required'
     else:
-        decision_code = "safe_for_projection" if safe_for_projection else "manual_review_required"
+        decision_code = 'safe_for_projection' if safe_for_projection else 'manual_review_required'
 
     if safe_for_projection and safe_for_user_reliance:
-        decision_code = "safe_for_user_reliance"
+        decision_code = 'safe_for_user_reliance'
 
     combined_blockers = blocker_reasons + [reason for reason in user_reliance_blockers if reason not in blocker_reasons]
 
@@ -1096,6 +1116,9 @@ def evaluate_jurisdiction_trust_decision(
         missing_required_categories=missing_required,
         stale_categories=stale_categories,
         stale_authoritative_categories=stale_authoritative,
+        legal_stale_categories=legal_stale_categories,
+        critical_legal_stale_categories=critical_legal_stale,
+        informational_stale_categories=informational_stale_categories,
         conflicting_categories=conflicting_categories,
         inferred_categories=inferred_categories,
         inferred_critical_categories=inferred_critical,
@@ -1110,7 +1133,6 @@ def evaluate_jurisdiction_trust_decision(
         governance_subscore=breakdown.governance_subscore,
         conflict_penalty=breakdown.conflict_penalty,
     )
-
 
 def compute_profile_trust_decision(
     db: Session,
@@ -1382,6 +1404,8 @@ def apply_profile_completeness(
     profile.covered_categories_json = _dumps(breakdown.covered_categories)
     profile.missing_categories_json = _dumps(breakdown.missing_categories)
     profile.stale_categories_json = _dumps(breakdown.stale_categories)
+    if hasattr(profile, 'critical_stale_categories_json'):
+        profile.critical_stale_categories_json = _dumps(breakdown.critical_stale_categories)
     profile.inferred_categories_json = _dumps(breakdown.inferred_categories)
     profile.conflicting_categories_json = _dumps(breakdown.conflicting_categories)
     profile.expected_rule_universe_json = _dumps((breakdown.scoring_defaults or {}).get("expected_rule_universe", {})) if hasattr(profile, "expected_rule_universe_json") else getattr(profile, "expected_rule_universe_json", "{}")
@@ -1400,6 +1424,14 @@ def apply_profile_completeness(
             "covered_categories": breakdown.covered_categories,
             "missing_categories": breakdown.missing_categories,
             "stale_categories": breakdown.stale_categories,
+        "legal_stale_categories": breakdown.legal_stale_categories,
+        "informational_stale_categories": breakdown.informational_stale_categories,
+        "critical_stale_categories": breakdown.critical_stale_categories,
+        "stale_authoritative_categories": breakdown.stale_authoritative_categories,
+            "legal_stale_categories": breakdown.legal_stale_categories,
+            "informational_stale_categories": breakdown.informational_stale_categories,
+            "critical_stale_categories": breakdown.critical_stale_categories,
+            "stale_authoritative_categories": breakdown.stale_authoritative_categories,
             "inferred_categories": breakdown.inferred_categories,
             "conflicting_categories": breakdown.conflicting_categories,
             "undiscovered_categories": breakdown.undiscovered_categories,
@@ -1427,6 +1459,8 @@ def apply_profile_completeness(
     )
     production_readiness = _production_readiness(trust_decision=trust_decision)
 
+    profile.is_stale = bool(freshness.is_stale)
+    profile.stale_reason = freshness.stale_reason
     profile.source_freshness_json = _dumps(
         {
             **freshness.freshness_payload,
@@ -1442,6 +1476,18 @@ def apply_profile_completeness(
                 "category_statuses": breakdown.category_statuses,
                 "missing_categories": breakdown.missing_categories,
                 "stale_categories": breakdown.stale_categories,
+        "legal_stale_categories": breakdown.legal_stale_categories,
+        "informational_stale_categories": breakdown.informational_stale_categories,
+        "critical_stale_categories": breakdown.critical_stale_categories,
+        "stale_authoritative_categories": breakdown.stale_authoritative_categories,
+                "legal_stale_categories": breakdown.legal_stale_categories,
+                "informational_stale_categories": breakdown.informational_stale_categories,
+                "critical_stale_categories": breakdown.critical_stale_categories,
+                "stale_authoritative_categories": breakdown.stale_authoritative_categories,
+            "legal_stale_categories": breakdown.legal_stale_categories,
+            "informational_stale_categories": breakdown.informational_stale_categories,
+            "critical_stale_categories": breakdown.critical_stale_categories,
+            "stale_authoritative_categories": breakdown.stale_authoritative_categories,
                 "inferred_categories": breakdown.inferred_categories,
                 "conflicting_categories": breakdown.conflicting_categories,
                 "trust_decision": trust_decision.to_dict(),
@@ -1457,6 +1503,10 @@ def apply_profile_completeness(
         "covered_categories": breakdown.covered_categories,
         "missing_categories": breakdown.missing_categories,
         "stale_categories": breakdown.stale_categories,
+        "legal_stale_categories": breakdown.legal_stale_categories,
+        "informational_stale_categories": breakdown.informational_stale_categories,
+        "critical_stale_categories": breakdown.critical_stale_categories,
+        "stale_authoritative_categories": breakdown.stale_authoritative_categories,
         "inferred_categories": breakdown.inferred_categories,
         "conflicting_categories": breakdown.conflicting_categories,
         "production_readiness": production_readiness,
@@ -1477,6 +1527,10 @@ def apply_profile_completeness(
             "completeness": rollup_payload,
             "coverage_confidence": breakdown.confidence_label,
             "missing_local_rule_areas": breakdown.missing_categories,
+            "legal_stale_categories": breakdown.legal_stale_categories,
+            "informational_stale_categories": breakdown.informational_stale_categories,
+            "critical_stale_categories": breakdown.critical_stale_categories,
+            "stale_authoritative_categories": breakdown.stale_authoritative_categories,
             "last_refreshed": rollup_payload["last_refresh"],
             "discovery_status": discovery_status,
             "last_discovery_run": rollup_payload["last_discovery_run"],
@@ -1565,3 +1619,87 @@ def sync_coverage_status_from_profile(
     else:
         db.flush()
     return coverage
+
+
+def profile_completeness_payload(db: Session, profile: JurisdictionProfile, *, stale_days: int = DEFAULT_STALE_DAYS) -> dict[str, Any]:
+    breakdown = compute_profile_score_breakdown(db, profile, stale_days=stale_days)
+    freshness = compute_scope_freshness_summary(
+        db,
+        state=getattr(profile, 'state', None),
+        county=getattr(profile, 'county', None),
+        city=getattr(profile, 'city', None),
+        stale_days=stale_days,
+    )
+    trust = evaluate_jurisdiction_trust_decision(
+        breakdown=breakdown,
+        state=getattr(profile, 'state', None),
+        county=getattr(profile, 'county', None),
+        city=getattr(profile, 'city', None),
+        pha_name=getattr(profile, 'pha_name', None),
+        include_section8=True,
+        trust_defaults=_profile_trust_defaults(profile),
+    )
+    expected_universe = (breakdown.scoring_defaults or {}).get('expected_rule_universe', {})
+    return {
+        'jurisdiction_profile_id': int(getattr(profile, 'id', 0) or 0),
+        'completeness_score': breakdown.overall_completeness,
+        'completeness_status': breakdown.completeness_status,
+        'confidence_label': breakdown.confidence_label,
+        'coverage_subscore': breakdown.coverage_subscore,
+        'freshness_subscore': breakdown.freshness_subscore,
+        'authority_subscore': breakdown.authority_subscore,
+        'extraction_subscore': breakdown.extraction_subscore,
+        'governance_subscore': breakdown.governance_subscore,
+        'conflict_penalty': breakdown.conflict_penalty,
+        'required_categories': list(breakdown.category_statuses.keys()),
+        'covered_categories': breakdown.covered_categories,
+        'missing_categories': breakdown.missing_categories,
+        'stale_categories': breakdown.stale_categories,
+        'legal_stale_categories': breakdown.legal_stale_categories,
+        'informational_stale_categories': breakdown.informational_stale_categories,
+        'critical_stale_categories': breakdown.critical_stale_categories,
+        'stale_authoritative_categories': breakdown.stale_authoritative_categories,
+        'inferred_categories': breakdown.inferred_categories,
+        'conflicting_categories': breakdown.conflicting_categories,
+        'undiscovered_categories': breakdown.undiscovered_categories,
+        'weak_support_categories': breakdown.weak_support_categories,
+        'authority_unmet_categories': breakdown.authority_unmet_categories,
+        'supporting_only_categories': [c for c, detail in (breakdown.category_details or {}).items() if bool((detail or {}).get('supporting_only'))],
+        'binding_unmet_categories': [c for c, detail in (breakdown.category_details or {}).items() if bool((detail or {}).get('binding_authority_unmet'))],
+        'legally_binding_missing_authority_categories': [c for c, detail in (breakdown.category_details or {}).items() if bool((detail or {}).get('legally_binding')) and bool((detail or {}).get('binding_authority_unmet'))],
+        'unmet_categories': breakdown.unmet_categories,
+        'category_unmet_reasons': breakdown.category_unmet_reasons,
+        'category_statuses': breakdown.category_statuses,
+        'category_details': breakdown.category_details,
+        'is_stale': freshness.is_stale,
+        'stale_reason': freshness.stale_reason,
+        'source_freshness': freshness.freshness_payload,
+        'freshness_summary': freshness.freshness_payload,
+        'trust_decision': trust.to_dict(),
+        'safe_for_projection': trust.safe_for_projection,
+        'safe_for_user_reliance': trust.safe_for_user_reliance,
+        'expected_rule_universe': expected_universe,
+        'rule_family_inventory': dict((breakdown.scoring_defaults or {}).get('rule_family_inventory', {}) or {}),
+        'legally_binding_categories': list((breakdown.scoring_defaults or {}).get('legally_binding_categories', []) or []),
+        'operational_heuristic_categories': list((breakdown.scoring_defaults or {}).get('operational_heuristic_categories', []) or []),
+        'property_proof_required_categories': list((breakdown.scoring_defaults or {}).get('property_proof_required_categories', []) or []),
+        'authority_expectations': dict((breakdown.scoring_defaults or {}).get('authority_expectations', {}) or {}),
+    }
+
+
+def recompute_profile_and_coverage(
+    db: Session,
+    profile: JurisdictionProfile,
+    *,
+    stale_days: int = DEFAULT_STALE_DAYS,
+    commit: bool = False,
+) -> tuple[JurisdictionProfile, JurisdictionCoverageStatus]:
+    profile = apply_profile_completeness(db, profile, stale_days=stale_days, commit=False)
+    coverage = sync_coverage_status_from_profile(db, profile, commit=False)
+    if commit:
+        db.commit()
+        db.refresh(profile)
+        db.refresh(coverage)
+    else:
+        db.flush()
+    return profile, coverage

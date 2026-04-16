@@ -10,11 +10,32 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import expected_rule_universe_for_scope, normalize_categories
+
+
+AUTHORITY_POLICY_BY_TIER: dict[str, dict[str, Any]] = {
+    "authoritative_official": {"use_type": "binding", "binding_sufficient": True, "supporting_only": False, "usable": True},
+    "approved_official_supporting": {"use_type": "supporting", "binding_sufficient": False, "supporting_only": True, "usable": True},
+    "semi_authoritative_operational": {"use_type": "supporting", "binding_sufficient": False, "supporting_only": True, "usable": True},
+    "derived_or_inferred": {"use_type": "weak", "binding_sufficient": False, "supporting_only": False, "usable": False},
+}
 from app.policy_models import PolicyDiscoveryAttempt, PolicySource, PolicySourceInventory
 from app.services.policy_change_detection_service import compute_next_retry_due
 
 
 DEFAULT_DISCOVERY_RETRY_DAYS = 3
+
+INVENTORY_LIFECYCLE_DISCOVERED = "discovered"
+INVENTORY_LIFECYCLE_PENDING_CRAWL = "pending_crawl"
+INVENTORY_LIFECYCLE_NOT_FOUND = "not_found"
+INVENTORY_LIFECYCLE_FAILED = "failed"
+INVENTORY_LIFECYCLE_SUPERSEDED = "superseded"
+INVENTORY_LIFECYCLE_ACCEPTED = "accepted"
+
+INVENTORY_CRAWL_PENDING = "pending"
+INVENTORY_CRAWL_QUEUED = "queued"
+INVENTORY_CRAWL_FETCHED = "fetched"
+INVENTORY_CRAWL_FAILED = "failed"
+INVENTORY_CRAWL_NOT_FOUND = "not_found"
 
 
 def _utcnow() -> datetime:
@@ -112,6 +133,8 @@ def expected_inventory_hints(*, state: str, county: Optional[str], city: Optiona
     return {
         "expected_categories": list(universe.required_categories),
         "expected_tiers": list(universe.jurisdiction_types),
+        "legally_binding_categories": list(getattr(universe, "legally_binding_categories", []) or []),
+        "authority_expectations": dict(getattr(universe, "authority_expectations", {}) or {}),
     }
 
 
@@ -175,6 +198,7 @@ def upsert_source_inventory_record(
     )
     row = _find_inventory_row(db, org_id=org_id, scope_key=scope_key, canonical_url=canonical_url)
     merged_meta = dict(metadata or {})
+    authority_policy = AUTHORITY_POLICY_BY_TIER.get(str(authority_tier or "derived_or_inferred"), AUTHORITY_POLICY_BY_TIER["derived_or_inferred"])
     if probe_result:
         merged_meta["probe_result"] = dict(probe_result)
     dedupe_key = inventory_dedupe_key(scope_key=scope_key, url=canonical_url)
@@ -204,6 +228,8 @@ def upsert_source_inventory_record(
             lifecycle_state=lifecycle_state,
             crawl_status=crawl_status,
             inventory_origin=inventory_origin,
+            candidate_origin_type=inventory_origin,
+            candidate_status_reason=None,
             is_curated=bool(is_curated),
             is_official_candidate=bool(is_official_candidate),
             dedupe_key=dedupe_key,
@@ -238,6 +264,7 @@ def upsert_source_inventory_record(
     row.lifecycle_state = lifecycle_state or row.lifecycle_state
     row.crawl_status = crawl_status or row.crawl_status
     row.inventory_origin = inventory_origin or row.inventory_origin
+    row.candidate_origin_type = inventory_origin or row.candidate_origin_type
     row.is_curated = bool(row.is_curated or is_curated)
     row.is_official_candidate = bool(row.is_official_candidate or is_official_candidate)
     row.authority_tier = authority_tier or row.authority_tier
@@ -284,8 +311,8 @@ def upsert_discovery_candidate_inventory(
     probe = dict(probe_result or {})
     fetch_error = probe.get("fetch_error")
     ok = bool(probe.get("ok"))
-    crawl_status = "queued" if ok else ("failed" if fetch_error and fetch_error != "probe_skipped" else "pending")
-    lifecycle_state = "active" if ok else ("discovered" if not fetch_error or fetch_error == "probe_skipped" else "failed")
+    crawl_status = INVENTORY_CRAWL_QUEUED if ok else (INVENTORY_CRAWL_FAILED if fetch_error and fetch_error != "probe_skipped" else INVENTORY_CRAWL_PENDING)
+    lifecycle_state = INVENTORY_LIFECYCLE_PENDING_CRAWL if ok else (INVENTORY_LIFECYCLE_DISCOVERED if not fetch_error or fetch_error == "probe_skipped" else INVENTORY_LIFECYCLE_FAILED)
     refresh_state = "healthy" if ok else ("degraded" if fetch_error and fetch_error != "probe_skipped" else "pending")
     next_step = "crawl" if ok else ("retry_probe" if fetch_error and fetch_error != "probe_skipped" else "crawl")
     row = upsert_source_inventory_record(
@@ -318,6 +345,7 @@ def upsert_discovery_candidate_inventory(
         metadata=metadata,
     )
     row.last_seen_at = now
+    row.candidate_status_reason = None if ok else str(fetch_error or "discovered_not_probed")
     row.refresh_state = refresh_state
     row.refresh_status_reason = None if ok else (str(fetch_error or "discovered_not_probed"))
     row.next_refresh_step = next_step
@@ -325,6 +353,7 @@ def upsert_discovery_candidate_inventory(
     if fetch_error and fetch_error != "probe_skipped":
         row.last_failure_at = now
         row.failure_count = int(row.failure_count or 0) + 1
+        row.lifecycle_state = INVENTORY_LIFECYCLE_FAILED
         row.next_search_retry_due_at = compute_next_retry_due(
             retry_count=int(row.failure_count or 0),
             base_dt=now,
@@ -334,6 +363,8 @@ def upsert_discovery_candidate_inventory(
         row.next_crawl_due_at = row.next_search_retry_due_at
     else:
         row.next_crawl_due_at = row.next_crawl_due_at or now
+        if ok:
+            row.lifecycle_state = INVENTORY_LIFECYCLE_PENDING_CRAWL
     meta = _json_loads_dict(getattr(row, "inventory_metadata_json", None))
     meta["last_probe_result"] = probe
     row.inventory_metadata_json = _json_dumps(meta)
@@ -378,8 +409,8 @@ def sync_policy_source_into_inventory(
         authority_tier=getattr(source, "authority_tier", None),
         authority_rank=int(getattr(source, "authority_rank", 0) or 0),
         authority_score=float(getattr(source, "authority_score", 0.0) or 0.0),
-        lifecycle_state=(getattr(source, "registry_status", None) or "active").lower(),
-        crawl_status="pending" if not getattr(source, "last_fetched_at", None) else "fetched",
+        lifecycle_state=INVENTORY_LIFECYCLE_ACCEPTED,
+        crawl_status=INVENTORY_CRAWL_PENDING if not getattr(source, "last_fetched_at", None) else INVENTORY_CRAWL_FETCHED,
         inventory_origin=inventory_origin,
         policy_source_id=int(getattr(source, "id", 0) or 0) or None,
         is_curated=bool(getattr(source, "source_origin", "") == "curated") if is_curated is None else bool(is_curated),
@@ -486,8 +517,10 @@ def update_inventory_after_fetch(
     if changed:
         row.last_change_detected_at = now
     if ok:
-        row.crawl_status = "fetched"
-        row.lifecycle_state = "active"
+        row.crawl_status = INVENTORY_CRAWL_FETCHED
+        row.lifecycle_state = INVENTORY_LIFECYCLE_ACCEPTED
+        row.accepted_at = row.accepted_at or now
+        row.rejected_at = None
         row.last_success_at = now
         row.last_failure_at = row.last_failure_at
         row.next_crawl_due_at = getattr(source, "next_refresh_due_at", None) or (now + timedelta(days=7))
@@ -495,8 +528,9 @@ def update_inventory_after_fetch(
             row.refresh_state = "validating"
             row.next_refresh_step = "validate"
     else:
-        row.crawl_status = "failed"
-        row.lifecycle_state = "failed"
+        row.crawl_status = INVENTORY_CRAWL_FAILED
+        row.lifecycle_state = INVENTORY_LIFECYCLE_FAILED
+        row.rejected_at = now
         row.last_failure_at = now
         row.failure_count = int(row.failure_count or 0) + 1
         row.next_crawl_due_at = getattr(source, "next_refresh_due_at", None) or compute_next_retry_due(retry_count=int(row.failure_count or 0), base_dt=now)
@@ -553,14 +587,15 @@ def mark_inventory_not_found(
             search_terms=search_terms,
             expected_categories=[category],
             expected_tiers=expected_tiers,
-            lifecycle_state="ignored",
-            crawl_status="not_found",
+            lifecycle_state=INVENTORY_LIFECYCLE_NOT_FOUND,
+            crawl_status=INVENTORY_CRAWL_NOT_FOUND,
             inventory_origin="search_placeholder",
             metadata=metadata,
         )
         row.searched_not_found_count = int(row.searched_not_found_count or 0) + 1
         row.last_failure_at = now
         row.last_search_retry_at = now
+        row.lifecycle_state = INVENTORY_LIFECYCLE_FAILED
         row.next_search_retry_due_at = compute_next_retry_due(
             retry_count=int(row.searched_not_found_count or 0),
             base_dt=now,
@@ -568,6 +603,7 @@ def mark_inventory_not_found(
             max_days=max(DEFAULT_DISCOVERY_RETRY_DAYS, 14),
         )
         row.next_crawl_due_at = row.next_search_retry_due_at
+        row.candidate_status_reason = "searched_not_found"
         row.refresh_state = "pending"
         row.refresh_status_reason = "searched_not_found"
         row.next_refresh_step = "search_retry"
@@ -616,6 +652,7 @@ def summarize_inventory_for_scope(
     crawl_counts: dict[str, int] = {}
     category_map: dict[str, int] = {}
     source_ids: list[int] = []
+    authority_use_counts: dict[str, int] = {}
     for row in rows:
         lifecycle = (getattr(row, "lifecycle_state", None) or "unknown").strip().lower()
         crawl = (getattr(row, "crawl_status", None) or "unknown").strip().lower()
@@ -623,6 +660,8 @@ def summarize_inventory_for_scope(
         crawl_counts[crawl] = crawl_counts.get(crawl, 0) + 1
         for cat in normalize_categories(_json_loads_list(getattr(row, "category_hints_json", None))):
             category_map[cat] = category_map.get(cat, 0) + 1
+        authority_use = str(getattr(row, "authority_use_type", None) or "weak").strip().lower() or "weak"
+        authority_use_counts[authority_use] = authority_use_counts.get(authority_use, 0) + 1
         if getattr(row, "policy_source_id", None) is not None:
             source_ids.append(int(row.policy_source_id))
     return {
@@ -630,7 +669,9 @@ def summarize_inventory_for_scope(
         "lifecycle_counts": lifecycle_counts,
         "crawl_counts": crawl_counts,
         "categories": category_map,
+        "authority_use_counts": {},
         "linked_source_ids": sorted(set(source_ids)),
+        "authority_use_counts": authority_use_counts,
         "rows": [
             {
                 "id": int(row.id),
@@ -639,6 +680,9 @@ def summarize_inventory_for_scope(
                 "publisher": row.publisher,
                 "lifecycle_state": row.lifecycle_state,
                 "crawl_status": row.crawl_status,
+                "inventory_origin": row.inventory_origin,
+                "candidate_origin_type": getattr(row, "candidate_origin_type", None),
+                "candidate_status_reason": getattr(row, "candidate_status_reason", None),
                 "policy_source_id": row.policy_source_id,
                 "expected_categories": _json_loads_list(row.expected_categories_json),
                 "category_hints": _json_loads_list(row.category_hints_json),
@@ -650,6 +694,8 @@ def summarize_inventory_for_scope(
                 "next_refresh_step": getattr(row, "next_refresh_step", None),
                 "revalidation_required": bool(getattr(row, "revalidation_required", False)),
                 "validation_due_at": row.validation_due_at.isoformat() if getattr(row, "validation_due_at", None) else None,
+                "authority_use_type": getattr(row, "authority_use_type", None),
+                "authority_policy": _json_loads_dict(getattr(row, "authority_policy_json", None)),
                 "next_search_retry_due_at": row.next_search_retry_due_at.isoformat() if getattr(row, "next_search_retry_due_at", None) else None,
             }
             for row in rows

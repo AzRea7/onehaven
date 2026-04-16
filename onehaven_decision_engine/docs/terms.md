@@ -23,3 +23,17 @@ Use at your own risk. Liability is limited to the amount paid in the last billin
 
 ## 5) Early access reality
 Features may change rapidly. Data models may evolve. Migrations may be required.
+
+
+
+
+## 6) Operational trust is not legal clearance
+OneHaven may label a jurisdiction, proof set, or property workflow as **safe to rely on operationally**. That means the system currently sees enough governed rule support, freshness, and proof coverage to support operational decision-making.
+
+That label does **not** mean the property is legally cleared in every respect, and it does **not** replace legal review where the rule set, facts, or local enforcement posture make review appropriate.
+
+## 7) Verify critical requirements
+You must independently verify critical items such as registration, certificates of occupancy, inspection pass requirements, lead documents, subsidy packet requirements, and local-contact obligations before leasing, occupying, or representing a property as compliant.
+
+## 8) Shared summaries keep the same boundary
+Any exported, copied, emailed, printed, or otherwise shared compliance summary should be read together with the same boundary language: OneHaven provides operational guidance, not legal advice or a legal compliance guarantee.

@@ -71,6 +71,12 @@ type OperationalStatusLike = {
   lockout?: LockoutLike | null;
   next_actions?: NextActionsLike | null;
   source_summary?: SourceSummaryLike | null;
+  last_validation_at?: string | null;
+  next_due_step?: string | null;
+  lockout_causing_categories?: string[] | null;
+  informational_gap_categories?: string[] | null;
+  validation_pending_categories?: string[] | null;
+  authority_gap_categories?: string[] | null;
 };
 
 type ResolvedProfile = {
@@ -111,6 +117,8 @@ type ResolvedProfile = {
   } | null;
   operational_status?: OperationalStatusLike | null;
   health?: OperationalStatusLike | null;
+  legally_unsafe?: boolean | null;
+  informationally_incomplete?: boolean | null;
 };
 
 function toArray<T = any>(v: any): T[] {
@@ -195,6 +203,29 @@ function renderCountChips(
   ));
 }
 
+function BoundaryCallout({
+  title,
+  body,
+  tone = "warn",
+}: {
+  title: string;
+  body: React.ReactNode;
+  tone?: "warn" | "bad" | "good";
+}) {
+  const cls =
+    tone === "bad"
+      ? "border-red-400/25 bg-red-500/10 text-red-100"
+      : tone === "good"
+        ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+        : "border-amber-300/25 bg-amber-500/10 text-amber-100";
+  return (
+    <div className={`rounded-2xl border px-4 py-4 ${cls}`}>
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mt-2 text-sm leading-6">{body}</div>
+    </div>
+  );
+}
+
 function LayerCard({ row }: { row: RuleLayer }) {
   const layer = row.layer || row.scope || row.label || "layer";
   const applied = row.applied ?? row.matched ?? false;
@@ -248,9 +279,21 @@ export default function PropertyJurisdictionRulesPanel({
   const stale = toArray<string>(
     p.stale_categories || p.completeness?.stale_categories,
   );
+  const lockoutCausing = toArray<string>(
+    operational?.lockout_causing_categories,
+  );
+  const informationalGaps = toArray<string>(
+    operational?.informational_gap_categories,
+  );
+  const validationPending = toArray<string>(
+    operational?.validation_pending_categories,
+  );
+  const authorityGaps = toArray<string>(operational?.authority_gap_categories);
   const conflicting = toArray<string>(
     p.conflicting_categories || p.completeness?.conflicting_categories,
   );
+  const legallyUnsafe = Boolean(p.legally_unsafe);
+  const informationallyIncomplete = Boolean(p.informationally_incomplete);
   const locationBits = [p.city, p.county, p.state].filter(Boolean).join(", ");
   const safeToRely = Boolean(operational?.safe_to_rely_on);
   const lockout = operational?.lockout;
@@ -269,15 +312,61 @@ export default function PropertyJurisdictionRulesPanel({
         />
       ) : (
         <div className="space-y-4">
-          <JurisdictionCoverageBadge coverage={{
-            completeness_status: p.completeness_status,
-            completeness_score: p.completeness_score,
-            is_stale: p.is_stale,
-            stale_reason: p.stale_reason,
-          }} />
+          <BoundaryCallout
+            title="Legal and product boundary"
+            tone={
+              safeToRely
+                ? "good"
+                : legallyUnsafe || lockout?.lockout_active
+                  ? "bad"
+                  : "warn"
+            }
+            body={
+              <>
+                OneHaven distinguishes between{" "}
+                <strong>operational trust</strong> and{" "}
+                <strong>legal clearance</strong>. Even when this view is safe to
+                rely on operationally, it is not legal advice and it is not a
+                legal compliance guarantee.{" "}
+                {!safeToRely
+                  ? "A human or legal review is still needed before treating this property as cleared."
+                  : "You should still verify critical requirements with the authoritative jurisdiction source before final external use."}{" "}
+                Any copied or shared summary should carry this same boundary.
+              </>
+            }
+          />
 
-          {lockout?.lockout_active || reasons.length ? (
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+          <JurisdictionCoverageBadge
+            coverage={{
+              completeness_status: p.completeness_status,
+              completeness_score: p.completeness_score,
+              is_stale: p.is_stale,
+              stale_reason: p.stale_reason,
+              operational_status: operational,
+              lockout_causing_categories: lockoutCausing,
+              informational_gap_categories: informationalGaps,
+              validation_pending_categories: validationPending,
+              authority_gap_categories: authorityGaps,
+              last_validation_at: operational?.last_validation_at,
+              next_due_step: operational?.next_due_step,
+              last_refreshed: p.last_refreshed,
+              last_refreshed_at: p.last_refreshed_at,
+              resolved_rule_version: p.resolved_rule_version,
+              rule_version: p.rule_version,
+              coverage_confidence: p.coverage_confidence,
+              confidence_label: p.confidence_label,
+              production_readiness: p.production_readiness,
+              trustworthy_for_projection: p.trustworthy_for_projection,
+            }}
+          />
+
+          {lockout?.lockout_active ||
+          reasons.length ||
+          legallyUnsafe ||
+          informationallyIncomplete ? (
+            <div
+              className={`oh-state-banner ${legallyUnsafe || lockout?.lockout_active ? "oh-state-banner-bad" : informationallyIncomplete ? "oh-state-banner-warn" : safeToRely ? "oh-state-banner-good" : "oh-state-banner-warn"}`}
+            >
               <div className="flex items-start gap-2 text-sm text-app-1">
                 {safeToRely ? (
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
@@ -287,14 +376,101 @@ export default function PropertyJurisdictionRulesPanel({
                 <div>
                   <div className="font-semibold text-app-0">
                     {safeToRely
-                      ? "Safe to rely on"
-                      : "Do not rely on this jurisdiction state yet"}
+                      ? "Safe to rely on now"
+                      : legallyUnsafe || lockout?.lockout_active
+                        ? "Legally unsafe right now"
+                        : informationallyIncomplete
+                          ? "Informationally incomplete"
+                          : "Review required before reliance"}
                   </div>
                   <div className="mt-1 text-app-2">
                     {lockout?.lockout_reason ||
                       reasons[0] ||
                       p.stale_reason ||
                       "This jurisdiction still needs review."}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {lockoutCausing.length ||
+          validationPending.length ||
+          authorityGaps.length ||
+          informationalGaps.length ? (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                <div className="text-sm font-semibold text-app-0">
+                  Blocking categories
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {lockoutCausing.length ? (
+                    lockoutCausing.map((item) => (
+                      <span key={item} className="oh-pill oh-pill-bad">
+                        {titleize(item)}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-app-4">None</span>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                <div className="text-sm font-semibold text-app-0">
+                  Validation pending
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {validationPending.length ? (
+                    validationPending.map((item) => (
+                      <span key={item} className="oh-pill oh-pill-warn">
+                        {titleize(item)}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-app-4">None</span>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                <div className="text-sm font-semibold text-app-0">
+                  Authority gaps
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {authorityGaps.length ? (
+                    authorityGaps.map((item) => (
+                      <span key={item} className="oh-pill oh-pill-bad">
+                        {titleize(item)}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-app-4">None</span>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                <div className="text-sm font-semibold text-app-0">
+                  What is needed next
+                </div>
+                <div className="mt-3 space-y-2 text-sm text-app-2">
+                  <div>
+                    Next step:{" "}
+                    <span className="text-app-1">
+                      {titleize(
+                        operational?.next_due_step ||
+                          operational?.next_actions?.next_step ||
+                          "monitor",
+                      )}
+                    </span>
+                  </div>
+                  <div>
+                    Informational gaps:{" "}
+                    {informationalGaps.length
+                      ? informationalGaps.map(titleize).join(", ")
+                      : "none listed"}
+                  </div>
+                  <div>
+                    Last validation:{" "}
+                    {formatDate(operational?.last_validation_at)}
                   </div>
                 </div>
               </div>

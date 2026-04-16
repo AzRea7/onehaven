@@ -107,6 +107,38 @@ def _dedupe_reasons(items: list[str]) -> list[str]:
     return out
 
 
+def _proof_gap_items(proof_obligations: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    return [
+        item for item in (proof_obligations or [])
+        if str(item.get("proof_status") or "").strip().lower() in {"missing", "expired", "mismatched"}
+    ]
+
+
+def _proof_blocking_reasons(proof_gap_items: list[dict[str, Any]] | None) -> list[str]:
+    reasons: list[str] = []
+    for item in proof_gap_items or []:
+        if not bool(item.get("blocking")):
+            continue
+        label = str(item.get("proof_label") or item.get("rule_key") or "required proof").strip()
+        status = str(item.get("proof_status") or "missing").strip().lower()
+        gap = str(item.get("evidence_gap") or "").strip()
+        if gap:
+            reasons.append(gap)
+        else:
+            reasons.append(f"{label} is {status}.")
+    return _dedupe_reasons(reasons)
+
+
+def _safe_to_rely_on_from_trust_and_proof(*, trust: dict[str, Any], proof_gap_items: list[dict[str, Any]] | None) -> bool:
+    blocker = _build_jurisdiction_blocker_from_trust(trust)
+    if bool(blocker.get("blocking")):
+        return False
+    for item in proof_gap_items or []:
+        if bool(item.get("blocking")):
+            return False
+    return bool(blocker.get("safe_for_user_reliance", blocker.get("safe_for_projection", False)))
+
+
 def _build_jurisdiction_blocker_from_trust(trust: dict[str, Any]) -> dict[str, Any]:
     trust = trust if isinstance(trust, dict) else {}
 
@@ -210,6 +242,29 @@ def build_property_jurisdiction_blocker(db, *, org_id: int, property_id: int) ->
     trust = _jurisdiction_trust_payload(projection_snapshot)
     blocker = _build_jurisdiction_blocker_from_trust(trust)
     blocker["property_id"] = int(property_id)
+    proof_obligations: list[dict[str, Any]] = []
+    proof_counts: dict[str, Any] = {}
+    if projection_snapshot and isinstance(projection_snapshot, dict):
+        proof_obligations = list(projection_snapshot.get("proof_obligations") or ((projection_snapshot.get("projection") or {}).get("proof_obligations") if isinstance(projection_snapshot.get("projection"), dict) else []) or [])
+        proof_counts = dict(projection_snapshot.get("proof_counts") or ((projection_snapshot.get("projection") or {}).get("proof_counts") if isinstance(projection_snapshot.get("projection"), dict) else {}) or {})
+    proof_gap_items = _proof_gap_items(proof_obligations)
+    proof_blocking_reasons = _proof_blocking_reasons(proof_gap_items)
+    legally_unsafe = bool(blocker.get("blocking")) or bool(proof_blocking_reasons)
+    informationally_incomplete = (not legally_unsafe) and bool(proof_gap_items)
+    unsafe_reasons = _dedupe_reasons(list(blocker.get("blocking_reasons") or []) + proof_blocking_reasons)
+    informational_reasons = _dedupe_reasons([
+        str(item.get("evidence_gap") or f"{item.get('proof_label') or item.get('rule_key') or 'Required proof'} is {str(item.get('proof_status') or 'missing').strip().lower()}.")
+        for item in proof_gap_items if not bool(item.get("blocking"))
+    ])
+    blocker["proof_obligations"] = proof_obligations
+    blocker["proof_counts"] = proof_counts
+    blocker["proof_gap_items"] = proof_gap_items
+    blocker["proof_blocking_reasons"] = proof_blocking_reasons
+    blocker["safe_to_rely_on"] = _safe_to_rely_on_from_trust_and_proof(trust=trust, proof_gap_items=proof_gap_items)
+    blocker["legally_unsafe"] = legally_unsafe
+    blocker["informationally_incomplete"] = informationally_incomplete
+    blocker["unsafe_reasons"] = unsafe_reasons
+    blocker["informational_reasons"] = informational_reasons
     blocker["ok"] = True
     return blocker
 
@@ -255,7 +310,9 @@ def _build_compliance_gate(
 
     projection = projection_snapshot.get("projection") or {}
     blockers = list(projection_snapshot.get("blockers") or [])
-    blocking_count = _safe_int(projection.get("blocking_count"))
+    proof_obligations = list(projection_snapshot.get("proof_obligations") or ((projection_snapshot.get("projection") or {}).get("proof_obligations") if isinstance(projection_snapshot.get("projection"), dict) else []) or [])
+    proof_gap_items = _proof_gap_items(proof_obligations)
+    blocking_count = _safe_int(projection.get("blocking_count")) + len([item for item in proof_gap_items if bool(item.get("blocking"))])
     unknown_count = _safe_int(projection.get("unknown_count"))
     stale_count = _safe_int(projection.get("stale_count"))
     conflicting_count = _safe_int(projection.get("conflicting_count"))
@@ -285,16 +342,22 @@ def _build_compliance_gate(
     manual_review_reasons = list(jurisdiction_blocker.get("manual_review_reasons") or [])
 
     warnings: list[str] = []
+    if proof_gap_items:
+        unresolved_gaps.extend([{"rule_key": item.get("rule_key"), "gap": item.get("evidence_gap") or f"Missing required proof: {item.get('proof_label')}"} for item in proof_gap_items])
+        blockers.extend([{"rule_key": item.get("rule_key"), "title": item.get("proof_label"), "evaluation_status": item.get("proof_status"), "evidence_gap": item.get("evidence_gap") or f"Missing required proof: {item.get('proof_label')}"} for item in proof_gap_items if bool(item.get("blocking"))])
     blocked_reason = None
     warning_reason = None
 
     jurisdiction_blocking = bool(jurisdiction_blocker.get("blocking"))
+    proof_blocking_reasons = _proof_blocking_reasons(proof_gap_items)
+    safe_to_rely_on = _safe_to_rely_on_from_trust_and_proof(trust=jurisdiction_trust, proof_gap_items=proof_gap_items)
 
     hard_block = (
         blocking_count > 0
         or conflicting_count > 0
         or readiness_score < 45.0
         or jurisdiction_blocking
+        or bool(proof_blocking_reasons)
         or production_readiness in {"blocked", "needs_review"}
     )
 
@@ -311,6 +374,7 @@ def _build_compliance_gate(
         or completeness_score < 0.80
         or bool(manual_review_reasons)
         or not safe_for_user_reliance
+        or (not safe_to_rely_on and not hard_block)
     )
 
     if blocking_count > 0:
@@ -366,6 +430,10 @@ def _build_compliance_gate(
     for reason in manual_review_reasons:
         warnings.append(f"Jurisdiction manual review required: {reason}.")
 
+    if proof_blocking_reasons:
+        for reason in proof_blocking_reasons:
+            warnings.append(f"Required property proof blocker: {reason}")
+
     if hard_block and current_stage in PRE_CLOSE_STAGES:
         if jurisdiction_blocker.get("blocked_reason"):
             blocked_reason = str(jurisdiction_blocker.get("blocked_reason"))
@@ -373,6 +441,8 @@ def _build_compliance_gate(
             blocked_reason = "Pre-close compliance blocker(s) remain unresolved."
         elif conflicting_count > 0:
             blocked_reason = "Conflicting compliance evidence must be resolved before closing."
+        elif proof_blocking_reasons:
+            blocked_reason = proof_blocking_reasons[0]
         elif not safe_for_projection or production_readiness in {"blocked", "needs_review"}:
             blocked_reason = "Jurisdiction trust is too weak for a safe pre-close decision."
         else:
@@ -388,6 +458,8 @@ def _build_compliance_gate(
             warning_reason = "Jurisdiction trust is weak and should be reviewed before close."
         elif stale_count > 0:
             warning_reason = "Compliance proof is stale and should be refreshed before close."
+        elif not safe_to_rely_on:
+            warning_reason = "Compliance details are informational only until required proof is verified."
         elif unknown_count > 0:
             warning_reason = "Compliance proof is incomplete before close."
         elif confidence_score < 0.65:
@@ -405,6 +477,7 @@ def _build_compliance_gate(
         or bool(critical_conflicting_categories)
         or bool(manual_review_reasons)
         or not safe_for_user_reliance
+        or (not safe_to_rely_on and not hard_block)
     )
 
     ok = not (current_stage in PRE_CLOSE_STAGES and hard_block)
@@ -430,6 +503,8 @@ def _build_compliance_gate(
         "warnings": warnings,
         "impacted_rules": impacted_rules,
         "unresolved_evidence_gaps": unresolved_gaps,
+        "proof_obligations": proof_obligations,
+        "proof_gap_count": len(proof_gap_items),
         "post_close_recheck_needed": post_close_recheck_needed,
         "jurisdiction_trust": jurisdiction_trust,
         "jurisdiction_blocker": jurisdiction_blocker,
@@ -447,6 +522,11 @@ def _build_compliance_gate(
         "manual_review_reasons": manual_review_reasons,
         "safe_for_projection": safe_for_projection,
         "safe_for_user_reliance": safe_for_user_reliance,
+        "safe_to_rely_on": safe_to_rely_on,
+        "legally_unsafe": bool(hard_block),
+        "informationally_incomplete": bool(soft_warn and not hard_block),
+        "unsafe_reasons": _dedupe_reasons(list(trust_blocker_reasons) + proof_blocking_reasons + ([blocked_reason] if blocked_reason else [])),
+        "informational_reasons": _dedupe_reasons(([warning_reason] if warning_reason else []) + [str(item.get("evidence_gap") or "").strip() for item in proof_gap_items if not bool(item.get("blocking"))]),
     }
 
 
@@ -600,6 +680,13 @@ def build_workflow_summary(db, *, org_id: int, property_id: int, principal: Any 
             }
         )
 
+    stage_blocked = not bool(gate.get("ok", True))
+    action_recommendations = list(next_actions)
+    if compliance_gate.get("legally_unsafe"):
+        action_recommendations.insert(0, "Resolve legal compliance blockers before proceeding.")
+    elif compliance_gate.get("informationally_incomplete"):
+        action_recommendations.insert(0, "Refresh missing informational proof before relying on compliance automation.")
+
     return {
         "ok": True,
         "current_stage": cur,
@@ -611,10 +698,16 @@ def build_workflow_summary(db, *, org_id: int, property_id: int, principal: Any 
         "gate": gate,
         "pre_close_risk": pre_close_risk,
         "post_close_recheck": post_close_recheck,
-        "next_actions": next_actions,
+        "next_actions": action_recommendations,
         "constraints": constraints,
         "outstanding_tasks": outstanding_tasks,
         "transition": tx,
         "compliance_gate": compliance_gate,
+        "unsafe_reasons": list(compliance_gate.get("unsafe_reasons") or []),
+        "informational_reasons": list(compliance_gate.get("informational_reasons") or []),
+        "safe_to_rely_on": compliance_gate.get("safe_to_rely_on"),
+        "legally_unsafe": compliance_gate.get("legally_unsafe"),
+        "informationally_incomplete": compliance_gate.get("informationally_incomplete"),
+        "stage_movement_blocked": stage_blocked,
         "jurisdiction_trust": compliance_gate.get("jurisdiction_trust") or {},
     }

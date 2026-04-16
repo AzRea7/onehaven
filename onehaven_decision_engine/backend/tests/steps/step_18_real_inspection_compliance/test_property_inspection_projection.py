@@ -195,3 +195,12 @@ def test_property_projection_can_advance_when_compliance_is_clean(
     assert state["constraints"]["inspection"]["passed"] is True
     assert state["constraints"]["checklist"]["failed"] == 0
     assert state["constraints"]["checklist"]["blocked"] == 0
+
+
+
+def test_property_projection_exposes_proof_obligations(real_inspection_seed, db_session):
+    org = real_inspection_seed["org"]
+    prop = real_inspection_seed["property"]
+    from app.services.policy_projection_service import build_property_projection_snapshot
+    snapshot = build_property_projection_snapshot(db_session, org_id=org.id, property_id=prop.id)
+    assert "proof_obligations" in snapshot or "proof_obligations" in (snapshot.get("projection") or {})

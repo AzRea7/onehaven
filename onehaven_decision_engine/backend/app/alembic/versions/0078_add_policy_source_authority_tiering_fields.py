@@ -144,6 +144,51 @@ def upgrade() -> None:
                 server_default=sa.text("false"),
             ),
         )
+        _add_column(
+            "policy_sources",
+            sa.Column(
+                "authority_use_type",
+                sa.String(length=40),
+                nullable=False,
+                server_default=sa.text("'weak'"),
+            ),
+        )
+        _add_column(
+            "policy_sources",
+            sa.Column(
+                "authority_policy_json",
+                sa.Text(),
+                nullable=False,
+                server_default=sa.text("'{}'"),
+            ),
+        )
+        _add_column(
+            "policy_sources",
+            sa.Column(
+                "binding_categories_json",
+                sa.Text(),
+                nullable=False,
+                server_default=sa.text("'[]'"),
+            ),
+        )
+        _add_column(
+            "policy_sources",
+            sa.Column(
+                "supporting_categories_json",
+                sa.Text(),
+                nullable=False,
+                server_default=sa.text("'[]'"),
+            ),
+        )
+        _add_column(
+            "policy_sources",
+            sa.Column(
+                "unusable_categories_json",
+                sa.Text(),
+                nullable=False,
+                server_default=sa.text("'[]'"),
+            ),
+        )
 
         _create_index(
             "ix_policy_sources_authority_tier",
@@ -165,15 +210,52 @@ def upgrade() -> None:
             "policy_sources",
             ["authority_class"],
         )
+        _create_index(
+            "ix_policy_sources_authority_use_type",
+            "policy_sources",
+            ["authority_use_type"],
+        )
+
+    if _table_exists("policy_source_inventory"):
+        _add_column(
+            "policy_source_inventory",
+            sa.Column(
+                "authority_use_type",
+                sa.String(length=40),
+                nullable=False,
+                server_default=sa.text("'weak'"),
+            ),
+        )
+        _add_column(
+            "policy_source_inventory",
+            sa.Column(
+                "authority_policy_json",
+                sa.Text(),
+                nullable=False,
+                server_default=sa.text("'{}'"),
+            ),
+        )
+        _create_index(
+            "ix_policy_source_inventory_authority_use_type",
+            "policy_source_inventory",
+            ["authority_use_type"],
+        )
 
 
 def downgrade() -> None:
+    _drop_index("ix_policy_source_inventory_authority_use_type", "policy_source_inventory")
+    _drop_index("ix_policy_sources_authority_use_type", "policy_sources")
     _drop_index("ix_policy_sources_authority_class", "policy_sources")
     _drop_index("ix_policy_sources_domain_name", "policy_sources")
     _drop_index("ix_policy_sources_authority_rank", "policy_sources")
     _drop_index("ix_policy_sources_authority_tier", "policy_sources")
 
     for name in [
+        "authority_policy_json",
+        "authority_use_type",
+        "binding_categories_json",
+        "supporting_categories_json",
+        "unusable_categories_json",
         "derived_or_inferred",
         "semi_authoritative",
         "approved_supporting_source",

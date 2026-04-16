@@ -62,6 +62,8 @@ from ..services.property_state_machine import (
     normalize_decision_bucket,
 )
 from ..services.workflow_gate_service import build_workflow_summary, build_property_jurisdiction_blocker
+from ..services.compliance_document_service import build_property_document_stack
+from ..services.policy_projection_service import build_property_compliance_brief, build_property_projection_snapshot
 from ..services.acquisition_tag_service import list_property_tags, replace_property_tags
 from ..services.acquisition_participant_service import list_participants
 from ..services.property_inventory_snapshot_service import (
@@ -1294,3 +1296,36 @@ def enrich_property_financial_batch(
     return {"ok": True, "count": len(rows), "rows": rows}
 
 
+
+
+@router.get("/{property_id}/compliance-brief")
+def get_property_compliance_brief(property_id: int, db: Session = Depends(get_db), principal=Depends(get_principal)):
+    return build_property_compliance_brief(db, org_id=int(principal.org_id), property_id=int(property_id))
+
+
+@router.get("/{property_id}/compliance-documents")
+def get_property_compliance_documents(property_id: int, db: Session = Depends(get_db), principal=Depends(get_principal)):
+    return build_property_document_stack(db, org_id=int(principal.org_id), property_id=int(property_id))
+
+
+@router.get("/{property_id}/compliance-projection")
+def get_property_compliance_projection(property_id: int, db: Session = Depends(get_db), principal=Depends(get_principal)):
+    return build_property_projection_snapshot(db, org_id=int(principal.org_id), property_id=int(property_id))
+
+
+@router.get("/{property_id}/compliance-safety")
+def get_property_compliance_safety(property_id: int, db: Session = Depends(get_db), principal=Depends(get_principal)):
+    blocker = build_property_jurisdiction_blocker(db, org_id=principal.org_id, property_id=property_id)
+    snapshot = build_property_projection_snapshot(db, org_id=principal.org_id, property_id=property_id)
+    brief = build_property_compliance_brief(db, org_id=principal.org_id, property_id=property_id)
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "blocker": blocker,
+        "safe_to_rely_on": bool((brief or {}).get("safe_to_rely_on", blocker.get("safe_to_rely_on"))),
+        "legally_unsafe": bool((brief or {}).get("legally_unsafe", blocker.get("legally_unsafe"))),
+        "informationally_incomplete": bool((brief or {}).get("informationally_incomplete", blocker.get("informationally_incomplete"))),
+        "unsafe_reasons": list((brief or {}).get("unsafe_reasons") or blocker.get("unsafe_reasons") or []),
+        "informational_reasons": list((brief or {}).get("informational_reasons") or blocker.get("informational_reasons") or []),
+        "projection": snapshot.get("projection") if isinstance(snapshot, dict) else None,
+    }

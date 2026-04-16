@@ -42,3 +42,19 @@ def test_notification_service_skips_when_fresh_and_complete():
     )
 
     assert out["notify"] is False
+
+
+
+
+def test_notification_service_escalates_for_legal_stale_categories():
+    out = notify_svc.should_notify_stale_rules(
+        completeness_status="stale",
+        stale_status="stale",
+        stale_reason="critical_authoritative_data_stale",
+        missing_categories=[],
+        critical_stale_categories=["inspection"],
+    )
+
+    assert out["notify"] is True
+    assert out["severity"] == "high"
+    assert out["reason"] == "critical_authoritative_data_stale"

@@ -11,7 +11,7 @@ from app.services.jurisdiction_completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
 )
-from app.services.jurisdiction_notification_service import build_review_queue_payload
+from app.services.jurisdiction_notification_service import build_review_queue_payload, build_gap_escalation_notifications
 from app.services.policy_cleanup_service import (
     ARCHIVE_MARKER,
     archive_stale_market_sources,
@@ -43,6 +43,7 @@ from app.services.policy_source_service import (
 from app.services.policy_discovery_service import expected_inventory_hints
 from app.services.policy_change_detection_service import summarize_refresh_runs
 from app.services.policy_validation_service import validate_market_assertions
+from app.services.jurisdiction_sla_service import build_refresh_requirements, collect_profile_source_sla_summary
 
 
 def _norm_state(s: Optional[str]) -> str:
@@ -309,6 +310,26 @@ def _recompute_profile_for_market(
         profile,
         commit=True,
     )
+    completeness_payload = profile_completeness_payload(db, refreshed_profile)
+    sla_summary = collect_profile_source_sla_summary(db, profile=refreshed_profile)
+    refresh_requirements = build_refresh_requirements(
+        refreshed_profile,
+        next_step="refresh" if list(sla_summary.get("legal_overdue_categories") or completeness_payload.get("critical_stale_categories") or []) else "monitor",
+        missing_categories=list(completeness_payload.get("missing_categories") or []),
+        stale_categories=list(completeness_payload.get("stale_categories") or []),
+        overdue_categories=list(sla_summary.get("overdue_categories") or []),
+        critical_overdue_categories=list(sla_summary.get("critical_overdue_categories") or []),
+        legal_overdue_categories=list(sla_summary.get("legal_overdue_categories") or []),
+        informational_overdue_categories=list(sla_summary.get("informational_overdue_categories") or []),
+        stale_authoritative_categories=list(sla_summary.get("stale_authoritative_categories") or []),
+        inventory_summary=inventory_summary,
+    )
+    if hasattr(refreshed_profile, "refresh_requirements_json"):
+        import json as _json
+        refreshed_profile.refresh_requirements_json = _json.dumps(refresh_requirements, sort_keys=True, default=str)
+        db.add(refreshed_profile)
+        db.commit()
+        db.refresh(refreshed_profile)
 
     return {
         "ok": True,
@@ -316,7 +337,9 @@ def _recompute_profile_for_market(
         "inventory_summary": inventory_summary,
         "recomputed": True,
         "jurisdiction_profile_id": int(refreshed_profile.id),
-        "profile": profile_completeness_payload(db, refreshed_profile),
+        "profile": completeness_payload,
+        "sla_summary": sla_summary,
+        "refresh_requirements": refresh_requirements,
         "coverage": {
             "id": int(coverage.id),
             "coverage_status": getattr(coverage, "coverage_status", None),
@@ -458,10 +481,16 @@ def _run_source_refresh_batch(
                 "source_id": int(source.id),
                 "refresh": fetch_result,
                 "changed": content_changed,
+                "comparison_state": fetch_result.get("comparison_state"),
+                "change_kind": fetch_result.get("change_kind") or (fetch_result.get("change_summary") or {}).get("change_kind"),
+                "revalidation_required": bool(fetch_result.get("revalidation_required")),
+                "source_version_id": fetch_result.get("source_version_id"),
+                "previous_version_id": fetch_result.get("previous_version_id"),
                 "extract_result": extract_result,
                 "diff": diff_result,
                 "normalized": normalize_result,
                 "validation": validation_result,
+                "requires_revalidation": bool(fetch_result.get("revalidation_required")) or bool((validation_result or {}).get("blocking_issue_count")),
             }
         )
 
@@ -578,6 +607,15 @@ def run_market_policy_pipeline(
         pha_name=pha,
     )
 
+    gap_escalations = []
+    try:
+        profile_id = ((recompute or {}).get("jurisdiction_profile_id") if isinstance(recompute, dict) else None)
+        profile = db.get(JurisdictionProfile, int(profile_id)) if profile_id else None
+        if profile is not None:
+            gap_escalations = [note.as_dict() for note in build_gap_escalation_notifications(db, profile=profile)]
+    except Exception:
+        gap_escalations = []
+
     return {
         "ok": True,
         "missing_categories": missing_categories,
@@ -588,11 +626,17 @@ def run_market_policy_pipeline(
         "changed_source_count": int(refresh_batch["summary"]["changed_source_count"]),
         "failed_source_count": int(refresh_batch["summary"]["failed_source_count"]),
         "source_runs": refresh_batch["source_runs"],
-        "refresh_summary": refresh_batch["summary"],
+        "refresh_summary": {
+            **refresh_batch["summary"],
+            "revalidation_required_source_ids": [row["source_id"] for row in refresh_batch["source_runs"] if bool(row.get("revalidation_required"))],
+            "changed_or_failed_source_ids": [row["source_id"] for row in refresh_batch["source_runs"] if bool(row.get("changed")) or not bool((row.get("refresh") or {}).get("ok", False))],
+            "validation_blocked_source_ids": [row["source_id"] for row in refresh_batch["source_runs"] if isinstance(row.get("validation"), dict) and int((row.get("validation") or {}).get("blocking_issue_count", 0) or 0) > 0],
+        },
         "refresh_state": refresh_state_summary,
         "lifecycle_result": lifecycle_result,
         "recompute": recompute,
         "review_queue": review_queue,
+        "gap_escalations": gap_escalations,
         "inventory_summary": inventory_summary,
     }
 
@@ -914,5 +958,103 @@ def refresh_market_policy_pipeline(
         )
         if profile is not None:
             pipeline_result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(profile.id))
+    result["pipeline_result"] = pipeline_result
+    return result
+
+
+# --- Story 4.2 additive governed-truth overlays ---
+from app.services.policy_cleanup_service import cleanup_non_projectable_assertions_for_market
+from app.services.jurisdiction_rules_service import governed_assertions_for_scope
+
+_chunk42_original_run_market_policy_pipeline = run_market_policy_pipeline
+
+def run_market_policy_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    result = _chunk42_original_run_market_policy_pipeline(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
+    cleanup_result = cleanup_market_stale_assertions(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        reviewer_user_id=reviewer_user_id,
+    )
+    non_projectable_cleanup = cleanup_non_projectable_assertions_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    governed_truth = governed_assertions_for_scope(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+
+    lifecycle_result = dict(result.get("lifecycle_result") or {})
+    lifecycle_result["cleanup_result"] = cleanup_result
+    lifecycle_result["non_projectable_cleanup"] = non_projectable_cleanup
+    lifecycle_result["governed_truth"] = governed_truth
+    lifecycle_result["manual_review_count"] = int(governed_truth.get("manual_review_count", 0) or 0)
+    lifecycle_result["manual_review_ids"] = list(governed_truth.get("manual_review_ids") or [])
+    result["lifecycle_result"] = lifecycle_result
+
+    refresh_summary = dict(result.get("refresh_summary") or {})
+    refresh_summary["manual_review_assertion_ids"] = list(governed_truth.get("manual_review_ids") or [])
+    refresh_summary["active_governed_assertion_ids"] = list(governed_truth.get("safe_assertion_ids") or [])
+    refresh_summary["replaced_cleanup_ids"] = list((cleanup_result or {}).get("archived_duplicate_ids") or [])
+    result["refresh_summary"] = refresh_summary
+
+    recompute = dict(result.get("recompute") or {})
+    profile = dict(recompute.get("profile") or {})
+    profile["governed_truth"] = governed_truth
+    profile["governed_active_assertion_ids"] = list(governed_truth.get("safe_assertion_ids") or [])
+    profile["manual_review_assertion_ids"] = list(governed_truth.get("manual_review_ids") or [])
+    recompute["profile"] = profile
+    result["recompute"] = recompute
+    return result
+
+
+_chunk42_original_refresh_market_policy_pipeline = refresh_market_policy_pipeline
+
+def refresh_market_policy_pipeline(*args, **kwargs):
+    result = _chunk42_original_refresh_market_policy_pipeline(*args, **kwargs)
+    pipeline_result = dict(result.get("pipeline_result") or {})
+    if pipeline_result.get("ok"):
+        lifecycle_result = dict(pipeline_result.get("lifecycle_result") or {})
+        governed_truth = dict((lifecycle_result.get("governed_truth") or {}))
+        pipeline_result.setdefault("refresh_summary", {})["manual_review_assertion_ids"] = list(governed_truth.get("manual_review_ids") or [])
+        pipeline_result.setdefault("refresh_summary", {})["active_governed_assertion_ids"] = list(governed_truth.get("safe_assertion_ids") or [])
     result["pipeline_result"] = pipeline_result
     return result

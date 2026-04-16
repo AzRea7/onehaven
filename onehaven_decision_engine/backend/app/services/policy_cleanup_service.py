@@ -210,3 +210,90 @@ def cleanup_non_projectable_assertions_for_market(
         "updated_count": len(updated_ids),
         "updated_ids": updated_ids,
     }
+
+# --- Story 4.2 additive cleanup overlays ---
+
+def _is_assertion_projectable_now(row: PolicyAssertion) -> bool:
+    governance_state = (getattr(row, "governance_state", None) or "").strip().lower()
+    rule_status = (getattr(row, "rule_status", None) or "").strip().lower()
+    review_status = (getattr(row, "review_status", None) or "").strip().lower()
+    validation_state = (getattr(row, "validation_state", None) or "pending").strip().lower()
+    coverage_status = (getattr(row, "coverage_status", None) or "").strip().lower()
+    has_replacement = getattr(row, "replaced_by_assertion_id", None) is not None
+    has_superseder = getattr(row, "superseded_by_assertion_id", None) is not None
+    return bool(
+        governance_state == "active"
+        and rule_status == "active"
+        and review_status == "verified"
+        and validation_state == "validated"
+        and not has_replacement
+        and not has_superseder
+        and coverage_status not in {"candidate", "partial", "inferred", "conflicting", "stale", "superseded"}
+        and bool(getattr(row, "is_current", False))
+    )
+
+
+def cleanup_non_projectable_assertions_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+) -> dict:
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
+    q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
+    if org_id is None:
+        q = q.filter(PolicyAssertion.org_id.is_(None))
+    else:
+        q = q.filter((PolicyAssertion.org_id == org_id) | (PolicyAssertion.org_id.is_(None)))
+
+    rows = q.all()
+
+    updated_ids: list[int] = []
+    excluded_ids: list[int] = []
+    safe_ids: list[int] = []
+    manual_review_ids: list[int] = []
+
+    for row in rows:
+        if row.county is not None and row.county != cnty:
+            continue
+        if row.city is not None and row.city != cty:
+            continue
+        if getattr(row, "pha_name", None) is not None and getattr(row, "pha_name", None) != pha:
+            continue
+
+        if _is_assertion_projectable_now(row):
+            safe_ids.append(int(row.id))
+            continue
+
+        excluded_ids.append(int(row.id))
+        validation_state = (getattr(row, "validation_state", None) or "pending").strip().lower()
+        review_status = (getattr(row, "review_status", None) or "").strip().lower()
+        if validation_state == "conflicting" or review_status == "needs_manual_review":
+            row.coverage_status = "conflicting"
+            row.is_current = False
+            manual_review_ids.append(int(row.id))
+        else:
+            rule_status = (getattr(row, "rule_status", None) or "").strip().lower()
+            row.coverage_status = "stale" if rule_status == "stale" else ("superseded" if getattr(row, "superseded_by_assertion_id", None) is not None or getattr(row, "replaced_by_assertion_id", None) is not None else "candidate")
+        row.change_summary = f"{NON_PROJECTABLE_NOTE_MARKER} governance_state={(getattr(row, 'governance_state', None) or 'unknown')} rule_status={(getattr(row, 'rule_status', None) or 'unknown')}"
+        updated_ids.append(int(row.id))
+        db.add(row)
+
+    db.commit()
+    return {
+        "safe_count": len(safe_ids),
+        "safe_ids": safe_ids,
+        "excluded_count": len(excluded_ids),
+        "excluded_ids": excluded_ids,
+        "updated_count": len(updated_ids),
+        "updated_ids": updated_ids,
+        "manual_review_count": len(sorted(set(manual_review_ids))),
+        "manual_review_ids": sorted(set(manual_review_ids)),
+    }
