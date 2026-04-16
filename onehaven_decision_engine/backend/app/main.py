@@ -43,6 +43,7 @@ from .routers.trust import router as trust_router
 
 from .routers.auth import router as auth_router
 from .routers.api_keys import router as api_keys_router
+from .routers.automation import router as automation_router
 
 from .routers.jurisdiction_profiles import router as jurisdiction_profiles_router
 from .routers.policy_seed import router as policy_seed_router
@@ -139,6 +140,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(api_keys_router, prefix=API_PREFIX)
+    app.include_router(automation_router, prefix=API_PREFIX)
 
     app.include_router(jurisdiction_profiles_router, prefix=API_PREFIX)
     app.include_router(policy_seed_router, prefix=API_PREFIX)

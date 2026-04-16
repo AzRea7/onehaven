@@ -72,6 +72,24 @@ from ..services.workflow_gate_service import build_workflow_summary
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
 
+def _rollback_preview_read(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
+def _safe_preview_call(db: Session, builder):
+    try:
+        return builder()
+    except HTTPException:
+        _rollback_preview_read(db)
+        raise
+    except Exception:
+        _rollback_preview_read(db)
+        raise
+
+
 _SECTION8_TEMPLATE: list[dict[str, Any]] = [
     {
         "category": "Electrical",
@@ -769,15 +787,18 @@ def property_brief(
         property_id=property_id,
         action="view property compliance brief",
     )
-    return build_property_compliance_brief(
+    return _safe_preview_call(
         db,
-        org_id=p.org_id,
-        state=getattr(prop, "state", None) or "MI",
-        county=getattr(prop, "county", None),
-        city=getattr(prop, "city", None),
-        pha_name=None,
-        property_id=int(property_id),
-        property=prop,
+        lambda: build_property_compliance_brief(
+            db,
+            org_id=p.org_id,
+            state=getattr(prop, "state", None) or "MI",
+            county=getattr(prop, "county", None),
+            city=getattr(prop, "city", None),
+            pha_name=None,
+            property_id=int(property_id),
+            property=prop,
+        ),
     )
 
 
@@ -794,16 +815,22 @@ def property_inspection_readiness(
         property_id=property_id,
         action="view property inspection readiness",
     )
-    readiness = build_property_inspection_readiness(
+    readiness = _safe_preview_call(
         db,
-        org_id=p.org_id,
-        property_id=property_id,
+        lambda: build_property_inspection_readiness(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+        ),
     )
-    history = _history_rows_for_property(
+    history = _safe_preview_call(
         db,
-        org_id=p.org_id,
-        property_id=property_id,
-        limit=25,
+        lambda: _history_rows_for_property(
+            db,
+            org_id=p.org_id,
+            property_id=property_id,
+            limit=25,
+        ),
     )
     readiness["inspection_history"] = history
     return readiness

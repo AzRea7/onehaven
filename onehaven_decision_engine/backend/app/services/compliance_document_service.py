@@ -36,8 +36,26 @@ _ALLOWED_CATEGORIES = {
 }
 
 
+class DocumentResult(dict):
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        self[name] = value
+
+
 def _now() -> datetime:
     return datetime.utcnow()
+
+
+def _rollback_quietly(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        pass
 
 
 def _storage_dir() -> Path:
@@ -103,9 +121,9 @@ def ensure_compliance_document_table(db: Session) -> None:
     db.flush()
 
 
-def _row_to_dict(row: Any) -> dict[str, Any]:
+def _row_to_dict(row: Any) -> DocumentResult:
     mapping = row._mapping if hasattr(row, "_mapping") else row
-    item = dict(mapping)
+    item = DocumentResult(dict(mapping))
     item["parse_meta"] = _json_loads(item.get("parser_meta_json"), {})
     item["metadata"] = _json_loads(item.get("metadata_json"), {})
     item["absolute_path"] = None
@@ -142,7 +160,7 @@ def list_compliance_documents(
     sql = f"""
         SELECT *
         FROM compliance_documents
-        WHERE {" AND ".join(clauses)}
+        WHERE {' AND '.join(clauses)}
         ORDER BY id DESC
     """
     rows = db.execute(text(sql), params).fetchall()
@@ -376,18 +394,43 @@ def create_compliance_document_from_path(
     db.flush()
 
     created = _row_to_dict(row)
-    sync_document_evidence_for_property(
-        db,
-        org_id=org_id,
-        property_id=property_id,
-        document_id=int(created["id"]),
-    )
-    rebuild_property_projection(
-        db,
-        org_id=org_id,
-        property_id=property_id,
-    )
-    return get_compliance_document(db, org_id=org_id, document_id=int(created["id"]))
+
+    # Commit the document insert first so later evidence/projection failures do not
+    # make the upload appear successful while rolling the document back.
+    db.commit()
+
+    try:
+        sync_document_evidence_for_property(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            document_id=int(created["id"]),
+        )
+        db.commit()
+    except Exception:
+        _rollback_quietly(db)
+        created["evidence_sync_error"] = True
+
+    try:
+        rebuild_property_projection(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+        db.commit()
+    except Exception:
+        _rollback_quietly(db)
+        created["projection_rebuild_error"] = True
+
+    persisted = get_compliance_document(db, org_id=org_id, document_id=int(created["id"]))
+    if isinstance(persisted, dict):
+        persisted.update(
+            {
+                "evidence_sync_error": created.get("evidence_sync_error", False),
+                "projection_rebuild_error": created.get("projection_rebuild_error", False),
+            }
+        )
+    return persisted
 
 
 def delete_compliance_document(
@@ -422,12 +465,16 @@ def delete_compliance_document(
             Path(path).unlink(missing_ok=True)
         except Exception:
             pass
-    db.flush()
-    rebuild_property_projection(
-        db,
-        org_id=org_id,
-        property_id=int(row["property_id"]),
-    )
+    db.commit()
+    try:
+        rebuild_property_projection(
+            db,
+            org_id=org_id,
+            property_id=int(row["property_id"]),
+        )
+        db.commit()
+    except Exception:
+        _rollback_quietly(db)
     return {"document_id": int(document_id), "deleted": True}
 
 
@@ -457,11 +504,15 @@ def build_property_document_stack(
         checklist_key = str(row.get("checklist_item_id")) if row.get("checklist_item_id") is not None else "unassigned"
         by_checklist_item.setdefault(checklist_key, []).append(row)
 
-    projection = build_property_projection_snapshot(
-        db,
-        org_id=org_id,
-        property_id=property_id,
-    )
+    try:
+        projection = build_property_projection_snapshot(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+    except Exception:
+        _rollback_quietly(db)
+        projection = {"projection": None, "items": [], "blockers": [], "proof_counts": {}, "proof_obligations": []}
 
     proof_summary: dict[str, list[dict[str, Any]]] = {}
     for item in projection.get("items") or []:
@@ -492,5 +543,3 @@ def build_property_document_stack(
         "projection_items": projection.get("items") or [],
         "blockers": projection.get("blockers") or [],
     }
-
-

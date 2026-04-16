@@ -57,6 +57,72 @@ def _j(v: Any) -> str:
     return json.dumps(v, separators=(",", ":"), ensure_ascii=False, default=str)
 
 
+def _rollback_quietly(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
+def _safe_projection_snapshot(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    property: Property | None = None,
+) -> dict[str, Any]:
+    try:
+        rebuild_property_projection(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            property=property,
+        )
+        snapshot = build_property_projection_snapshot(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+        return snapshot if isinstance(snapshot, dict) else {}
+    except TypeError:
+        try:
+            rebuild_property_projection(db, org_id=org_id, property_id=property_id)
+            snapshot = build_property_projection_snapshot(
+                db,
+                org_id=org_id,
+                property_id=property_id,
+            )
+            return snapshot if isinstance(snapshot, dict) else {}
+        except Exception:
+            _rollback_quietly(db)
+            return {}
+    except Exception:
+        _rollback_quietly(db)
+        return {}
+
+
+def _safe_document_stack_snapshot(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    try:
+        snapshot = build_property_document_stack(db, org_id=org_id, property_id=property_id)
+        return snapshot if isinstance(snapshot, dict) else {}
+    except Exception:
+        _rollback_quietly(db)
+        return {}
+
+
+def _safe_jurisdiction_blocker(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    try:
+        blocker = build_property_jurisdiction_blocker(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+        return blocker if isinstance(blocker, dict) else {}
+    except Exception:
+        _rollback_quietly(db)
+        return {}
+
+
 def _get_property(db: Session, *, org_id: int, property_id: int) -> Property:
     prop = db.scalar(
         select(Property).where(
@@ -67,6 +133,134 @@ def _get_property(db: Session, *, org_id: int, property_id: int) -> Property:
     if not prop:
         raise ValueError("property not found")
     return prop
+
+def _safe_get_property(db: Session, *, org_id: int, property_id: int) -> Property | None:
+    try:
+        return _get_property(db, org_id=org_id, property_id=property_id)
+    except Exception:
+        _rollback_quietly(db)
+        try:
+            return _get_property(db, org_id=org_id, property_id=property_id)
+        except Exception:
+            _rollback_quietly(db)
+            return None
+
+
+def _safe_checklist_rows(db: Session, *, org_id: int, property_id: int) -> list[PropertyChecklistItem]:
+    try:
+        return _checklist_rows(db, org_id=org_id, property_id=property_id)
+    except Exception:
+        _rollback_quietly(db)
+        return []
+
+
+def _safe_latest_inspection(db: Session, *, org_id: int, property_id: int) -> Inspection | None:
+    try:
+        return _latest_inspection(db, org_id=org_id, property_id=property_id)
+    except Exception:
+        _rollback_quietly(db)
+        return None
+
+
+def _safe_inspection_rows(db: Session, *, inspection_id: int | None) -> list[InspectionItem]:
+    if inspection_id is None:
+        return []
+    try:
+        return _inspection_rows(db, inspection_id=int(inspection_id))
+    except Exception:
+        _rollback_quietly(db)
+        return []
+
+
+def _safe_profile_summary_for_property(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property | None,
+    fallback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if isinstance(fallback, dict) and fallback:
+        return fallback
+    if prop is None:
+        return {}
+    try:
+        resolved = resolve_operational_policy(
+            db,
+            org_id=org_id,
+            state=getattr(prop, "state", None) or "MI",
+            county=getattr(prop, "county", None),
+            city=getattr(prop, "city", None),
+        )
+        return resolved if isinstance(resolved, dict) else {}
+    except Exception:
+        _rollback_quietly(db)
+        return {}
+
+
+def _safe_effective_hqs_items(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property | None,
+    profile_summary: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if prop is None:
+        return {"items": [], "sources": [], "counts": {}}
+    try:
+        effective = get_effective_hqs_items(
+            db,
+            org_id=org_id,
+            prop=prop,
+            profile_summary=profile_summary or {},
+        )
+        return effective if isinstance(effective, dict) else {"items": [], "sources": [], "counts": {}}
+    except Exception:
+        _rollback_quietly(db)
+        return {"items": [], "sources": [], "counts": {}}
+
+
+def _safe_readiness_score(db: Session, *, org_id: int, property_id: int):
+    try:
+        return compute_property_readiness_score(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+    except Exception:
+        _rollback_quietly(db)
+        return compute_property_readiness_score(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+
+
+def _safe_readiness_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    try:
+        summary = build_property_readiness_summary(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+        return summary if isinstance(summary, dict) else {}
+    except Exception:
+        _rollback_quietly(db)
+        return {}
+
+
+def _safe_failure_actions(db: Session, *, org_id: int, property_id: int, inspection_id: int | None) -> dict[str, Any]:
+    try:
+        actions = build_failure_next_actions(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            inspection_id=inspection_id,
+            limit=10,
+        )
+        return actions if isinstance(actions, dict) else {"recommended_actions": []}
+    except Exception:
+        _rollback_quietly(db)
+        return {"recommended_actions": []}
 
 
 def _latest_inspection(db: Session, *, org_id: int, property_id: int) -> Inspection | None:
@@ -610,8 +804,10 @@ def _safe_property_policy_brief(
                 property=prop,
             ) or {}
         except Exception:
+            _rollback_quietly(db)
             return {}
     except Exception:
+        _rollback_quietly(db)
         return {}
 
 
@@ -672,14 +868,41 @@ def build_property_inspection_readiness(
     org_id: int,
     property_id: int,
 ) -> dict[str, Any]:
-    prop = _get_property(db, org_id=org_id, property_id=property_id)
-    checklist_sync = ensure_template_backed_checklist(
-        db,
-        org_id=org_id,
-        property_id=property_id,
-    )
+    prop = _safe_get_property(db, org_id=org_id, property_id=property_id)
+    if prop is None:
+        raise ValueError("property not found")
 
-    checklist_rows = _checklist_rows(db, org_id=org_id, property_id=property_id)
+    try:
+        checklist_sync = ensure_template_backed_checklist(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+    except Exception as e:
+        _rollback_quietly(db)
+        checklist_sync = {
+            "ok": False,
+            "sync_error": str(e),
+            "template_key": "hud_52580a",
+            "template_version": "hud_52580a_2019",
+            "checklist_id": None,
+            "created_checklist": False,
+            "created_items": 0,
+            "updated_items": 0,
+            "template": {
+                "ok": False,
+                "template_key": "hud_52580a",
+                "template_version": "hud_52580a_2019",
+                "property_id": property_id,
+                "profile_summary": {},
+                "items": [],
+                "sources": [],
+                "counts": {"total": 0},
+            },
+        }
+        prop = _safe_get_property(db, org_id=org_id, property_id=property_id) or prop
+
+    checklist_rows = _safe_checklist_rows(db, org_id=org_id, property_id=property_id)
 
     by_code: dict[str, PropertyChecklistItem] = {}
     for r in checklist_rows:
@@ -687,15 +910,14 @@ def build_property_inspection_readiness(
         if code:
             by_code[code] = r
 
-    profile_summary = checklist_sync["template"].get("profile_summary") or resolve_operational_policy(
+    profile_summary = _safe_profile_summary_for_property(
         db,
         org_id=org_id,
-        state=getattr(prop, "state", None) or "MI",
-        county=getattr(prop, "county", None),
-        city=getattr(prop, "city", None),
+        prop=prop,
+        fallback=(checklist_sync.get("template") or {}).get("profile_summary"),
     )
 
-    effective_hqs = get_effective_hqs_items(
+    effective_hqs = _safe_effective_hqs_items(
         db,
         org_id=org_id,
         prop=prop,
@@ -730,7 +952,7 @@ def build_property_inspection_readiness(
 
     local_rules = _build_local_rules_from_profile(profile_summary)
 
-    latest_inspection = _latest_inspection(db, org_id=org_id, property_id=property_id)
+    latest_inspection = _safe_latest_inspection(db, org_id=org_id, property_id=property_id)
     inspection_result_rules: list[dict[str, Any]] = []
     latest_inspection_id = getattr(latest_inspection, "id", None) if latest_inspection else None
     if latest_inspection is not None:
@@ -768,7 +990,7 @@ def build_property_inspection_readiness(
                 )
             )
 
-        for inspection_item in _inspection_rows(db, inspection_id=int(latest_inspection.id)):
+        for inspection_item in _safe_inspection_rows(db, inspection_id=latest_inspection_id):
             inspection_result_rules.append(_inspection_item_to_rule(inspection_item))
 
     all_results = _dedupe_rules(hqs_results + local_rules + inspection_result_rules)
@@ -784,18 +1006,18 @@ def build_property_inspection_readiness(
     unknowns = [r for r in all_results if r["status"] == STATUS_UNKNOWN]
     passed_items = [r for r in all_results if r["status"] == STATUS_PASS]
 
-    readiness_score = compute_property_readiness_score(
+    readiness_score = _safe_readiness_score(
         db,
         org_id=org_id,
         property_id=property_id,
     )
-    rebuild_property_projection(
+    _safe_projection_snapshot(
         db,
         org_id=org_id,
         property_id=property_id,
         property=prop,
     )
-    readiness_summary = build_property_readiness_summary(
+    readiness_summary = _safe_readiness_summary(
         db,
         org_id=org_id,
         property_id=property_id,
@@ -808,12 +1030,11 @@ def build_property_inspection_readiness(
         profile_summary=profile_summary,
     )
 
-    failure_actions = build_failure_next_actions(
+    failure_actions = _safe_failure_actions(
         db,
         org_id=org_id,
         property_id=property_id,
         inspection_id=latest_inspection_id,
-        limit=10,
     )
 
     recommended_actions = _sorted_actions(
@@ -841,10 +1062,17 @@ def build_property_inspection_readiness(
 
     recommended_actions = _sorted_actions(recommended_actions, limit=10)
 
-    rebuild_property_projection(db, org_id=org_id, property_id=property_id)
-    projection = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
-    document_stack = build_property_document_stack(db, org_id=org_id, property_id=property_id)
-    jurisdiction_blocker = build_property_jurisdiction_blocker(
+    projection = _safe_projection_snapshot(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    document_stack = _safe_document_stack_snapshot(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    jurisdiction_blocker = _safe_jurisdiction_blocker(
         db,
         org_id=org_id,
         property_id=property_id,

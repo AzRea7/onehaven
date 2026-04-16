@@ -127,6 +127,26 @@ def _must_get_property_for_inspection(
     return must_get_property(db, org_id=org_id, property_id=property_id)
 
 
+def _require_inspection_preview_stage(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    action: str,
+) -> None:
+    """
+    Allow read-only inspection preview endpoints to be visible earlier than full
+    compliance execution while preserving strict gates for mutations.
+    """
+    require_stage(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        min_stage="underwritten",
+        action=action,
+    )
+
+
 def _sync_checklist_state_from_inspection_item(
     db: Session,
     *,
@@ -997,11 +1017,10 @@ def inspection_timeline(
     p=Depends(get_principal),
 ):
     _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
+    _require_inspection_preview_stage(
         db,
         org_id=p.org_id,
         property_id=property_id,
-        min_stage="compliance",
         action="view inspection timeline",
     )
     return build_inspection_timeline(
@@ -1019,11 +1038,10 @@ def inspection_schedule_summary(
     p=Depends(get_principal),
 ):
     _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
+    _require_inspection_preview_stage(
         db,
         org_id=p.org_id,
         property_id=property_id,
-        min_stage="compliance",
         action="view inspection schedule summary",
     )
     return build_property_schedule_summary(

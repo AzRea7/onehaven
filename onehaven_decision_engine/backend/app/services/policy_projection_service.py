@@ -229,6 +229,13 @@ def _utcnow() -> datetime:
     return datetime.utcnow()
 
 
+def _rollback_quietly(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
 def _loads(value: Any, default: Any) -> Any:
     if value in (None, ""):
         return default
@@ -630,7 +637,7 @@ def _build_property_scope(
         row = db.execute(
             text(
                 """
-                SELECT id, address, state, county, city, property_type, program_type, jurisdiction_slug
+                SELECT id, address, state, county, city, property_type
                 FROM properties
                 WHERE id = :property_id AND (:org_id IS NULL OR org_id = :org_id)
                 """
@@ -1194,171 +1201,177 @@ def sync_document_evidence_for_property(
     property_id: int,
     document_id: int | None = None,
 ) -> dict[str, Any]:
-    scope = _build_property_scope(db, org_id=org_id, property_id=property_id)
+    try:
+        scope = _build_property_scope(db, org_id=org_id, property_id=property_id)
 
-    where = ["org_id = :org_id", "property_id = :property_id", "deleted_at IS NULL"]
-    params: dict[str, Any] = {"org_id": int(org_id), "property_id": int(property_id)}
-    if document_id is not None:
-        where.append("id = :document_id")
-        params["document_id"] = int(document_id)
+        where = ["org_id = :org_id", "property_id = :property_id", "deleted_at IS NULL"]
+        params: dict[str, Any] = {"org_id": int(org_id), "property_id": int(property_id)}
+        if document_id is not None:
+            where.append("id = :document_id")
+            params["document_id"] = int(document_id)
 
-    rows = db.execute(
-        text(
-            f"""
-            SELECT *
-            FROM compliance_documents
-            WHERE {' AND '.join(where)}
-            ORDER BY id ASC
-            """
-        ),
-        params,
-    ).mappings().all()
+        rows = db.execute(
+            text(
+                f"""
+                SELECT *
+                FROM compliance_documents
+                WHERE {' AND '.join(where)}
+                ORDER BY id ASC
+                """
+            ),
+            params,
+        ).mappings().all()
 
-    created_or_updated = 0
-    linked_rule_keys: set[str] = set()
-    keep_keys: set[str] = set()
+        created_or_updated = 0
+        linked_rule_keys: set[str] = set()
+        keep_keys: set[str] = set()
 
-    for row in rows:
-        metadata = _loads(row.get("metadata_json"), {})
-        parser_meta = _loads(row.get("parser_meta_json"), {})
-        category = str(row.get("category") or "other_evidence")
-        rule_keys = _document_rule_keys(
-            category,
-            metadata={**metadata, "label": row.get("label")},
-            extracted_text=row.get("extracted_text_preview"),
-        )
-        scan_status = str(row.get("scan_status") or "unknown").lower()
-        parse_status = str(row.get("parse_status") or "unknown").lower()
+        for row in rows:
+            metadata = _loads(row.get("metadata_json"), {})
+            parser_meta = _loads(row.get("parser_meta_json"), {})
+            category = str(row.get("category") or "other_evidence")
+            rule_keys = _document_rule_keys(
+                category,
+                metadata={**metadata, "label": row.get("label")},
+                extracted_text=row.get("extracted_text_preview"),
+            )
+            scan_status = str(row.get("scan_status") or "unknown").lower()
+            parse_status = str(row.get("parse_status") or "unknown").lower()
 
-        if scan_status in {"infected", "blocked"}:
-            status = "blocked"
-            satisfies_rule = False
-        elif scan_status in {"clean", "ok", "unknown"}:
-            status = "verified"
-            satisfies_rule = True
-        else:
-            status = "unknown"
-            satisfies_rule = None
+            if scan_status in {"infected", "blocked"}:
+                status = "blocked"
+                satisfies_rule = False
+            elif scan_status in {"clean", "ok", "unknown"}:
+                status = "verified"
+                satisfies_rule = True
+            else:
+                status = "unknown"
+                satisfies_rule = None
 
-        proof_state = "confirmed" if parse_status in {"parsed", "queued", "skipped"} else "inferred"
+            proof_state = "confirmed" if parse_status in {"parsed", "queued", "skipped"} else "inferred"
 
-        if not rule_keys:
-            rule_keys = [f"document_category::{category}"]
+            if not rule_keys:
+                rule_keys = [f"document_category::{category}"]
 
-        document_kind = category
-        issuing_authority = str(
-            metadata.get("issuing_authority")
-            or parser_meta.get("issuing_authority")
-            or metadata.get("authority_name")
-            or ""
-        ).strip() or None
-        reference_number = _document_reference_number(row, metadata, parser_meta)
-        expires_at = _document_expires_at(row, metadata, parser_meta)
-        remediation_due_at = _parse_datetime(metadata.get("remediation_due_at") or parser_meta.get("remediation_due_at"))
-        observed_at = _parse_datetime(row.get("created_at")) or _utcnow()
+            document_kind = category
+            issuing_authority = str(
+                metadata.get("issuing_authority")
+                or parser_meta.get("issuing_authority")
+                or metadata.get("authority_name")
+                or ""
+            ).strip() or None
+            reference_number = _document_reference_number(row, metadata, parser_meta)
+            expires_at = _document_expires_at(row, metadata, parser_meta)
+            remediation_due_at = _parse_datetime(metadata.get("remediation_due_at") or parser_meta.get("remediation_due_at"))
+            observed_at = _parse_datetime(row.get("created_at")) or _utcnow()
 
-        for rule_key in rule_keys:
-            evidence_key = f"document:{int(row['id'])}:{rule_key}"
-            keep_keys.add(evidence_key)
+            for rule_key in rule_keys:
+                evidence_key = f"document:{int(row['id'])}:{rule_key}"
+                keep_keys.add(evidence_key)
 
-            evidence_row = _upsert_evidence(
+                evidence_row = _upsert_evidence(
+                    db,
+                    org_id=org_id,
+                    property_id=property_id,
+                    evidence_source_type="document",
+                    evidence_key=evidence_key,
+                    evidence_name=row.get("label") or row.get("original_filename") or rule_key,
+                    evidence_status=status,
+                    proof_state=proof_state,
+                    satisfies_rule=satisfies_rule,
+                    compliance_document_id=int(row["id"]),
+                    inspection_id=int(row["inspection_id"]) if row.get("inspection_id") is not None else None,
+                    checklist_item_id=int(row["checklist_item_id"]) if row.get("checklist_item_id") is not None else None,
+                    jurisdiction_slug=scope.jurisdiction_slug,
+                    program_type=scope.pha_name,
+                    rule_key=rule_key,
+                    rule_category=RULE_KEY_TO_CATEGORY.get(rule_key, "other"),
+                    document_kind=document_kind,
+                    evidence_category=category,
+                    issuing_authority=issuing_authority,
+                    reference_number=reference_number,
+                    observed_at=observed_at,
+                    expires_at=expires_at,
+                    remediation_due_at=remediation_due_at,
+                    confidence=0.9 if proof_state == "confirmed" else 0.65,
+                    notes=row.get("extracted_text_preview"),
+                    source_details={
+                        "rule_key": rule_key,
+                        "category": category,
+                        "metadata": metadata,
+                        "parser_meta": parser_meta,
+                        "parse_status": parse_status,
+                        "scan_status": scan_status,
+                    },
+                    metadata_json={
+                        "document_id": int(row["id"]),
+                        "parse_status": parse_status,
+                        "scan_status": scan_status,
+                    },
+                )
+
+                _replace_evidence_facts(
+                    db,
+                    evidence_id=int(evidence_row.id),
+                    org_id=org_id,
+                    property_id=property_id,
+                    facts=[
+                        {
+                            "inspection_id": int(row["inspection_id"]) if row.get("inspection_id") is not None else None,
+                            "checklist_item_id": int(row["checklist_item_id"]) if row.get("checklist_item_id") is not None else None,
+                            "rule_key": rule_key,
+                            "fact_key": f"document:{int(row['id'])}",
+                            "fact_label": row.get("label") or row.get("original_filename") or rule_key,
+                            "fact_type": "document",
+                            "fact_value": row.get("extracted_text_preview") or category,
+                            "fact_status": status,
+                            "proof_state": proof_state,
+                            "satisfies_rule": satisfies_rule,
+                            "observed_at": observed_at,
+                            "expires_at": expires_at,
+                            "source_details": {
+                                "document_id": int(row["id"]),
+                                "category": category,
+                                "reference_number": reference_number,
+                            },
+                            "metadata": {
+                                "issuing_authority": issuing_authority,
+                                "document_kind": document_kind,
+                            },
+                        }
+                    ],
+                )
+
+                created_or_updated += 1
+                linked_rule_keys.add(rule_key)
+
+        if document_id is None:
+            _invalidate_missing_evidence(
                 db,
                 org_id=org_id,
                 property_id=property_id,
                 evidence_source_type="document",
-                evidence_key=evidence_key,
-                evidence_name=row.get("label") or row.get("original_filename") or rule_key,
-                evidence_status=status,
-                proof_state=proof_state,
-                satisfies_rule=satisfies_rule,
-                compliance_document_id=int(row["id"]),
-                inspection_id=int(row["inspection_id"]) if row.get("inspection_id") is not None else None,
-                checklist_item_id=int(row["checklist_item_id"]) if row.get("checklist_item_id") is not None else None,
-                jurisdiction_slug=scope.jurisdiction_slug,
-                program_type=scope.pha_name,
-                rule_key=rule_key,
-                rule_category=RULE_KEY_TO_CATEGORY.get(rule_key, "other"),
-                document_kind=document_kind,
-                evidence_category=category,
-                issuing_authority=issuing_authority,
-                reference_number=reference_number,
-                observed_at=observed_at,
-                expires_at=expires_at,
-                remediation_due_at=remediation_due_at,
-                confidence=0.9 if proof_state == "confirmed" else 0.65,
-                notes=row.get("extracted_text_preview"),
-                source_details={
-                    "rule_key": rule_key,
-                    "category": category,
-                    "metadata": metadata,
-                    "parser_meta": parser_meta,
-                    "parse_status": parse_status,
-                    "scan_status": scan_status,
-                },
-                metadata_json={
-                    "document_id": int(row["id"]),
-                    "parse_status": parse_status,
-                    "scan_status": scan_status,
-                },
+                keep_keys=keep_keys,
             )
 
-            _replace_evidence_facts(
-                db,
-                evidence_id=int(evidence_row.id),
-                org_id=org_id,
-                property_id=property_id,
-                facts=[
-                    {
-                        "inspection_id": int(row["inspection_id"]) if row.get("inspection_id") is not None else None,
-                        "checklist_item_id": int(row["checklist_item_id"]) if row.get("checklist_item_id") is not None else None,
-                        "rule_key": rule_key,
-                        "fact_key": f"document:{int(row['id'])}",
-                        "fact_label": row.get("label") or row.get("original_filename") or rule_key,
-                        "fact_type": "document",
-                        "fact_value": row.get("extracted_text_preview") or category,
-                        "fact_status": status,
-                        "proof_state": proof_state,
-                        "satisfies_rule": satisfies_rule,
-                        "observed_at": observed_at,
-                        "expires_at": expires_at,
-                        "source_details": {
-                            "document_id": int(row["id"]),
-                            "category": category,
-                            "reference_number": reference_number,
-                        },
-                        "metadata": {
-                            "issuing_authority": issuing_authority,
-                            "document_kind": document_kind,
-                        },
-                    }
-                ],
-            )
-
-            created_or_updated += 1
-            linked_rule_keys.add(rule_key)
-
-    if document_id is None:
-        _invalidate_missing_evidence(
-            db,
-            org_id=org_id,
-            property_id=property_id,
-            evidence_source_type="document",
-            keep_keys=keep_keys,
-        )
-
-    db.commit()
-    product_safety = _property_product_safety_payload(
-        projection_reason=((projection_snapshot or {}).get("projection") or {}).get("projection_reason") if projection_snapshot else {},
-        proof_obligations=((projection_snapshot or {}).get("proof_obligations") or build_property_proof_obligations(db, org_id=org_id, property_id=scope.property_id, property=property, state=scope.state, county=scope.county, city=scope.city, pha_name=scope.pha_name).get("required_proofs", [])),
-    )
-
-    return {
-        "ok": True,
-        "property_id": int(property_id),
-        "document_count": len(rows),
-        "linked_rule_keys": sorted(linked_rule_keys),
-        "evidence_rows": created_or_updated,
-    }
+        db.commit()
+        return {
+            "ok": True,
+            "property_id": int(property_id),
+            "document_count": len(rows),
+            "linked_rule_keys": sorted(linked_rule_keys),
+            "evidence_rows": created_or_updated,
+        }
+    except Exception as e:
+        _rollback_quietly(db)
+        return {
+            "ok": False,
+            "property_id": int(property_id),
+            "document_count": 0,
+            "linked_rule_keys": [],
+            "evidence_rows": 0,
+            "error": str(e),
+        }
 
 
 def sync_inspection_evidence_for_property(
@@ -1529,7 +1542,6 @@ def sync_inspection_evidence_for_property(
         "evidence_rows": created_or_updated,
     }
 
-
 def sync_checklist_evidence_for_property(
     db: Session,
     *,
@@ -1676,7 +1688,6 @@ def sync_checklist_evidence_for_property(
         "linked_rule_keys": sorted(linked_rule_keys),
         "evidence_rows": created_or_updated,
     }
-
 def project_verified_assertions_to_profile(
     db: Session,
     *,
@@ -2152,21 +2163,44 @@ def _link_evidence_to_projection_items(
             rule_key = str(details.get("rule_key") or "").strip()
         if not rule_key:
             continue
+
         item = item_by_rule.get(rule_key)
         if item is None:
             continue
-        evidence.projection_item_id = int(item.id)
-        evidence.policy_assertion_id = int(effective_assertions[rule_key].id) if rule_key in effective_assertions else evidence.policy_assertion_id
+
+        item_id = getattr(item, "id", None)
+        if item_id is None:
+            continue
+
+        evidence.projection_item_id = int(item_id)
+        evidence.policy_assertion_id = (
+            int(effective_assertions[rule_key].id)
+            if rule_key in effective_assertions and getattr(effective_assertions[rule_key], "id", None) is not None
+            else evidence.policy_assertion_id
+        )
         evidence.updated_at = _utcnow()
         db.add(evidence)
-    db.flush()
 
-    linked_evidence_ids = [int(e.id) for e in evidence_rows if getattr(e, "projection_item_id", None) is not None]
+    try:
+        db.flush()
+    except Exception:
+        _rollback_quietly(db)
+        return
+
+    linked_evidence_ids = [
+        int(e.id)
+        for e in evidence_rows
+        if getattr(e, "id", None) is not None and getattr(e, "projection_item_id", None) is not None
+    ]
     if not linked_evidence_ids:
         return
 
     fact_rows = _evidence_facts_for_property(db, org_id=org_id, property_id=property_id, evidence_ids=linked_evidence_ids)
-    evidence_to_projection = {int(e.id): int(e.projection_item_id) for e in evidence_rows if getattr(e, "projection_item_id", None) is not None}
+    evidence_to_projection = {
+        int(e.id): int(e.projection_item_id)
+        for e in evidence_rows
+        if getattr(e, "id", None) is not None and getattr(e, "projection_item_id", None) is not None
+    }
     for fact in fact_rows:
         projection_item_id = evidence_to_projection.get(int(fact.evidence_id))
         if projection_item_id is None:
@@ -2277,102 +2311,125 @@ def rebuild_property_projection(
     confidence_values: list[float] = []
 
     for rule_key in sorted(rule_keys):
-        assertion = effective_assertions.get(rule_key)
-        layer_assertions = grouped_assertions.get(rule_key, [])
-        evaluation = _evaluate_rule(
-            rule_key=rule_key,
-            assertion=assertion,
-            layer_assertions=layer_assertions,
-            evidence_rows=evidence_index.get(rule_key, []),
-        )
-
-        item = PropertyComplianceProjectionItem(
-            org_id=org_id,
-            projection_id=int(projection.id),
-            property_id=property_id,
-            policy_assertion_id=int(assertion.id) if assertion is not None else None,
-            jurisdiction_slug=scope.jurisdiction_slug,
-            program_type=scope.pha_name,
-            property_type=scope.property_type,
-            source_level=getattr(assertion, "source_level", None) if assertion is not None else "property",
-            rule_key=rule_key,
-            rule_category=evaluation["rule_category"],
-            required=bool(evaluation["required"]),
-            blocking=bool(evaluation["blocking"]),
-            evaluation_status=evaluation["evaluation_status"],
-            evidence_status=evaluation["evidence_status"],
-            proof_state=evaluation["proof_state"],
-            confidence=float(evaluation["confidence"]),
-            estimated_cost=evaluation["estimated_cost"],
-            estimated_days=evaluation["estimated_days"],
-            evidence_summary=evaluation["evidence_summary"],
-            evidence_gap=evaluation["evidence_gap"],
-            status_reason=evaluation["status_reason"],
-            source_citation=evaluation["source_citation"],
-            raw_excerpt=evaluation["raw_excerpt"],
-            rule_value_json=evaluation["rule_value_json"],
-            resolution_detail_json=_dumps(evaluation["resolution_detail"]),
-            conflicting_evidence_count=int(evaluation["conflicting_evidence_count"]),
-            required_document_kind=evaluation["required_document_kind"],
-            required_evidence_type="document_or_inspection" if evaluation["required"] else None,
-            required_evidence_key=rule_key,
-            required_evidence_group=evaluation["rule_category"],
-            proof_requirement_level="strict" if evaluation["blocking"] else "standard",
-            proof_validity_days=365 if evaluation["required_document_kind"] else None,
-            last_evaluated_at=_utcnow(),
-            evidence_updated_at=evaluation["evidence_updated_at"],
-            created_at=_utcnow(),
-        )
-        db.add(item)
-        db.flush()
-        item_rows.append(item)
-        confidence_values.append(float(item.confidence or 0.0))
-
-        if item.proof_state == "confirmed":
-            confirmed_count += 1
-        elif item.proof_state == "inferred":
-            inferred_count += 1
-
-        if item.evidence_gap:
-            evidence_gap_count += 1
-
-        if item.evaluation_status in {"fail", "blocked"}:
-            failing_count += 1
-            if item.blocking:
-                blocking_count += 1
-        elif item.evaluation_status == "unknown":
-            unknown_count += 1
-        elif item.evaluation_status == "stale":
-            stale_count += 1
-        elif item.evaluation_status == "conflicting":
-            conflicting_count += 1
-            if item.blocking:
-                blocking_count += 1
-
-        if item.evaluation_status in {"fail", "blocked", "unknown", "stale", "conflicting"}:
-            impacted_rules.append(
-                {
-                    "rule_key": item.rule_key,
-                    "evaluation_status": item.evaluation_status,
-                    "evidence_status": item.evidence_status,
-                    "blocking": bool(item.blocking),
-                    "source_level": item.source_level,
-                }
+            assertion = effective_assertions.get(rule_key)
+            layer_assertions = grouped_assertions.get(rule_key, [])
+            evaluation = _evaluate_rule(
+                rule_key=rule_key,
+                assertion=assertion,
+                layer_assertions=layer_assertions,
+                evidence_rows=evidence_index.get(rule_key, []),
             )
 
-        if item.evidence_gap:
-            unresolved_gaps.append(
-                {
-                    "rule_key": item.rule_key,
-                    "gap": item.evidence_gap,
-                    "category": item.rule_category,
-                }
+            item = PropertyComplianceProjectionItem(
+                org_id=org_id,
+                projection_id=int(projection.id),
+                property_id=property_id,
+                policy_assertion_id=int(assertion.id) if assertion is not None else None,
+                rule_key=rule_key,
+                rule_category=evaluation["rule_category"],
+                required=bool(evaluation["required"]),
+                blocking=bool(evaluation["blocking"]),
+                evaluation_status=evaluation["evaluation_status"],
+                evidence_status=evaluation["evidence_status"],
+                confidence=float(evaluation["confidence"]),
+                estimated_cost=evaluation["estimated_cost"],
+                estimated_days=evaluation["estimated_days"],
+                evidence_summary=evaluation["evidence_summary"],
+                evidence_gap=evaluation["evidence_gap"],
             )
 
-        if item.estimated_cost:
-            cost_total += float(item.estimated_cost)
-        if item.estimated_days:
-            days_total += int(item.estimated_days)
+            optional_item_fields = {
+                "jurisdiction_slug": scope.jurisdiction_slug,
+                "program_type": scope.pha_name,
+                "property_type": scope.property_type,
+                "source_level": getattr(assertion, "source_level", None) if assertion is not None else "property",
+                "proof_state": evaluation.get("proof_state"),
+                "status_reason": evaluation.get("status_reason"),
+                "source_citation": evaluation.get("source_citation"),
+                "raw_excerpt": evaluation.get("raw_excerpt"),
+                "rule_value_json": evaluation.get("rule_value_json"),
+                "resolution_detail_json": _dumps(evaluation.get("resolution_detail") or {}),
+                "conflicting_evidence_count": int(evaluation.get("conflicting_evidence_count") or 0),
+                "required_document_kind": evaluation.get("required_document_kind"),
+                "required_evidence_type": "document_or_inspection" if evaluation.get("required") else None,
+                "required_evidence_key": rule_key,
+                "required_evidence_group": evaluation.get("rule_category"),
+                "proof_requirement_level": "strict" if evaluation.get("blocking") else "standard",
+                "proof_validity_days": 365 if evaluation.get("required_document_kind") else None,
+                "last_evaluated_at": _utcnow(),
+                "evidence_updated_at": evaluation.get("evidence_updated_at"),
+                "created_at": _utcnow(),
+            }
+            for field_name, field_value in optional_item_fields.items():
+                if hasattr(item, field_name):
+                    setattr(item, field_name, field_value)
+
+            try:
+                db.add(item)
+                db.flush()
+                persisted_item = item
+            except Exception as exc:
+                _rollback_quietly(db)
+                item_persist_error = str(exc)
+                persisted_item = item
+                if hasattr(projection, "projection_reason_json"):
+                    existing_reason = _loads(getattr(projection, "projection_reason_json", None), {})
+                    if not isinstance(existing_reason, dict):
+                        existing_reason = {}
+                    existing_reason["projection_item_persist_error"] = item_persist_error
+                    try:
+                        projection.projection_reason_json = _dumps(existing_reason)
+                    except Exception:
+                        pass
+
+            item_rows.append(persisted_item)
+            confidence_values.append(float(getattr(persisted_item, "confidence", 0.0) or 0.0))
+
+            if getattr(persisted_item, "proof_state", None) == "confirmed":
+                confirmed_count += 1
+            elif getattr(persisted_item, "proof_state", None) == "inferred":
+                inferred_count += 1
+
+            if getattr(persisted_item, "evidence_gap", None):
+                evidence_gap_count += 1
+
+            if item.evaluation_status in {"fail", "blocked"}:
+                failing_count += 1
+                if item.blocking:
+                    blocking_count += 1
+            elif item.evaluation_status == "unknown":
+                unknown_count += 1
+            elif item.evaluation_status == "stale":
+                stale_count += 1
+            elif item.evaluation_status == "conflicting":
+                conflicting_count += 1
+                if item.blocking:
+                    blocking_count += 1
+
+            if item.evaluation_status in {"fail", "blocked", "unknown", "stale", "conflicting"}:
+                impacted_rules.append(
+                    {
+                        "rule_key": item.rule_key,
+                        "evaluation_status": item.evaluation_status,
+                        "evidence_status": item.evidence_status,
+                        "blocking": bool(item.blocking),
+                        "source_level": item.source_level,
+                    }
+                )
+
+            if item.evidence_gap:
+                unresolved_gaps.append(
+                    {
+                        "rule_key": item.rule_key,
+                        "gap": item.evidence_gap,
+                        "category": item.rule_category,
+                    }
+                )
+
+            if item.estimated_cost:
+                cost_total += float(item.estimated_cost)
+            if item.estimated_days:
+                days_total += int(item.estimated_days)
 
     _link_evidence_to_projection_items(
         db,
@@ -2539,40 +2596,40 @@ def rebuild_property_projection(
 
 
 
-def _property_product_safety_payload(*, projection_reason: dict[str, Any] | None, proof_obligations: list[dict[str, Any]] | None) -> dict[str, Any]:
-    reason = projection_reason if isinstance(projection_reason, dict) else {}
-    trust = reason.get("jurisdiction_trust") if isinstance(reason.get("jurisdiction_trust"), dict) else {}
-    proof_rows = list(proof_obligations or [])
-    lockout_active = bool(trust.get("lockout_active") or trust.get("jurisdiction_lockout_active"))
-    safe_for_projection = bool(trust.get("safe_for_projection", False))
-    safe_for_user_reliance = bool(trust.get("safe_for_user_reliance", False))
-    proof_blockers = [
-        row for row in proof_rows
-        if bool(row.get("blocking")) and str(row.get("proof_status") or "").strip().lower() in {"missing", "expired", "mismatched"}
-    ]
-    info_gaps = [
-        row for row in proof_rows
-        if str(row.get("proof_status") or "").strip().lower() in {"missing", "expired", "mismatched"} and not bool(row.get("blocking"))
-    ]
-    unsafe_reasons: list[str] = []
-    unsafe_reasons.extend([str(x) for x in (trust.get("blocker_reasons") or []) if str(x).strip()])
-    unsafe_reasons.extend([str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()])
-    for row in proof_blockers:
-        unsafe_reasons.append(str(row.get("evidence_gap") or f"{row.get('proof_label') or row.get('rule_key') or 'Required proof'} is {row.get('proof_status') or 'missing'}."))
-    informational_reasons = [str(row.get("evidence_gap") or f"{row.get('proof_label') or row.get('rule_key') or 'Required proof'} is {row.get('proof_status') or 'missing'}." ) for row in info_gaps]
-    legally_unsafe = bool(lockout_active or not safe_for_projection or proof_blockers)
-    informationally_incomplete = bool((not legally_unsafe) and (informational_reasons or not safe_for_user_reliance))
-    safe_to_rely_on = bool((not legally_unsafe) and safe_for_user_reliance and not proof_blockers)
-    return {
-        "lockout_active": lockout_active,
-        "safe_for_projection": safe_for_projection,
-        "safe_for_user_reliance": safe_for_user_reliance,
-        "safe_to_rely_on": safe_to_rely_on,
-        "legally_unsafe": legally_unsafe,
-        "informationally_incomplete": informationally_incomplete,
-        "unsafe_reasons": unsafe_reasons,
-        "informational_reasons": informational_reasons,
-    }
+    def _property_product_safety_payload(*, projection_reason: dict[str, Any] | None, proof_obligations: list[dict[str, Any]] | None) -> dict[str, Any]:
+        reason = projection_reason if isinstance(projection_reason, dict) else {}
+        trust = reason.get("jurisdiction_trust") if isinstance(reason.get("jurisdiction_trust"), dict) else {}
+        proof_rows = list(proof_obligations or [])
+        lockout_active = bool(trust.get("lockout_active") or trust.get("jurisdiction_lockout_active"))
+        safe_for_projection = bool(trust.get("safe_for_projection", False))
+        safe_for_user_reliance = bool(trust.get("safe_for_user_reliance", False))
+        proof_blockers = [
+            row for row in proof_rows
+            if bool(row.get("blocking")) and str(row.get("proof_status") or "").strip().lower() in {"missing", "expired", "mismatched"}
+        ]
+        info_gaps = [
+            row for row in proof_rows
+            if str(row.get("proof_status") or "").strip().lower() in {"missing", "expired", "mismatched"} and not bool(row.get("blocking"))
+        ]
+        unsafe_reasons: list[str] = []
+        unsafe_reasons.extend([str(x) for x in (trust.get("blocker_reasons") or []) if str(x).strip()])
+        unsafe_reasons.extend([str(x) for x in (trust.get("manual_review_reasons") or []) if str(x).strip()])
+        for row in proof_blockers:
+            unsafe_reasons.append(str(row.get("evidence_gap") or f"{row.get('proof_label') or row.get('rule_key') or 'Required proof'} is {row.get('proof_status') or 'missing'}."))
+        informational_reasons = [str(row.get("evidence_gap") or f"{row.get('proof_label') or row.get('rule_key') or 'Required proof'} is {row.get('proof_status') or 'missing'}." ) for row in info_gaps]
+        legally_unsafe = bool(lockout_active or not safe_for_projection or proof_blockers)
+        informationally_incomplete = bool((not legally_unsafe) and (informational_reasons or not safe_for_user_reliance))
+        safe_to_rely_on = bool((not legally_unsafe) and safe_for_user_reliance and not proof_blockers)
+        return {
+            "lockout_active": lockout_active,
+            "safe_for_projection": safe_for_projection,
+            "safe_for_user_reliance": safe_for_user_reliance,
+            "safe_to_rely_on": safe_to_rely_on,
+            "legally_unsafe": legally_unsafe,
+            "informationally_incomplete": informationally_incomplete,
+            "unsafe_reasons": unsafe_reasons,
+            "informational_reasons": informational_reasons,
+        }
 def build_property_projection_snapshot(
     db: Session,
     *,
@@ -2580,10 +2637,196 @@ def build_property_projection_snapshot(
     property_id: int,
     projection: PropertyComplianceProjection | None = None,
 ) -> dict[str, Any]:
-    row = projection or _current_projection(db, org_id=org_id, property_id=property_id)
-    if row is None:
+    try:
+        row = projection or _current_projection(db, org_id=org_id, property_id=property_id)
+        if row is None:
+            return {
+                "ok": True,
+                "property_id": int(property_id),
+                "projection": None,
+                "items": [],
+                "evidence": [],
+                "facts": [],
+                "counts": {"blocking": 0, "unknown": 0, "stale": 0, "conflicting": 0},
+                "evidence_summary": {"count": 0, "linked_documents": 0, "inspection_links": 0},
+                "blockers": [],
+                "jurisdiction": {},
+                "proof_obligations": [],
+                "proof_counts": {},
+                "safe_to_rely_on": False,
+                "legally_unsafe": False,
+                "informationally_incomplete": True,
+                "unsafe_reasons": ["Compliance projection has not been built yet."],
+                "informational_reasons": [],
+            }
+
+        items = _current_projection_items(db, org_id=org_id, property_id=property_id, projection_id=int(row.id))
+        evidence = _evidence_rows(db, org_id=org_id, property_id=property_id)
+        evidence_ids = [int(e.id) for e in evidence]
+        facts = _evidence_facts_for_property(db, org_id=org_id, property_id=property_id, evidence_ids=evidence_ids)
+
+        blockers = [
+            {
+                "rule_key": item.rule_key,
+                "evaluation_status": item.evaluation_status,
+                "evidence_gap": item.evidence_gap,
+                "source_level": item.source_level,
+            }
+            for item in items
+            if item.evaluation_status in {"fail", "blocked", "conflicting", "stale"} and bool(item.blocking)
+        ]
+
+        proof_payload = build_property_proof_obligations(db, org_id=org_id, property_id=property_id)
+        projection_reason = _loads(row.projection_reason_json, {})
+        product_safety = _property_product_safety_payload(
+            projection_reason=projection_reason,
+            proof_obligations=proof_payload.get("required_proofs", []),
+        )
+
+        linked_documents = sum(1 for e in evidence if getattr(e, "compliance_document_id", None) is not None)
+        inspection_links = sum(1 for e in evidence if getattr(e, "inspection_id", None) is not None)
+
         return {
             "ok": True,
+            "property_id": int(property_id),
+            "projection": {
+                "id": int(row.id),
+                "jurisdiction_slug": row.jurisdiction_slug,
+                "rules_version": row.rules_version,
+                "projection_status": row.projection_status,
+                "blocking_count": int(row.blocking_count or 0),
+                "unknown_count": int(row.unknown_count or 0),
+                "stale_count": int(row.stale_count or 0),
+                "conflicting_count": int(row.conflicting_count or 0),
+                "evidence_gap_count": int(row.evidence_gap_count or 0),
+                "confirmed_count": int(row.confirmed_count or 0),
+                "inferred_count": int(row.inferred_count or 0),
+                "failing_count": int(row.failing_count or 0),
+                "readiness_score": float(row.readiness_score or 0.0),
+                "projected_compliance_cost": row.projected_compliance_cost,
+                "projected_days_to_rent": row.projected_days_to_rent,
+                "confidence_score": float(row.confidence_score or 0.0),
+                "impacted_rules": _loads(row.impacted_rules_json, []),
+                "unresolved_evidence_gaps": _loads(row.unresolved_evidence_gaps_json, []),
+                "source_confidence": _loads(row.source_confidence_json, {}),
+                "projection_reason": projection_reason,
+                "jurisdiction": (projection_reason or {}).get("jurisdiction_trust", {}),
+                "jurisdiction_penalties": (projection_reason or {}).get("jurisdiction_penalties", {}),
+                "proof_obligations": proof_payload.get("required_proofs", []),
+                "proof_counts": proof_payload.get("counts", {}),
+                "safe_to_rely_on": product_safety.get("safe_to_rely_on"),
+                "legally_unsafe": product_safety.get("legally_unsafe"),
+                "informationally_incomplete": product_safety.get("informationally_incomplete"),
+                "unsafe_reasons": product_safety.get("unsafe_reasons") or [],
+                "informational_reasons": product_safety.get("informational_reasons") or [],
+                "rules_effective_at": row.rules_effective_at,
+                "last_rule_change_at": row.last_rule_change_at,
+                "last_projected_at": row.last_projected_at,
+            },
+            "items": [
+                {
+                    "id": int(item.id),
+                    "rule_key": item.rule_key,
+                    "rule_category": item.rule_category,
+                    "required": bool(item.required),
+                    "blocking": bool(item.blocking),
+                    "source_level": item.source_level,
+                    "evaluation_status": item.evaluation_status,
+                    "evidence_status": item.evidence_status,
+                    "proof_state": item.proof_state,
+                    "confidence": float(item.confidence or 0.0),
+                    "estimated_cost": item.estimated_cost,
+                    "estimated_days": item.estimated_days,
+                    "evidence_summary": item.evidence_summary,
+                    "evidence_gap": item.evidence_gap,
+                    "status_reason": item.status_reason,
+                    "required_document_kind": getattr(item, "required_document_kind", None),
+                    "required_evidence_type": getattr(item, "required_evidence_type", None),
+                    "required_evidence_key": getattr(item, "required_evidence_key", None),
+                    "required_evidence_group": getattr(item, "required_evidence_group", None),
+                    "proof_requirement_level": getattr(item, "proof_requirement_level", None),
+                    "proof_validity_days": getattr(item, "proof_validity_days", None),
+                    "resolution_detail": _loads(getattr(item, "resolution_detail_json", None), {}),
+                    "source_citation": item.source_citation,
+                    "raw_excerpt": item.raw_excerpt,
+                    "evidence_updated_at": getattr(item, "evidence_updated_at", None),
+                    "last_evaluated_at": getattr(item, "last_evaluated_at", None),
+                }
+                for item in items
+            ],
+            "evidence": [
+                {
+                    "id": int(ev.id),
+                    "evidence_source_type": ev.evidence_source_type,
+                    "evidence_key": ev.evidence_key,
+                    "evidence_name": ev.evidence_name,
+                    "evidence_status": ev.evidence_status,
+                    "proof_state": ev.proof_state,
+                    "satisfies_rule": ev.satisfies_rule,
+                    "rule_key": ev.rule_key,
+                    "rule_category": ev.rule_category,
+                    "document_kind": ev.document_kind,
+                    "evidence_category": ev.evidence_category,
+                    "inspection_id": ev.inspection_id,
+                    "checklist_item_id": ev.checklist_item_id,
+                    "compliance_document_id": ev.compliance_document_id,
+                    "projection_item_id": ev.projection_item_id,
+                    "confidence": float(ev.confidence or 0.0),
+                    "observed_at": ev.observed_at,
+                    "expires_at": ev.expires_at,
+                    "updated_at": ev.updated_at,
+                    "notes": ev.notes,
+                    "metadata": _loads(ev.metadata_json, {}),
+                    "source_details": _loads(ev.source_details_json, {}),
+                }
+                for ev in evidence
+            ],
+            "facts": [
+                {
+                    "id": int(f.id),
+                    "evidence_id": int(f.evidence_id),
+                    "rule_key": f.rule_key,
+                    "fact_key": f.fact_key,
+                    "fact_label": f.fact_label,
+                    "fact_type": f.fact_type,
+                    "fact_value": f.fact_value,
+                    "fact_status": f.fact_status,
+                    "proof_state": f.proof_state,
+                    "severity": f.severity,
+                    "satisfies_rule": f.satisfies_rule,
+                    "observed_at": f.observed_at,
+                    "expires_at": f.expires_at,
+                    "resolved_at": f.resolved_at,
+                    "metadata": _loads(f.metadata_json, {}),
+                    "source_details": _loads(f.source_details_json, {}),
+                }
+                for f in facts
+            ],
+            "counts": {
+                "blocking": int(row.blocking_count or 0),
+                "unknown": int(row.unknown_count or 0),
+                "stale": int(row.stale_count or 0),
+                "conflicting": int(row.conflicting_count or 0),
+            },
+            "evidence_summary": {
+                "count": len(evidence),
+                "linked_documents": linked_documents,
+                "inspection_links": inspection_links,
+            },
+            "blockers": blockers,
+            "jurisdiction": (projection_reason or {}).get("jurisdiction_trust", {}),
+            "proof_obligations": proof_payload.get("required_proofs", []),
+            "proof_counts": proof_payload.get("counts", {}),
+            "safe_to_rely_on": bool(product_safety.get("safe_to_rely_on")),
+            "legally_unsafe": bool(product_safety.get("legally_unsafe")),
+            "informationally_incomplete": bool(product_safety.get("informationally_incomplete")),
+            "unsafe_reasons": product_safety.get("unsafe_reasons") or [],
+            "informational_reasons": product_safety.get("informational_reasons") or [],
+        }
+    except Exception as e:
+        _rollback_quietly(db)
+        return {
+            "ok": False,
             "property_id": int(property_id),
             "projection": None,
             "items": [],
@@ -2593,190 +2836,15 @@ def build_property_projection_snapshot(
             "evidence_summary": {"count": 0, "linked_documents": 0, "inspection_links": 0},
             "blockers": [],
             "jurisdiction": {},
+            "proof_obligations": [],
+            "proof_counts": {},
             "safe_to_rely_on": False,
             "legally_unsafe": False,
             "informationally_incomplete": True,
-            "unsafe_reasons": ["Compliance projection has not been built yet."],
+            "unsafe_reasons": ["Compliance projection could not be loaded."],
             "informational_reasons": [],
+            "error": str(e),
         }
-
-    items = _current_projection_items(db, org_id=org_id, property_id=property_id, projection_id=int(row.id))
-    evidence = _evidence_rows(db, org_id=org_id, property_id=property_id)
-    evidence_ids = [int(e.id) for e in evidence]
-    facts = _evidence_facts_for_property(db, org_id=org_id, property_id=property_id, evidence_ids=evidence_ids)
-
-    blockers = [
-        {
-            "rule_key": item.rule_key,
-            "evaluation_status": item.evaluation_status,
-            "evidence_gap": item.evidence_gap,
-            "source_level": item.source_level,
-        }
-        for item in items
-        if item.evaluation_status in {"fail", "blocked", "conflicting", "stale"} and bool(item.blocking)
-    ]
-
-    proof_payload = build_property_proof_obligations(db, org_id=org_id, property_id=property_id)
-    product_safety = _property_product_safety_payload(
-        projection_reason=_loads(row.projection_reason_json, {}),
-        proof_obligations=proof_payload.get("required_proofs", []),
-    )
-
-    return {
-        "ok": True,
-        "property_id": int(property_id),
-        "projection": {
-            "id": int(row.id),
-            "jurisdiction_slug": row.jurisdiction_slug,
-            "rules_version": row.rules_version,
-            "projection_status": row.projection_status,
-            "blocking_count": int(row.blocking_count or 0),
-            "unknown_count": int(row.unknown_count or 0),
-            "stale_count": int(row.stale_count or 0),
-            "conflicting_count": int(row.conflicting_count or 0),
-            "evidence_gap_count": int(row.evidence_gap_count or 0),
-            "confirmed_count": int(row.confirmed_count or 0),
-            "inferred_count": int(row.inferred_count or 0),
-            "failing_count": int(row.failing_count or 0),
-            "readiness_score": float(row.readiness_score or 0.0),
-            "projected_compliance_cost": row.projected_compliance_cost,
-            "projected_days_to_rent": row.projected_days_to_rent,
-            "confidence_score": float(row.confidence_score or 0.0),
-            "impacted_rules": _loads(row.impacted_rules_json, []),
-            "unresolved_evidence_gaps": _loads(row.unresolved_evidence_gaps_json, []),
-            "source_confidence": _loads(row.source_confidence_json, {}),
-            "projection_reason": _loads(row.projection_reason_json, {}),
-            "jurisdiction": (_loads(row.projection_reason_json, {}) or {}).get("jurisdiction_trust", {}),
-            "jurisdiction_penalties": (_loads(row.projection_reason_json, {}) or {}).get("jurisdiction_penalties", {}),
-            "proof_obligations": proof_payload.get("required_proofs", []),
-            "proof_counts": proof_payload.get("counts", {}),
-            "safe_to_rely_on": product_safety.get("safe_to_rely_on"),
-            "legally_unsafe": product_safety.get("legally_unsafe"),
-            "informationally_incomplete": product_safety.get("informationally_incomplete"),
-            "unsafe_reasons": product_safety.get("unsafe_reasons") or [],
-            "informational_reasons": product_safety.get("informational_reasons") or [],
-            "rules_effective_at": row.rules_effective_at,
-            "last_rule_change_at": row.last_rule_change_at,
-            "last_projected_at": row.last_projected_at,
-        },
-        "items": [
-            {
-                "id": int(item.id),
-                "rule_key": item.rule_key,
-                "rule_category": item.rule_category,
-                "required": bool(item.required),
-                "blocking": bool(item.blocking),
-                "source_level": item.source_level,
-                "evaluation_status": item.evaluation_status,
-                "evidence_status": item.evidence_status,
-                "proof_state": item.proof_state,
-                "confidence": float(item.confidence or 0.0),
-                "estimated_cost": item.estimated_cost,
-                "estimated_days": item.estimated_days,
-                "evidence_summary": item.evidence_summary,
-                "evidence_gap": item.evidence_gap,
-                "status_reason": item.status_reason,
-                "source_citation": item.source_citation,
-                "raw_excerpt": item.raw_excerpt,
-                "rule_value": _loads(item.rule_value_json, {}),
-                "resolution_detail": _loads(item.resolution_detail_json, {}),
-                "conflicting_evidence_count": int(item.conflicting_evidence_count or 0),
-                "required_document_kind": item.required_document_kind,
-                "required_evidence_type": getattr(item, "required_evidence_type", None),
-                "required_evidence_key": getattr(item, "required_evidence_key", None),
-                "required_evidence_group": getattr(item, "required_evidence_group", None),
-                "proof_requirement_level": getattr(item, "proof_requirement_level", None),
-                "proof_validity_days": getattr(item, "proof_validity_days", None),
-                "evidence_updated_at": item.evidence_updated_at,
-                "last_evaluated_at": item.last_evaluated_at,
-            }
-            for item in items
-        ],
-        "evidence": [
-            {
-                "id": int(e.id),
-                "projection_item_id": e.projection_item_id,
-                "policy_assertion_id": e.policy_assertion_id,
-                "compliance_document_id": e.compliance_document_id,
-                "inspection_id": e.inspection_id,
-                "checklist_item_id": e.checklist_item_id,
-                "rule_key": e.rule_key,
-                "rule_category": e.rule_category,
-                "evidence_source_type": e.evidence_source_type,
-                "evidence_category": e.evidence_category,
-                "evidence_key": e.evidence_key,
-                "evidence_name": e.evidence_name,
-                "document_kind": e.document_kind,
-                "issuing_authority": e.issuing_authority,
-                "reference_number": e.reference_number,
-                "line_item_key": e.line_item_key,
-                "line_item_label": e.line_item_label,
-                "line_item_status": e.line_item_status,
-                "severity": e.severity,
-                "remediation_status": e.remediation_status,
-                "remediation_due_at": e.remediation_due_at,
-                "evidence_status": e.evidence_status,
-                "proof_state": e.proof_state,
-                "satisfies_rule": e.satisfies_rule,
-                "confidence": float(e.confidence or 0.0),
-                "observed_at": e.observed_at,
-                "expires_at": e.expires_at,
-                "invalidated_at": e.invalidated_at,
-                "invalidated_reason": e.invalidated_reason,
-                "is_current": bool(e.is_current),
-                "notes": e.notes,
-                "source_details": _loads(e.source_details_json, {}),
-                "metadata": _loads(e.metadata_json, {}),
-            }
-            for e in evidence
-        ],
-        "facts": [
-            {
-                "id": int(f.id),
-                "evidence_id": int(f.evidence_id),
-                "projection_item_id": f.projection_item_id,
-                "inspection_id": f.inspection_id,
-                "checklist_item_id": f.checklist_item_id,
-                "rule_key": f.rule_key,
-                "fact_key": f.fact_key,
-                "fact_label": f.fact_label,
-                "fact_type": f.fact_type,
-                "fact_value": f.fact_value,
-                "fact_status": f.fact_status,
-                "proof_state": f.proof_state,
-                "severity": f.severity,
-                "satisfies_rule": f.satisfies_rule,
-                "observed_at": f.observed_at,
-                "expires_at": f.expires_at,
-                "resolved_at": f.resolved_at,
-                "source_details": _loads(f.source_details_json, {}),
-                "metadata": _loads(f.metadata_json, {}),
-            }
-            for f in facts
-        ],
-        "counts": {
-            "blocking": int(row.blocking_count or 0),
-            "unknown": int(row.unknown_count or 0),
-            "stale": int(row.stale_count or 0),
-            "conflicting": int(row.conflicting_count or 0),
-        },
-        "evidence_summary": {
-            "count": len(evidence),
-            "linked_documents": sum(1 for e in evidence if getattr(e, "compliance_document_id", None) is not None),
-            "inspection_links": sum(1 for e in evidence if getattr(e, "inspection_id", None) is not None),
-            "checklist_links": sum(1 for e in evidence if getattr(e, "checklist_item_id", None) is not None),
-            "confirmed": sum(1 for e in evidence if str(getattr(e, "proof_state", "") or "").lower() == "confirmed"),
-            "failing": sum(1 for e in evidence if str(getattr(e, "evidence_status", "") or "").lower() in FAILING_EVIDENCE),
-        },
-        "blockers": blockers,
-        "proof_obligations": proof_payload.get("required_proofs", []),
-        "proof_counts": proof_payload.get("counts", {}),
-        "safe_to_rely_on": product_safety.get("safe_to_rely_on"),
-        "legally_unsafe": product_safety.get("legally_unsafe"),
-        "informationally_incomplete": product_safety.get("informationally_incomplete"),
-        "unsafe_reasons": product_safety.get("unsafe_reasons") or [],
-        "informational_reasons": product_safety.get("informational_reasons") or [],
-    }
 
 
 def build_property_compliance_brief(
@@ -2819,6 +2887,7 @@ def build_property_compliance_brief(
                 property=property,
             )
         except Exception:
+            _rollback_quietly(db)
             projection_snapshot = build_property_projection_snapshot(
                 db,
                 org_id=int(org_id),

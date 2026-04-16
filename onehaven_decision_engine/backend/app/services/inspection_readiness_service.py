@@ -22,6 +22,96 @@ def _rollback_quietly(db: Session) -> None:
         pass
 
 
+def _safe_projection_snapshot(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    try:
+        rebuild_property_projection(db, org_id=org_id, property_id=property_id)
+        snapshot = build_property_projection_snapshot(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+        return snapshot if isinstance(snapshot, dict) else {}
+    except Exception as e:
+        _rollback_quietly(db)
+        return {"error": str(e)}
+
+
+def _safe_property_jurisdiction_blocker(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    try:
+        from .workflow_gate_service import build_property_jurisdiction_blocker
+
+        result = build_property_jurisdiction_blocker(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+        return result if isinstance(result, dict) else {}
+    except Exception:
+        _rollback_quietly(db)
+        return {}
+
+
+def _safe_latest_inspection(db: Session, *, org_id: int, property_id: int) -> Inspection | None:
+    try:
+        return db.scalar(
+            select(Inspection)
+            .where(
+                Inspection.org_id == org_id,
+                Inspection.property_id == property_id,
+            )
+            .order_by(
+                desc(Inspection.inspection_date),
+                desc(Inspection.created_at),
+                desc(Inspection.id),
+            )
+            .limit(1)
+        )
+    except Exception:
+        _rollback_quietly(db)
+        return None
+
+
+def _safe_checklist_rows(db: Session, *, org_id: int, property_id: int) -> list[PropertyChecklistItem]:
+    try:
+        return list(
+            db.scalars(
+                select(PropertyChecklistItem)
+                .where(
+                    PropertyChecklistItem.org_id == org_id,
+                    PropertyChecklistItem.property_id == property_id,
+                )
+                .order_by(PropertyChecklistItem.id.asc())
+            ).all()
+        )
+    except Exception:
+        _rollback_quietly(db)
+        return []
+
+
+def _safe_inspection_rows(db: Session, *, inspection_id: int) -> list[InspectionItem]:
+    try:
+        return list(
+            db.scalars(
+                select(InspectionItem)
+                .where(InspectionItem.inspection_id == inspection_id)
+                .order_by(InspectionItem.id.asc())
+            ).all()
+        )
+    except Exception:
+        _rollback_quietly(db)
+        return []
+
+
 @dataclass(frozen=True)
 class InspectionReadinessScore:
     property_id: int
@@ -230,9 +320,7 @@ def _jurisdiction_trust_flags(db: Session, *, org_id: int, property_id: int) -> 
 
 
 def _build_property_jurisdiction_blocker(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    from .workflow_gate_service import build_property_jurisdiction_blocker
-
-    return build_property_jurisdiction_blocker(
+    return _safe_property_jurisdiction_blocker(
         db,
         org_id=int(org_id),
         property_id=int(property_id),
@@ -245,8 +333,8 @@ def compute_property_readiness_score(
     org_id: int,
     property_id: int,
 ) -> InspectionReadinessScore:
-    checklist_rows = _checklist_rows(db, org_id=org_id, property_id=property_id)
-    latest = _latest_inspection(db, org_id=org_id, property_id=property_id)
+    checklist_rows = _safe_checklist_rows(db, org_id=org_id, property_id=property_id)
+    latest = _safe_latest_inspection(db, org_id=org_id, property_id=property_id)
 
     latest_inspection_id = int(latest.id) if latest is not None else None
     template_key = getattr(latest, "template_key", None) if latest is not None else None
@@ -278,7 +366,7 @@ def compute_property_readiness_score(
         readiness_status = str(getattr(latest, "readiness_status", "unknown") or "unknown")
         result_status = str(getattr(latest, "result_status", "pending") or "pending")
 
-        inspection_items = _inspection_rows(db, inspection_id=int(latest.id))
+        inspection_items = _safe_inspection_rows(db, inspection_id=int(latest.id))
         if inspection_items:
             scored = score_readiness(inspection_items)
             readiness_score_value = float(scored.readiness_score)
@@ -323,24 +411,16 @@ def compute_property_readiness_score(
     evidence_conflicting_count = 0
     evidence_stale_count = 0
 
-    try:
-        rebuild_property_projection(db, org_id=org_id, property_id=property_id)
-        projection_snapshot = build_property_projection_snapshot(
-            db,
-            org_id=org_id,
-            property_id=property_id,
-        )
-        projection_counts = projection_snapshot.get("counts") or {}
-        evidence_blocking_count = int(projection_counts.get("blocking") or 0)
-        evidence_unknown_count = int(projection_counts.get("unknown") or 0)
-        evidence_conflicting_count = int(projection_counts.get("conflicting") or 0)
-        evidence_stale_count = int(projection_counts.get("stale") or 0)
-    except Exception:
-        _rollback_quietly(db)
-        evidence_blocking_count = 0
-        evidence_unknown_count = 0
-        evidence_conflicting_count = 0
-        evidence_stale_count = 0
+    projection_snapshot = _safe_projection_snapshot(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    projection_counts = projection_snapshot.get("counts") or {}
+    evidence_blocking_count = int(projection_counts.get("blocking") or 0)
+    evidence_unknown_count = int(projection_counts.get("unknown") or 0)
+    evidence_conflicting_count = int(projection_counts.get("conflicting") or 0)
+    evidence_stale_count = int(projection_counts.get("stale") or 0)
 
     unresolved_failure_count += evidence_blocking_count + evidence_conflicting_count
     unresolved_blocked_count += evidence_stale_count
@@ -448,21 +528,15 @@ def compute_property_readiness_score(
 
 
 def _projection_proof_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    try:
-        snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
-        projection = snapshot.get("projection") or {}
-        if not isinstance(projection, dict):
-            projection = {}
-        return {
-            "proof_obligations": list(snapshot.get("proof_obligations") or projection.get("proof_obligations") or []),
-            "proof_counts": dict(snapshot.get("proof_counts") or projection.get("proof_counts") or {}),
-        }
-    except Exception:
-        _rollback_quietly(db)
-        return {
-            "proof_obligations": [],
-            "proof_counts": {},
-        }
+    snapshot = _safe_projection_snapshot(db, org_id=org_id, property_id=property_id)
+    projection = snapshot.get("projection") or {}
+    if not isinstance(projection, dict):
+        projection = {}
+    return {
+        "proof_obligations": list(snapshot.get("proof_obligations") or projection.get("proof_obligations") or []),
+        "proof_counts": dict(snapshot.get("proof_counts") or projection.get("proof_counts") or {}),
+        "projection_error": snapshot.get("error"),
+    }
 
 
 def build_property_readiness_summary(
@@ -557,6 +631,7 @@ def build_property_readiness_summary(
         "completion": {
             "proof_obligations": list(proof.get("proof_obligations") or []),
             "proof_counts": dict(proof.get("proof_counts") or {}),
+            "projection_error": proof.get("projection_error"),
         },
         "trust_blocker_reasons": list(jurisdiction_blocker.get("blocking_reasons") or []),
         "manual_review_reasons": list(jurisdiction_blocker.get("manual_review_reasons") or []),
@@ -570,11 +645,14 @@ def rebuild_and_summarize_property_readiness(
     org_id: int,
     property_id: int,
 ) -> dict[str, Any]:
-    rebuild_property_projection(
-        db,
-        org_id=org_id,
-        property_id=property_id,
-    )
+    try:
+        rebuild_property_projection(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+    except Exception:
+        _rollback_quietly(db)
     return build_property_readiness_summary(
         db,
         org_id=org_id,

@@ -50,6 +50,13 @@ def _json_loads(value: Any, default: Any) -> Any:
     return default
 
 
+def _rollback_quietly(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
 def _severity_to_int(severity: str | None) -> int:
     s = str(severity or "").strip().lower()
     if s == "critical":
@@ -233,6 +240,87 @@ def _coalesce_text(*values: Any) -> str | None:
     return None
 
 
+def _safe_profile_summary(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+    profile_summary: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if isinstance(profile_summary, dict):
+        return profile_summary
+    try:
+        resolved = resolve_operational_policy(
+            db,
+            org_id=org_id,
+            state=getattr(prop, "state", None) or "MI",
+            county=getattr(prop, "county", None),
+            city=getattr(prop, "city", None),
+        )
+        return resolved if isinstance(resolved, dict) else {}
+    except Exception:
+        _rollback_quietly(db)
+        return {}
+
+
+def _safe_effective_hqs_items(
+    db: Session,
+    *,
+    org_id: int,
+    prop: Property,
+    profile_summary: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        effective = get_effective_hqs_items(
+            db,
+            org_id=org_id,
+            prop=prop,
+            profile_summary=profile_summary or {},
+        )
+        return effective if isinstance(effective, dict) else {}
+    except Exception:
+        _rollback_quietly(db)
+        return {"items": [], "sources": [], "counts": {}}
+
+
+def _safe_find_property_checklist(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    strategy: str,
+    version: str,
+) -> PropertyChecklist | None:
+    try:
+        return _find_property_checklist(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            strategy=strategy,
+            version=version,
+        )
+    except Exception:
+        _rollback_quietly(db)
+        return None
+
+
+def _safe_find_checklist_items(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> list[PropertyChecklistItem]:
+    try:
+        return _find_checklist_items(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+    except Exception:
+        _rollback_quietly(db)
+        return []
+
+
 def _build_template_item(row: dict[str, Any]) -> ChecklistTemplateItem:
     return ChecklistTemplateItem(
         code=str(row["code"]),
@@ -300,20 +388,18 @@ def build_inspection_template(
 ) -> dict[str, Any]:
     prop = _get_property(db, org_id=org_id, property_id=property_id)
 
-    if profile_summary is None:
-        profile_summary = resolve_operational_policy(
-            db,
-            org_id=org_id,
-            state=getattr(prop, "state", None) or "MI",
-            county=getattr(prop, "county", None),
-            city=getattr(prop, "city", None),
-        )
-
-    effective = get_effective_hqs_items(
+    safe_profile_summary = _safe_profile_summary(
         db,
         org_id=org_id,
         prop=prop,
-        profile_summary=profile_summary or {},
+        profile_summary=profile_summary,
+    )
+
+    effective = _safe_effective_hqs_items(
+        db,
+        org_id=org_id,
+        prop=prop,
+        profile_summary=safe_profile_summary,
     )
 
     template_items = template_items_from_effective_rules(effective.get("items") or []) or []
@@ -346,7 +432,7 @@ def build_inspection_template(
         "template_key": template_key,
         "template_version": template_version,
         "property_id": property_id,
-        "profile_summary": profile_summary or {},
+        "profile_summary": safe_profile_summary,
         "items": items,
         "sources": effective.get("sources") or [],
         "counts": {
@@ -374,7 +460,7 @@ def ensure_template_backed_checklist(
     version = str(template["template_version"])
     now = _now()
 
-    checklist = _find_property_checklist(
+    checklist = _safe_find_property_checklist(
         db,
         org_id=org_id,
         property_id=property_id,
@@ -384,23 +470,30 @@ def ensure_template_backed_checklist(
 
     created_checklist = False
     if checklist is None:
-        checklist = PropertyChecklist(
-            org_id=org_id,
-            property_id=property_id,
-            strategy=strategy,
-            version=version,
-            generated_at=now,
-            items_json=_j(template["items"]),
-        )
-        db.add(checklist)
-        db.flush()
-        created_checklist = True
+        try:
+            checklist = PropertyChecklist(
+                org_id=org_id,
+                property_id=property_id,
+                strategy=strategy,
+                version=version,
+                generated_at=now,
+                items_json=_j(template["items"]),
+            )
+            db.add(checklist)
+            db.flush()
+            created_checklist = True
+        except Exception:
+            _rollback_quietly(db)
+            checklist = None
     else:
-        checklist.items_json = _j(template["items"])
-        if hasattr(checklist, "generated_at") and getattr(checklist, "generated_at", None) is None:
-            checklist.generated_at = now
+        try:
+            checklist.items_json = _j(template["items"])
+            if hasattr(checklist, "generated_at") and getattr(checklist, "generated_at", None) is None:
+                checklist.generated_at = now
+        except Exception:
+            _rollback_quietly(db)
 
-    existing_rows = _find_checklist_items(
+    existing_rows = _safe_find_checklist_items(
         db,
         org_id=org_id,
         property_id=property_id,
@@ -422,49 +515,58 @@ def ensure_template_backed_checklist(
         )
         row = by_code.get(code)
         if row is None:
-            row = PropertyChecklistItem(
-                org_id=org_id,
-                property_id=property_id,
-                checklist_id=checklist.id,
-                item_code=code,
-                category=template_item.category,
-                description=template_item.description,
-                severity=_severity_to_int(template_item.severity),
-                common_fail=bool(template_item.common_fail),
-                applies_if_json=desired_applies,
-                status=str(template_item.default_status or "todo"),
-                notes=template_item.suggested_fix,
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(row)
-            created_items += 1
+            try:
+                row = PropertyChecklistItem(
+                    org_id=org_id,
+                    property_id=property_id,
+                    checklist_id=getattr(checklist, "id", None),
+                    item_code=code,
+                    category=template_item.category,
+                    description=template_item.description,
+                    severity=_severity_to_int(template_item.severity),
+                    common_fail=bool(template_item.common_fail),
+                    applies_if_json=desired_applies,
+                    status=str(template_item.default_status or "todo"),
+                    notes=template_item.suggested_fix,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(row)
+                created_items += 1
+            except Exception:
+                _rollback_quietly(db)
             continue
 
         changed = False
-        if getattr(row, "checklist_id", None) != checklist.id:
-            row.checklist_id = checklist.id
-            changed = True
-        if getattr(row, "category", None) != template_item.category:
-            row.category = template_item.category
-            changed = True
-        if getattr(row, "description", None) != template_item.description:
-            row.description = template_item.description
-            changed = True
-        desired_severity = _severity_to_int(template_item.severity)
-        if int(getattr(row, "severity", 0) or 0) != desired_severity:
-            row.severity = desired_severity
-            changed = True
-        desired_common_fail = bool(template_item.common_fail)
-        if bool(getattr(row, "common_fail", False)) != desired_common_fail:
-            row.common_fail = desired_common_fail
-            changed = True
-        if (getattr(row, "applies_if_json", None) or "") != desired_applies:
-            row.applies_if_json = desired_applies
-            changed = True
-        if changed:
-            row.updated_at = now
-            updated_items += 1
+        try:
+            checklist_id = getattr(checklist, "id", None)
+            if checklist_id is not None and getattr(row, "checklist_id", None) != checklist_id:
+                row.checklist_id = checklist_id
+                changed = True
+            if getattr(row, "category", None) != template_item.category:
+                row.category = template_item.category
+                changed = True
+            if getattr(row, "description", None) != template_item.description:
+                row.description = template_item.description
+                changed = True
+            desired_severity = _severity_to_int(template_item.severity)
+            if int(getattr(row, "severity", 0) or 0) != desired_severity:
+                row.severity = desired_severity
+                changed = True
+            desired_common_fail = bool(template_item.common_fail)
+            if bool(getattr(row, "common_fail", False)) != desired_common_fail:
+                row.common_fail = desired_common_fail
+                changed = True
+            if (getattr(row, "applies_if_json", None) or "") != desired_applies:
+                row.applies_if_json = desired_applies
+                changed = True
+            if changed:
+                row.updated_at = now
+                updated_items += 1
+        except Exception:
+            _rollback_quietly(db)
+
+    checklist_id = getattr(checklist, "id", None)
 
     return {
         "ok": True,
@@ -473,7 +575,7 @@ def ensure_template_backed_checklist(
         "created_checklist": created_checklist,
         "created_items": created_items,
         "updated_items": updated_items,
-        "checklist_id": checklist.id,
+        "checklist_id": checklist_id,
         "template": template,
     }
 
@@ -711,4 +813,5 @@ def apply_raw_inspection_payload(
                 "failed_critical_items": int(readiness.failed_critical_items),
             },
         },
+        "template_lookup_count": len(template_by_code),
     }
