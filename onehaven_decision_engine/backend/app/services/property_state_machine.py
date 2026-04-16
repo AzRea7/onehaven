@@ -76,6 +76,34 @@ def _json_dumps(value: Any) -> str:
         return "{}"
 
 
+def _safe_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _safe_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
+def _failure_recommended_actions(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        raw = value.get("recommended_actions")
+    else:
+        raw = value
+    actions: list[dict[str, Any]] = []
+    for item in _safe_list(raw):
+        if isinstance(item, dict):
+            actions.append(item)
+        elif item is not None:
+            title = str(item).strip()
+            if title:
+                actions.append({"title": title})
+    return actions
+
+
 def _row_to_dict(row: Any | None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -700,6 +728,7 @@ def derive_stage_and_constraints(
     readiness = build_property_readiness_summary(db, org_id=org_id, property_id=property_id)
     completion = compute_compliance_status(db, org_id=org_id, property_id=property_id)
     failure_actions = build_failure_next_actions(db, org_id=org_id, property_id=property_id, limit=10)
+    failure_action_items = _failure_recommended_actions(failure_actions)
 
     existing_row = ensure_state_row(db, org_id=org_id, property_id=property_id)
     persisted_constraints = _safe_json_load(getattr(existing_row, "constraints_json", None), {})
@@ -984,7 +1013,7 @@ def derive_stage_and_constraints(
         blockers.append("turnover_active")
         next_actions.append("Route turnover through compliance or investor review depending on the blocker profile.")
 
-    for action in failure_actions.get("recommended_actions") or []:
+    for action in failure_action_items:
         title = str(action.get("title") or "").strip()
         if title and title not in next_actions:
             next_actions.append(title)
@@ -1143,7 +1172,7 @@ def derive_stage_and_constraints(
         "blockers": blockers,
         "next_actions": next_actions,
         "jurisdiction_tasks": jurisdiction["tasks"],
-        "inspection_failure_actions": failure_actions.get("recommended_actions") or [],
+        "inspection_failure_actions": failure_action_items,
         "counts": {
             "rehab_open": rehab["open"],
             "rehab_blocked": rehab["blocked"],

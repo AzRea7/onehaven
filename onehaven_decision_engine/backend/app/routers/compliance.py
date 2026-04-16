@@ -181,6 +181,27 @@ def _must_get_inspection(
     return row
 
 
+def _require_compliance_preview_stage(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    action: str,
+) -> None:
+    """
+    Read-only preview endpoints should be visible earlier than the full
+    compliance workflow. Allow preview access from underwritten onward while
+    keeping stricter gates for mutating routes.
+    """
+    require_stage(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        min_stage="underwritten",
+        action=action,
+    )
+
+
 def _applies(
     cond: dict[str, Any] | None,
     *,
@@ -742,11 +763,10 @@ def property_brief(
     p=Depends(get_principal),
 ):
     prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
+    _require_compliance_preview_stage(
         db,
         org_id=p.org_id,
         property_id=property_id,
-        min_stage="compliance",
         action="view property compliance brief",
     )
     return build_property_compliance_brief(
@@ -768,11 +788,10 @@ def property_inspection_readiness(
     p=Depends(get_principal),
 ):
     _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
+    _require_compliance_preview_stage(
         db,
         org_id=p.org_id,
         property_id=property_id,
-        min_stage="compliance",
         action="view property inspection readiness",
     )
     readiness = build_property_inspection_readiness(
@@ -798,11 +817,10 @@ def property_compliance_record(
     p=Depends(get_principal),
 ):
     prop = _must_get_property(db, org_id=p.org_id, property_id=property_id)
-    require_stage(
+    _require_compliance_preview_stage(
         db,
         org_id=p.org_id,
         property_id=property_id,
-        min_stage="compliance",
         action="view property compliance record",
     )
 

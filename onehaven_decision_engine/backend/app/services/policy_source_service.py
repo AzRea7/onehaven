@@ -172,6 +172,22 @@ def _json_loads_list(value: Any) -> list[Any]:
     return []
 
 
+
+
+def _catalog_entry_key(entry: PolicyCatalogEntry) -> str:
+    payload = {
+        "url": getattr(entry, "url", None),
+        "state": getattr(entry, "state", None),
+        "county": getattr(entry, "county", None),
+        "city": getattr(entry, "city", None),
+        "pha_name": getattr(entry, "pha_name", None),
+        "program_type": getattr(entry, "program_type", None),
+        "source_kind": getattr(entry, "source_kind", None),
+        "title": getattr(entry, "title", None),
+        "publisher": getattr(entry, "publisher", None),
+    }
+    return hashlib.sha256(_json_dumps(payload).encode("utf-8")).hexdigest()
+
 def _source_name_from_url(url: str) -> str:
     host = urlparse(url).netloc.strip().lower()
     if not host:
@@ -1244,8 +1260,9 @@ def ensure_policy_source_from_catalog_entry(
             fetch_config_json=_json_dumps({"focus": focus}),
             registry_meta_json=_json_dumps(
                 {
-                    "catalog_entry_id": entry.id,
-                    "baseline_url": entry.baseline_url,
+                    "catalog_entry_key": _catalog_entry_key(entry),
+                    "catalog_entry_url": entry.url,
+                    "baseline_url": getattr(entry, "baseline_url", None),
                     "source_kind": entry.source_kind,
                     "priority": entry.priority,
                     "origin_mode": "curated",
@@ -1279,7 +1296,14 @@ def ensure_policy_source_from_catalog_entry(
         _apply_authority_policy_to_source(source, normalized_categories=_json_loads_list(getattr(entry, "normalized_categories_json", None)))
         db.add(source)
         db.flush()
-        inventory_hints = expected_inventory_hints(state=_norm_state(state), county=county, city=city, pha_name=pha_name, include_section8=True)
+        inventory_hints = expected_inventory_hints(
+            state=_norm_state(state),
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            include_section8=True,
+        )
+        normalized_categories = _json_loads_list(getattr(entry, "normalized_categories_json", None))
         upsert_source_inventory_record(
             db,
             org_id=org_id,
@@ -1287,27 +1311,27 @@ def ensure_policy_source_from_catalog_entry(
             county=county,
             city=city,
             pha_name=pha_name,
-            program_type="section8" if "section8" in set(candidate.category_hints) else None,
-            url=candidate.url,
-            title=probe_result.get("title") or candidate.title,
-            publisher=candidate.publisher,
-            source_type=candidate.source_type,
-            publication_type=candidate.publication_type,
-            category_hints=list(candidate.category_hints),
-            search_terms=list(candidate.search_terms),
+            program_type=program_type,
+            url=entry.url,
+            title=entry.title,
+            publisher=entry.publisher,
+            source_type=source_type,
+            publication_type=authority.get("publication_type"),
+            category_hints=list(normalized_categories),
+            search_terms=list(normalized_categories),
             expected_categories=inventory_hints.get("expected_categories"),
             expected_tiers=inventory_hints.get("expected_tiers"),
-            authority_tier=candidate.authority_tier,
-            authority_rank=candidate.authority_rank,
-            authority_score=candidate.authority_score,
-            lifecycle_state=INVENTORY_LIFECYCLE_PENDING_CRAWL if probe_result.get("ok") else INVENTORY_LIFECYCLE_DISCOVERED,
-            crawl_status=INVENTORY_CRAWL_PENDING if not probe_result.get("ok") else INVENTORY_CRAWL_QUEUED,
-            inventory_origin="discovered",
+            authority_tier=str(authority.get("authority_tier") or "derived_or_inferred"),
+            authority_rank=int(authority.get("authority_rank") or 25),
+            authority_score=float(authority.get("authority_score") or 0.35),
+            lifecycle_state=INVENTORY_LIFECYCLE_ACCEPTED,
+            crawl_status=INVENTORY_CRAWL_QUEUED,
+            inventory_origin="catalog_sync",
             policy_source_id=int(source.id),
-            is_curated=False,
-            is_official_candidate=bool(candidate.authority_rank >= 85),
-            probe_result=probe_result,
-            metadata={"focus": focus},
+            is_curated=True,
+            is_official_candidate=bool(int(authority.get("authority_rank") or 25) >= 85),
+            probe_result={"ok": True, "source": "catalog"},
+            metadata={"focus": focus, "catalog_entry_key": _catalog_entry_key(entry)},
         )
         return source
 
@@ -1348,8 +1372,9 @@ def ensure_policy_source_from_catalog_entry(
     meta = _json_loads_dict(existing.registry_meta_json)
     meta.update(
         {
-            "catalog_entry_id": entry.id,
-            "baseline_url": entry.baseline_url,
+            "catalog_entry_key": _catalog_entry_key(entry),
+                    "catalog_entry_url": entry.url,
+            "baseline_url": getattr(entry, "baseline_url", None),
             "source_kind": entry.source_kind,
             "priority": entry.priority,
             "origin_mode": "curated",
@@ -1368,7 +1393,14 @@ def ensure_policy_source_from_catalog_entry(
     _sync_registry_defaults(existing)
     _apply_authority_policy_to_source(existing, normalized_categories=_json_loads_list(getattr(entry, "normalized_categories_json", None)))
     db.flush()
-    inventory_hints = expected_inventory_hints(state=_norm_state(state), county=county, city=city, pha_name=pha_name, include_section8=True)
+    inventory_hints = expected_inventory_hints(
+        state=_norm_state(state),
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=True,
+    )
+    normalized_categories = _json_loads_list(getattr(entry, "normalized_categories_json", None))
     upsert_source_inventory_record(
         db,
         org_id=org_id,
@@ -1377,26 +1409,26 @@ def ensure_policy_source_from_catalog_entry(
         city=city,
         pha_name=pha_name,
         program_type=getattr(existing, "program_type", None),
-        url=candidate.url,
-        title=probe_result.get("title") or candidate.title or existing.title,
-        publisher=candidate.publisher or existing.publisher,
+        url=existing.url,
+        title=existing.title,
+        publisher=existing.publisher,
         source_type=existing.source_type,
         publication_type=existing.publication_type,
-        category_hints=list(candidate.category_hints),
-        search_terms=list(candidate.search_terms),
+        category_hints=list(normalized_categories),
+        search_terms=list(normalized_categories),
         expected_categories=inventory_hints.get("expected_categories"),
         expected_tiers=inventory_hints.get("expected_tiers"),
         authority_tier=existing.authority_tier,
         authority_rank=existing.authority_rank,
         authority_score=existing.authority_score,
-        lifecycle_state=INVENTORY_LIFECYCLE_PENDING_CRAWL if probe_result.get("ok") else INVENTORY_LIFECYCLE_DISCOVERED,
-        crawl_status=INVENTORY_CRAWL_QUEUED if probe_result.get("ok") else INVENTORY_CRAWL_PENDING,
-        inventory_origin="discovered",
+        lifecycle_state=INVENTORY_LIFECYCLE_ACCEPTED,
+        crawl_status=INVENTORY_CRAWL_QUEUED,
+        inventory_origin="catalog_sync",
         policy_source_id=int(existing.id),
-        is_curated=bool(policy_source_origin(existing) == "curated"),
-        is_official_candidate=bool(existing.authority_rank >= 85),
-        probe_result=probe_result,
-        metadata={"focus": focus},
+        is_curated=True,
+        is_official_candidate=bool(int(existing.authority_rank or 0) >= 85),
+        probe_result={"ok": True, "source": "catalog"},
+        metadata={"focus": focus, "catalog_entry_key": _catalog_entry_key(entry)},
     )
     return existing
 
@@ -1642,7 +1674,14 @@ def _upsert_discovered_source(
         _apply_authority_policy_to_source(source, normalized_categories=list(candidate.category_hints))
         db.add(source)
         db.flush()
-        inventory_hints = expected_inventory_hints(state=_norm_state(state), county=county, city=city, pha_name=pha_name, include_section8=True)
+        inventory_hints = expected_inventory_hints(
+            state=_norm_state(state),
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            include_section8=True,
+        )
+        normalized_categories = _json_loads_list(getattr(entry, "normalized_categories_json", None))
         upsert_source_inventory_record(
             db,
             org_id=org_id,
@@ -1650,27 +1689,27 @@ def _upsert_discovered_source(
             county=county,
             city=city,
             pha_name=pha_name,
-            program_type="section8" if "section8" in set(candidate.category_hints) else None,
-            url=candidate.url,
-            title=probe_result.get("title") or candidate.title,
-            publisher=candidate.publisher,
-            source_type=candidate.source_type,
-            publication_type=candidate.publication_type,
-            category_hints=list(candidate.category_hints),
-            search_terms=list(candidate.search_terms),
+            program_type=program_type,
+            url=entry.url,
+            title=entry.title,
+            publisher=entry.publisher,
+            source_type=source_type,
+            publication_type=authority.get("publication_type"),
+            category_hints=list(normalized_categories),
+            search_terms=list(normalized_categories),
             expected_categories=inventory_hints.get("expected_categories"),
             expected_tiers=inventory_hints.get("expected_tiers"),
-            authority_tier=candidate.authority_tier,
-            authority_rank=candidate.authority_rank,
-            authority_score=candidate.authority_score,
-            lifecycle_state=INVENTORY_LIFECYCLE_PENDING_CRAWL if probe_result.get("ok") else INVENTORY_LIFECYCLE_DISCOVERED,
-            crawl_status=INVENTORY_CRAWL_PENDING if not probe_result.get("ok") else INVENTORY_CRAWL_QUEUED,
-            inventory_origin="discovered",
+            authority_tier=str(authority.get("authority_tier") or "derived_or_inferred"),
+            authority_rank=int(authority.get("authority_rank") or 25),
+            authority_score=float(authority.get("authority_score") or 0.35),
+            lifecycle_state=INVENTORY_LIFECYCLE_ACCEPTED,
+            crawl_status=INVENTORY_CRAWL_QUEUED,
+            inventory_origin="catalog_sync",
             policy_source_id=int(source.id),
-            is_curated=False,
-            is_official_candidate=bool(candidate.authority_rank >= 85),
-            probe_result=probe_result,
-            metadata={"focus": focus},
+            is_curated=True,
+            is_official_candidate=bool(int(authority.get("authority_rank") or 25) >= 85),
+            probe_result={"ok": True, "source": "catalog"},
+            metadata={"focus": focus, "catalog_entry_key": _catalog_entry_key(entry)},
         )
         return source
 
@@ -1729,7 +1768,14 @@ def _upsert_discovered_source(
     _sync_registry_defaults(existing)
     _apply_authority_policy_to_source(existing, normalized_categories=merged_hints)
     db.flush()
-    inventory_hints = expected_inventory_hints(state=_norm_state(state), county=county, city=city, pha_name=pha_name, include_section8=True)
+    inventory_hints = expected_inventory_hints(
+        state=_norm_state(state),
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=True,
+    )
+    normalized_categories = _json_loads_list(getattr(entry, "normalized_categories_json", None))
     upsert_source_inventory_record(
         db,
         org_id=org_id,
@@ -1738,26 +1784,26 @@ def _upsert_discovered_source(
         city=city,
         pha_name=pha_name,
         program_type=getattr(existing, "program_type", None),
-        url=candidate.url,
-        title=probe_result.get("title") or candidate.title or existing.title,
-        publisher=candidate.publisher or existing.publisher,
+        url=existing.url,
+        title=existing.title,
+        publisher=existing.publisher,
         source_type=existing.source_type,
         publication_type=existing.publication_type,
-        category_hints=list(candidate.category_hints),
-        search_terms=list(candidate.search_terms),
+        category_hints=list(normalized_categories),
+        search_terms=list(normalized_categories),
         expected_categories=inventory_hints.get("expected_categories"),
         expected_tiers=inventory_hints.get("expected_tiers"),
         authority_tier=existing.authority_tier,
         authority_rank=existing.authority_rank,
         authority_score=existing.authority_score,
-        lifecycle_state=INVENTORY_LIFECYCLE_PENDING_CRAWL if probe_result.get("ok") else INVENTORY_LIFECYCLE_DISCOVERED,
-        crawl_status=INVENTORY_CRAWL_QUEUED if probe_result.get("ok") else INVENTORY_CRAWL_PENDING,
-        inventory_origin="discovered",
+        lifecycle_state=INVENTORY_LIFECYCLE_ACCEPTED,
+        crawl_status=INVENTORY_CRAWL_QUEUED,
+        inventory_origin="catalog_sync",
         policy_source_id=int(existing.id),
-        is_curated=bool(policy_source_origin(existing) == "curated"),
-        is_official_candidate=bool(existing.authority_rank >= 85),
-        probe_result=probe_result,
-        metadata={"focus": focus},
+        is_curated=True,
+        is_official_candidate=bool(int(existing.authority_rank or 0) >= 85),
+        probe_result={"ok": True, "source": "catalog"},
+        metadata={"focus": focus, "catalog_entry_key": _catalog_entry_key(entry)},
     )
     return existing
 
@@ -2052,7 +2098,7 @@ def collect_catalog_for_market(
     city: Optional[str],
     pha_name: Optional[str] = None,
     focus: str = "se_mi_extended",
-) -> list[PolicySource]:
+) -> list[PolicyCollectResult]:
     items = merged_catalog_for_market(
         db,
         org_id=org_id,
@@ -2062,7 +2108,9 @@ def collect_catalog_for_market(
         pha_name=pha_name,
         focus=focus,
     )
-    rows: list[PolicySource] = []
+
+    results: list[PolicyCollectResult] = []
+    seen_urls: set[str] = set()
     inventory_hints = expected_inventory_hints(
         state=_norm_state(state),
         county=county,
@@ -2070,8 +2118,14 @@ def collect_catalog_for_market(
         pha_name=pha_name,
         include_section8=True,
     )
+
     for item in items:
-        source = ensure_policy_source_from_catalog_entry(
+        url = str(getattr(item, "url", "") or "").strip().lower()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        result = _collect_single_catalog_entry(
             db,
             entry=item,
             org_id=org_id,
@@ -2079,17 +2133,17 @@ def collect_catalog_for_market(
         )
         sync_policy_source_into_inventory(
             db,
-            source=source,
+            source=result.source,
             org_id=org_id,
             expected_categories=inventory_hints.get("expected_categories"),
             expected_tiers=inventory_hints.get("expected_tiers"),
             inventory_origin="catalog_sync",
             is_curated=True,
         )
-        rows.append(source)
-    db.commit()
-    return rows
+        results.append(result)
 
+    db.commit()
+    return results
 
 def list_sources_for_market(
     db: Session,

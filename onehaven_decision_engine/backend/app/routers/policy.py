@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import get_principal, require_owner
-from app.db import get_db
+from app.db import get_db, rollback_quietly
 from app.models import Property
 from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
 from app.services.jurisdiction_completeness_service import profile_completeness_payload
@@ -263,6 +263,20 @@ def _norm_text(s: Optional[str]) -> Optional[str]:
     return v or None
 
 
+
+def _apply_profile_pha_filter(query, pha_name: Optional[str]):
+    """
+    JurisdictionProfile does not always have a pha_name column in this repo shape.
+    Only filter on it when the mapped model actually exposes that attribute.
+    """
+    pha_attr = getattr(JurisdictionProfile, "pha_name", None)
+    if pha_attr is None:
+        return query
+    if pha_name is not None:
+        return query.filter(pha_attr == _norm_text(pha_name))
+    return query.filter(pha_attr.is_(None))
+
+
 def _market_sources_for_catalog(
     db,
     *,
@@ -296,6 +310,23 @@ def _market_sources_for_catalog(
         q = q.filter((PolicySource.org_id == org_id) | (PolicySource.org_id.is_(None)))
 
     return q.order_by(PolicySource.id.asc()).all()
+
+
+def _normalize_collect_results(results: list[Any]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for item in results:
+        source = getattr(item, "source", item)
+        if source is None:
+            continue
+        normalized.append(
+            {
+                "source": source,
+                "changed": bool(getattr(item, "changed", False)),
+                "fetch_ok": bool(getattr(item, "fetch_ok", True)),
+                "fetch_error": getattr(item, "fetch_error", None),
+            }
+        )
+    return normalized
 
 
 @router.get("/catalog")
@@ -371,23 +402,24 @@ def collect_catalog_market(
         city=payload.city,
         focus=payload.focus,
     )
+    normalized_results = _normalize_collect_results(results)
     return {
         "ok": True,
         "state": payload.state,
         "county": _norm_lower(payload.county),
         "city": _norm_lower(payload.city),
-        "count": len(results),
-        "ok_count": sum(1 for r in results if r.fetch_ok),
-        "failed_count": sum(1 for r in results if not r.fetch_ok),
+        "count": len(normalized_results),
+        "ok_count": sum(1 for r in normalized_results if r["fetch_ok"]),
+        "failed_count": sum(1 for r in normalized_results if not r["fetch_ok"]),
         "results": [
             {
-                "source_id": r.source.id,
-                "url": r.source.url,
-                "changed": r.changed,
-                "fetch_ok": r.fetch_ok,
-                "fetch_error": r.fetch_error,
+                "source_id": int(r["source"].id),
+                "url": r["source"].url,
+                "changed": bool(r["changed"]),
+                "fetch_ok": bool(r["fetch_ok"]),
+                "fetch_error": r["fetch_error"],
             }
-            for r in results
+            for r in normalized_results
         ],
     }
 
@@ -983,13 +1015,14 @@ def get_coverage_status(
         city=city,
         pha_name=pha_name,
     )
-    profile = db.query(JurisdictionProfile).filter(
+    profile_query = db.query(JurisdictionProfile).filter(
         JurisdictionProfile.state == _norm_state(state),
         JurisdictionProfile.county == _norm_lower(county) if county is not None else JurisdictionProfile.county.is_(None),
         JurisdictionProfile.city == _norm_lower(city) if city is not None else JurisdictionProfile.city.is_(None),
-        JurisdictionProfile.pha_name == _norm_text(pha_name) if pha_name is not None else JurisdictionProfile.pha_name.is_(None),
         (JurisdictionProfile.org_id == target_org_id) | (JurisdictionProfile.org_id.is_(None)),
-    ).order_by(JurisdictionProfile.org_id.desc(), JurisdictionProfile.id.desc()).first()
+    )
+    profile_query = _apply_profile_pha_filter(profile_query, pha_name)
+    profile = profile_query.order_by(JurisdictionProfile.org_id.desc(), JurisdictionProfile.id.desc()).first()
     return {
         **coverage,
         "operational_status": _profile_operational_payload(db, profile, org_id=target_org_id),
@@ -1267,13 +1300,14 @@ def get_market_coverage(
         pha_name=payload.pha_name,
     )
 
-    profile = db.query(JurisdictionProfile).filter(
+    profile_query = db.query(JurisdictionProfile).filter(
         JurisdictionProfile.state == _norm_state(payload.state),
         JurisdictionProfile.county == _norm_lower(payload.county),
         JurisdictionProfile.city == _norm_lower(payload.city),
-        JurisdictionProfile.pha_name == _norm_text(payload.pha_name),
         (JurisdictionProfile.org_id == target_org_id) if target_org_id is not None else JurisdictionProfile.org_id.is_(None),
-    ).order_by(JurisdictionProfile.id.desc()).first()
+    )
+    profile_query = _apply_profile_pha_filter(profile_query, payload.pha_name)
+    profile = profile_query.order_by(JurisdictionProfile.id.desc()).first()
 
     profile_payload = _profile_summary_payload(db, profile)
     return {
@@ -1290,6 +1324,63 @@ def get_market_coverage(
         "missing_local_rule_areas": (profile_payload or {}).get("missing_local_rule_areas") or (coverage or {}).get("missing_local_rule_areas") or [],
         "coverage_matrix": (profile_payload or {}).get("coverage_matrix"),
     }
+
+
+@router.get("/brief")
+def get_policy_brief(
+    state: str = Query("MI"),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    org_scope: bool = Query(False),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    target_org_id = principal.org_id if org_scope else None
+    try:
+        profile_query = db.query(JurisdictionProfile).filter(
+            JurisdictionProfile.state == _norm_state(state),
+            JurisdictionProfile.county == _norm_lower(county) if county is not None else JurisdictionProfile.county.is_(None),
+            JurisdictionProfile.city == _norm_lower(city) if city is not None else JurisdictionProfile.city.is_(None),
+            (JurisdictionProfile.org_id == target_org_id) | (JurisdictionProfile.org_id.is_(None)),
+        )
+        profile_query = _apply_profile_pha_filter(profile_query, pha_name)
+        profile = profile_query.order_by(JurisdictionProfile.org_id.desc(), JurisdictionProfile.id.desc()).first()
+    
+        brief = build_property_compliance_brief(
+            db,
+            org_id=target_org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+    
+        profile_payload = _profile_summary_payload(db, profile)
+        operational_status = _profile_operational_payload(db, profile, org_id=target_org_id)
+        return {
+            "ok": True,
+            "market": {
+                "state": _norm_state(state),
+                "county": _norm_lower(county),
+                "city": _norm_lower(city),
+                "pha_name": _norm_text(pha_name),
+            },
+            "profile": profile_payload,
+            "brief": brief,
+            "coverage_confidence": (profile_payload or {}).get("coverage_confidence") or brief.get("coverage_confidence"),
+            "missing_local_rule_areas": (profile_payload or {}).get("missing_local_rule_areas") or brief.get("missing_local_rule_areas") or [],
+            "coverage_matrix": (profile_payload or {}).get("coverage_matrix"),
+            "operational_status": operational_status,
+            "operational_health": operational_status,
+            "safe_to_rely_on": operational_status.get("safe_to_rely_on"),
+            "unsafe_reasons": operational_status.get("reasons") or [],
+            "lockout": operational_status.get("lockout"),
+            "next_actions": operational_status.get("next_actions"),
+        }
+    except Exception as exc:
+        rollback_quietly(db)
+        raise HTTPException(status_code=409, detail=f"policy_brief_conflict: {type(exc).__name__}")
 
 
 @router.get("/property/{property_id}/resolved-rules")

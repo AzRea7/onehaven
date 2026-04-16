@@ -15,6 +15,13 @@ from ..models import Inspection, InspectionItem, PropertyChecklistItem
 from ..services.policy_projection_service import build_property_projection_snapshot, rebuild_property_projection
 
 
+def _rollback_quietly(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
 @dataclass(frozen=True)
 class InspectionReadinessScore:
     property_id: int
@@ -213,6 +220,7 @@ def _jurisdiction_trust_flags(db: Session, *, org_id: int, property_id: int) -> 
             property_id=int(property_id),
         )
     except Exception:
+        _rollback_quietly(db)
         return {}
 
     projection = snapshot.get("projection") or {}
@@ -222,7 +230,7 @@ def _jurisdiction_trust_flags(db: Session, *, org_id: int, property_id: int) -> 
 
 
 def _build_property_jurisdiction_blocker(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    from ..services.workflow_gate_service import build_property_jurisdiction_blocker
+    from .workflow_gate_service import build_property_jurisdiction_blocker
 
     return build_property_jurisdiction_blocker(
         db,
@@ -304,15 +312,39 @@ def compute_property_readiness_score(
             failed_critical_items = int(scored.failed_critical_items)
 
     checklist_summary = summarize_items(checklist_rows)
-    checklist_failed_count = int(checklist_summary.get("failed_count", 0) or 0)
-    checklist_blocked_count = int(checklist_summary.get("blocked_count", 0) or 0)
-    unresolved_failure_count = int(checklist_summary.get("unresolved_failure_count", checklist_failed_count) or 0)
-    unresolved_blocked_count = int(checklist_summary.get("unresolved_blocked_count", checklist_blocked_count) or 0)
-    unresolved_critical_count = int(checklist_summary.get("unresolved_critical_count", 0) or 0)
-    evidence_blocking_count = int(checklist_summary.get("evidence_blocking_count", 0) or 0)
-    evidence_unknown_count = int(checklist_summary.get("evidence_unknown_count", 0) or 0)
-    evidence_conflicting_count = int(checklist_summary.get("evidence_conflicting_count", 0) or 0)
-    evidence_stale_count = int(checklist_summary.get("evidence_stale_count", 0) or 0)
+    checklist_failed_count = int(getattr(checklist_summary, "failed", 0) or 0)
+    checklist_blocked_count = int(getattr(checklist_summary, "blocked", 0) or 0)
+    unresolved_failure_count = int(checklist_failed_count)
+    unresolved_blocked_count = int(checklist_blocked_count)
+    unresolved_critical_count = int(checklist_failed_count)
+
+    evidence_blocking_count = 0
+    evidence_unknown_count = 0
+    evidence_conflicting_count = 0
+    evidence_stale_count = 0
+
+    try:
+        rebuild_property_projection(db, org_id=org_id, property_id=property_id)
+        projection_snapshot = build_property_projection_snapshot(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+        projection_counts = projection_snapshot.get("counts") or {}
+        evidence_blocking_count = int(projection_counts.get("blocking") or 0)
+        evidence_unknown_count = int(projection_counts.get("unknown") or 0)
+        evidence_conflicting_count = int(projection_counts.get("conflicting") or 0)
+        evidence_stale_count = int(projection_counts.get("stale") or 0)
+    except Exception:
+        _rollback_quietly(db)
+        evidence_blocking_count = 0
+        evidence_unknown_count = 0
+        evidence_conflicting_count = 0
+        evidence_stale_count = 0
+
+    unresolved_failure_count += evidence_blocking_count + evidence_conflicting_count
+    unresolved_blocked_count += evidence_stale_count
+    unresolved_critical_count += evidence_blocking_count
 
     combined_readiness_status, combined_result_status, combined_reinspect_required = _compute_combined_status(
         latest_result_status=result_status,
@@ -416,14 +448,21 @@ def compute_property_readiness_score(
 
 
 def _projection_proof_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
-    snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
-    projection = snapshot.get("projection") or {}
-    if not isinstance(projection, dict):
-        projection = {}
-    return {
-        "proof_obligations": list(snapshot.get("proof_obligations") or projection.get("proof_obligations") or []),
-        "proof_counts": dict(snapshot.get("proof_counts") or projection.get("proof_counts") or {}),
-    }
+    try:
+        snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
+        projection = snapshot.get("projection") or {}
+        if not isinstance(projection, dict):
+            projection = {}
+        return {
+            "proof_obligations": list(snapshot.get("proof_obligations") or projection.get("proof_obligations") or []),
+            "proof_counts": dict(snapshot.get("proof_counts") or projection.get("proof_counts") or {}),
+        }
+    except Exception:
+        _rollback_quietly(db)
+        return {
+            "proof_obligations": [],
+            "proof_counts": {},
+        }
 
 
 def build_property_readiness_summary(
@@ -438,11 +477,15 @@ def build_property_readiness_summary(
         property_id=property_id,
     )
     proof = _projection_proof_summary(db, org_id=org_id, property_id=property_id)
-    jurisdiction_blocker = _build_property_jurisdiction_blocker(
-        db,
-        org_id=org_id,
-        property_id=property_id,
-    )
+    try:
+        jurisdiction_blocker = _build_property_jurisdiction_blocker(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+    except Exception:
+        _rollback_quietly(db)
+        jurisdiction_blocker = {"blocking": True, "jurisdiction_trust": {}}
 
     acquisition_ready = bool(
         score.readiness_score >= 60.0

@@ -16,6 +16,13 @@ from .policy_projection_service import build_property_projection_snapshot
 from .property_state_machine import get_state_payload, get_transition_payload
 
 
+def _rollback_quietly(db) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
 PRE_CLOSE_STAGES = {
     "deal",
     "underwritten",
@@ -58,6 +65,27 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _safe_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _safe_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
+def _safe_string_list(value: Any) -> list[str]:
+    out: list[str] = []
+    for item in _safe_list(value):
+        text = str(item or "").strip()
+        if text:
+            out.append(text)
+    return out
+
+
 def _projection_payload(db, *, org_id: int, property_id: int) -> dict[str, Any] | None:
     try:
         snapshot = build_property_projection_snapshot(
@@ -67,6 +95,7 @@ def _projection_payload(db, *, org_id: int, property_id: int) -> dict[str, Any] 
         )
         return snapshot if isinstance(snapshot, dict) else None
     except Exception:
+        _rollback_quietly(db)
         return None
 
 
@@ -229,35 +258,62 @@ def _build_jurisdiction_blocker_from_trust(trust: dict[str, Any]) -> dict[str, A
 
 
 def build_property_jurisdiction_blocker(db, *, org_id: int, property_id: int) -> dict[str, Any]:
-    projection_snapshot = _projection_payload(db, org_id=org_id, property_id=property_id)
-    trust = _jurisdiction_trust_payload(projection_snapshot)
-    blocker = _build_jurisdiction_blocker_from_trust(trust)
-    blocker["property_id"] = int(property_id)
-    proof_obligations: list[dict[str, Any]] = []
-    proof_counts: dict[str, Any] = {}
-    if projection_snapshot and isinstance(projection_snapshot, dict):
-        proof_obligations = list(projection_snapshot.get("proof_obligations") or ((projection_snapshot.get("projection") or {}).get("proof_obligations") if isinstance(projection_snapshot.get("projection"), dict) else []) or [])
-        proof_counts = dict(projection_snapshot.get("proof_counts") or ((projection_snapshot.get("projection") or {}).get("proof_counts") if isinstance(projection_snapshot.get("projection"), dict) else {}) or {})
-    proof_gap_items = _proof_gap_items(proof_obligations)
-    proof_blocking_reasons = _proof_blocking_reasons(proof_gap_items)
-    legally_unsafe = bool(blocker.get("blocking")) or bool(proof_blocking_reasons)
-    informationally_incomplete = (not legally_unsafe) and bool(proof_gap_items)
-    unsafe_reasons = _dedupe_reasons(list(blocker.get("blocking_reasons") or []) + proof_blocking_reasons)
-    informational_reasons = _dedupe_reasons([
-        str(item.get("evidence_gap") or f"{item.get('proof_label') or item.get('rule_key') or 'Required proof'} is {str(item.get('proof_status') or 'missing').strip().lower()}.")
-        for item in proof_gap_items if not bool(item.get("blocking"))
-    ])
-    blocker["proof_obligations"] = proof_obligations
-    blocker["proof_counts"] = proof_counts
-    blocker["proof_gap_items"] = proof_gap_items
-    blocker["proof_blocking_reasons"] = proof_blocking_reasons
-    blocker["safe_to_rely_on"] = _safe_to_rely_on_from_trust_and_proof(trust=trust, proof_gap_items=proof_gap_items)
-    blocker["legally_unsafe"] = legally_unsafe
-    blocker["informationally_incomplete"] = informationally_incomplete
-    blocker["unsafe_reasons"] = unsafe_reasons
-    blocker["informational_reasons"] = informational_reasons
-    blocker["ok"] = True
-    return blocker
+    try:
+        projection_snapshot = _projection_payload(db, org_id=org_id, property_id=property_id)
+        trust = _jurisdiction_trust_payload(projection_snapshot)
+        blocker = _build_jurisdiction_blocker_from_trust(trust)
+        blocker["property_id"] = int(property_id)
+        proof_obligations: list[dict[str, Any]] = []
+        proof_counts: dict[str, Any] = {}
+        if projection_snapshot and isinstance(projection_snapshot, dict):
+            proof_obligations = list(
+                projection_snapshot.get("proof_obligations")
+                or ((projection_snapshot.get("projection") or {}).get("proof_obligations") if isinstance(projection_snapshot.get("projection"), dict) else [])
+                or []
+            )
+            proof_counts = dict(
+                projection_snapshot.get("proof_counts")
+                or ((projection_snapshot.get("projection") or {}).get("proof_counts") if isinstance(projection_snapshot.get("projection"), dict) else {})
+                or {}
+            )
+        proof_gap_items = _proof_gap_items(proof_obligations)
+        proof_blocking_reasons = _proof_blocking_reasons(proof_gap_items)
+        legally_unsafe = bool(blocker.get("blocking")) or bool(proof_blocking_reasons)
+        informationally_incomplete = (not legally_unsafe) and bool(proof_gap_items)
+        unsafe_reasons = _dedupe_reasons(list(blocker.get("blocking_reasons") or []) + proof_blocking_reasons)
+        informational_reasons = _dedupe_reasons([
+            str(item.get("evidence_gap") or f"{item.get('proof_label') or item.get('rule_key') or 'Required proof'} is {str(item.get('proof_status') or 'missing').strip().lower()}.")
+            for item in proof_gap_items if not bool(item.get("blocking"))
+        ])
+        blocker["proof_obligations"] = proof_obligations
+        blocker["proof_counts"] = proof_counts
+        blocker["proof_gap_items"] = proof_gap_items
+        blocker["proof_blocking_reasons"] = proof_blocking_reasons
+        blocker["safe_to_rely_on"] = _safe_to_rely_on_from_trust_and_proof(trust=trust, proof_gap_items=proof_gap_items)
+        blocker["legally_unsafe"] = legally_unsafe
+        blocker["informationally_incomplete"] = informationally_incomplete
+        blocker["unsafe_reasons"] = unsafe_reasons
+        blocker["informational_reasons"] = informational_reasons
+        blocker["ok"] = True
+        return blocker
+    except Exception:
+        _rollback_quietly(db)
+        return {
+            "ok": False,
+            "property_id": int(property_id),
+            "blocking": True,
+            "blocked_reason": "Jurisdiction blocker computation failed.",
+            "jurisdiction_trust": {},
+            "proof_obligations": [],
+            "proof_counts": {},
+            "proof_gap_items": [],
+            "proof_blocking_reasons": [],
+            "safe_to_rely_on": False,
+            "legally_unsafe": True,
+            "informationally_incomplete": False,
+            "unsafe_reasons": ["Jurisdiction blocker computation failed."],
+            "informational_reasons": [],
+        }
 
 
 def _build_compliance_gate(
@@ -659,17 +715,25 @@ def _effective_gate(
 
 
 def build_workflow_summary(db, *, org_id: int, property_id: int, principal: Any = None, recompute: bool = True) -> dict[str, Any]:
-    state = get_state_payload(db, org_id=org_id, property_id=property_id, recompute=recompute)
-    tx = get_transition_payload(db, org_id=org_id, property_id=property_id)
+    try:
+        state = get_state_payload(db, org_id=org_id, property_id=property_id, recompute=recompute)
+        tx = get_transition_payload(db, org_id=org_id, property_id=property_id)
+    except Exception:
+        _rollback_quietly(db)
+        state = get_state_payload(db, org_id=org_id, property_id=property_id, recompute=False)
+        tx = get_transition_payload(db, org_id=org_id, property_id=property_id)
+
+    state = _safe_dict(state)
+    tx = _safe_dict(tx)
 
     cur = clamp_stage(state.get("current_stage"))
     cur_rank = stage_rank(cur)
     nxt = next_stage(cur)
-    state_gate = tx.get("gate") or {}
-    next_actions = state.get("next_actions") or []
-    stage_completion_summary = state.get("stage_completion_summary") or {}
-    constraints = state.get("constraints") or {}
-    outstanding_tasks = state.get("outstanding_tasks") or {}
+    state_gate = _safe_dict(tx.get("gate"))
+    next_actions = _safe_string_list(state.get("next_actions"))
+    stage_completion_summary = _safe_dict(state.get("stage_completion_summary"))
+    constraints = _safe_dict(state.get("constraints"))
+    outstanding_tasks = _safe_dict(state.get("outstanding_tasks"))
     pane = build_pane_context(current_stage=cur, constraints=constraints, principal=principal, org_id=org_id)
 
     projection_snapshot = _projection_payload(db, org_id=org_id, property_id=property_id) or {}
