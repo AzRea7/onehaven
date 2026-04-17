@@ -705,8 +705,14 @@ def upsert_coverage_status(
     row.source_count = payload["source_count"]
     row.fetch_failure_count = payload["fetch_failure_count"]
     row.stale_warning_count = payload["stale_warning_count"]
-    row.last_source_refresh_at = None
-    row.last_reviewed_at = datetime.utcnow() if payload["verified_rule_count"] > 0 else row.last_reviewed_at
+    if hasattr(row, "last_source_refresh_at"):
+        row.last_source_refresh_at = None
+    if hasattr(row, "last_reviewed_at"):
+        row.last_reviewed_at = (
+            datetime.utcnow()
+            if payload["verified_rule_count"] > 0
+            else getattr(row, "last_reviewed_at", None)
+        )
     row.required_categories_json = _dumps(payload["required_categories"])
     row.covered_categories_json = _dumps(payload["covered_categories"])
     row.missing_categories_json = _dumps(payload["missing_categories"])
@@ -728,15 +734,34 @@ def upsert_coverage_status(
     row.confidence_score = payload["confidence_score"]
     row.completeness_status = payload["completeness_status"]
     row.coverage_version = "v2"
-    row.last_verified_at = datetime.utcnow() if payload["completeness_status"] == "complete" and not payload["is_stale"] else row.last_verified_at
+    if hasattr(row, "last_verified_at"):
+        row.last_verified_at = (
+            datetime.utcnow()
+            if payload["completeness_status"] == "complete" and not payload["is_stale"]
+            else getattr(row, "last_verified_at", None)
+        )
     row.is_stale = bool(payload["is_stale"])
     row.stale_reason = payload["stale_reason"]
-    row.stale_since = datetime.utcnow() if row.is_stale and row.stale_since is None else row.stale_since
-    row.freshest_source_at = None
-    row.oldest_source_at = None
-    row.source_freshness_json = _dumps(payload["source_freshness_json"])
-    row.last_computed_at = datetime.utcnow()
-    row.last_source_change_at = datetime.utcnow() if payload.get("stale_warning") else row.last_source_change_at
+    if hasattr(row, "stale_since"):
+        row.stale_since = (
+            datetime.utcnow()
+            if row.is_stale and getattr(row, "stale_since", None) is None
+            else getattr(row, "stale_since", None)
+        )
+    if hasattr(row, "freshest_source_at"):
+        row.freshest_source_at = None
+    if hasattr(row, "oldest_source_at"):
+        row.oldest_source_at = None
+    if hasattr(row, "source_freshness_json"):
+        row.source_freshness_json = _dumps(payload["source_freshness_json"])
+    if hasattr(row, "last_computed_at"):
+        row.last_computed_at = datetime.utcnow()
+    if hasattr(row, "last_source_change_at"):
+        row.last_source_change_at = (
+            datetime.utcnow()
+            if payload.get("stale_warning")
+            else getattr(row, "last_source_change_at", None)
+        )
 
     note_suffix = f"coverage_confidence={payload.get('coverage_confidence')} score={payload.get('confidence_score')}"
     row.notes = f"{(notes or '').strip()} | {note_suffix}".strip(" |")
@@ -744,8 +769,10 @@ def upsert_coverage_status(
     source_ids_json = []
     for detail in payload.get("category_details", {}).values():
         source_ids_json.extend(detail.get("source_ids", []))
-    row.source_ids_json = _dumps(sorted(set(source_ids_json)))
-    row.source_summary_json = _dumps(payload.get("category_statuses", {}))
+    if hasattr(row, "source_ids_json"):
+        row.source_ids_json = _dumps(sorted(set(source_ids_json)))
+    if hasattr(row, "source_summary_json"):
+        row.source_summary_json = _dumps(payload.get("category_statuses", {}))
     if hasattr(row, "category_coverage_snapshot_json"):
         row.category_coverage_snapshot_json = _dumps(payload.get("category_statuses", {}))
     if hasattr(row, "category_coverage_details_json"):
@@ -791,56 +818,54 @@ def upsert_coverage_status(
             "expected_rule_universe": payload.get("expected_rule_universe", {}),
             "trust_decision": payload.get("trust_decision", {}),
         })
-    row.metadata_json = _dumps(
-        {
-            "jurisdiction_types": payload.get("jurisdiction_types", []),
-            "expected_category_bundles": payload.get("expected_category_bundles", {}),
-            "critical_categories": payload.get("critical_categories", []),
-            "optional_categories": payload.get("optional_categories", []),
-            "critical_missing_categories": payload.get("critical_missing_categories", []),
-            "critical_categories_missing_authoritative_backing": payload.get("critical_categories_missing_authoritative_backing", []),
-            "critical_stale_categories": payload.get("critical_stale_categories", []),
-            "critical_inferred_categories": payload.get("critical_inferred_categories", []),
-            "critical_conflicting_categories": payload.get("critical_conflicting_categories", []),
-            "scoring_defaults": payload.get("scoring_defaults", {}),
-            "coverage_subscore": payload.get("coverage_subscore"),
-            "freshness_subscore": payload.get("freshness_subscore"),
-            "authority_subscore": payload.get("authority_subscore"),
-            "extraction_subscore": payload.get("extraction_subscore"),
-            "governance_subscore": payload.get("governance_subscore"),
-            "conflict_penalty": payload.get("conflict_penalty"),
-            "stale_categories": payload.get("stale_categories", []),
-            "inferred_categories": payload.get("inferred_categories", []),
-            "conflicting_categories": payload.get("conflicting_categories", []),
-            "undiscovered_categories": payload.get("undiscovered_categories", []),
-            "weak_support_categories": payload.get("weak_support_categories", []),
-            "authority_unmet_categories": payload.get("authority_unmet_categories", []),
-            "unmet_categories": payload.get("unmet_categories", []),
-            "category_unmet_reasons": payload.get("category_unmet_reasons", {}),
-            "expected_rule_universe": payload.get("expected_rule_universe", {}),
-            "trustworthy_assertion_count": payload.get("trustworthy_assertion_count"),
-            "active_governed_rule_count": payload.get("active_governed_rule_count"),
-            "approved_not_active_count": payload.get("approved_not_active_count"),
-            "draft_rule_count": payload.get("draft_rule_count"),
-            "excluded_rule_count": payload.get("excluded_rule_count"),
-            "governance_category_buckets": payload.get("governance_category_buckets", {}),
-            "category_details": payload.get("category_details", {}),
-            "source_authority_summary": payload.get("source_authority_summary", {}),
-            "category_authority_tiers": payload.get("category_authority_tiers", {}),
-            "authoritative_backing_ok": payload.get("authoritative_backing_ok"),
-            # Chunk 1 additive trust metadata.
-            "trust_decision": payload.get("trust_decision", {}),
-            "safe_for_projection": payload.get("safe_for_projection"),
-            "safe_for_user_reliance": payload.get("safe_for_user_reliance"),
-            "trust_decision_code": payload.get("trust_decision_code"),
-            "trust_blocked": payload.get("trust_blocked"),
-            "trust_blocker_reasons": payload.get("trust_blocker_reasons", []),
-            "manual_review_reasons": payload.get("manual_review_reasons", []),
-            "stale_authoritative_categories": payload.get("stale_authoritative_categories", []),
-            "incomplete_required_tiers": payload.get("incomplete_required_tiers", []),
-            "tier_coverage": payload.get("tier_coverage", []),
-        }
-    )
+    row.metadata_json = _dumps({
+        "jurisdiction_types": payload.get("jurisdiction_types", []),
+        "expected_category_bundles": payload.get("expected_category_bundles", {}),
+        "critical_categories": payload.get("critical_categories", []),
+        "optional_categories": payload.get("optional_categories", []),
+        "critical_missing_categories": payload.get("critical_missing_categories", []),
+        "critical_categories_missing_authoritative_backing": payload.get("critical_categories_missing_authoritative_backing", []),
+        "critical_stale_categories": payload.get("critical_stale_categories", []),
+        "critical_inferred_categories": payload.get("critical_inferred_categories", []),
+        "critical_conflicting_categories": payload.get("critical_conflicting_categories", []),
+        "scoring_defaults": payload.get("scoring_defaults", {}),
+        "coverage_subscore": payload.get("coverage_subscore"),
+        "freshness_subscore": payload.get("freshness_subscore"),
+        "authority_subscore": payload.get("authority_subscore"),
+        "extraction_subscore": payload.get("extraction_subscore"),
+        "governance_subscore": payload.get("governance_subscore"),
+        "conflict_penalty": payload.get("conflict_penalty"),
+        "stale_categories": payload.get("stale_categories", []),
+        "inferred_categories": payload.get("inferred_categories", []),
+        "conflicting_categories": payload.get("conflicting_categories", []),
+        "undiscovered_categories": payload.get("undiscovered_categories", []),
+        "weak_support_categories": payload.get("weak_support_categories", []),
+        "authority_unmet_categories": payload.get("authority_unmet_categories", []),
+        "unmet_categories": payload.get("unmet_categories", []),
+        "category_unmet_reasons": payload.get("category_unmet_reasons", {}),
+        "expected_rule_universe": payload.get("expected_rule_universe", {}),
+        "trustworthy_assertion_count": payload.get("trustworthy_assertion_count"),
+        "active_governed_rule_count": payload.get("active_governed_rule_count"),
+        "approved_not_active_count": payload.get("approved_not_active_count"),
+        "draft_rule_count": payload.get("draft_rule_count"),
+        "excluded_rule_count": payload.get("excluded_rule_count"),
+        "governance_category_buckets": payload.get("governance_category_buckets", {}),
+        "category_details": payload.get("category_details", {}),
+        "source_authority_summary": payload.get("source_authority_summary", {}),
+        "category_authority_tiers": payload.get("category_authority_tiers", {}),
+        "authoritative_backing_ok": payload.get("authoritative_backing_ok"),
+        # Chunk 1 additive trust metadata.
+        "trust_decision": payload.get("trust_decision", {}),
+        "safe_for_projection": payload.get("safe_for_projection"),
+        "safe_for_user_reliance": payload.get("safe_for_user_reliance"),
+        "trust_decision_code": payload.get("trust_decision_code"),
+        "trust_blocked": payload.get("trust_blocked"),
+        "trust_blocker_reasons": payload.get("trust_blocker_reasons", []),
+        "manual_review_reasons": payload.get("manual_review_reasons", []),
+        "stale_authoritative_categories": payload.get("stale_authoritative_categories", []),
+        "incomplete_required_tiers": payload.get("incomplete_required_tiers", []),
+        "tier_coverage": payload.get("tier_coverage", []),
+    })
 
     if hasattr(row, "confidence_label"):
         setattr(row, "confidence_label", payload["confidence_label"])

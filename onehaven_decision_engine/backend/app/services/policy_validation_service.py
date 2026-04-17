@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 from sqlalchemy import or_, select
@@ -38,6 +39,26 @@ CRITICAL_VALIDATION_MIN_CONFIDENCE = 0.75
 GENERAL_VALIDATION_MIN_CITATION = 0.35
 GENERAL_VALIDATION_MIN_CONFIDENCE = 0.55
 
+SOURCE_FETCH_FAILURE_STATES = {"fetch_failed", "error", "blocked"}
+SOURCE_BLOCKED_STATES = {"blocked"}
+SOURCE_HTTP_BLOCK_STATUSES = {401, 403, 405, 406, 407, 429, 451}
+SOURCE_HTTP_DEAD_STATUSES = {404, 410}
+OFFICIAL_HOST_ALLOWLIST = {
+    "ecfr.gov",
+    "www.ecfr.gov",
+    "federalregister.gov",
+    "www.federalregister.gov",
+    "hud.gov",
+    "www.hud.gov",
+    "michigan.gov",
+    "www.michigan.gov",
+    "legislature.mi.gov",
+    "www.legislature.mi.gov",
+    "courts.michigan.gov",
+    "www.courts.michigan.gov",
+}
+
+
 
 def _source_requires_revalidation(source: PolicySource | None) -> bool:
     return bool(getattr(source, "revalidation_required", False)) if source is not None else False
@@ -46,14 +67,190 @@ def _source_requires_revalidation(source: PolicySource | None) -> bool:
 def _validation_support_summary(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
     authority_policy = _authority_policy_for_source(source)
     category_requirement = _category_authority_requirement(assertion)
+    url_validation = _source_url_validation_summary(source)
     return {
         "authority_policy": authority_policy,
         "category_requirement": category_requirement,
         "critical_binding_required": bool(category_requirement.get("critical_binding_required")),
-        "binding_sufficient": bool(authority_policy.get("binding_sufficient")),
+        "binding_sufficient": bool(authority_policy.get("binding_sufficient")) and bool(url_validation.get("binding_allowed")),
         "supporting_only": bool(authority_policy.get("supporting_only")),
-        "unusable": not bool(authority_policy.get("usable", True)),
+        "unusable": (not bool(authority_policy.get("usable", True))) or (not bool(url_validation.get("trust_for_extraction"))),
         "requires_revalidation": _source_requires_revalidation(source),
+        "url_validation": url_validation,
+    }
+
+
+def _host_from_url(url: str) -> str:
+    raw = str(url or "").strip().lower()
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    raw = raw.split("/", 1)[0].strip()
+    if ":" in raw:
+        raw = raw.split(":", 1)[0].strip()
+    return raw
+
+
+def _source_http_status(source: PolicySource | None) -> int | None:
+    if source is None:
+        return None
+    raw = getattr(source, "http_status", None)
+    try:
+        return int(raw) if raw is not None else None
+    except Exception:
+        return None
+
+
+def _source_failure_count(source: PolicySource | None) -> int:
+    if source is None:
+        return 0
+    retry_count = getattr(source, "refresh_retry_count", None)
+    if retry_count is not None:
+        try:
+            return int(retry_count)
+        except Exception:
+            pass
+    outcome = _loads_dict(getattr(source, "last_refresh_outcome_json", None))
+    validation_summary = _loads_dict(outcome.get("validation_summary"))
+    for key in ("failure_count", "retry_count", "consecutive_failure_count"):
+        try:
+            return int(validation_summary.get(key) or 0)
+        except Exception:
+            continue
+    return 0
+
+
+def _host_looks_guessed(host: str) -> bool:
+    host = str(host or "").strip().lower()
+    if not host:
+        return True
+    guessed_patterns = [
+        r"(^|\.)ci\.",
+        r"(^|\.)co\.",
+        r"(^|\.)cityof[a-z0-9-]+\.",
+        r"(^|\.)countyof[a-z0-9-]+\.",
+        r"(^|\.)housingauthorityof[a-z0-9-]+\.",
+    ]
+    if any(re.search(pat, host) for pat in guessed_patterns):
+        return True
+    bad_tokens = {
+        "example.gov",
+        "example.mi.us",
+        "localhost",
+        "127.0.0.1",
+    }
+    if host in bad_tokens:
+        return True
+    return False
+
+
+def _official_host_allowed(url: str) -> bool:
+    host = _host_from_url(url)
+    if not host:
+        return False
+    if host in OFFICIAL_HOST_ALLOWLIST:
+        return True
+    if host.endswith(".gov"):
+        return True
+    if host.endswith(".mi.us"):
+        return True
+    return False
+
+
+def _source_url_validation_summary(source: PolicySource | None) -> dict[str, object]:
+    if source is None:
+        return {
+            "host": "",
+            "url_allowed": False,
+            "url_reason": "missing_source",
+            "fetch_usable": False,
+            "fetch_reason": "missing_source",
+            "trust_for_extraction": False,
+            "binding_allowed": False,
+            "rejection_reasons": ["missing_source"],
+            "http_status": None,
+            "refresh_state": None,
+            "freshness_status": None,
+            "failure_count": 0,
+            "looks_guessed": True,
+        }
+
+    url = str(getattr(source, "url", "") or "").strip()
+    host = _host_from_url(url)
+    freshness_status = str(getattr(source, "freshness_status", "") or "").strip().lower()
+    refresh_state = str(getattr(source, "refresh_state", "") or "").strip().lower()
+    refresh_reason = str(getattr(source, "refresh_status_reason", "") or getattr(source, "refresh_blocked_reason", "") or "").strip().lower()
+    authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
+    http_status = _source_http_status(source)
+    failure_count = _source_failure_count(source)
+    looks_guessed = _host_looks_guessed(host)
+    is_official_host = _official_host_allowed(url)
+
+    rejection_reasons: list[str] = []
+    if not url:
+        rejection_reasons.append("missing_url")
+    if looks_guessed:
+        rejection_reasons.append("guessed_domain")
+    if not is_official_host:
+        rejection_reasons.append("non_official_host")
+    if http_status in SOURCE_HTTP_DEAD_STATUSES:
+        rejection_reasons.append("http_not_found")
+    elif http_status is not None and http_status >= 400:
+        rejection_reasons.append(f"http_status_{http_status}")
+    if freshness_status in SOURCE_FETCH_FAILURE_STATES:
+        rejection_reasons.append(freshness_status)
+    if refresh_state in SOURCE_BLOCKED_STATES:
+        rejection_reasons.append("refresh_blocked")
+    if http_status in SOURCE_HTTP_BLOCK_STATUSES or "anti-bot" in refresh_reason or "antibot" in refresh_reason or "captcha" in refresh_reason:
+        rejection_reasons.append("blocked_or_antibot")
+    if failure_count >= 2 and freshness_status in SOURCE_FETCH_FAILURE_STATES:
+        rejection_reasons.append("repeated_fetch_failed")
+
+    url_allowed = bool(url) and is_official_host and not looks_guessed
+    fetch_usable = url_allowed and not any(
+        reason in {
+            "http_not_found",
+            "fetch_failed",
+            "error",
+            "blocked",
+            "refresh_blocked",
+            "blocked_or_antibot",
+            "repeated_fetch_failed",
+        } or reason.startswith("http_status_")
+        for reason in rejection_reasons
+    )
+    trust_for_extraction = fetch_usable
+    binding_allowed = trust_for_extraction and authority_tier == "authoritative_official"
+
+    if not url_allowed:
+        url_reason = "guessed_domain" if looks_guessed else "non_official_host"
+    elif "http_not_found" in rejection_reasons:
+        url_reason = "http_not_found"
+    elif any(reason.startswith("http_status_") for reason in rejection_reasons):
+        url_reason = next(reason for reason in rejection_reasons if reason.startswith("http_status_"))
+    else:
+        url_reason = "official_host"
+
+    if fetch_usable:
+        fetch_reason = "usable"
+    elif rejection_reasons:
+        fetch_reason = rejection_reasons[0]
+    else:
+        fetch_reason = "unusable"
+
+    return {
+        "host": host,
+        "url_allowed": url_allowed,
+        "url_reason": url_reason,
+        "fetch_usable": fetch_usable,
+        "fetch_reason": fetch_reason,
+        "trust_for_extraction": trust_for_extraction,
+        "binding_allowed": binding_allowed,
+        "rejection_reasons": sorted(set(rejection_reasons)),
+        "http_status": http_status,
+        "refresh_state": refresh_state or None,
+        "freshness_status": freshness_status or None,
+        "failure_count": failure_count,
+        "looks_guessed": looks_guessed,
     }
 
 
@@ -194,6 +391,7 @@ def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | Non
     authority_score = _safe_float(getattr(source, "authority_score", 0.0), 0.0) if source is not None else _safe_float(getattr(assertion, "authority_score", 0.0), 0.0)
     support = _validation_support_summary(assertion, source)
     authority_policy = dict(support.get("authority_policy") or {})
+    url_validation = dict(support.get("url_validation") or {})
     category_requirement = dict(support.get("category_requirement") or {})
     required_tier = str(category_requirement.get("required_tier") or "")
     critical_binding_required = bool(support.get("critical_binding_required"))
@@ -201,6 +399,7 @@ def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | Non
     supporting_only = bool(support.get("supporting_only"))
     unusable = bool(support.get("unusable"))
     source_requires_revalidation = bool(support.get("requires_revalidation"))
+    source_rejection_reasons = list(url_validation.get("rejection_reasons") or [])
 
     min_citation = CRITICAL_VALIDATION_MIN_CITATION if (blocking or critical_binding_required) else GENERAL_VALIDATION_MIN_CITATION
     min_confidence = CRITICAL_VALIDATION_MIN_CONFIDENCE if (blocking or critical_binding_required) else GENERAL_VALIDATION_MIN_CONFIDENCE
@@ -216,7 +415,10 @@ def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | Non
     elif unusable:
         validation_state = VALIDATION_STATE_UNSUPPORTED
         validation_quality = 0.10
-        reason = "source_authority_unusable_for_policy"
+        if source_rejection_reasons:
+            reason = f"source_authority_unusable_for_policy:{source_rejection_reasons[0]}"
+        else:
+            reason = "source_authority_unusable_for_policy"
     elif critical_binding_required and not binding_sufficient:
         validation_state = VALIDATION_STATE_UNSUPPORTED if supporting_only else VALIDATION_STATE_AMBIGUOUS
         validation_quality = 0.15 if supporting_only else 0.30
@@ -274,6 +476,8 @@ def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | Non
         "binding_authority_missing": bool(critical_binding_required and not binding_sufficient),
         "supporting_only": bool(supporting_only),
         "requires_revalidation": source_requires_revalidation,
+        "url_validation": url_validation,
+        "source_rejection_reasons": source_rejection_reasons,
     }
 
 
@@ -317,6 +521,7 @@ def _apply_validation_state_to_source(
         source.refresh_blocked_reason = None
         source.refresh_retry_count = 0
 
+    url_validation = _source_url_validation_summary(source)
     summary = {
         "validated_count": counts.get("validated", 0),
         "weak_support_count": counts.get("weak_support", 0),
@@ -332,6 +537,7 @@ def _apply_validation_state_to_source(
         "refresh_state": source.refresh_state,
         "status_reason": source.refresh_status_reason,
         "next_step": state_payload.get("next_step"),
+        "url_validation": url_validation,
     }
     source.last_refresh_outcome_json = _dumps({
         **_loads_dict(getattr(source, "last_refresh_outcome_json", None)),
@@ -445,6 +651,7 @@ def validate_market_assertions(
                 "requires_revalidation": bool(payload.get("requires_revalidation")),
                 "authority_policy": payload.get("authority_policy") or {},
                 "category_requirement": payload.get("category_requirement") or {},
+                "url_validation": payload.get("url_validation") or {},
             },
         })
         if row.validation_state == VALIDATION_STATE_UNSUPPORTED:
@@ -471,7 +678,10 @@ def validate_market_assertions(
         local_blocking = 0
         for row in source_rows:
             local_counts[str(getattr(row, "validation_state", "unsupported"))] = local_counts.get(str(getattr(row, "validation_state", "unsupported")), 0) + 1
+            payload_url_validation = _loads_dict(getattr(row, "change_summary", None)).get("validation", {}).get("url_validation") if getattr(row, "change_summary", None) else {}
             if bool(getattr(row, "blocking", False)) and str(getattr(row, "validation_state", "")) != VALIDATION_STATE_VALIDATED:
+                local_blocking += 1
+            if isinstance(payload_url_validation, dict) and not bool(payload_url_validation.get("trust_for_extraction", True)):
                 local_blocking += 1
         source_summaries.append(_apply_validation_state_to_source(db, source=source, assertions=source_rows, counts=local_counts, blocking_issue_count=local_blocking))
 
@@ -487,4 +697,5 @@ def validate_market_assertions(
         "binding_failures": counts.get("binding_failures", 0),
         "updated_ids": updated_ids,
         "source_validation_summaries": source_summaries,
+        "rejected_source_count": sum(1 for item in source_summaries if str(item.get("refresh_state") or "").lower() == "blocked"),
     }

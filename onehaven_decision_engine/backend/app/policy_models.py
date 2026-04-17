@@ -19,8 +19,11 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.dialects import postgresql
 
 from .db import Base
+
+JSONB = postgresql.JSONB(astext_type=Text())
 
 
 class PolicyCatalogEntry(Base):
@@ -106,17 +109,17 @@ class JurisdictionProfile(Base):
     conflicting_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     required_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     covered_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    unresolved_items_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    completeness_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    expected_rule_universe_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    category_coverage_details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    category_unmet_reasons_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    unresolved_items_json: Mapped[list | None] = mapped_column(JSONB, nullable=False, default=list)
+    completeness_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    expected_rule_universe_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    category_coverage_details_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    category_unmet_reasons_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
     unmet_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     undiscovered_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     weak_support_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     authority_unmet_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     latest_rule_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    category_norm_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    category_norm_version: Mapped[str] = mapped_column(String(40), nullable=False, default="v1")
     source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     authoritative_source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     freshest_source_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -136,16 +139,16 @@ class JurisdictionProfile(Base):
     refresh_blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_refresh_state_transition_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_refresh_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    last_refresh_outcome_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    refresh_requirements_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    last_refresh_outcome_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    refresh_requirements_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
     refresh_retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     current_refresh_run_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_refresh_changed_source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_refresh_changed_rule_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    source_freshness_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    discovery_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    source_freshness_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    discovery_metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -320,8 +323,8 @@ class PolicySource(Base):
     last_fetch_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_seen_same_fingerprint_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    source_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    discovery_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    source_metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    discovery_metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
     last_verified_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     refresh_state: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
     refresh_status_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -329,7 +332,7 @@ class PolicySource(Base):
     last_refresh_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_refresh_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_state_transition_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_refresh_outcome_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    last_refresh_outcome_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
     last_change_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     revalidation_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     validation_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -454,14 +457,14 @@ class PolicySourceInventory(Base):
     rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     superseded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    inventory_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    inventory_metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
     refresh_state: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
     refresh_status_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     next_refresh_step: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     revalidation_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     validation_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_change_detected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_refresh_outcome_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    last_refresh_outcome_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
     last_change_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     last_search_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     next_search_retry_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -509,7 +512,7 @@ class PolicyDiscoveryAttempt(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     next_retry_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    attempt_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    attempt_metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=sa.text("now()"))
 
@@ -690,10 +693,10 @@ class JurisdictionCoverageStatus(Base):
     category_coverage_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     category_last_verified_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     category_source_backing_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    completeness_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    expected_rule_universe_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    category_coverage_details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    category_unmet_reasons_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    completeness_snapshot_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    expected_rule_universe_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    category_coverage_details_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    category_unmet_reasons_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
     unmet_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     undiscovered_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     weak_support_categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
@@ -716,8 +719,8 @@ class JurisdictionCoverageStatus(Base):
     next_discovery_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     projection_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    discovery_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    discovery_metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -765,7 +768,7 @@ class PolicyOverrideLedger(Base):
 
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     linked_evidence_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
 
     created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     approved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -1007,7 +1010,7 @@ class PropertyComplianceEvidence(Base):
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     source_details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -1081,7 +1084,7 @@ class PropertyComplianceEvidenceFact(Base):
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     source_details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=False, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

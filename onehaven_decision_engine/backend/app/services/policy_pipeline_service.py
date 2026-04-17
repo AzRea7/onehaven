@@ -44,7 +44,7 @@ from app.services.policy_discovery_service import expected_inventory_hints
 from app.services.policy_change_detection_service import summarize_refresh_runs
 from app.services.policy_validation_service import validate_market_assertions
 from app.services.jurisdiction_sla_service import build_refresh_requirements, collect_profile_source_sla_summary
-
+from app.services.policy_catalog_admin_service import merged_catalog_for_market
 
 def _norm_state(s: Optional[str]) -> str:
     return (s or "MI").strip().upper()
@@ -67,6 +67,26 @@ def _norm_text(s: Optional[str]) -> Optional[str]:
 def _is_archived_source(src: PolicySource) -> bool:
     return ARCHIVE_MARKER in (src.notes or "").lower()
 
+def _official_catalog_urls_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    focus: str,
+) -> list[str]:
+    items = merged_catalog_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+    return [str(item.url or "").strip().lower() for item in items if str(item.url or "").strip()]
 
 def _find_matching_profile(
     db: Session,
@@ -130,6 +150,18 @@ def _market_sources_from_catalog(
         pha_name=pha_name,
         focus=focus,
     )
+
+    allowed_urls = set(
+        _official_catalog_urls_for_market(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            focus=focus,
+        )
+    )
     rows = list_sources_for_market(
         db,
         org_id=org_id,
@@ -138,15 +170,21 @@ def _market_sources_from_catalog(
         city=city,
         pha_name=pha_name,
     )
+
     out: list[PolicySource] = []
     seen: set[int] = set()
+
     for row in rows:
         if _is_archived_source(row):
             continue
         if int(row.id) in seen:
             continue
+        row_url = str(getattr(row, "url", "") or "").strip().lower()
+        if row_url not in allowed_urls:
+            continue
         seen.add(int(row.id))
         out.append(row)
+
     return out
 
 
@@ -526,7 +564,13 @@ def run_market_policy_pipeline(
     cty = _norm_lower(city)
     pha = _norm_text(pha_name)
 
-    inventory_hints = expected_inventory_hints(state=st, county=cnty, city=cty, pha_name=pha, include_section8=True)
+    inventory_hints = expected_inventory_hints(
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        include_section8=True,
+    )
     missing_categories = _discovery_missing_categories(
         db,
         org_id=org_id,
@@ -535,6 +579,8 @@ def run_market_policy_pipeline(
         city=cty,
         pha_name=pha,
     )
+
+    # Discovery is now selection only; it cannot invent URLs.
     discovery_result = discover_policy_sources_for_market(
         db,
         org_id=org_id,
@@ -544,7 +590,7 @@ def run_market_policy_pipeline(
         pha_name=pha,
         missing_categories=missing_categories,
         focus=focus,
-        probe=True,
+        probe=False,
     )
 
     sources = _market_sources_from_catalog(
@@ -620,7 +666,11 @@ def run_market_policy_pipeline(
         "ok": True,
         "missing_categories": missing_categories,
         "expected_inventory": inventory_hints,
-        "discovery_result": discovery_result,
+        "discovery_result": {
+            **discovery_result,
+            "selection_mode": "curated_only",
+            "guessed_source_count": 0,
+        },
         "sources_processed": len(refresh_batch["source_runs"]),
         "total_changed_rules": int(refresh_batch["summary"]["changed_rule_count"]),
         "changed_source_count": int(refresh_batch["summary"]["changed_source_count"]),
@@ -628,9 +678,20 @@ def run_market_policy_pipeline(
         "source_runs": refresh_batch["source_runs"],
         "refresh_summary": {
             **refresh_batch["summary"],
-            "revalidation_required_source_ids": [row["source_id"] for row in refresh_batch["source_runs"] if bool(row.get("revalidation_required"))],
-            "changed_or_failed_source_ids": [row["source_id"] for row in refresh_batch["source_runs"] if bool(row.get("changed")) or not bool((row.get("refresh") or {}).get("ok", False))],
-            "validation_blocked_source_ids": [row["source_id"] for row in refresh_batch["source_runs"] if isinstance(row.get("validation"), dict) and int((row.get("validation") or {}).get("blocking_issue_count", 0) or 0) > 0],
+            "manual_review_assertion_ids": [],
+            "revalidation_required_source_ids": [
+                row["source_id"] for row in refresh_batch["source_runs"]
+                if bool((row.get("refresh") or {}).get("revalidation_required"))
+            ],
+            "changed_or_failed_source_ids": [
+                row["source_id"] for row in refresh_batch["source_runs"]
+                if bool(row.get("changed")) or not bool((row.get("refresh") or {}).get("ok", False))
+            ],
+            "validation_blocked_source_ids": [
+                row["source_id"] for row in refresh_batch["source_runs"]
+                if isinstance(row.get("validation"), dict)
+                and int((row.get("validation") or {}).get("blocking_issue_count", 0) or 0) > 0
+            ],
         },
         "refresh_state": refresh_state_summary,
         "lifecycle_result": lifecycle_result,

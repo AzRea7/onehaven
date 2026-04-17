@@ -616,23 +616,26 @@ def upsert_profile(
     now = datetime.utcnow()
 
     if row is None:
-        row = JurisdictionProfile(
-            org_id=org_id,
-            state=st,
-            county=cnty,
-            city=cty,
-            friction_multiplier=float(friction_multiplier or 1.0),
-            pha_name=_norm(pha_name),
-            policy_json=_dumps(policy or {}),
-            notes=_norm(notes),
-            updated_at=now,
-        )
+        create_kwargs = {
+            "org_id": org_id,
+            "state": st,
+            "county": cnty,
+            "city": cty,
+            "friction_multiplier": float(friction_multiplier or 1.0),
+            "policy_json": _dumps(policy or {}),
+            "notes": _norm(notes),
+            "updated_at": now,
+        }
+        if hasattr(JurisdictionProfile, "pha_name"):
+            create_kwargs["pha_name"] = _norm(pha_name)
+        row = JurisdictionProfile(**create_kwargs)
         if hasattr(row, "required_categories_json") and isinstance(policy, dict):
             row.required_categories_json = _dumps(policy.get("required_categories") or [])
         db.add(row)
     else:
         row.friction_multiplier = float(friction_multiplier or 1.0)
-        row.pha_name = _norm(pha_name)
+        if hasattr(row, "pha_name"):
+            row.pha_name = _norm(pha_name)
         row.policy_json = _dumps(policy or {})
         row.notes = _norm(notes)
         row.updated_at = now
@@ -1009,3 +1012,4 @@ def set_profile_operational_rollup(
     policy["meta"] = meta
     profile.policy_json = _dumps(policy)
     return profile
+

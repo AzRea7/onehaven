@@ -19,6 +19,90 @@ class PolicyCatalogItem:
     is_authoritative: bool = True
     priority: int = 100
 
+OFFICIAL_HOST_SUFFIXES = (
+    ".gov",
+    ".gov.us",
+    ".mi.gov",
+    ".legislature.mi.gov",
+    ".courts.michigan.gov",
+    ".michigan.gov",
+    ".hud.gov",
+    ".ecfr.gov",
+    ".federalregister.gov",
+)
+
+OFFICIAL_HOST_EXACT = {
+    "ecfr.gov",
+    "www.ecfr.gov",
+    "federalregister.gov",
+    "www.federalregister.gov",
+    "hud.gov",
+    "www.hud.gov",
+    "michigan.gov",
+    "www.michigan.gov",
+    "legislature.mi.gov",
+    "www.legislature.mi.gov",
+    "courts.michigan.gov",
+    "www.courts.michigan.gov",
+}
+
+
+def _host_from_url(url: str) -> str:
+    raw = str(url or "").strip().lower()
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    raw = raw.split("/", 1)[0].strip()
+    if ":" in raw:
+        raw = raw.split(":", 1)[0].strip()
+    return raw
+
+
+def _is_official_catalog_host(url: str) -> bool:
+    host = _host_from_url(url)
+    if not host:
+        return False
+    if host in OFFICIAL_HOST_EXACT:
+        return True
+    if host.endswith(".gov"):
+        return True
+    if host.endswith(".mi.us"):
+        return True
+    if host.endswith(".us") and ".gov" in host:
+        return True
+    return any(host.endswith(suffix) for suffix in OFFICIAL_HOST_SUFFIXES)
+
+
+def _is_official_catalog_item(item: PolicyCatalogItem) -> bool:
+    source_kind = str(item.source_kind or "").strip().lower()
+    publisher = str(item.publisher or "").strip().lower()
+
+    if _is_official_catalog_host(item.url):
+        return True
+
+    if source_kind in {
+        "federal_anchor",
+        "state_anchor",
+        "municipal_code",
+        "municipal_registration",
+        "municipal_inspection",
+        "municipal_program_page",
+        "city_program_page",
+        "county_program_page",
+        "state_program_page",
+        "housing_authority",
+        "pha_plan",
+        "pha_guidance",
+    }:
+        return True
+
+    if "housing authority" in publisher or "housing commission" in publisher:
+        return True
+
+    return False
+
+
+def filter_official_catalog_items(items: list[PolicyCatalogItem]) -> list[PolicyCatalogItem]:
+    return _sorted_then_deduped([item for item in items if _is_official_catalog_item(item)])
 
 def _norm_state(v: Optional[str]) -> Optional[str]:
     if v is None:
@@ -141,25 +225,22 @@ def catalog_for_market(
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
 
-    items = catalog_mi_authoritative(focus=focus)
+    items = filter_official_catalog_items(catalog_mi_authoritative(focus=focus))
     out: list[PolicyCatalogItem] = []
 
     for item in items:
         if (item.state or "MI") != st:
             continue
 
-        # State/global anchors always included.
         if item.city is None and item.county is None:
             out.append(item)
             continue
 
-        # County-scoped items.
         if item.city is None and item.county is not None:
             if cnty and item.county == cnty:
                 out.append(item)
             continue
 
-        # City-scoped items.
         if item.city is not None:
             if cty and item.city == cty:
                 out.append(item)

@@ -43,11 +43,13 @@ def _health_status(*, lockout: dict[str, Any], completeness: dict[str, Any], sla
     override_summary = override_summary or {}
     if bool(lockout.get('lockout_active')):
         return 'blocked'
+    if list(sla_summary.get('legal_lockout_categories') or []) or list(sla_summary.get('critical_fetch_failure_categories') or []):
+        return 'blocked'
     if bool(override_summary.get('carrying_critical_override')):
         return 'degraded'
-    if list(completeness.get('critical_stale_categories') or []) or list(sla_summary.get('legal_overdue_categories') or []):
+    if list(completeness.get('critical_stale_categories') or []) or list(sla_summary.get('legal_overdue_categories') or []) or int(sla_summary.get('failed_binding_source_count') or 0) > 0:
         return 'degraded'
-    if bool(completeness.get('is_stale')) or bool(sla_summary.get('has_overdue_sources')) or bool(override_summary.get('review_required')):
+    if bool(completeness.get('is_stale')) or bool(sla_summary.get('has_overdue_sources')) or bool(override_summary.get('review_required')) or int(sla_summary.get('rejected_source_count') or 0) > 0:
         return 'warning'
     return 'ok'
 
@@ -55,6 +57,10 @@ def _health_status(*, lockout: dict[str, Any], completeness: dict[str, Any], sla
 def _operational_reason(completeness: dict[str, Any], lockout: dict[str, Any], sla_summary: dict[str, Any], override_summary: dict[str, Any]) -> str | None:
     if bool(lockout.get('lockout_active')):
         return str(lockout.get('lockout_reason') or 'jurisdiction_lockout_active')
+    if list(sla_summary.get('legal_lockout_categories') or []):
+        return 'legal_source_failure_lockout'
+    if list(sla_summary.get('critical_fetch_failure_categories') or []):
+        return 'critical_binding_sources_fetch_failed'
     if list(lockout.get('lockout_causing_categories') or []):
         return 'critical_categories_block_safe_reliance'
     if list(lockout.get('validation_pending_categories') or []):
@@ -118,10 +124,10 @@ def get_jurisdiction_health(
     )
     if bool(override_summary.get('carrying_critical_override')):
         lockout['override_review_required'] = True
+    lockout_causing_categories = _dedupe(list(lockout.get('lockout_causing_categories') or []) + list(sla_summary.get('legal_lockout_categories') or []) + list(sla_summary.get('critical_fetch_failure_categories') or []))
     health_status = _health_status(lockout=lockout, completeness=completeness, sla_summary=sla_summary, override_summary=override_summary)
-    validation_pending_categories = _dedupe(list(lockout.get('validation_pending_categories') or []) + list(completeness.get('validation_pending_categories') or []))
+    validation_pending_categories = _dedupe(list(lockout.get('validation_pending_categories') or []) + list(completeness.get('validation_pending_categories') or []) + list(sla_summary.get('review_required_categories') or []))
     authority_gap_categories = _dedupe(list(lockout.get('authority_gap_categories') or []) + list(completeness.get('authority_unmet_categories') or []))
-    lockout_causing_categories = _dedupe(list(lockout.get('lockout_causing_categories') or []))
     informational_gap_categories = _dedupe(list(lockout.get('informational_gap_categories') or []) + list(completeness.get('inferred_categories') or []))
     operational_reason = _operational_reason(completeness, lockout, sla_summary, override_summary)
 
@@ -138,13 +144,18 @@ def get_jurisdiction_health(
         'operational_reason': operational_reason,
         'safe_for_user_reliance': bool(completeness.get('safe_for_user_reliance')) and not bool(override_summary.get('carrying_critical_override')) and not bool(lockout.get('lockout_active')),
         'safe_for_projection': bool(completeness.get('safe_for_projection')) and not bool(lockout.get('lockout_active')),
-        'safe_to_rely_on': bool(completeness.get('safe_for_user_reliance')) and not bool(override_summary.get('carrying_critical_override')) and not bool(lockout.get('lockout_active')) and not bool(validation_pending_categories) and not bool(authority_gap_categories),
+        'safe_to_rely_on': bool(completeness.get('safe_for_user_reliance')) and bool(sla_summary.get('safe_to_rely_on', True)) and not bool(override_summary.get('carrying_critical_override')) and not bool(lockout.get('lockout_active')) and not bool(validation_pending_categories) and not bool(authority_gap_categories) and not bool(lockout_causing_categories),
         'completeness': completeness,
         'lockout': lockout,
         'next_actions': next_actions,
         'sla_summary': sla_summary,
         'critical_stale_categories': list(completeness.get('critical_stale_categories') or []),
         'lockout_causing_categories': lockout_causing_categories,
+        'critical_fetch_failure_categories': list(sla_summary.get('critical_fetch_failure_categories') or []),
+        'legal_lockout_categories': list(sla_summary.get('legal_lockout_categories') or []),
+        'rejected_source_count': int(sla_summary.get('rejected_source_count') or 0),
+        'guessed_source_count': int(sla_summary.get('guessed_source_count') or 0),
+        'failed_binding_source_count': int(sla_summary.get('failed_binding_source_count') or 0),
         'informational_gap_categories': informational_gap_categories,
         'validation_pending_categories': validation_pending_categories,
         'authority_gap_categories': authority_gap_categories,
@@ -152,7 +163,7 @@ def get_jurisdiction_health(
         'informational_stale_categories': list(completeness.get('informational_stale_categories') or sla_summary.get('informational_overdue_categories') or []),
         'stale_authoritative_categories': list(completeness.get('stale_authoritative_categories') or sla_summary.get('stale_authoritative_categories') or []),
         'override_summary': override_summary,
-        'review_required': bool(override_summary.get('review_required')) or bool(override_summary.get('carrying_critical_override')) or not bool(completeness.get('safe_for_user_reliance')),
+        'review_required': bool(override_summary.get('review_required')) or bool(override_summary.get('carrying_critical_override')) or not bool(completeness.get('safe_for_user_reliance')) or bool(sla_summary.get('review_required_categories')) or int(sla_summary.get('rejected_source_count') or 0) > 0,
         'refresh_state': getattr(profile, 'refresh_state', None),
         'last_validation_at': (sla_summary.get('latest_validated_at') if isinstance(sla_summary, dict) else None),
         'next_due_step': (next_actions.get('next_step') if isinstance(next_actions, dict) else None),

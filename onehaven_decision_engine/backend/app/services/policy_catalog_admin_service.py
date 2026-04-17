@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.policy_models import PolicyCatalogEntry
-from app.services.policy_catalog import PolicyCatalogItem, catalog_for_market
+from app.services.policy_catalog import PolicyCatalogItem, catalog_for_market, filter_official_catalog_items
 
 
 def _norm_state(v: Optional[str]) -> str:
@@ -45,6 +45,12 @@ def _row_to_item(row: PolicyCatalogEntry) -> PolicyCatalogItem:
         priority=int(row.priority or 100),
     )
 
+def _item_url_key(item: PolicyCatalogItem) -> str:
+    return (item.url or "").strip().lower()
+
+
+def _is_truthy_authoritative(item: PolicyCatalogItem) -> bool:
+    return bool(getattr(item, "is_authoritative", False))
 
 def _market_stmt(
     *,
@@ -115,11 +121,13 @@ def merged_catalog_for_market(
     pha_name: Optional[str] = None,
     focus: str = "se_mi_extended",
 ) -> list[PolicyCatalogItem]:
-    baseline = catalog_for_market(
-        state=state,
-        county=county,
-        city=city,
-        focus=focus,
+    baseline = filter_official_catalog_items(
+        catalog_for_market(
+            state=state,
+            county=county,
+            city=city,
+            focus=focus,
+        )
     )
     db_rows = list_catalog_entries_for_market(
         db,
@@ -148,36 +156,49 @@ def merged_catalog_for_market(
             continue
 
         item = _row_to_item(row)
-        overrides_by_url[row_url] = item
+
+        # Hard boundary: DB overrides may extend the catalog, but only with vetted official sources.
+        vetted = filter_official_catalog_items([item])
+        if not vetted:
+            continue
+
+        item = vetted[0]
+        overrides_by_url[_item_url_key(item)] = item
 
         if baseline_url and baseline_url != row_url:
-            suppressed_urls.add(baseline_url)
+            suppressed_urls.add(baseline_url.strip())
 
     merged: list[PolicyCatalogItem] = []
 
     for item in baseline:
-        url = item.url.strip()
-        if not url:
+        url_key = _item_url_key(item)
+        if not url_key or url_key in suppressed_urls:
             continue
-        if url in suppressed_urls:
-            continue
-        if url in overrides_by_url:
-            merged.append(overrides_by_url[url])
+        if url_key in overrides_by_url:
+            merged.append(overrides_by_url[url_key])
         else:
             merged.append(item)
 
-    for url, item in overrides_by_url.items():
-        if url in suppressed_urls:
+    for url_key, item in overrides_by_url.items():
+        if url_key in suppressed_urls:
             continue
-        if all(existing.url.strip() != url for existing in merged):
+        if all(_item_url_key(existing) != url_key for existing in merged):
             merged.append(item)
 
-    merged.sort(key=lambda x: (int(x.priority or 100), x.title or "", x.url or ""))
+    merged = filter_official_catalog_items(merged)
+    merged.sort(
+        key=lambda x: (
+            int(x.priority or 100),
+            0 if _is_truthy_authoritative(x) else 1,
+            x.title or "",
+            x.url or "",
+        )
+    )
 
     deduped: list[PolicyCatalogItem] = []
     seen: set[str] = set()
     for item in merged:
-        key = item.url.strip()
+        key = _item_url_key(item)
         if not key or key in seen:
             continue
         seen.add(key)

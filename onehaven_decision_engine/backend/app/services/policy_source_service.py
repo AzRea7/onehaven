@@ -37,7 +37,7 @@ from app.services.policy_change_detection_service import (
 )
 
 from app.services.policy_catalog import catalog_mi_authoritative, catalog_municipalities
-
+from app.services.policy_catalog_admin_service import merged_catalog_for_market as merged_catalog_for_market_admin
 
 AUTHORITY_TIER_RANKS: dict[str, int] = {
     "derived_or_inferred": 25,
@@ -59,6 +59,202 @@ AUTHORITY_POLICY_BY_TIER: dict[str, dict[str, Any]] = {
     "derived_or_inferred": {"use_type": "weak", "binding_sufficient": False, "supporting_only": False, "usable": False},
 }
 
+class OfficialSourceValidationError(ValueError):
+    pass
+
+
+def _host_from_url(url: str) -> str:
+    host = urlparse(str(url or "").strip()).netloc.strip().lower()
+    if ":" in host:
+        host = host.split(":", 1)[0].strip()
+    return host
+
+
+def _is_official_host(url: str) -> bool:
+    host = _host_from_url(url)
+    if not host:
+        return False
+    if host.endswith(".gov"):
+        return True
+    if host.endswith(".mi.us"):
+        return True
+    if host in {
+        "ecfr.gov",
+        "www.ecfr.gov",
+        "federalregister.gov",
+        "www.federalregister.gov",
+        "hud.gov",
+        "www.hud.gov",
+        "michigan.gov",
+        "www.michigan.gov",
+        "legislature.mi.gov",
+        "www.legislature.mi.gov",
+        "courts.michigan.gov",
+        "www.courts.michigan.gov",
+    }:
+        return True
+    return False
+
+
+def _source_is_validated_official(source: PolicySource) -> bool:
+    if source is None:
+        return False
+    authority_tier = str(getattr(source, "authority_tier", None) or "").strip().lower()
+    validation_state = str(getattr(source, "validation_state", None) or "").strip().lower()
+    freshness_status = str(getattr(source, "freshness_status", None) or "").strip().lower()
+    http_status = getattr(source, "http_status", None)
+
+    if not _is_official_host(getattr(source, "url", None) or ""):
+        return False
+    if authority_tier != "authoritative_official":
+        return False
+    if validation_state in {"unsupported", "conflicting"}:
+        return False
+    if freshness_status in {"fetch_failed", "error", "blocked"}:
+        return False
+    if http_status is not None and int(http_status) >= 400:
+        return False
+    return True
+
+
+def _catalog_items_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+):
+    return merged_catalog_for_market_admin(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+
+
+def _find_catalog_item_for_url(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    url: str,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+):
+    clean = str(url or "").strip().lower()
+    if not clean:
+        return None
+    for item in _catalog_items_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    ):
+        if str(getattr(item, "url", "") or "").strip().lower() == clean:
+            return item
+    return None
+
+
+def _catalog_candidates_for_missing_categories(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    missing_categories: list[str],
+    focus: str,
+) -> list[PolicySourceDiscoveryCandidate]:
+    items = _catalog_items_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+    wanted = {str(x).strip().lower() for x in (missing_categories or []) if str(x).strip()}
+    out: list[PolicySourceDiscoveryCandidate] = []
+
+    for item in items:
+        title_text = str(getattr(item, "title", "") or "").lower()
+        notes_text = str(getattr(item, "notes", "") or "").lower()
+        source_kind = str(getattr(item, "source_kind", "") or "").lower()
+
+        category_hints = sorted({
+            category
+            for category in wanted
+            if (
+                category in title_text
+                or category in notes_text
+                or category_label(category).lower() in title_text
+                or category_label(category).lower() in notes_text
+                or category.replace("_", " ") in source_kind
+            )
+        })
+
+        if wanted and not category_hints:
+            # keep broad authoritative anchors when nothing narrower exists
+            if source_kind not in {"federal_anchor", "state_anchor", "municipal_code", "pha_plan", "municipal_registration"}:
+                continue
+            category_hints = sorted(wanted)
+
+        source_type = _source_type_from_entry(item)
+        authority = _classify_authority_tier(
+            url=item.url,
+            publisher=item.publisher,
+            title=item.title,
+            source_type=source_type,
+            source_kind=item.source_kind,
+        )
+
+        out.append(
+            PolicySourceDiscoveryCandidate(
+                url=item.url,
+                title=str(item.title or category_label(category_hints[0] if category_hints else "policy_source")),
+                publisher=_norm_text(item.publisher),
+                source_type=source_type,
+                category_hints=category_hints or sorted(wanted),
+                search_terms=sorted(wanted),
+                authority_kind=str(authority["authority_kind"]),
+                authority_score=float(authority["authority_score"]),
+                authority_tier=str(authority["authority_tier"]),
+                authority_rank=int(authority["authority_rank"]),
+                authority_class=authority.get("authority_class"),
+                authority_reason=authority.get("authority_reason"),
+                publication_type=authority.get("publication_type"),
+                domain_name=authority.get("domain_name"),
+                discovered_via="curated_catalog_selection",
+                should_fetch=True,
+            )
+        )
+
+    deduped: dict[str, PolicySourceDiscoveryCandidate] = {}
+    for item in out:
+        key = item.url.strip().lower()
+        if not key:
+            continue
+        existing = deduped.get(key)
+        if existing is None or item.authority_rank > existing.authority_rank:
+            deduped[key] = item
+
+    return sorted(
+        deduped.values(),
+        key=lambda row: (-int(row.authority_rank), row.url),
+    )
 
 @dataclass(frozen=True)
 class PolicySourceDiscoveryCandidate:
@@ -451,11 +647,6 @@ def collect_url(
     title: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> PolicyCollectResult:
-    """
-    Backward-compatible single-source collect entrypoint expected by routers/policy.py.
-    Creates or updates one PolicySource from a direct URL and returns the old result shape:
-    {source, changed, fetch_ok, fetch_error}.
-    """
     st = _norm_state(state)
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
@@ -465,13 +656,53 @@ def collect_url(
     if not clean_url:
         raise ValueError("url is required")
 
-    stmt = select(PolicySource).where(PolicySource.url == clean_url)
+    existing_stmt = select(PolicySource).where(PolicySource.url == clean_url)
     if org_id is None:
-        stmt = stmt.where(PolicySource.org_id.is_(None))
+        existing_stmt = existing_stmt.where(PolicySource.org_id.is_(None))
     else:
-        stmt = stmt.where(or_(PolicySource.org_id == org_id, PolicySource.org_id.is_(None)))
-    existing = db.scalar(stmt.order_by(PolicySource.id.asc()))
-    changed = existing is None
+        existing_stmt = existing_stmt.where(or_(PolicySource.org_id == org_id, PolicySource.org_id.is_(None)))
+    existing = db.scalar(existing_stmt.order_by(PolicySource.id.asc()))
+    if existing is not None:
+        return PolicyCollectResult(source=existing, changed=False, fetch_ok=True, fetch_error=None)
+
+    matched_catalog_item = _find_catalog_item_for_url(
+        db,
+        org_id=org_id,
+        url=clean_url,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+
+    if matched_catalog_item is not None:
+        source = ensure_policy_source_from_catalog_entry(
+            db,
+            entry=matched_catalog_item,
+            org_id=org_id,
+        )
+        db.commit()
+        return PolicyCollectResult(source=source, changed=True, fetch_ok=True, fetch_error=None)
+
+    # Allow direct entry only when the host is official and already known through a validated official source.
+    if not _is_official_host(clean_url):
+        raise OfficialSourceValidationError("direct_source_url_rejected_non_official_host")
+
+    known_scoped_sources = list_sources_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    known_hosts = {
+        _host_from_url(getattr(row, "url", "") or "")
+        for row in known_scoped_sources
+        if _source_is_validated_official(row)
+    }
+    if _host_from_url(clean_url) not in known_hosts:
+        raise OfficialSourceValidationError("direct_source_url_rejected_unapproved_host")
 
     source_type = "program" if pha or (program and program.lower() == "section8") else ("city" if cty else "county" if cnty else "state")
     authority = _classify_authority_tier(
@@ -482,141 +713,62 @@ def collect_url(
         source_kind=None,
     )
 
-    if existing is None:
-        row = PolicySource(
-            org_id=org_id,
-            state=st,
-            county=cnty,
-            city=cty,
-            pha_name=pha,
-            program_type=program,
-            publisher=publisher,
-            title=title or _source_name_from_url(clean_url),
-            url=clean_url,
-            content_type=None,
-            http_status=None,
-            retrieved_at=None,
-            content_sha256=None,
-            raw_path=None,
-            extracted_text=None,
-            notes=notes,
-            is_authoritative=bool(authority.get("authority_tier") == "authoritative_official"),
-            authority_score=float(authority.get("authority_score", 0.35) or 0.35),
-            authority_tier=str(authority.get("authority_tier") or "derived_or_inferred"),
-            authority_rank=int(authority.get("authority_rank", 25) or 25),
-            authority_class=authority.get("authority_class"),
-            authority_reason=authority.get("authority_reason"),
-            publication_type=authority.get("publication_type"),
-            domain_name=authority.get("domain_name"),
-            approved_supporting_source=bool(authority.get("approved_supporting_source", False)),
-            semi_authoritative=bool(authority.get("semi_authoritative", False)),
-            derived_or_inferred=bool(authority.get("derived_or_inferred", False)),
-            authority_use_type=str(
-                AUTHORITY_POLICY_BY_TIER.get(
-                    str(authority.get("authority_tier") or "derived_or_inferred"),
-                    AUTHORITY_POLICY_BY_TIER["derived_or_inferred"],
-                ).get("use_type")
-                or "weak"
-            ),
-            authority_policy_json="{}",
-            binding_categories_json="[]",
-            supporting_categories_json="[]",
-            unusable_categories_json="[]",
-            normalized_categories_json="[]",
-            freshness_status="unknown",
-            freshness_reason="not_fetched",
-            freshness_checked_at=None,
-            published_at=None,
-            effective_date=None,
-            last_verified_at=None,
-            source_name=publisher or title or _source_name_from_url(clean_url),
-            source_type=source_type,
-            jurisdiction_slug=_jurisdiction_slug(
-                source_type=source_type,
-                state=st,
-                county=cnty,
-                city=cty,
-                pha_name=pha,
-                program_type=program,
-            ),
-            fetch_method=_fetch_method_from_url(clean_url),
-            trust_level=float(round(max(0.35, float(authority.get("authority_score", 0.35) or 0.35)), 3)),
-            refresh_interval_days=30,
-            last_fetched_at=None,
-            registry_status="active",
-            fetch_config_json=_json_dumps({}),
-            registry_meta_json=_json_dumps({"origin_mode": "manual_collect"}),
-            fingerprint_algo="sha256",
-            current_fingerprint=None,
-            last_changed_at=None,
-            next_refresh_due_at=None,
-            last_fetch_error=None,
-            last_http_status=None,
-            last_seen_same_fingerprint_at=None,
-            source_metadata_json=_json_dumps(
-                {
-                    "discovery": {
-                        "mode": "manual_collect",
-                        "authority_kind": authority.get("authority_kind"),
-                        "authority_tier": authority.get("authority_tier"),
-                        "authority_rank": authority.get("authority_rank"),
-                        "authority_class": authority.get("authority_class"),
-                        "authority_reason": authority.get("authority_reason"),
-                        "publication_type": authority.get("publication_type"),
-                        "domain_name": authority.get("domain_name"),
-                    }
-                }
-            ),
-            last_verified_by_user_id=None,
-        )
-        _sync_registry_defaults(row)
-        _apply_authority_policy_to_source(row)
-        db.add(row)
-        db.commit()
-        db.refresh(row)
-    else:
-        row = existing
-        row.state = st
-        row.county = cnty
-        row.city = cty
-        row.pha_name = pha
-        row.program_type = program
-        row.publisher = publisher or row.publisher
-        row.title = title or row.title or _source_name_from_url(clean_url)
-        if notes is not None:
-            row.notes = notes
-        row.source_name = publisher or title or row.source_name or _source_name_from_url(clean_url)
-        row.source_type = source_type or row.source_type
-        row.jurisdiction_slug = _jurisdiction_slug(
-            source_type=row.source_type,
-            state=st,
-            county=cnty,
-            city=cty,
-            pha_name=pha,
-            program_type=program,
-        )
-        row.authority_score = max(float(row.authority_score or 0.0), float(authority.get("authority_score", 0.35) or 0.35))
-        row.authority_tier = str(authority.get("authority_tier") or row.authority_tier or "derived_or_inferred")
-        row.authority_rank = int(authority.get("authority_rank", row.authority_rank or 25) or 25)
-        row.authority_class = authority.get("authority_class") or row.authority_class
-        row.authority_reason = authority.get("authority_reason") or row.authority_reason
-        row.publication_type = authority.get("publication_type") or row.publication_type
-        row.domain_name = authority.get("domain_name") or row.domain_name
-        row.approved_supporting_source = bool(authority.get("approved_supporting_source", row.approved_supporting_source))
-        row.semi_authoritative = bool(authority.get("semi_authoritative", row.semi_authoritative))
-        row.derived_or_inferred = bool(authority.get("derived_or_inferred", row.derived_or_inferred))
-        _sync_registry_defaults(row)
-        _apply_authority_policy_to_source(row)
-        db.add(row)
-        db.commit()
-        db.refresh(row)
-
-    return PolicyCollectResult(
-        source=row,
-        changed=bool(changed),
-        fetch_ok=True,
-        fetch_error=None,
+    row = PolicySource(
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        program_type=program,
+        publisher=publisher,
+        title=title,
+        url=clean_url,
+        notes=_append_note_marker(notes, CURATED_NOTE_MARKER),
+        is_authoritative=bool(authority["authority_tier"] == "authoritative_official"),
+        authority_score=float(authority["authority_score"]),
+        authority_tier=str(authority["authority_tier"]),
+        authority_rank=int(authority["authority_rank"]),
+        authority_class=authority.get("authority_class"),
+        authority_reason="manual_addition_on_prevalidated_official_host",
+        publication_type=authority.get("publication_type"),
+        domain_name=authority.get("domain_name"),
+        authority_use_type=str(
+            AUTHORITY_POLICY_BY_TIER.get(
+                str(authority.get("authority_tier") or "derived_or_inferred"),
+                AUTHORITY_POLICY_BY_TIER["derived_or_inferred"],
+            ).get("use_type") or "weak"
+        ),
+        freshness_status="unknown",
+        freshness_reason="manual_collect_pending_fetch",
     )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    sync_policy_source_into_inventory(
+        db,
+        source=row,
+        org_id=org_id,
+        expected_categories=expected_inventory_hints(
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            include_section8=True,
+        ).get("expected_categories"),
+        expected_tiers=expected_inventory_hints(
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            include_section8=True,
+        ).get("expected_tiers"),
+        inventory_origin="manual_collect_prevalidated_host",
+        is_curated=True,
+    )
+    db.commit()
+
+    return PolicyCollectResult(source=row, changed=True, fetch_ok=True, fetch_error=None)
 
 def authority_policy_for_scope(*, authority_tier: Optional[str], state: Optional[str], county: Optional[str], city: Optional[str], pha_name: Optional[str], program_type: Optional[str] = None, normalized_categories: list[str] | None = None) -> dict[str, Any]:
     tier = str(authority_tier or "derived_or_inferred").strip() or "derived_or_inferred"
@@ -1461,88 +1613,9 @@ def _candidate_urls_for_scope(
     pha_name: Optional[str],
     missing_categories: list[str],
 ) -> list[PolicySourceDiscoveryCandidate]:
-    base_domains = _base_domains_for_scope(state=state, county=county, city=city, pha_name=pha_name)
-    output: list[PolicySourceDiscoveryCandidate] = []
-
-    for category in missing_categories:
-        search_terms = _discovery_terms_for_category(category)
-        paths = _paths_for_category(category)
-        for base in base_domains:
-            domain = str(base.get("domain") or "").strip()
-            source_type = str(base.get("source_type") or "local").strip()
-            publisher = base.get("publisher")
-            for path in paths:
-                url = f"https://{domain}{path}"
-                authority = classify_discovery_authority(url=url, publisher=publisher, title=category_label(category), source_type=source_type)
-                output.append(
-                    PolicySourceDiscoveryCandidate(
-                        url=url,
-                        title=_title_for_candidate(
-                            city=city,
-                            county=county,
-                            pha_name=pha_name,
-                            category=category,
-                            source_type=source_type,
-                        ),
-                        publisher=str(publisher).strip() if publisher else None,
-                        source_type=source_type,
-                        category_hints=[category],
-                        search_terms=list(search_terms),
-                        authority_kind=str(authority["authority_kind"]),
-                        authority_score=float(authority["authority_score"]),
-                        authority_tier=str(authority["authority_tier"]),
-                        authority_rank=int(authority["authority_rank"]),
-                        authority_class=authority.get("authority_class"),
-                        authority_reason=authority.get("authority_reason"),
-                        publication_type=authority.get("publication_type"),
-                        domain_name=authority.get("domain_name"),
-                        discovered_via="missing_category_generation",
-                        should_fetch=True,
-                    )
-                )
-
-    if pha_name:
-        for suffix in (
-            "/housing-choice-voucher",
-            "/documents/administrative-plan.pdf",
-            "/landlords",
-            "/section-8",
-        ):
-            domain = f"www.{_slugify(pha_name)}.org"
-            url = f"https://{domain}{suffix}"
-            authority = classify_discovery_authority(url=url, publisher=pha_name, title="Section 8 overlay", source_type="program")
-            output.append(
-                PolicySourceDiscoveryCandidate(
-                    url=url,
-                    title=f"{pha_name} program overlay source",
-                    publisher=pha_name,
-                    source_type="program",
-                    category_hints=["section8", "program_overlay", "contacts"],
-                    search_terms=["section 8", "housing choice voucher", "administrative plan"],
-                    authority_kind=str(authority["authority_kind"]),
-                    authority_score=float(authority["authority_score"]),
-                    authority_tier=str(authority["authority_tier"]),
-                    authority_rank=int(authority["authority_rank"]),
-                    authority_class=authority.get("authority_class"),
-                    authority_reason=authority.get("authority_reason"),
-                    publication_type=authority.get("publication_type"),
-                    domain_name=authority.get("domain_name"),
-                    discovered_via="pha_overlay_generation",
-                    should_fetch=True,
-                )
-            )
-
-    deduped: dict[str, PolicySourceDiscoveryCandidate] = {}
-    for row in output:
-        key = row.url.strip().lower()
-        existing = deduped.get(key)
-        if existing is None or row.authority_score > existing.authority_score:
-            deduped[key] = row
-
-    return sorted(
-        deduped.values(),
-        key=lambda item: (-item.authority_score, item.url),
-    )
+    # URL guessing is intentionally disabled.
+    # Discovery now means selecting from curated official catalog entries only.
+    return []
 
 
 def _upsert_discovered_source(
@@ -1681,35 +1754,37 @@ def _upsert_discovered_source(
             pha_name=pha_name,
             include_section8=True,
         )
-        normalized_categories = _json_loads_list(getattr(entry, "normalized_categories_json", None))
+        normalized_categories = _json_loads_list(getattr(source, "normalized_categories_json", None))
+        if not normalized_categories:
+            normalized_categories = list(candidate.category_hints)
         upsert_source_inventory_record(
             db,
             org_id=org_id,
             state=_norm_state(state),
-            county=county,
-            city=city,
-            pha_name=pha_name,
-            program_type=program_type,
-            url=entry.url,
-            title=entry.title,
-            publisher=entry.publisher,
-            source_type=source_type,
-            publication_type=authority.get("publication_type"),
+            county=_norm_lower(county),
+            city=_norm_lower(city),
+            pha_name=_norm_text(pha_name),
+            program_type="section8" if "section8" in set(candidate.category_hints) else None,
+            url=source.url,
+            title=source.title,
+            publisher=source.publisher,
+            source_type=source.source_type,
+            publication_type=source.publication_type,
             category_hints=list(normalized_categories),
-            search_terms=list(normalized_categories),
+            search_terms=list(candidate.search_terms),
             expected_categories=inventory_hints.get("expected_categories"),
             expected_tiers=inventory_hints.get("expected_tiers"),
-            authority_tier=str(authority.get("authority_tier") or "derived_or_inferred"),
-            authority_rank=int(authority.get("authority_rank") or 25),
-            authority_score=float(authority.get("authority_score") or 0.35),
+            authority_tier=str(getattr(source, "authority_tier", None) or candidate.authority_tier or "derived_or_inferred"),
+            authority_rank=int(getattr(source, "authority_rank", 0) or candidate.authority_rank or 25),
+            authority_score=float(getattr(source, "authority_score", 0.0) or candidate.authority_score or 0.35),
             lifecycle_state=INVENTORY_LIFECYCLE_ACCEPTED,
             crawl_status=INVENTORY_CRAWL_QUEUED,
-            inventory_origin="catalog_sync",
+            inventory_origin="discovered",
             policy_source_id=int(source.id),
-            is_curated=True,
-            is_official_candidate=bool(int(authority.get("authority_rank") or 25) >= 85),
-            probe_result={"ok": True, "source": "catalog"},
-            metadata={"focus": focus, "catalog_entry_key": _catalog_entry_key(entry)},
+            is_curated=False,
+            is_official_candidate=bool(int(getattr(source, "authority_rank", 0) or 0) >= 85),
+            probe_result=probe_result,
+            metadata={"focus": focus, "candidate": candidate.as_dict()},
         )
         return source
 
@@ -1850,11 +1925,20 @@ def discover_policy_sources_for_market(
     pha = _norm_text(pha_name)
     missing = [str(item).strip().lower() for item in (missing_categories or []) if str(item).strip()]
 
+    inventory_hints = expected_inventory_hints(
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        include_section8=True,
+    )
+
     if not missing:
         return {
             "ok": True,
             "discovery_triggered": False,
             "reason": "no_missing_categories",
+            "mode": "catalog_selection_only",
             "state": st,
             "county": cnty,
             "city": cty,
@@ -1864,32 +1948,55 @@ def discover_policy_sources_for_market(
             "created_count": 0,
             "existing_count": 0,
             "created_source_ids": [],
+            "curated_candidate_count": 0,
+            "validated_candidate_count": 0,
+            "rejected_candidate_count": 0,
+            "guessed_candidate_count": 0,
             "candidates": [],
             "results": [],
+            "inventory_summary": summarize_inventory_for_scope(
+                db,
+                org_id=org_id,
+                state=st,
+                county=cnty,
+                city=cty,
+                pha_name=pha,
+                program_type="section8" if "section8" in set(missing) else None,
+            ),
         }
 
-    existing_urls = _existing_source_urls(
+    # Ensure catalog-backed official sources are present first.
+    collected = collect_catalog_for_market(
         db,
         org_id=org_id,
         state=st,
         county=cnty,
         city=cty,
         pha_name=pha,
+        focus=focus,
     )
+    collected_by_url = {
+        str(getattr(item.source, "url", "") or "").strip().lower(): item
+        for item in collected
+        if getattr(item, "source", None) is not None
+    }
 
-    raw_candidates = _candidate_urls_for_scope(
+    raw_candidates = _catalog_candidates_for_missing_categories(
+        db,
+        org_id=org_id,
         state=st,
         county=cnty,
         city=cty,
         pha_name=pha,
         missing_categories=missing,
+        focus=focus,
     )
 
-    selected = []
-    seen_urls: set[str] = set(existing_urls)
+    selected: list[PolicySourceDiscoveryCandidate] = []
+    seen_urls: set[str] = set()
     for candidate in raw_candidates:
         key = candidate.url.strip().lower()
-        if key in seen_urls:
+        if not key or key in seen_urls:
             continue
         seen_urls.add(key)
         selected.append(candidate)
@@ -1900,109 +2007,55 @@ def discover_policy_sources_for_market(
     created_source_ids: list[int] = []
     created_count = 0
     existing_count = 0
-    inventory_hints = expected_inventory_hints(state=st, county=cnty, city=cty, pha_name=pha, include_section8=True)
-    overall_status = "completed"
 
     for candidate in selected:
-        probe_result = _probe_discovery_candidate(url=candidate.url, timeout_seconds=timeout_seconds) if probe else {
-            "ok": False,
-            "http_status": None,
-            "content_type": None,
-            "title": None,
-            "fetch_error": "probe_skipped",
-        }
-        inventory = upsert_discovery_candidate_inventory(
-            db,
-            org_id=org_id,
-            state=st,
-            county=cnty,
-            city=cty,
-            pha_name=pha,
-            program_type="section8" if "section8" in set(candidate.category_hints) else None,
-            url=candidate.url,
-            title=probe_result.get("title") or candidate.title,
-            publisher=candidate.publisher,
-            source_type=candidate.source_type,
-            publication_type=candidate.publication_type,
-            category_hints=list(candidate.category_hints),
-            search_terms=list(candidate.search_terms),
-            expected_categories=inventory_hints.get("expected_categories"),
-            expected_tiers=inventory_hints.get("expected_tiers"),
-            authority_tier=candidate.authority_tier,
-            authority_rank=candidate.authority_rank,
-            authority_score=candidate.authority_score,
-            probe_result=probe_result,
-            metadata={"focus": focus, "candidate": candidate.as_dict()},
-        )
-
-        should_persist = bool(probe_result.get("ok")) or candidate.authority_score >= 0.85
-        persisted_source_id: int | None = None
-        if should_persist:
-            source_row = _upsert_discovered_source(
-                db,
-                org_id=org_id,
-                state=st,
-                county=cnty,
-                city=cty,
-                pha_name=pha,
-                candidate=candidate,
-                probe_result=probe_result,
-                focus=focus,
-            )
-            persisted_source_id = int(source_row.id)
-            inventory.policy_source_id = persisted_source_id
-            inventory.lifecycle_state = INVENTORY_LIFECYCLE_ACCEPTED
-            inventory.candidate_status_reason = "accepted_as_policy_source"
-            inventory.accepted_at = _utcnow()
-            db.add(inventory)
-            created_source_ids.append(persisted_source_id)
-            if policy_source_origin(source_row) == "discovered":
+        source_row = None
+        collected_row = collected_by_url.get(candidate.url.strip().lower())
+        if collected_row is not None:
+            source_row = collected_row.source
+            if collected_row.changed:
                 created_count += 1
             else:
                 existing_count += 1
+        else:
+            stmt = select(PolicySource).where(PolicySource.url == candidate.url)
+            if org_id is None:
+                stmt = stmt.where(PolicySource.org_id.is_(None))
+            else:
+                stmt = stmt.where(or_(PolicySource.org_id == org_id, PolicySource.org_id.is_(None)))
+            source_row = db.scalar(stmt.order_by(PolicySource.id.asc()))
+            if source_row is not None:
+                existing_count += 1
 
-        attempt_status = "completed"
-        attempt_error = None
-        if not probe_result.get("ok") and str(probe_result.get("fetch_error") or "") not in {"", "probe_skipped"}:
-            attempt_status = "failed"
-            attempt_error = str(probe_result.get("fetch_error"))
-            overall_status = "degraded"
-        record_discovery_attempt(
-            db,
-            org_id=org_id,
-            state=st,
-            county=cnty,
-            city=cty,
-            pha_name=pha,
-            program_type="section8" if "section8" in set(candidate.category_hints) else None,
-            query_text=" | ".join(candidate.search_terms) or candidate.title,
-            searched_categories=list(candidate.category_hints),
-            searched_tiers=inventory_hints.get("expected_tiers"),
-            result_urls=[candidate.url],
-            inventory_id=int(inventory.id),
-            policy_source_id=persisted_source_id,
-            attempt_type="discovery_probe" if probe else "discovery_queue",
-            status=attempt_status,
-            not_found=False,
-            error_message=attempt_error,
-            metadata={"focus": focus, "probe_result": probe_result, "candidate": candidate.as_dict()},
-            next_retry_due_at=getattr(inventory, "next_search_retry_due_at", None),
-        )
+        if source_row is not None:
+            created_source_ids.append(int(source_row.id))
+            sync_policy_source_into_inventory(
+                db,
+                source=source_row,
+                org_id=org_id,
+                expected_categories=inventory_hints.get("expected_categories"),
+                expected_tiers=inventory_hints.get("expected_tiers"),
+                inventory_origin="catalog_selection",
+                is_curated=True,
+            )
 
         results.append(
             {
-                "candidate": candidate.as_dict(),
-                "probe_result": probe_result,
-                "inventory_id": int(inventory.id),
-                "persisted": should_persist,
-                "policy_source_id": persisted_source_id,
-                "inventory_refresh_state": getattr(inventory, "refresh_state", None),
-                "inventory_next_refresh_step": getattr(inventory, "next_refresh_step", None),
+                "url": candidate.url,
+                "title": candidate.title,
+                "publisher": candidate.publisher,
+                "category_hints": list(candidate.category_hints),
+                "authority_tier": candidate.authority_tier,
+                "authority_rank": candidate.authority_rank,
+                "discovered_via": candidate.discovered_via,
+                "selected_from": "curated_catalog",
+                "accepted": source_row is not None,
+                "source_id": int(source_row.id) if source_row is not None else None,
+                "fetch_ok": None,
+                "fetch_error": None,
             }
         )
 
-    discovered_urls = [candidate.url for candidate in selected]
-    search_query = " | ".join(missing) if missing else None
     record_discovery_attempt(
         db,
         org_id=org_id,
@@ -2011,16 +2064,23 @@ def discover_policy_sources_for_market(
         city=cty,
         pha_name=pha,
         program_type="section8" if "section8" in set(missing) else None,
-        query_text=search_query,
+        query_text=" | ".join(missing) if missing else None,
         searched_categories=missing,
         searched_tiers=inventory_hints.get("expected_tiers"),
-        result_urls=discovered_urls,
-        attempt_type="discovery",
-        status=overall_status,
-        not_found=not bool(discovered_urls),
-        metadata={"focus": focus, "probe": probe, "candidate_count": len(selected)},
+        result_urls=[row.url for row in selected],
+        attempt_type="catalog_selection",
+        status="completed",
+        not_found=not bool(selected),
+        metadata={
+            "focus": focus,
+            "probe": False,
+            "candidate_count": len(selected),
+            "guessed_candidate_count": 0,
+            "selection_mode": "curated_only",
+        },
     )
-    if not discovered_urls and missing:
+
+    if not selected and missing:
         mark_inventory_not_found(
             db,
             org_id=org_id,
@@ -2032,15 +2092,17 @@ def discover_policy_sources_for_market(
             expected_categories=missing,
             expected_tiers=inventory_hints.get("expected_tiers"),
             search_terms=missing,
-            metadata={"focus": focus, "reason": "no_candidates"},
+            metadata={"focus": focus, "reason": "no_curated_candidates"},
         )
+
     db.commit()
 
     return {
         "ok": True,
         "discovery_triggered": True,
         "reason": "missing_categories",
-        "status": overall_status,
+        "mode": "catalog_selection_only",
+        "status": "completed",
         "state": st,
         "county": cnty,
         "city": cty,
@@ -2050,6 +2112,10 @@ def discover_policy_sources_for_market(
         "created_count": created_count,
         "existing_count": existing_count,
         "created_source_ids": sorted(set(created_source_ids)),
+        "curated_candidate_count": len(selected),
+        "validated_candidate_count": len(selected),
+        "rejected_candidate_count": 0,
+        "guessed_candidate_count": 0,
         "candidates": [candidate.as_dict() for candidate in selected],
         "results": results,
         "inventory_summary": summarize_inventory_for_scope(

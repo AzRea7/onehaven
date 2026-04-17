@@ -229,8 +229,6 @@ def _coalesce_required_categories(profile: JurisdictionProfile) -> list[str]:
     return required_categories_for_city(
         profile.city,
         state=profile.state or "MI",
-        county=getattr(profile, "county", None),
-        pha_name=getattr(profile, "pha_name", None),
         include_section8=True,
     )
 

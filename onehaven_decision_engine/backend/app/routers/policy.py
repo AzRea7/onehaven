@@ -54,6 +54,7 @@ from app.services.policy_source_service import (
     collect_catalog_for_market,
     collect_url,
 )
+from app.services.policy_validation_service import _source_url_validation_summary
 
 router = APIRouter(prefix="/policy", tags=["policy"])
 
@@ -220,6 +221,7 @@ def _manual_market_result(
         "action": action,
         "manual": True,
         "result": result,
+        "source_counts": _source_counts_payload(source_rows),
         "summary": {
             "discovery_result": result.get("discovery_result"),
             "refresh_summary": result.get("refresh_summary"),
@@ -329,6 +331,63 @@ def _normalize_collect_results(results: list[Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _source_counts_payload(items: list[PolicySource]) -> dict[str, int]:
+    curated_count = 0
+    validated_count = 0
+    rejected_count = 0
+    guessed_count = 0
+    for source in items:
+        if source is None:
+            continue
+        notes = str(getattr(source, "notes", "") or "").lower()
+        if "[curated]" in notes or bool(getattr(source, "is_authoritative", False)):
+            curated_count += 1
+        validation = _source_url_validation_summary(source)
+        if bool(validation.get("trust_for_extraction")):
+            validated_count += 1
+        else:
+            rejected_count += 1
+        if bool(validation.get("looks_guessed")):
+            guessed_count += 1
+    return {
+        "curated_source_count": int(curated_count),
+        "validated_source_count": int(validated_count),
+        "rejected_source_count": int(rejected_count),
+        "guessed_source_count": int(guessed_count),
+    }
+
+
+def _collect_result_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    return _source_counts_payload([item.get("source") for item in results if isinstance(item, dict)])
+
+
+def _validated_refresh_result(
+    *,
+    action: str,
+    result: dict[str, Any],
+    db: Session,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None,
+    focus: str,
+) -> dict[str, Any]:
+    source_rows = _market_sources_for_catalog(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+    return {
+        **_manual_market_result(action=action, result=result),
+        "source_counts": _source_counts_payload(source_rows),
+    }
+
+
 @router.get("/catalog")
 def get_catalog(
     focus: str = Query("se_mi_extended"),
@@ -377,12 +436,14 @@ def ingest_catalog(
         for r in results
     ]
 
+    source_rows = [r.source for r in results]
     return {
         "ok": True,
         "focus": focus,
         "count": len(payload),
         "ok_count": sum(1 for r in payload if r["fetch_ok"]),
         "failed_count": sum(1 for r in payload if not r["fetch_ok"]),
+        **_source_counts_payload(source_rows),
         "results": payload,
     }
 
@@ -403,6 +464,7 @@ def collect_catalog_market(
         focus=payload.focus,
     )
     normalized_results = _normalize_collect_results(results)
+    counts = _collect_result_counts(normalized_results)
     return {
         "ok": True,
         "state": payload.state,
@@ -411,6 +473,7 @@ def collect_catalog_market(
         "count": len(normalized_results),
         "ok_count": sum(1 for r in normalized_results if r["fetch_ok"]),
         "failed_count": sum(1 for r in normalized_results if not r["fetch_ok"]),
+        **counts,
         "results": [
             {
                 "source_id": int(r["source"].id),
@@ -432,13 +495,16 @@ def collect_catalog_all(
     principal=Depends(get_principal),
 ):
     target_org_id = principal.org_id if org_scope else None
+    result = collect_catalog_all_municipalities(
+        db,
+        org_id=target_org_id,
+        focus=focus,
+    )
+    source_rows = [db.query(PolicySource).filter(PolicySource.id == int(item.get("source_id"))).first() for item in list(result.get("results") or []) if item.get("source_id")]
     return {
         "ok": True,
-        **collect_catalog_all_municipalities(
-            db,
-            org_id=target_org_id,
-            focus=focus,
-        ),
+        **result,
+        **_source_counts_payload([row for row in source_rows if row is not None]),
     }
 
 
@@ -465,11 +531,26 @@ def collect_source(
     )
 
     s = res.source
+    url_validation = _source_url_validation_summary(s)
+    if not bool(url_validation.get("trust_for_extraction")):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "source_url_rejected",
+                "url": s.url,
+                "rejection_reasons": list(url_validation.get("rejection_reasons") or []),
+                "guessed_source_count": 0,
+            },
+        )
     return {
         "ok": True,
         "changed": res.changed,
         "fetch_ok": res.fetch_ok,
         "fetch_error": res.fetch_error,
+        "curated_source_count": 1 if ("[curated]" in str(getattr(s, "notes", "") or "").lower() or bool(getattr(s, "is_authoritative", False))) else 0,
+        "validated_source_count": 1 if bool(url_validation.get("trust_for_extraction")) else 0,
+        "rejected_source_count": 0 if bool(url_validation.get("trust_for_extraction")) else 1,
+        "guessed_source_count": 1 if bool(url_validation.get("looks_guessed")) else 0,
         "source": {
             "id": s.id,
             "org_id": s.org_id,
@@ -933,9 +1014,9 @@ def build_profile_from_verified_assertions(
             "state": row.state,
             "county": row.county,
             "city": row.city,
-            "friction_multiplier": row.friction_multiplier,
-            "pha_name": row.pha_name,
-            "policy": _loads(row.policy_json, {}),
+            "friction_multiplier": getattr(row, "friction_multiplier", None),
+            "pha_name": getattr(row, "pha_name", None),
+            "policy": _loads(getattr(row, "policy_json", None), {}),
             "notes": row.notes,
             "completeness": profile_completeness_payload(db, row),
         },
@@ -965,7 +1046,7 @@ def build_profiles_all(
             city=market["city"],
             notes=f"Projected from verified policy assertions for {market['city']}, {market['county']}, {market['state']}.",
         )
-        policy = _loads(row.policy_json, {})
+        policy = _loads(getattr(row, "policy_json", None), {})
         coverage = policy.get("coverage", {})
         if coverage.get("production_readiness") == "ready":
             ready += 1
@@ -978,7 +1059,7 @@ def build_profiles_all(
                 "state": row.state,
                 "county": row.county,
                 "city": row.city,
-                "friction_multiplier": row.friction_multiplier,
+                "friction_multiplier": getattr(row, "friction_multiplier", None),
                 "production_readiness": coverage.get("production_readiness"),
                 "coverage_status": coverage.get("coverage_status"),
                 "completeness_status": coverage.get("completeness_status"),
@@ -1089,13 +1170,13 @@ def refresh_coverage_status(
             "state": row.state,
             "county": row.county,
             "city": row.city,
-            "pha_name": row.pha_name,
-            "coverage_status": row.coverage_status,
-            "production_readiness": row.production_readiness,
-            "verified_rule_count": row.verified_rule_count,
-            "source_count": row.source_count,
-            "fetch_failure_count": row.fetch_failure_count,
-            "stale_warning_count": row.stale_warning_count,
+            "pha_name": getattr(row, "pha_name", None),
+            "coverage_status": getattr(row, "coverage_status", None),
+            "production_readiness": getattr(row, "production_readiness", None),
+            "verified_rule_count": getattr(row, "verified_rule_count", None),
+            "source_count": getattr(row, "source_count", None),
+            "fetch_failure_count": getattr(row, "fetch_failure_count", None),
+            "stale_warning_count": getattr(row, "stale_warning_count", None),
             "completeness_score": getattr(row, "completeness_score", None),
             "completeness_status": getattr(row, "completeness_status", None),
             "is_stale": getattr(row, "is_stale", None),
@@ -1174,7 +1255,7 @@ def _coverage_matrix_payload(db: Session, profile: JurisdictionProfile | None) -
         "state": profile.state,
         "county": profile.county,
         "city": profile.city,
-        "pha_name": profile.pha_name,
+        "pha_name": getattr(profile, "pha_name", None),
         "expected_categories": list(completeness.get("required_categories") or []),
         "covered_categories": list(completeness.get("covered_categories") or []),
         "missing_categories": list(completeness.get("missing_categories") or []),
@@ -1205,8 +1286,8 @@ def _profile_summary_payload(db: Session, profile: JurisdictionProfile | None) -
         "state": profile.state,
         "county": profile.county,
         "city": profile.city,
-        "pha_name": profile.pha_name,
-        "policy": _loads(profile.policy_json, {}),
+        "pha_name": getattr(profile, "pha_name", None),
+        "policy": _loads(getattr(profile, "policy_json", None), {}),
         "resolved_rule_version": meta.get("resolved_rule_version") or meta.get("rule_version") or (profile.updated_at.isoformat() if getattr(profile, "updated_at", None) else None),
         "coverage_confidence": completeness.get("coverage_confidence") or meta.get("coverage_confidence") or ("high" if completeness.get("completeness_score", 0) >= 0.85 else "medium" if completeness.get("completeness_score", 0) >= 0.6 else "low"),
         "missing_local_rule_areas": completeness.get("missing_local_rule_areas") or completeness.get("missing_categories") or meta.get("missing_local_rule_areas") or [],
@@ -1399,12 +1480,14 @@ def get_property_resolved_rules(
     county = _norm_lower(getattr(prop, "county", None))
     city = _norm_lower(getattr(prop, "city", None))
 
-    profile = db.query(JurisdictionProfile).filter(
+    profile_query = db.query(JurisdictionProfile).filter(
         JurisdictionProfile.state == state,
         JurisdictionProfile.county == county,
         JurisdictionProfile.city == city,
         (JurisdictionProfile.org_id == target_org_id) | (JurisdictionProfile.org_id.is_(None)),
-    ).order_by(JurisdictionProfile.org_id.desc(), JurisdictionProfile.id.desc()).first()
+    )
+    profile_query = _apply_profile_pha_filter(profile_query, getattr(prop, "pha_name", None))
+    profile = profile_query.order_by(JurisdictionProfile.org_id.desc(), JurisdictionProfile.id.desc()).first()
 
     if recompute_coverage:
         upsert_coverage_status(
@@ -1713,7 +1796,17 @@ def post_manual_discovery_refresh(
         reviewer_user_id=getattr(principal, "user_id", None),
         auto_activate=payload.auto_activate,
     )
-    return _manual_market_result(action="discovery_refresh", result=result)
+    return _validated_refresh_result(
+        action="discovery_refresh",
+        result=result,
+        db=db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+    )
 
 
 @router.post("/manual/crawl-refresh")
@@ -1733,7 +1826,17 @@ def post_manual_crawl_refresh(
         reviewer_user_id=getattr(principal, "user_id", None),
         auto_activate=payload.auto_activate,
     )
-    return _manual_market_result(action="crawl_refresh", result=result)
+    return _validated_refresh_result(
+        action="crawl_refresh",
+        result=result,
+        db=db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+    )
 
 
 @router.post("/manual/validation-retry")
@@ -1753,7 +1856,17 @@ def post_manual_validation_retry(
         reviewer_user_id=getattr(principal, "user_id", None),
         auto_activate=payload.auto_activate,
     )
-    return _manual_market_result(action="validation_retry", result=result)
+    return _validated_refresh_result(
+        action="validation_retry",
+        result=result,
+        db=db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+    )
 
 
 @router.post("/manual/recompute")
@@ -1773,7 +1886,17 @@ def post_manual_market_recompute(
         reviewer_user_id=getattr(principal, "user_id", None),
         auto_activate=payload.auto_activate,
     )
-    return _manual_market_result(action="recompute", result=result)
+    return _validated_refresh_result(
+        action="recompute",
+        result=result,
+        db=db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+    )
 
 
 @router.post("/manual/health-recompute")
@@ -1790,4 +1913,308 @@ def post_manual_market_health_recompute(
         city=payload.city,
         pha_name=payload.pha_name,
     )
-    return {"ok": True, "manual": True, "action": "health_recompute", "health": health}
+    source_rows = _market_sources_for_catalog(
+        db,
+        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+    )
+    return {"ok": True, "manual": True, "action": "health_recompute", "health": health, "source_counts": _source_counts_payload(source_rows)}
+
+
+# -------------------------
+# Added compatibility helper + market routes for frontend contract
+# -------------------------
+
+def _market_profile_query(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None,
+):
+    q = db.query(JurisdictionProfile).filter(
+        JurisdictionProfile.state == _norm_state(state),
+        JurisdictionProfile.county == _norm_lower(county)
+        if county is not None
+        else JurisdictionProfile.county.is_(None),
+        JurisdictionProfile.city == _norm_lower(city)
+        if city is not None
+        else JurisdictionProfile.city.is_(None),
+    )
+
+    if org_id is None:
+        q = q.filter(JurisdictionProfile.org_id.is_(None))
+    else:
+        q = q.filter(
+            (JurisdictionProfile.org_id == org_id)
+            | (JurisdictionProfile.org_id.is_(None))
+        )
+
+    q = _apply_profile_pha_filter(q, pha_name)
+    return q.order_by(JurisdictionProfile.org_id.desc(), JurisdictionProfile.id.desc())
+
+
+@router.post("/market/build")
+def build_market_profile(
+    payload: MarketBuildIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    """
+    Compatibility route for the frontend button posting to /api/policy/market/build.
+    Builds or rebuilds the jurisdiction profile from current verified assertions.
+    """
+    target_org_id = principal.org_id if payload.org_scope else None
+
+    row = project_verified_assertions_to_profile(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        notes=payload.notes,
+    )
+
+    profile_payload = _profile_summary_payload(db, row)
+    operational_status = _profile_operational_payload(
+        db,
+        row,
+        org_id=target_org_id,
+    )
+
+    return {
+        "ok": True,
+        "action": "build_market_profile",
+        "market": {
+            "state": _norm_state(payload.state),
+            "county": _norm_lower(payload.county),
+            "city": _norm_lower(payload.city),
+            "pha_name": _norm_text(payload.pha_name),
+            "focus": payload.focus,
+            "org_scope": bool(payload.org_scope),
+        },
+        "profile": profile_payload,
+        "operational_status": operational_status,
+    }
+
+
+@router.post("/market/cleanup-stale")
+def cleanup_stale_market(
+    payload: MarketCleanupIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    """
+    Compatibility route for stale cleanup / repair UX.
+    """
+    target_org_id = principal.org_id if payload.org_scope else None
+
+    result = cleanup_market(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+        archive_extracted_duplicates=payload.archive_extracted_duplicates,
+    )
+
+    profile = _market_profile_query(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+    ).first()
+
+    return {
+        "ok": True,
+        "action": "cleanup_stale_market",
+        "market": {
+            "state": _norm_state(payload.state),
+            "county": _norm_lower(payload.county),
+            "city": _norm_lower(payload.city),
+            "pha_name": _norm_text(payload.pha_name),
+            "focus": payload.focus,
+            "org_scope": bool(payload.org_scope),
+        },
+        "result": result,
+        "profile": _profile_summary_payload(db, profile),
+        "operational_status": _profile_operational_payload(
+            db,
+            profile,
+            org_id=target_org_id,
+        ),
+    }
+
+
+@router.post("/market/repair")
+def repair_market_route(
+    payload: MarketRepairIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    """
+    Compatibility route for the frontend button posting to /api/policy/market/repair.
+    Performs the higher-level repair flow and returns refreshed profile/health info.
+    """
+    target_org_id = principal.org_id if payload.org_scope else None
+
+    result = repair_market(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+        archive_extracted_duplicates=payload.archive_extracted_duplicates,
+        reviewer_user_id=getattr(principal, "user_id", None),
+        auto_activate=True,
+    )
+
+    profile = _market_profile_query(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+    ).first()
+
+    source_rows = _market_sources_for_catalog(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+    )
+    return {
+        "ok": True,
+        "action": "repair_market",
+        "market": {
+            "state": _norm_state(payload.state),
+            "county": _norm_lower(payload.county),
+            "city": _norm_lower(payload.city),
+            "pha_name": _norm_text(payload.pha_name),
+            "focus": payload.focus,
+            "org_scope": bool(payload.org_scope),
+        },
+        "result": result,
+        "summary": {
+            "discovery_result": result.get("discovery_result"),
+            "refresh_summary": result.get("refresh_summary"),
+            "refresh_state": result.get("refresh_state"),
+            "lifecycle_result": result.get("lifecycle_result"),
+            "recompute": result.get("recompute"),
+            "review_queue": result.get("review_queue"),
+            "health": (
+                ((result.get("pipeline_result") or {}).get("health"))
+                if isinstance(result.get("pipeline_result"), dict)
+                else None
+            )
+            or result.get("health"),
+        },
+        "profile": _profile_summary_payload(db, profile),
+        "operational_status": _profile_operational_payload(
+            db,
+            profile,
+            org_id=target_org_id,
+        ),
+    }
+
+
+@router.post("/market/pipeline")
+def run_market_pipeline_route(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(require_owner),
+):
+    """
+    Compatibility route for the frontend button posting to /api/policy/market/pipeline.
+    """
+    target_org_id = principal.org_id if payload.org_scope else None
+
+    result = run_market_pipeline(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+        reviewer_user_id=getattr(principal, "user_id", None),
+        auto_activate=True,
+    )
+
+    profile = _market_profile_query(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+    ).first()
+
+    coverage = compute_coverage_status(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+    )
+
+    source_rows = _market_sources_for_catalog(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        focus=payload.focus,
+    )
+    return {
+        "ok": True,
+        "action": "run_market_pipeline",
+        "market": {
+            "state": _norm_state(payload.state),
+            "county": _norm_lower(payload.county),
+            "city": _norm_lower(payload.city),
+            "pha_name": _norm_text(payload.pha_name),
+            "focus": payload.focus,
+            "org_scope": bool(payload.org_scope),
+        },
+        "result": result,
+        "source_counts": _source_counts_payload(source_rows),
+        "coverage": coverage,
+        "profile": _profile_summary_payload(db, profile),
+        "operational_status": _profile_operational_payload(
+            db,
+            profile,
+            org_id=target_org_id,
+        ),
+        "summary": {
+            "discovery_result": result.get("discovery_result"),
+            "refresh_summary": result.get("refresh_summary"),
+            "refresh_state": result.get("refresh_state"),
+            "lifecycle_result": result.get("lifecycle_result"),
+            "recompute": result.get("recompute"),
+            "review_queue": result.get("review_queue"),
+            "health": result.get("health"),
+            "lockout": result.get("lockout"),
+            "sla_summary": result.get("sla_summary"),
+            "requirements": result.get("requirements"),
+        },
+    }
