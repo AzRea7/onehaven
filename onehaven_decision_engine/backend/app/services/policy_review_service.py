@@ -60,6 +60,17 @@ def _norm_text(s: Optional[str]) -> Optional[str]:
     return v or None
 
 
+def _is_verified_like(row: PolicyAssertion) -> bool:
+    review_status = (getattr(row, "review_status", None) or "").strip().lower()
+    verification_reason = (getattr(row, "verification_reason", None) or "").strip().lower()
+    return review_status in {"verified", "approved"} or bool(verification_reason)
+
+
+def _has_projectable_category(row: PolicyAssertion) -> bool:
+    normalized_category = getattr(row, "normalized_category", None) or getattr(row, "rule_category", None)
+    return bool(normalized_category)
+
+
 def _query_market_assertions(
     db: Session,
     *,
@@ -244,11 +255,12 @@ def _set_lifecycle_state(
     row.governance_state = governance_state
 
     if governance_state == "draft":
-        row.review_status = "extracted"
+        if not _is_verified_like(row):
+            row.review_status = "extracted"
         row.rule_status = "candidate"
-        row.coverage_status = "candidate"
+        row.coverage_status = getattr(row, "coverage_status", None) or "candidate"
         row.is_current = False
-        if hasattr(row, "trust_state") and (getattr(row, "trust_state", None) in {None, "trusted"}):
+        if hasattr(row, "trust_state") and not _is_verified_like(row) and (getattr(row, "trust_state", None) in {None, "trusted"}):
             row.trust_state = "extracted"
     elif governance_state == "approved":
         validation_state = (getattr(row, "validation_state", None) or "pending").lower()
@@ -262,7 +274,7 @@ def _set_lifecycle_state(
         row.approved_by_user_id = row.approved_by_user_id or reviewer_user_id
     elif governance_state == "active":
         validation_state = (getattr(row, "validation_state", None) or "pending").lower()
-        if validation_state != "validated":
+        if validation_state != "validated" and not _is_verified_like(row):
             row.review_status = "needs_validation"
             row.rule_status = "candidate"
             row.coverage_status = "partial"
@@ -275,9 +287,11 @@ def _set_lifecycle_state(
         row.review_status = "verified"
         row.rule_status = "active"
         row.coverage_status = "verified"
-        row.is_current = True
+        row.is_current = bool(_has_projectable_category(row))
         if hasattr(row, "trust_state"):
             row.trust_state = "trusted"
+        if hasattr(row, "validation_state") and validation_state != "validated":
+            row.validation_state = "validated"
         row.approved_at = row.approved_at or now
         row.approved_by_user_id = row.approved_by_user_id or reviewer_user_id
         row.activated_at = row.activated_at or now
@@ -502,13 +516,21 @@ def auto_verify_market_assertions(
             continue
         if float(row.confidence or 0.0) < 0.75:
             continue
-        if (getattr(row, "validation_state", None) or "pending").lower() != "validated":
+        if not _has_projectable_category(row):
+            continue
+        validation_state = (getattr(row, "validation_state", None) or "pending").lower()
+        if validation_state != "validated" and _is_verified_like(row):
+            row.validation_state = "validated"
+            if hasattr(row, "trust_state") and (getattr(row, "trust_state", None) or "").lower() in {"", "extracted", "needs_review"}:
+                row.trust_state = "validated"
+            validation_state = "validated"
+        if validation_state != "validated":
             continue
         if (row.governance_state or "").lower() == "active":
             row.is_current = True
             active_ids.append(int(row.id))
             continue
-        if float(row.confidence or 0.0) >= 0.9:
+        if _is_verified_like(row) or float(row.confidence or 0.0) >= 0.9:
             _set_lifecycle_state(row, governance_state="active", reviewer_user_id=reviewer_user_id, reviewed_at=now)
             active_ids.append(int(row.id))
         else:
@@ -623,10 +645,18 @@ def apply_governance_lifecycle(
 
         validation_state = (getattr(keeper, "validation_state", None) or "pending").lower()
         trust_state = (getattr(keeper, "trust_state", None) or "extracted").lower()
+        verified_like = _is_verified_like(keeper)
+        projectable = _has_projectable_category(keeper)
+        if verified_like and validation_state != "validated":
+            keeper.validation_state = "validated"
+            validation_state = "validated"
+        if verified_like and trust_state in {"", "extracted", "needs_review"}:
+            keeper.trust_state = "validated"
+            trust_state = "validated"
         target_state = "draft"
-        if validation_state == "validated":
+        if projectable and validation_state == "validated":
             target_state = "approved"
-            if auto_activate and trust_state in {"validated", "trusted"} and float(keeper.confidence or 0.0) >= 0.85:
+            if auto_activate and (verified_like or trust_state in {"validated", "trusted"}) and float(keeper.confidence or 0.0) >= 0.75:
                 target_state = "active"
         elif validation_state in {"weak_support", "ambiguous", "unsupported", "conflicting"}:
             target_state = "draft"
@@ -1274,3 +1304,264 @@ def revoke_policy_override(
     db.commit()
     db.refresh(row)
     return {"ok": True, "item": _override_to_dict(row)}
+
+
+
+# --- Final jurisdiction profile promotion fix overlay ---
+# This block intentionally comes LAST so it overrides earlier chunk overlays that
+# were downgrading manually verified assertions back to extracted/draft.
+
+_final_fix_original_requires_manual_review = _requires_manual_review
+_final_fix_original_set_lifecycle_state = _set_lifecycle_state
+_final_fix_original_auto_verify_market_assertions = auto_verify_market_assertions
+_final_fix_original_apply_governance_lifecycle = apply_governance_lifecycle
+
+
+def _requires_manual_review(row: PolicyAssertion) -> bool:
+    review_status = (getattr(row, "review_status", None) or "").strip().lower()
+    verification_reason = (getattr(row, "verification_reason", None) or "").strip().lower()
+    normalized_category = getattr(row, "normalized_category", None) or getattr(row, "rule_category", None)
+    validation_state = (getattr(row, "validation_state", None) or "pending").strip().lower()
+    trust_state = (getattr(row, "trust_state", None) or "").strip().lower()
+
+    # Manual human verification with a mapped category should not be forced back into
+    # manual review solely because older overlays left validation/trust fields behind.
+    if normalized_category and (review_status in {"verified", "approved"} or verification_reason):
+        if validation_state not in HIGH_RISK_VALIDATION_STATES and trust_state != MANUAL_REVIEW_REVIEW_STATUS:
+            return False
+
+    return _final_fix_original_requires_manual_review(row)
+
+
+def _set_lifecycle_state(
+    row: PolicyAssertion,
+    *,
+    governance_state: str,
+    reviewer_user_id: int | None,
+    reviewed_at: datetime | None = None,
+) -> None:
+    now = reviewed_at or _utcnow()
+    normalized_category = getattr(row, "normalized_category", None) or getattr(row, "rule_category", None)
+    review_status = (getattr(row, "review_status", None) or "").strip().lower()
+    verification_reason = (getattr(row, "verification_reason", None) or "").strip().lower()
+
+    if normalized_category and (review_status in {"verified", "approved"} or verification_reason):
+        if governance_state == "active":
+            if hasattr(row, "validation_state"):
+                row.validation_state = "validated"
+            if hasattr(row, "trust_state"):
+                row.trust_state = "trusted"
+            row.review_status = "verified"
+            row.rule_status = "active"
+            row.coverage_status = "verified"
+            row.governance_state = "active"
+            row.is_current = True
+            row.reviewed_by_user_id = reviewer_user_id
+            row.reviewed_at = now
+            row.approved_at = getattr(row, "approved_at", None) or now
+            row.approved_by_user_id = getattr(row, "approved_by_user_id", None) or reviewer_user_id
+            row.activated_at = getattr(row, "activated_at", None) or now
+            row.activated_by_user_id = getattr(row, "activated_by_user_id", None) or reviewer_user_id
+            return
+        if governance_state == "approved":
+            if hasattr(row, "validation_state"):
+                row.validation_state = "validated"
+            if hasattr(row, "trust_state"):
+                row.trust_state = "validated"
+            row.review_status = "verified"
+            row.rule_status = "approved"
+            row.coverage_status = "verified"
+            row.governance_state = "approved"
+            row.is_current = False
+            row.reviewed_by_user_id = reviewer_user_id
+            row.reviewed_at = now
+            row.approved_at = getattr(row, "approved_at", None) or now
+            row.approved_by_user_id = getattr(row, "approved_by_user_id", None) or reviewer_user_id
+            return
+
+    _final_fix_original_set_lifecycle_state(
+        row,
+        governance_state=governance_state,
+        reviewer_user_id=reviewer_user_id,
+        reviewed_at=now,
+    )
+
+
+def auto_verify_market_assertions(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    reviewer_user_id: int | None = None,
+) -> dict[str, Any]:
+    result = _final_fix_original_auto_verify_market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        reviewer_user_id=reviewer_user_id,
+    )
+    rows = _market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    forced_validated_ids: list[int] = []
+    active_ids = set(result.get("active_ids") or [])
+    approved_ids = set(result.get("approved_ids") or [])
+    now = _utcnow()
+
+    for row in rows:
+        normalized_category = getattr(row, "normalized_category", None) or getattr(row, "rule_category", None)
+        review_status = (getattr(row, "review_status", None) or "").strip().lower()
+        verification_reason = (getattr(row, "verification_reason", None) or "").strip().lower()
+        if not normalized_category:
+            continue
+        if not (review_status in {"verified", "approved"} or verification_reason):
+            continue
+        if hasattr(row, "validation_state"):
+            row.validation_state = "validated"
+        if hasattr(row, "trust_state") and (getattr(row, "trust_state", None) or "").strip().lower() in {"", "extracted", "needs_review", "validated"}:
+            row.trust_state = "trusted"
+        row.review_status = "verified"
+        row.coverage_status = "verified"
+        row.rule_status = "active"
+        row.governance_state = "active"
+        row.is_current = True
+        row.reviewed_by_user_id = reviewer_user_id
+        row.reviewed_at = now
+        row.approved_at = getattr(row, "approved_at", None) or now
+        row.approved_by_user_id = getattr(row, "approved_by_user_id", None) or reviewer_user_id
+        row.activated_at = getattr(row, "activated_at", None) or now
+        row.activated_by_user_id = getattr(row, "activated_by_user_id", None) or reviewer_user_id
+        forced_validated_ids.append(int(row.id))
+        active_ids.add(int(row.id))
+        approved_ids.discard(int(row.id))
+        db.add(row)
+
+    db.commit()
+    result["forced_validated_count"] = len(sorted(set(forced_validated_ids)))
+    result["forced_validated_ids"] = sorted(set(forced_validated_ids))
+    result["active_count"] = len(sorted(active_ids))
+    result["active_ids"] = sorted(active_ids)
+    result["approved_count"] = len(sorted(approved_ids))
+    result["approved_ids"] = sorted(approved_ids)
+    return result
+
+
+def apply_governance_lifecycle(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    result = _final_fix_original_apply_governance_lifecycle(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )
+
+    rows = _market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    by_group: dict[tuple[str, str], list[PolicyAssertion]] = {}
+    for row in rows:
+        key = ((getattr(row, "version_group", None) or ""), (getattr(row, "rule_key", None) or ""))
+        by_group.setdefault(key, []).append(row)
+
+    forced_active_ids: list[int] = []
+    forced_replaced_ids: list[int] = []
+    now = _utcnow()
+
+    for _, group in by_group.items():
+        verified_projectable = [
+            row for row in group
+            if (getattr(row, "normalized_category", None) or getattr(row, "rule_category", None))
+            and ((getattr(row, "review_status", None) or "").strip().lower() in {"verified", "approved"} or (getattr(row, "verification_reason", None) or "").strip())
+        ]
+        if not verified_projectable:
+            continue
+        keeper = sorted(
+            verified_projectable,
+            key=lambda x: (
+                float(getattr(x, "confidence", 0.0) or 0.0),
+                int(getattr(x, "version_number", 0) or 0),
+                int(getattr(x, "id", 0) or 0),
+            ),
+            reverse=True,
+        )[0]
+
+        if hasattr(keeper, "validation_state"):
+            keeper.validation_state = "validated"
+        if hasattr(keeper, "trust_state"):
+            keeper.trust_state = "trusted"
+        keeper.review_status = "verified"
+        keeper.rule_status = "active"
+        keeper.coverage_status = "verified"
+        keeper.governance_state = "active"
+        keeper.is_current = True
+        keeper.reviewed_by_user_id = reviewer_user_id
+        keeper.reviewed_at = now
+        keeper.approved_at = getattr(keeper, "approved_at", None) or now
+        keeper.approved_by_user_id = getattr(keeper, "approved_by_user_id", None) or reviewer_user_id
+        keeper.activated_at = getattr(keeper, "activated_at", None) or now
+        keeper.activated_by_user_id = getattr(keeper, "activated_by_user_id", None) or reviewer_user_id
+        db.add(keeper)
+        forced_active_ids.append(int(keeper.id))
+
+        for row in group:
+            if row.id == keeper.id:
+                continue
+            row.replaced_by_assertion_id = keeper.id
+            row.superseded_by_assertion_id = keeper.id
+            row.review_status = "superseded"
+            row.rule_status = "superseded"
+            row.coverage_status = "superseded"
+            row.governance_state = "replaced"
+            row.is_current = False
+            row.reviewed_by_user_id = reviewer_user_id
+            row.reviewed_at = now
+            row.replaced_at = getattr(row, "replaced_at", None) or now
+            db.add(row)
+            forced_replaced_ids.append(int(row.id))
+
+    db.commit()
+
+    active_ids = set(result.get("active_ids") or [])
+    replaced_ids = set(result.get("replaced_ids") or [])
+    active_ids.update(forced_active_ids)
+    replaced_ids.update(forced_replaced_ids)
+
+    result["forced_active_count"] = len(sorted(set(forced_active_ids)))
+    result["forced_active_ids"] = sorted(set(forced_active_ids))
+    result["forced_replaced_count"] = len(sorted(set(forced_replaced_ids)))
+    result["forced_replaced_ids"] = sorted(set(forced_replaced_ids))
+    result["active_count"] = len(sorted(active_ids))
+    result["active_ids"] = sorted(active_ids)
+    result["replaced_count"] = len(sorted(replaced_ids))
+    result["replaced_ids"] = sorted(replaced_ids)
+    return result
+

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.domain.jurisdiction_categories import expected_rule_universe_for_scope, normalize_category
 from app.policy_models import PolicyAssertion, PolicySource, PolicySourceInventory
 from app.services.policy_change_detection_service import compute_next_retry_due, determine_validation_refresh_state
+from app.services.policy_source_service import _is_official_host
 
 
 VALIDATION_STATE_VALIDATED = "validated"
@@ -699,3 +700,121 @@ def validate_market_assertions(
         "source_validation_summaries": source_summaries,
         "rejected_source_count": sum(1 for item in source_summaries if str(item.get("refresh_state") or "").lower() == "blocked"),
     }
+
+
+# --- Final official-source validation softening override ---
+def _source_is_curated_official_fetched(source: PolicySource | None) -> bool:
+    if source is None:
+        return False
+    url = str(getattr(source, "url", "") or "").strip()
+    if not _is_official_host(url):
+        return False
+    authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
+    if authority_tier != "authoritative_official":
+        return False
+    if str(getattr(source, "freshness_status", "") or "").strip().lower() in SOURCE_HTTP_DEAD_STATUSES:
+        return False
+    notes = str(getattr(source, "notes", "") or "").lower()
+    return ("[curated]" in notes) or bool(getattr(source, "is_authoritative", False)) or bool(getattr(source, "domain_name", None))
+
+
+_validation_orig_source_url = _source_url_validation_summary
+
+def _source_url_validation_summary(source: PolicySource | None) -> dict[str, object]:
+    summary = dict(_validation_orig_source_url(source))
+    if source is None:
+        return summary
+    if not _source_is_curated_official_fetched(source):
+        return summary
+
+    http_status = _source_http_status(source)
+    refresh_state = str(getattr(source, "refresh_state", "") or "").strip().lower()
+    refresh_reason = str(getattr(source, "refresh_status_reason", "") or "").strip().lower()
+    rejection_reasons = list(summary.get("rejection_reasons") or [])
+
+    dead = http_status in SOURCE_HTTP_DEAD_STATUSES
+    blocked = http_status in SOURCE_HTTP_BLOCK_STATUSES or "anti-bot" in refresh_reason or "antibot" in refresh_reason or "captcha" in refresh_reason
+
+    if dead:
+        return summary
+
+    summary["url_allowed"] = True
+    summary["url_reason"] = "official_host"
+    summary["trust_for_extraction"] = True
+    summary["binding_allowed"] = True
+
+    if blocked:
+        summary["fetch_usable"] = True
+        summary["fetch_reason"] = "blocked_but_official"
+        rejection_reasons = [r for r in rejection_reasons if r not in {"blocked_or_antibot", "refresh_blocked", "repeated_fetch_failed"} and not str(r).startswith("http_status_")]
+        rejection_reasons.append("blocked_but_official")
+    else:
+        summary["fetch_usable"] = True
+        summary["fetch_reason"] = "official_fetched"
+        rejection_reasons = [r for r in rejection_reasons if r not in {"refresh_blocked", "repeated_fetch_failed"} and not str(r).startswith("http_status_")]
+
+    summary["rejection_reasons"] = sorted(set(rejection_reasons))
+    return summary
+
+
+_validation_orig_validate_assertion = validate_assertion
+
+def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    payload = dict(_validation_orig_validate_assertion(assertion=assertion, source=source))
+    if source is None:
+        return payload
+
+    url_validation = dict((payload.get("validation_support") or {}).get("url_validation") or _source_url_validation_summary(source))
+    category = normalize_category(getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None))
+    critical_binding_required = bool(category in CRITICAL_BINDING_CATEGORIES)
+    review_status = str(getattr(assertion, "review_status", "") or "").strip().lower()
+
+    if _source_is_curated_official_fetched(source) and bool(url_validation.get("trust_for_extraction")):
+        if payload.get("validation_state") in {VALIDATION_STATE_UNSUPPORTED, VALIDATION_STATE_CONFLICTING, VALIDATION_STATE_AMBIGUOUS}:
+            payload["validation_state"] = VALIDATION_STATE_VALIDATED if review_status == "verified" else VALIDATION_STATE_WEAK
+            payload["validation_quality"] = max(float(payload.get("validation_quality") or 0.0), 0.72 if review_status == "verified" else 0.58)
+            payload["validation_reason"] = "curated_official_source_requires_review_not_block"
+            payload["validated"] = bool(review_status == "verified")
+            payload["trust_state"] = TRUST_STATE_TRUSTED if review_status == "verified" else TRUST_STATE_VALIDATED
+            payload["blocking_issue"] = False if not critical_binding_required else False
+    payload["validation_support"] = dict(payload.get("validation_support") or {})
+    payload["validation_support"]["url_validation"] = url_validation
+    return payload
+
+
+_validation_orig_apply_state = _apply_validation_state_to_source
+
+def _apply_validation_state_to_source(
+    db: Session,
+    *,
+    source: PolicySource,
+    assertions: list[PolicyAssertion],
+    counts: dict[str, int],
+    blocking_issue_count: int,
+) -> dict[str, object]:
+    summary = dict(_validation_orig_apply_state(
+        db,
+        source=source,
+        assertions=assertions,
+        counts=counts,
+        blocking_issue_count=blocking_issue_count,
+    ))
+
+    if _source_is_curated_official_fetched(source):
+        source.authority_use_type = "binding"
+        if str(getattr(source, "refresh_state", "") or "").strip().lower() in {"blocked", "degraded"}:
+            source.refresh_state = "review_required"
+            source.refresh_status_reason = "validation_conflict_needs_review"
+            source.registry_status = "active"
+            source.refresh_blocked_reason = None
+            source.revalidation_required = True
+            db.add(source)
+            db.commit()
+            db.refresh(source)
+
+        summary["refresh_state"] = getattr(source, "refresh_state", None)
+        summary["status_reason"] = getattr(source, "refresh_status_reason", None)
+        summary["next_step"] = "manual_review"
+        summary["revalidation_required"] = True
+        summary["authority_use_type"] = "binding"
+    return summary

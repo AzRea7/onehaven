@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import get_principal, require_owner
@@ -221,7 +222,6 @@ def _manual_market_result(
         "action": action,
         "manual": True,
         "result": result,
-        "source_counts": _source_counts_payload(source_rows),
         "summary": {
             "discovery_result": result.get("discovery_result"),
             "refresh_summary": result.get("refresh_summary"),
@@ -264,6 +264,203 @@ def _norm_text(s: Optional[str]) -> Optional[str]:
     v = s.strip()
     return v or None
 
+
+def _normalize_category_value(value: Any) -> Optional[str]:
+    raw = value
+    if isinstance(value, dict):
+        raw = value.get("normalized_category") or value.get("rule_category") or value.get("category")
+    if raw is None:
+        return None
+    try:
+        from app.domain.jurisdiction_categories import normalize_category as _normalize_category
+        normalized = _normalize_category(raw)
+        return normalized or None
+    except Exception:
+        text = str(raw).strip().lower()
+        return text or None
+
+
+def _apply_verified_assertion_fields(
+    row: PolicyAssertion,
+    *,
+    payload_value: dict[str, Any] | None = None,
+    verification_reason: str | None = None,
+) -> None:
+    payload_value = dict(payload_value or {})
+    normalized_category = _normalize_category_value(payload_value) or getattr(row, "normalized_category", None)
+    if normalized_category:
+        try:
+            row.normalized_category = normalized_category
+        except Exception:
+            pass
+        try:
+            row.rule_category = normalized_category
+        except Exception:
+            pass
+    if payload_value:
+        existing_value = _loads(getattr(row, "value_json", None), {})
+        if isinstance(existing_value, dict):
+            merged = dict(existing_value)
+            merged.update(payload_value)
+            if normalized_category and not merged.get("normalized_category"):
+                merged["normalized_category"] = normalized_category
+            row.value_json = json.dumps(merged, ensure_ascii=False)
+    if verification_reason:
+        row.verification_reason = verification_reason
+    if hasattr(row, "validation_state"):
+        row.validation_state = "validated"
+    if hasattr(row, "validation_reason") and verification_reason:
+        row.validation_reason = verification_reason
+    if hasattr(row, "trust_state"):
+        row.trust_state = "validated"
+    if hasattr(row, "coverage_status"):
+        row.coverage_status = "verified" if normalized_category else (getattr(row, "coverage_status", None) or "candidate")
+    if hasattr(row, "rule_status"):
+        row.rule_status = "approved"
+    if hasattr(row, "governance_state"):
+        row.governance_state = "approved"
+    if hasattr(row, "is_current"):
+        row.is_current = False
+
+
+
+def _has_active_projectable_assertions(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None,
+) -> bool:
+    q = db.query(PolicyAssertion).filter(
+        PolicyAssertion.state == _norm_state(state),
+        PolicyAssertion.county == _norm_lower(county) if county is not None else PolicyAssertion.county.is_(None),
+        PolicyAssertion.city == _norm_lower(city) if city is not None else PolicyAssertion.city.is_(None),
+    )
+    if hasattr(PolicyAssertion, "pha_name"):
+        if pha_name is None:
+            q = q.filter((PolicyAssertion.pha_name.is_(None)) | (PolicyAssertion.pha_name == ""))
+        else:
+            q = q.filter(PolicyAssertion.pha_name == _norm_text(pha_name))
+    if org_id is None:
+        q = q.filter(PolicyAssertion.org_id.is_(None))
+    else:
+        q = q.filter((PolicyAssertion.org_id == org_id) | (PolicyAssertion.org_id.is_(None)))
+
+    rows = q.all()
+    for row in rows:
+        if not getattr(row, "normalized_category", None):
+            continue
+        if not bool(getattr(row, "is_current", False)):
+            continue
+        if (getattr(row, "review_status", None) or "").lower() != "verified":
+            continue
+        if (getattr(row, "governance_state", None) or "").lower() != "active":
+            continue
+        if (getattr(row, "rule_status", None) or "").lower() != "active":
+            continue
+        return True
+    return False
+
+
+def _bootstrap_profile_from_active_assertions(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None,
+    notes: str | None = None,
+):
+    existing = _market_profile_query(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    ).first()
+    if existing is not None:
+        return existing
+
+    if not _has_active_projectable_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    ):
+        return None
+
+    profile = JurisdictionProfile()
+    if hasattr(profile, "org_id"):
+        profile.org_id = org_id
+    if hasattr(profile, "state"):
+        profile.state = _norm_state(state)
+    if hasattr(profile, "county"):
+        profile.county = _norm_lower(county)
+    if hasattr(profile, "city"):
+        profile.city = _norm_lower(city)
+    if hasattr(profile, "pha_name"):
+        profile.pha_name = _norm_text(pha_name)
+    if hasattr(profile, "notes"):
+        profile.notes = notes or "Bootstrapped from active verified policy assertions."
+    if hasattr(profile, "policy_json"):
+        profile.policy_json = json.dumps(
+            {
+                "bootstrapped": True,
+                "bootstrapped_from": "active_verified_assertions",
+                "state": _norm_state(state),
+                "county": _norm_lower(county),
+                "city": _norm_lower(city),
+                "pha_name": _norm_text(pha_name),
+            },
+            ensure_ascii=False,
+        )
+    if hasattr(profile, "refresh_state"):
+        profile.refresh_state = "degraded"
+    if hasattr(profile, "refresh_status_reason"):
+        profile.refresh_status_reason = "bootstrapped_from_active_verified_assertions"
+
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+def _build_or_bootstrap_profile(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None,
+    notes: str | None = None,
+):
+    row = project_verified_assertions_to_profile(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        notes=notes,
+    )
+    if row is not None:
+        return row
+    return _bootstrap_profile_from_active_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        notes=notes,
+    )
 
 
 def _apply_profile_pha_filter(query, pha_name: Optional[str]):
@@ -877,6 +1074,13 @@ def review_assertion(
     if payload.superseded_by_assertion_id is not None:
         a.superseded_by_assertion_id = payload.superseded_by_assertion_id
 
+    if str(payload.review_status or "").strip().lower() == "verified":
+        _apply_verified_assertion_fields(
+            a,
+            payload_value=(payload.value if isinstance(payload.value, dict) else None),
+            verification_reason=payload.verification_reason or "manual_verified_review",
+        )
+
     a.reviewed_by_user_id = principal.user_id
     a.reviewed_at = datetime.utcnow()
 
@@ -947,6 +1151,7 @@ def create_verified_assertion_from_source(
 
     target_org_id = principal.org_id if payload.org_scope else None
 
+    normalized_category = _normalize_category_value(payload.value)
     row = PolicyAssertion(
         org_id=target_org_id,
         source_id=src.id,
@@ -968,6 +1173,20 @@ def create_verified_assertion_from_source(
         reviewed_at=datetime.utcnow(),
         verification_reason=payload.verification_reason,
         extracted_at=datetime.utcnow(),
+        normalized_category=normalized_category,
+        rule_category=normalized_category,
+        governance_state="approved",
+        rule_status="approved",
+        coverage_status="verified" if normalized_category else "candidate",
+        validation_state="validated",
+        trust_state="validated",
+        is_current=False,
+    )
+
+    _apply_verified_assertion_fields(
+        row,
+        payload_value=payload.value,
+        verification_reason=payload.verification_reason,
     )
 
     db.add(row)
@@ -996,7 +1215,7 @@ def build_profile_from_verified_assertions(
 ):
     target_org_id = principal.org_id if payload.org_scope else None
 
-    row = project_verified_assertions_to_profile(
+    row = _build_or_bootstrap_profile(
         db,
         org_id=target_org_id,
         state=payload.state,
@@ -1005,6 +1224,8 @@ def build_profile_from_verified_assertions(
         pha_name=payload.pha_name,
         notes=payload.notes,
     )
+    if row is None:
+        raise HTTPException(status_code=409, detail="no_projectable_assertions_for_profile")
 
     return {
         "ok": True,
@@ -1038,14 +1259,17 @@ def build_profiles_all(
     partial = 0
 
     for market in markets:
-        row = project_verified_assertions_to_profile(
+        row = _build_or_bootstrap_profile(
             db,
             org_id=target_org_id,
             state=market["state"] or "MI",
             county=market["county"],
             city=market["city"],
+            pha_name=None,
             notes=f"Projected from verified policy assertions for {market['city']}, {market['county']}, {market['state']}.",
         )
+        if row is None:
+            continue
         policy = _loads(getattr(row, "policy_json", None), {})
         coverage = policy.get("coverage", {})
         if coverage.get("production_readiness") == "ready":
@@ -1972,7 +2196,7 @@ def build_market_profile(
     """
     target_org_id = principal.org_id if payload.org_scope else None
 
-    row = project_verified_assertions_to_profile(
+    row = _build_or_bootstrap_profile(
         db,
         org_id=target_org_id,
         state=payload.state,
@@ -1981,6 +2205,8 @@ def build_market_profile(
         pha_name=payload.pha_name,
         notes=payload.notes,
     )
+    if row is None:
+        raise HTTPException(status_code=409, detail="no_projectable_assertions_for_profile")
 
     profile_payload = _profile_summary_payload(db, row)
     operational_status = _profile_operational_payload(
@@ -2035,6 +2261,16 @@ def cleanup_stale_market(
         city=payload.city,
         pha_name=payload.pha_name,
     ).first()
+    if profile is None:
+        profile = _bootstrap_profile_from_active_assertions(
+            db,
+            org_id=target_org_id,
+            state=payload.state,
+            county=payload.county,
+            city=payload.city,
+            pha_name=payload.pha_name,
+            notes="Bootstrapped after run_market_pipeline route.",
+        )
 
     return {
         "ok": True,

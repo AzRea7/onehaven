@@ -2624,3 +2624,76 @@ def inventory_summary_for_market(
         pha_name=_norm_text(pha_name),
         program_type=_norm_text(program_type),
     )
+
+
+# --- Final inventory summary filtering override ---
+_inventory_summary_orig = inventory_summary_for_market
+
+def inventory_summary_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    program_type: Optional[str] = None,
+) -> dict[str, Any]:
+    payload = dict(_inventory_summary_orig(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        program_type=program_type,
+    ) or {})
+    rows = list(payload.get("rows") or [])
+    filtered = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        lifecycle = str(row.get("lifecycle_state") or "").lower()
+        origin = str(row.get("inventory_origin") or "").lower()
+        policy_source_id = row.get("policy_source_id")
+        refresh_reason = str(row.get("refresh_status_reason") or "").lower()
+        url = str(row.get("url") or "")
+        if policy_source_id in (None, "", 0) and origin == "discovered":
+            continue
+        if "name or service not known" in refresh_reason and origin == "discovered":
+            continue
+        if lifecycle == "failed" and origin == "discovered" and not _is_official_host(url):
+            continue
+        filtered.append(row)
+
+    if len(filtered) != len(rows):
+        payload["rows"] = filtered
+        payload["inventory_count"] = len(filtered)
+        linked = []
+        lifecycle_counts = {}
+        crawl_counts = {}
+        categories = {}
+        authority_use_counts = {}
+        for row in filtered:
+            psid = row.get("policy_source_id")
+            if psid not in (None, "", 0):
+                try:
+                    linked.append(int(psid))
+                except Exception:
+                    pass
+            lifecycle = str(row.get("lifecycle_state") or "").lower() or "unknown"
+            crawl = str(row.get("crawl_status") or "").lower() or "unknown"
+            lifecycle_counts[lifecycle] = lifecycle_counts.get(lifecycle, 0) + 1
+            crawl_counts[crawl] = crawl_counts.get(crawl, 0) + 1
+            aut = str(row.get("authority_use_type") or "").lower() or "unknown"
+            authority_use_counts[aut] = authority_use_counts.get(aut, 0) + 1
+            for cat in list(row.get("category_hints") or []):
+                cat = str(cat).strip().lower()
+                if cat:
+                    categories[cat] = categories.get(cat, 0) + 1
+        payload["linked_source_ids"] = sorted(set(linked))
+        payload["lifecycle_counts"] = lifecycle_counts
+        payload["crawl_counts"] = crawl_counts
+        payload["categories"] = categories
+        payload["authority_use_counts"] = authority_use_counts
+    return payload
