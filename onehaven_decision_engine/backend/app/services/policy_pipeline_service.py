@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import json
-
+from datetime import datetime as _pp_datetime
 from typing import Any, Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import inspect, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError
 
@@ -14,16 +14,37 @@ from app.services.jurisdiction_completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
 )
-from app.services.jurisdiction_notification_service import build_review_queue_payload, build_gap_escalation_notifications
+from app.services.jurisdiction_notification_service import (
+    build_gap_escalation_notifications,
+    build_review_queue_payload,
+)
+from app.services.jurisdiction_health_service import (
+    get_jurisdiction_health as _chunk3_pipeline_get_jurisdiction_health,
+)
+from app.services.jurisdiction_refresh_service import (
+    finalize_jurisdiction_profile_lifecycle as _chunk3_finalize_jurisdiction_profile_lifecycle,
+)
+from app.services.jurisdiction_rules_service import governed_assertions_for_scope
+from app.services.jurisdiction_sla_service import (
+    build_refresh_requirements,
+    collect_profile_source_sla_summary,
+)
+from app.services.policy_catalog_admin_service import merged_catalog_for_market
+from app.services.policy_change_detection_service import summarize_refresh_runs
 from app.services.policy_cleanup_service import (
     ARCHIVE_MARKER,
     archive_stale_market_sources,
+    cleanup_non_projectable_assertions_for_market,
 )
 from app.services.policy_coverage_service import (
     compute_coverage_status,
     upsert_coverage_status,
 )
-from app.services.policy_extractor_service import extract_assertions_for_source, mark_assertions_stale_for_source
+from app.services.policy_discovery_service import expected_inventory_hints
+from app.services.policy_extractor_service import (
+    extract_assertions_for_source,
+    mark_assertions_stale_for_source,
+)
 from app.services.policy_projection_service import (
     build_property_compliance_brief,
     project_verified_assertions_to_profile,
@@ -43,11 +64,8 @@ from app.services.policy_source_service import (
     list_sources_for_market,
     refresh_policy_source_and_detect_changes,
 )
-from app.services.policy_discovery_service import expected_inventory_hints
-from app.services.policy_change_detection_service import summarize_refresh_runs
 from app.services.policy_validation_service import validate_market_assertions
-from app.services.jurisdiction_sla_service import build_refresh_requirements, collect_profile_source_sla_summary
-from app.services.policy_catalog_admin_service import merged_catalog_for_market
+
 
 def _norm_state(s: Optional[str]) -> str:
     return (s or "MI").strip().upper()
@@ -67,8 +85,152 @@ def _norm_text(s: Optional[str]) -> Optional[str]:
     return v or None
 
 
+def _safe_profile_pk(profile: JurisdictionProfile | None) -> int | None:
+    if profile is None:
+        return None
+    try:
+        state = inspect(profile)
+        identity = getattr(state, "identity", None)
+        if identity and len(identity) > 0 and identity[0] is not None:
+            return int(identity[0])
+    except Exception:
+        pass
+    try:
+        value = getattr(profile, "id", None)
+        return int(value) if value is not None else None
+    except ObjectDeletedError:
+        return None
+    except Exception:
+        return None
+
+
+def _safe_profile_id(profile: JurisdictionProfile | None) -> int | None:
+    return _safe_profile_pk(profile)
+
+
+def _find_matching_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> JurisdictionProfile | None:
+    stmt = select(JurisdictionProfile).where(JurisdictionProfile.state == state)
+
+    if org_id is None:
+        stmt = stmt.where(JurisdictionProfile.org_id.is_(None))
+    else:
+        stmt = stmt.where(or_(JurisdictionProfile.org_id == org_id, JurisdictionProfile.org_id.is_(None)))
+
+    rows = list(db.scalars(stmt).all())
+    requested_pha = _norm_text(pha_name)
+
+    for row in rows:
+        row_county = _norm_lower(getattr(row, "county", None))
+        row_city = _norm_lower(getattr(row, "city", None))
+        row_pha = _norm_text(getattr(row, "pha_name", None)) if _profile_has_attr("pha_name") else None
+
+        if row_county not in {None, county}:
+            continue
+        if row_city not in {None, city}:
+            continue
+        if _profile_has_attr("pha_name") and requested_pha is not None and row_pha not in {None, requested_pha}:
+            continue
+        if row_city == city and row_county == county:
+            return row
+
+    for row in rows:
+        row_county = _norm_lower(getattr(row, "county", None))
+        row_city = _norm_lower(getattr(row, "city", None))
+        if row_city is None and row_county == county:
+            return row
+
+    for row in rows:
+        if _norm_lower(getattr(row, "city", None)) is None and _norm_lower(getattr(row, "county", None)) is None:
+            return row
+    return None
+
+
+def _refetch_profile_by_scope(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> JurisdictionProfile | None:
+    return _find_matching_profile(
+        db,
+        org_id=org_id,
+        state=_norm_state(state),
+        county=_norm_lower(county),
+        city=_norm_lower(city),
+        pha_name=_norm_text(pha_name),
+    )
+
+
+def _refetch_profile_by_pk_or_scope(
+    db: Session,
+    *,
+    profile_id: int | None,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> JurisdictionProfile | None:
+    if profile_id:
+        try:
+            row = db.get(JurisdictionProfile, int(profile_id))
+            if row is not None:
+                return row
+        except Exception:
+            db.rollback()
+    return _find_matching_profile(
+        db,
+        org_id=org_id,
+        state=_norm_state(state),
+        county=_norm_lower(county),
+        city=_norm_lower(city),
+        pha_name=_norm_text(pha_name),
+    )
+
+
+def _safe_profile_identity_or_lookup(
+    db: Session,
+    *,
+    profile: JurisdictionProfile | None,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> tuple[JurisdictionProfile | None, int | None]:
+    pid = _safe_profile_id(profile)
+    if pid is not None:
+        try:
+            fresh = db.get(JurisdictionProfile, int(pid))
+            if fresh is not None:
+                return fresh, int(pid)
+        except Exception:
+            db.rollback()
+    fresh = _refetch_profile_by_scope(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    return fresh, _safe_profile_id(fresh)
+
+
 def _is_archived_source(src: PolicySource) -> bool:
     return ARCHIVE_MARKER in (src.notes or "").lower()
+
 
 def _official_catalog_urls_for_market(
     db: Session,
@@ -90,48 +252,6 @@ def _official_catalog_urls_for_market(
         focus=focus,
     )
     return [str(item.url or "").strip().lower() for item in items if str(item.url or "").strip()]
-
-def _find_matching_profile(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str],
-) -> JurisdictionProfile | None:
-    stmt = select(JurisdictionProfile).where(JurisdictionProfile.state == state)
-
-    if org_id is None:
-        stmt = stmt.where(JurisdictionProfile.org_id.is_(None))
-    else:
-        stmt = stmt.where(or_(JurisdictionProfile.org_id == org_id, JurisdictionProfile.org_id.is_(None)))
-
-    rows = list(db.scalars(stmt).all())
-    for row in rows:
-        row_county = _norm_lower(getattr(row, "county", None))
-        row_city = _norm_lower(getattr(row, "city", None))
-        row_pha = _norm_text(getattr(row, "pha_name", None))
-
-        if row_county not in {None, county}:
-            continue
-        if row_city not in {None, city}:
-            continue
-        if pha_name is not None and row_pha not in {None, pha_name}:
-            continue
-        if row_city == city and row_county == county:
-            return row
-
-    for row in rows:
-        row_county = _norm_lower(getattr(row, "county", None))
-        row_city = _norm_lower(getattr(row, "city", None))
-        if row_city is None and row_county == county:
-            return row
-
-    for row in rows:
-        if _norm_lower(getattr(row, "city", None)) is None and _norm_lower(getattr(row, "county", None)) is None:
-            return row
-    return None
 
 
 def _market_sources_from_catalog(
@@ -275,6 +395,109 @@ def _governance_summary(
         "total": len(rows),
     }
 
+def _profile_has_attr(name: str) -> bool:
+    return hasattr(JurisdictionProfile, name)
+
+
+def _profile_pha_value(profile: JurisdictionProfile | None) -> str | None:
+    if profile is None:
+        return None
+    return _norm_text(getattr(profile, "pha_name", None))
+
+
+def _create_empty_market_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    notes: str | None = None,
+) -> JurisdictionProfile | None:
+    existing = _refetch_profile_by_scope(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    if existing is not None:
+        return existing
+
+    profile = JurisdictionProfile()
+
+    if hasattr(profile, "org_id"):
+        profile.org_id = org_id
+    if hasattr(profile, "state"):
+        profile.state = _norm_state(state)
+    if hasattr(profile, "county"):
+        profile.county = _norm_lower(county)
+    if hasattr(profile, "city"):
+        profile.city = _norm_lower(city)
+    if _profile_has_attr("pha_name"):
+        setattr(profile, "pha_name", _norm_text(pha_name))
+    if hasattr(profile, "notes"):
+        profile.notes = notes or "Bootstrapped empty jurisdiction profile for market scope."
+    if hasattr(profile, "policy_json"):
+        profile.policy_json = json.dumps(
+            {
+                "bootstrapped": True,
+                "bootstrapped_from": "empty_market_scope",
+                "state": _norm_state(state),
+                "county": _norm_lower(county),
+                "city": _norm_lower(city),
+                "pha_name": _norm_text(pha_name),
+            },
+            ensure_ascii=False,
+        )
+    if hasattr(profile, "refresh_state"):
+        profile.refresh_state = "pending"
+    if hasattr(profile, "refresh_status_reason"):
+        profile.refresh_status_reason = "bootstrapped_empty_market_scope"
+    if hasattr(profile, "completeness_status"):
+        profile.completeness_status = "unknown"
+    if hasattr(profile, "completeness_score"):
+        profile.completeness_score = 0.0
+    if hasattr(profile, "confidence_score"):
+        profile.confidence_score = 0.0
+    if hasattr(profile, "missing_categories_json"):
+        profile.missing_categories_json = "[]"
+    if hasattr(profile, "stale_categories_json"):
+        profile.stale_categories_json = "[]"
+    if hasattr(profile, "inferred_categories_json"):
+        profile.inferred_categories_json = "[]"
+    if hasattr(profile, "conflicting_categories_json"):
+        profile.conflicting_categories_json = "[]"
+    if hasattr(profile, "required_categories_json"):
+        profile.required_categories_json = "[]"
+    if hasattr(profile, "covered_categories_json"):
+        profile.covered_categories_json = "[]"
+    if hasattr(profile, "unmet_categories_json"):
+        profile.unmet_categories_json = "[]"
+    if hasattr(profile, "undiscovered_categories_json"):
+        profile.undiscovered_categories_json = "[]"
+    if hasattr(profile, "weak_support_categories_json"):
+        profile.weak_support_categories_json = "[]"
+    if hasattr(profile, "authority_unmet_categories_json"):
+        profile.authority_unmet_categories_json = "[]"
+
+    try:
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        return profile
+    except Exception:
+        db.rollback()
+        return _refetch_profile_by_scope(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
 
 def _discovery_missing_categories(
     db: Session,
@@ -295,7 +518,6 @@ def _discovery_missing_categories(
     )
     missing = coverage_before.get("missing_categories") or []
     return [str(item).strip().lower() for item in missing if str(item).strip()]
-
 
 
 def _recompute_profile_for_market(
@@ -338,24 +560,66 @@ def _recompute_profile_for_market(
     )
 
     if profile is None:
+        profile = _create_empty_market_profile(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            notes="Bootstrapped during recompute for missing market profile.",
+        )
+
+    if profile is None:
         return {
             "ok": True,
             "expected_inventory": inventory_hints,
             "inventory_summary": inventory_summary,
             "recomputed": False,
             "jurisdiction_profile_id": None,
+            "profile_error": "jurisdiction_profile_not_created_for_market_scope",
         }
+
+    profile_id = _safe_profile_pk(profile)
 
     refreshed_profile, coverage = recompute_profile_and_coverage(
         db,
         profile,
         commit=True,
     )
+
+    refreshed_profile_id = _safe_profile_pk(refreshed_profile) or profile_id
+    refreshed_profile = _refetch_profile_by_pk_or_scope(
+        db,
+        profile_id=refreshed_profile_id,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+
+    if refreshed_profile is None:
+        return {
+            "ok": True,
+            "expected_inventory": inventory_hints,
+            "inventory_summary": inventory_summary,
+            "recomputed": False,
+            "jurisdiction_profile_id": None,
+            "profile_error": "jurisdiction_profile_not_found_after_recompute",
+        }
+
+    refreshed_profile_id = _safe_profile_pk(refreshed_profile)
+
     completeness_payload = profile_completeness_payload(db, refreshed_profile)
     sla_summary = collect_profile_source_sla_summary(db, profile=refreshed_profile)
     refresh_requirements = build_refresh_requirements(
         refreshed_profile,
-        next_step="refresh" if list(sla_summary.get("legal_overdue_categories") or completeness_payload.get("critical_stale_categories") or []) else "monitor",
+        next_step="refresh" if list(
+            sla_summary.get("legal_overdue_categories")
+            or completeness_payload.get("critical_stale_categories")
+            or []
+        ) else "monitor",
         missing_categories=list(completeness_payload.get("missing_categories") or []),
         stale_categories=list(completeness_payload.get("stale_categories") or []),
         overdue_categories=list(sla_summary.get("overdue_categories") or []),
@@ -365,19 +629,31 @@ def _recompute_profile_for_market(
         stale_authoritative_categories=list(sla_summary.get("stale_authoritative_categories") or []),
         inventory_summary=inventory_summary,
     )
+
     if hasattr(refreshed_profile, "refresh_requirements_json"):
         import json as _json
+
         refreshed_profile.refresh_requirements_json = _json.dumps(refresh_requirements, sort_keys=True, default=str)
         db.add(refreshed_profile)
         db.commit()
-        db.refresh(refreshed_profile)
+
+        refreshed_profile = _refetch_profile_by_pk_or_scope(
+            db,
+            profile_id=refreshed_profile_id,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+        )
+        refreshed_profile_id = _safe_profile_pk(refreshed_profile)
 
     return {
         "ok": True,
         "expected_inventory": inventory_hints,
         "inventory_summary": inventory_summary,
         "recomputed": True,
-        "jurisdiction_profile_id": int(refreshed_profile.id),
+        "jurisdiction_profile_id": refreshed_profile_id,
         "profile": completeness_payload,
         "sla_summary": sla_summary,
         "refresh_requirements": refresh_requirements,
@@ -392,7 +668,6 @@ def _recompute_profile_for_market(
 
 
 def _run_source_refresh_batch(
-
     db: Session,
     *,
     sources: list[PolicySource],
@@ -549,7 +824,6 @@ def _run_source_refresh_batch(
     }
 
 
-
 def run_market_policy_pipeline(
     db: Session,
     *,
@@ -583,7 +857,6 @@ def run_market_policy_pipeline(
         pha_name=pha,
     )
 
-    # Discovery is now selection only; it cannot invent URLs.
     discovery_result = discover_policy_sources_for_market(
         db,
         org_id=org_id,
@@ -706,7 +979,6 @@ def run_market_policy_pipeline(
 
 
 def refresh_market_policy_pipeline(
-
     db: Session,
     *,
     org_id: Optional[int],
@@ -901,6 +1173,99 @@ def refresh_single_policy_source(
         ),
     }
 
+def _create_empty_market_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    notes: str | None = None,
+) -> JurisdictionProfile | None:
+    existing = _refetch_profile_by_scope(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    if existing is not None:
+        return existing
+
+    profile = JurisdictionProfile()
+    if hasattr(profile, "org_id"):
+        profile.org_id = org_id
+    if hasattr(profile, "state"):
+        profile.state = _norm_state(state)
+    if hasattr(profile, "county"):
+        profile.county = _norm_lower(county)
+    if hasattr(profile, "city"):
+        profile.city = _norm_lower(city)
+    if hasattr(profile, "pha_name"):
+        profile.pha_name = _norm_text(pha_name)
+    if hasattr(profile, "notes"):
+        profile.notes = notes or "Bootstrapped empty jurisdiction profile for market scope."
+    if hasattr(profile, "policy_json"):
+        profile.policy_json = json.dumps(
+            {
+                "bootstrapped": True,
+                "bootstrapped_from": "empty_market_scope",
+                "state": _norm_state(state),
+                "county": _norm_lower(county),
+                "city": _norm_lower(city),
+                "pha_name": _norm_text(pha_name),
+            },
+            ensure_ascii=False,
+        )
+    if hasattr(profile, "refresh_state"):
+        profile.refresh_state = "pending"
+    if hasattr(profile, "refresh_status_reason"):
+        profile.refresh_status_reason = "bootstrapped_empty_market_scope"
+    if hasattr(profile, "completeness_status"):
+        profile.completeness_status = "unknown"
+    if hasattr(profile, "completeness_score"):
+        profile.completeness_score = 0.0
+    if hasattr(profile, "confidence_score"):
+        profile.confidence_score = 0.0
+    if hasattr(profile, "missing_categories_json"):
+        profile.missing_categories_json = "[]"
+    if hasattr(profile, "stale_categories_json"):
+        profile.stale_categories_json = "[]"
+    if hasattr(profile, "inferred_categories_json"):
+        profile.inferred_categories_json = "[]"
+    if hasattr(profile, "conflicting_categories_json"):
+        profile.conflicting_categories_json = "[]"
+    if hasattr(profile, "required_categories_json"):
+        profile.required_categories_json = "[]"
+    if hasattr(profile, "covered_categories_json"):
+        profile.covered_categories_json = "[]"
+    if hasattr(profile, "unmet_categories_json"):
+        profile.unmet_categories_json = "[]"
+    if hasattr(profile, "undiscovered_categories_json"):
+        profile.undiscovered_categories_json = "[]"
+    if hasattr(profile, "weak_support_categories_json"):
+        profile.weak_support_categories_json = "[]"
+    if hasattr(profile, "authority_unmet_categories_json"):
+        profile.authority_unmet_categories_json = "[]"
+
+    try:
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        return profile
+    except Exception:
+        db.rollback()
+        return _refetch_profile_by_scope(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+
 
 def mark_source_assertions_stale(
     db: Session,
@@ -910,9 +1275,6 @@ def mark_source_assertions_stale(
 ) -> dict[str, Any]:
     return mark_assertions_stale_for_source(db, source_id=source_id, reason=reason)
 
-
-from app.services.jurisdiction_health_service import get_jurisdiction_health as _chunk3_pipeline_get_jurisdiction_health
-from app.services.jurisdiction_refresh_service import finalize_jurisdiction_profile_lifecycle as _chunk3_finalize_jurisdiction_profile_lifecycle
 
 _chunk3_original_run_market_policy_pipeline = run_market_policy_pipeline
 _chunk3_original_refresh_market_policy_pipeline = refresh_market_policy_pipeline
@@ -995,9 +1357,6 @@ def run_market_pipeline(
     reviewer_user_id: int | None = None,
     auto_activate: bool = True,
 ) -> dict[str, Any]:
-    """
-    Backward-compatible alias expected by routers/policy.py.
-    """
     return run_market_policy_pipeline(
         db,
         org_id=org_id,
@@ -1022,9 +1381,6 @@ def cleanup_market(
     focus: str = "se_mi_extended",
     archive_extracted_duplicates: bool = True,
 ) -> dict[str, Any]:
-    """
-    Backward-compatible cleanup entrypoint expected by routers/policy.py.
-    """
     st = _norm_state(state)
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
@@ -1085,10 +1441,6 @@ def repair_market(
     reviewer_user_id: int | None = None,
     auto_activate: bool = True,
 ) -> dict[str, Any]:
-    """
-    Backward-compatible repair entrypoint expected by routers/policy.py.
-    Performs cleanup, normalization/governance repair, and recomputation.
-    """
     st = _norm_state(state)
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
@@ -1132,6 +1484,7 @@ def repair_market(
         "refresh_summary": (pipeline_result or {}).get("refresh_summary"),
     }
 
+
 def refresh_market_policy_pipeline(
     db: Session,
     *,
@@ -1169,17 +1522,30 @@ def refresh_market_policy_pipeline(
             city=cty,
             pha_name=pha,
         )
-        if profile is not None:
-            pipeline_result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(profile.id))
+        profile, profile_id = _safe_profile_identity_or_lookup(
+            db,
+            profile=profile,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+        )
+        if profile is not None and profile_id is not None:
+            try:
+                pipeline_result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(profile_id))
+            except Exception:
+                pass
+            recompute = dict(pipeline_result.get("recompute") or {})
+            recompute["jurisdiction_profile_id"] = profile_id
+            pipeline_result["recompute"] = recompute
     result["pipeline_result"] = pipeline_result
     return result
 
 
-# --- Story 4.2 additive governed-truth overlays ---
-from app.services.policy_cleanup_service import cleanup_non_projectable_assertions_for_market
-from app.services.jurisdiction_rules_service import governed_assertions_for_scope
-
 _chunk42_original_run_market_policy_pipeline = run_market_policy_pipeline
+_chunk42_original_refresh_market_policy_pipeline = refresh_market_policy_pipeline
+
 
 def run_market_policy_pipeline(
     db: Session,
@@ -1250,16 +1616,14 @@ def run_market_policy_pipeline(
     result["refresh_summary"] = refresh_summary
 
     recompute = dict(result.get("recompute") or {})
-    profile = dict(recompute.get("profile") or {})
-    profile["governed_truth"] = governed_truth
-    profile["governed_active_assertion_ids"] = list(governed_truth.get("safe_assertion_ids") or [])
-    profile["manual_review_assertion_ids"] = list(governed_truth.get("manual_review_ids") or [])
-    recompute["profile"] = profile
+    profile_payload = dict(recompute.get("profile") or {})
+    profile_payload["governed_truth"] = governed_truth
+    profile_payload["governed_active_assertion_ids"] = list(governed_truth.get("safe_assertion_ids") or [])
+    profile_payload["manual_review_assertion_ids"] = list(governed_truth.get("manual_review_ids") or [])
+    recompute["profile"] = profile_payload
     result["recompute"] = recompute
     return result
 
-
-_chunk42_original_refresh_market_policy_pipeline = refresh_market_policy_pipeline
 
 def refresh_market_policy_pipeline(*args, **kwargs):
     result = _chunk42_original_refresh_market_policy_pipeline(*args, **kwargs)
@@ -1273,7 +1637,6 @@ def refresh_market_policy_pipeline(*args, **kwargs):
     return result
 
 
-# --- Final profile bootstrap override ---
 def _has_active_projectable_assertions_for_market(
     db: Session,
     *,
@@ -1339,7 +1702,22 @@ def _bootstrap_profile_if_missing(
     if existing is not None:
         return existing
 
-    projected = project_verified_assertions_to_profile(
+    try:
+        projected = project_verified_assertions_to_profile(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            notes=notes,
+        )
+        if projected is not None:
+            return projected
+    except Exception:
+        db.rollback()
+
+    return _create_empty_market_profile(
         db,
         org_id=org_id,
         state=st,
@@ -1348,54 +1726,6 @@ def _bootstrap_profile_if_missing(
         pha_name=pha,
         notes=notes,
     )
-    if projected is not None:
-        return projected
-
-    if not _has_active_projectable_assertions_for_market(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-    ):
-        return None
-
-    profile = JurisdictionProfile()
-    if hasattr(profile, "org_id"):
-        profile.org_id = org_id
-    if hasattr(profile, "state"):
-        profile.state = st
-    if hasattr(profile, "county"):
-        profile.county = cnty
-    if hasattr(profile, "city"):
-        profile.city = cty
-    if hasattr(profile, "pha_name"):
-        profile.pha_name = pha
-    if hasattr(profile, "notes"):
-        profile.notes = notes or "Bootstrapped from active verified policy assertions."
-    if hasattr(profile, "policy_json"):
-        profile.policy_json = json.dumps(
-            {
-                "bootstrapped": True,
-                "bootstrapped_from": "policy_pipeline_service",
-                "state": st,
-                "county": cnty,
-                "city": cty,
-                "pha_name": pha,
-            },
-            ensure_ascii=False,
-        )
-    if hasattr(profile, "refresh_state"):
-        profile.refresh_state = "degraded"
-    if hasattr(profile, "refresh_status_reason"):
-        profile.refresh_status_reason = "bootstrapped_from_active_verified_assertions"
-
-    db.add(profile)
-    db.commit()
-    db.refresh(profile)
-    return profile
-
 
 _final_original_run_market_policy_pipeline = run_market_policy_pipeline
 
@@ -1405,7 +1735,7 @@ def run_market_policy_pipeline(
     org_id: Optional[int],
     state: str,
     county: Optional[str],
-    city: Optional[str],
+    city: str,
     pha_name: Optional[str] = None,
     focus: str = "se_mi_extended",
     reviewer_user_id: int | None = None,
@@ -1434,12 +1764,26 @@ def run_market_policy_pipeline(
             notes="Bootstrapped after run_market_policy_pipeline.",
         )
         if profile is not None:
+            st = _norm_state(state)
+            cnty = _norm_lower(county)
+            cty = _norm_lower(city)
+            pha = _norm_text(pha_name)
+            profile, profile_id = _safe_profile_identity_or_lookup(
+                db,
+                profile=profile,
+                org_id=org_id,
+                state=st,
+                county=cnty,
+                city=cty,
+                pha_name=pha,
+            )
             recompute = dict(result.get("recompute") or {})
-            recompute["jurisdiction_profile_id"] = int(getattr(profile, "id", 0) or 0)
+            recompute["jurisdiction_profile_id"] = profile_id
             result["recompute"] = recompute
             if "health" not in result or result.get("health") is None:
                 try:
-                    result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(profile.id))
+                    if profile_id is not None:
+                        result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(profile_id))
                 except Exception:
                     pass
     except Exception as exc:
@@ -1460,9 +1804,6 @@ def run_market_pipeline(
     reviewer_user_id: int | None = None,
     auto_activate: bool = True,
 ) -> dict[str, Any]:
-    """
-    Backward-compatible alias expected by routers/policy.py.
-    """
     return run_market_policy_pipeline(
         db,
         org_id=org_id,
@@ -1475,9 +1816,6 @@ def run_market_pipeline(
         auto_activate=auto_activate,
     )
 
-
-# --- Final hardened profile persistence + finalization override ---
-from datetime import datetime as _pp_datetime
 
 def _profile_set_if_present(profile: JurisdictionProfile, field_name: str, value) -> None:
     if hasattr(profile, field_name):
@@ -1531,12 +1869,19 @@ def _populate_profile_defaults(
     _profile_set_if_present(profile, "city", city)
     _profile_set_if_present(profile, "pha_name", pha_name)
     _profile_set_if_present(profile, "notes", notes or "Bootstrapped from active verified policy assertions.")
-    _profile_set_if_present(profile, "policy_json", json.dumps(_build_bootstrap_policy_payload(
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-    ), ensure_ascii=False))
+    _profile_set_if_present(
+        profile,
+        "policy_json",
+        json.dumps(
+            _build_bootstrap_policy_payload(
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+            ),
+            ensure_ascii=False,
+        ),
+    )
     _profile_set_if_present(profile, "refresh_state", "degraded")
     _profile_set_if_present(profile, "refresh_status_reason", "bootstrapped_from_active_verified_assertions")
     _profile_set_if_present(profile, "coverage_status", "partial")
@@ -1583,7 +1928,6 @@ def _persist_bootstrap_profile(
     except Exception:
         db.rollback()
 
-    # Second attempt with even slimmer/default-safe payload
     profile = JurisdictionProfile()
     _profile_set_if_present(profile, "org_id", org_id)
     _profile_set_if_present(profile, "state", state)
@@ -1644,17 +1988,7 @@ def _bootstrap_profile_if_missing_hardened(
     except Exception:
         db.rollback()
 
-    if not _has_active_projectable_assertions_for_market(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-    ):
-        return None
-
-    return _persist_bootstrap_profile(
+    return _create_empty_market_profile(
         db,
         org_id=org_id,
         state=st,
@@ -1664,8 +1998,8 @@ def _bootstrap_profile_if_missing_hardened(
         notes=notes,
     )
 
-
 _hardened_original_run_market_policy_pipeline = run_market_policy_pipeline
+_hardened_original_refresh_market_policy_pipeline = refresh_market_policy_pipeline
 
 def run_market_policy_pipeline(
     db: Session,
@@ -1722,6 +2056,22 @@ def run_market_policy_pipeline(
             if isinstance(row, dict) and isinstance(row.get("refresh"), dict):
                 refresh_results.append(dict(row["refresh"]))
 
+        profile, profile_id = _safe_profile_identity_or_lookup(
+            db,
+            profile=profile,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+        )
+        if profile is None:
+            recompute = dict(result.get("recompute") or {})
+            recompute["jurisdiction_profile_id"] = profile_id
+            result["recompute"] = recompute
+            result["profile_bootstrap_error"] = "profile_not_refetchable_before_finalization"
+            return result
+
         finalized = _chunk3_finalize_jurisdiction_profile_lifecycle(
             db,
             profile=profile,
@@ -1730,8 +2080,18 @@ def run_market_policy_pipeline(
             governance_result=result.get("lifecycle_result") if isinstance(result.get("lifecycle_result"), dict) else None,
         )
 
+        profile, profile_id = _safe_profile_identity_or_lookup(
+            db,
+            profile=profile,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+        )
+
         recompute = dict(result.get("recompute") or {})
-        recompute["jurisdiction_profile_id"] = int(getattr(profile, "id", 0) or 0)
+        recompute["jurisdiction_profile_id"] = profile_id
         recompute["profile"] = finalized.get("completeness")
         recompute["coverage"] = finalized.get("coverage")
         result["recompute"] = recompute
@@ -1742,15 +2102,22 @@ def run_market_policy_pipeline(
         result["profile_bootstrap_error"] = None
     except Exception as exc:
         db.rollback()
+        profile, profile_id = _safe_profile_identity_or_lookup(
+            db,
+            profile=None,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+        )
         recompute = dict(result.get("recompute") or {})
-        recompute["jurisdiction_profile_id"] = int(getattr(profile, "id", 0) or 0)
+        recompute["jurisdiction_profile_id"] = profile_id
         result["recompute"] = recompute
         result["profile_bootstrap_error"] = f"finalization_failed: {exc}"
 
     return result
 
-
-_hardened_original_refresh_market_policy_pipeline = refresh_market_policy_pipeline
 
 def refresh_market_policy_pipeline(
     db: Session,
@@ -1773,13 +2140,22 @@ def refresh_market_policy_pipeline(
             city=_norm_lower(city),
             pha_name=_norm_text(pha_name),
         )
-        if profile is not None:
+        profile, profile_id = _safe_profile_identity_or_lookup(
+            db,
+            profile=profile,
+            org_id=org_id,
+            state=_norm_state(state),
+            county=_norm_lower(county),
+            city=_norm_lower(city),
+            pha_name=_norm_text(pha_name),
+        )
+        if profile is not None and profile_id is not None:
             try:
-                pipeline_result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(profile.id))
+                pipeline_result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(profile_id))
             except Exception:
                 pass
             recompute = dict(pipeline_result.get("recompute") or {})
-            recompute["jurisdiction_profile_id"] = int(getattr(profile, "id", 0) or 0)
+            recompute["jurisdiction_profile_id"] = profile_id
             pipeline_result["recompute"] = recompute
     result["pipeline_result"] = pipeline_result
     return result
@@ -1810,46 +2186,6 @@ def run_market_pipeline(
     )
 
 
-# --- Final forced profile bootstrap + stale ORM hardening override ---
-def _safe_profile_id(profile: JurisdictionProfile | None) -> int | None:
-    if profile is None:
-        return None
-    try:
-        value = getattr(profile, "id", None)
-        return int(value) if value is not None else None
-    except ObjectDeletedError:
-        return None
-    except Exception:
-        return None
-
-
-def _refetch_profile_by_scope(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str],
-) -> JurisdictionProfile | None:
-    return _find_matching_profile(
-        db,
-        org_id=org_id,
-        state=_norm_state(state),
-        county=_norm_lower(county),
-        city=_norm_lower(city),
-        pha_name=_norm_text(pha_name),
-    )
-
-
-def _profile_set_if_present(profile: JurisdictionProfile, field_name: str, value) -> None:
-    if hasattr(profile, field_name):
-        try:
-            setattr(profile, field_name, value)
-        except Exception:
-            pass
-
-
 def _create_bootstrap_profile(
     db: Session,
     *,
@@ -1870,14 +2206,21 @@ def _create_bootstrap_profile(
     _profile_set_if_present(profile, "refresh_state", "review_required")
     _profile_set_if_present(profile, "refresh_status_reason", "bootstrapped_from_active_verified_assertions")
     if hasattr(profile, "policy_json"):
-        _profile_set_if_present(profile, "policy_json", json.dumps({
-            "bootstrapped": True,
-            "bootstrapped_from": "policy_pipeline_service",
-            "state": _norm_state(state),
-            "county": _norm_lower(county),
-            "city": _norm_lower(city),
-            "pha_name": _norm_text(pha_name),
-        }, ensure_ascii=False))
+        _profile_set_if_present(
+            profile,
+            "policy_json",
+            json.dumps(
+                {
+                    "bootstrapped": True,
+                    "bootstrapped_from": "policy_pipeline_service",
+                    "state": _norm_state(state),
+                    "county": _norm_lower(county),
+                    "city": _norm_lower(city),
+                    "pha_name": _norm_text(pha_name),
+                },
+                ensure_ascii=False,
+            ),
+        )
     try:
         db.add(profile)
         db.commit()
@@ -1919,6 +2262,7 @@ def _force_find_or_create_profile(
     )
     if existing is not None:
         return existing
+
     try:
         projected = project_verified_assertions_to_profile(
             db,
@@ -1936,6 +2280,7 @@ def _force_find_or_create_profile(
                 return fresh
     except Exception:
         db.rollback()
+
     existing = _refetch_profile_by_scope(
         db,
         org_id=org_id,
@@ -1946,27 +2291,21 @@ def _force_find_or_create_profile(
     )
     if existing is not None:
         return existing
-    if _has_active_projectable_assertions_for_market(
+
+    return _create_empty_market_profile(
         db,
         org_id=org_id,
-        state=_norm_state(state),
-        county=_norm_lower(county),
-        city=_norm_lower(city),
-        pha_name=_norm_text(pha_name),
-    ):
-        return _create_bootstrap_profile(
-            db,
-            org_id=org_id,
-            state=state,
-            county=county,
-            city=city,
-            pha_name=pha_name,
-            notes=notes,
-        )
-    return None
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        notes=notes,
+    )
 
 
 _pipeline_final_orig = run_market_policy_pipeline
+_refresh_pipeline_final_orig = refresh_market_policy_pipeline
+
 
 def run_market_policy_pipeline(
     db: Session,
@@ -2012,8 +2351,9 @@ def run_market_policy_pipeline(
         result["profile_bootstrap_error"] = result.get("profile_bootstrap_error") or "profile_not_created_after_forced_bootstrap"
         return result
 
-    profile = _refetch_profile_by_scope(
+    profile, profile_id = _safe_profile_identity_or_lookup(
         db,
+        profile=profile,
         org_id=org_id,
         state=st,
         county=cnty,
@@ -2022,6 +2362,9 @@ def run_market_policy_pipeline(
     )
     if profile is None:
         result["profile_bootstrap_error"] = "profile_not_refetchable_after_forced_bootstrap"
+        recompute = dict(result.get("recompute") or {})
+        recompute["jurisdiction_profile_id"] = profile_id
+        result["recompute"] = recompute
         return result
 
     refresh_results = []
@@ -2040,23 +2383,32 @@ def run_market_policy_pipeline(
     except Exception as exc:
         db.rollback()
         result["profile_bootstrap_error"] = f"finalization_failed: {exc}"
-        pid = _safe_profile_id(_refetch_profile_by_scope(db, org_id=org_id, state=st, county=cnty, city=cty, pha_name=pha))
+        _, fresh_profile_id = _safe_profile_identity_or_lookup(
+            db,
+            profile=None,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+        )
         recompute = dict(result.get("recompute") or {})
-        recompute["jurisdiction_profile_id"] = pid
+        recompute["jurisdiction_profile_id"] = fresh_profile_id
         result["recompute"] = recompute
         return result
 
-    profile = _refetch_profile_by_scope(
+    profile, profile_id = _safe_profile_identity_or_lookup(
         db,
+        profile=profile,
         org_id=org_id,
         state=st,
         county=cnty,
         city=cty,
         pha_name=pha,
     )
-    pid = _safe_profile_id(profile)
+
     recompute = dict(result.get("recompute") or {})
-    recompute["jurisdiction_profile_id"] = pid
+    recompute["jurisdiction_profile_id"] = profile_id
     recompute["profile"] = finalized.get("completeness")
     recompute["coverage"] = finalized.get("coverage")
     result["recompute"] = recompute
@@ -2067,8 +2419,6 @@ def run_market_policy_pipeline(
     result["profile_bootstrap_error"] = None
     return result
 
-
-_refresh_pipeline_final_orig = refresh_market_policy_pipeline
 
 def refresh_market_policy_pipeline(
     db: Session,
@@ -2091,13 +2441,22 @@ def refresh_market_policy_pipeline(
             city=_norm_lower(city),
             pha_name=_norm_text(pha_name),
         )
-        if profile is not None:
+        profile, profile_id = _safe_profile_identity_or_lookup(
+            db,
+            profile=profile,
+            org_id=org_id,
+            state=_norm_state(state),
+            county=_norm_lower(county),
+            city=_norm_lower(city),
+            pha_name=_norm_text(pha_name),
+        )
+        if profile is not None and profile_id is not None:
             try:
-                pipeline_result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(_safe_profile_id(profile) or 0))
+                pipeline_result["health"] = _chunk3_pipeline_get_jurisdiction_health(db, profile_id=int(profile_id))
             except Exception:
                 pass
             recompute = dict(pipeline_result.get("recompute") or {})
-            recompute["jurisdiction_profile_id"] = _safe_profile_id(profile)
+            recompute["jurisdiction_profile_id"] = profile_id
             pipeline_result["recompute"] = recompute
     result["pipeline_result"] = pipeline_result
     return result

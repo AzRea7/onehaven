@@ -42,6 +42,27 @@ from ..policy_models import (
 from .jurisdiction_profile_service import _loads, _dumps, merge_profile_policy_meta
 
 
+
+
+def _norm_state(value: Optional[str]) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip().upper()
+    return raw or None
+
+
+def _norm_lower(value: Optional[str]) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip().lower()
+    return raw or None
+
+
+def _norm_text(value: Optional[str]) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    return raw or None
 AUTHORITY_EXPECTATION_RANKS: dict[str, int] = {
     "derived_or_inferred": 25,
     "semi_authoritative_operational": 60,
@@ -196,6 +217,38 @@ def _loads_json_dict(value: Any) -> dict[str, Any]:
         except Exception:
             return {}
     return {}
+
+
+def _profile_pha_name(profile: JurisdictionProfile | None) -> str | None:
+    if profile is None:
+        return None
+    return _norm_text(getattr(profile, "pha_name", None))
+
+
+def _coverage_has_attr(name: str) -> bool:
+    return hasattr(JurisdictionCoverageStatus, name)
+
+def _set_if_present(obj: Any, name: str, value: Any) -> None:
+    if hasattr(obj, name):
+        setattr(obj, name, value)
+
+
+def _coverage_column_uses_json(name: str) -> bool:
+    try:
+        col = JurisdictionCoverageStatus.__table__.columns.get(name)
+        if col is None:
+            return False
+        return col.type.__class__.__name__.upper() in {"JSON", "JSONB"}
+    except Exception:
+        return False
+
+
+def _as_json_storage(name: str, value: Any) -> Any:
+    if _coverage_column_uses_json(name):
+        return value
+    if isinstance(value, (dict, list)):
+        return _dumps(value)
+    return value
 
 
 def _scope_filters(*, state: str | None, county: str | None, city: str | None):
@@ -1592,23 +1645,67 @@ def apply_profile_completeness(
 def get_or_create_coverage_status_for_profile(
     db: Session, profile: JurisdictionProfile
 ) -> JurisdictionCoverageStatus:
+    st = _norm_state(getattr(profile, "state", None))
+    cnty = _norm_lower(getattr(profile, "county", None))
+    cty = _norm_lower(getattr(profile, "city", None))
+    pha = _profile_pha_name(profile)
+    org_id = getattr(profile, "org_id", None)
+
     stmt = select(JurisdictionCoverageStatus).where(
-        JurisdictionCoverageStatus.org_id == profile.org_id,
-        JurisdictionCoverageStatus.state == profile.state,
-        JurisdictionCoverageStatus.county == profile.county,
-        JurisdictionCoverageStatus.city == profile.city,
-        JurisdictionCoverageStatus.pha_name == profile.pha_name,
+        JurisdictionCoverageStatus.org_id == org_id,
+        JurisdictionCoverageStatus.state == st,
+        JurisdictionCoverageStatus.county == cnty,
+        JurisdictionCoverageStatus.city == cty,
     )
+    if _coverage_has_attr("pha_name"):
+        stmt = stmt.where(JurisdictionCoverageStatus.pha_name == pha)
+
     coverage = db.execute(stmt).scalar_one_or_none()
     if coverage is not None:
         return coverage
-    coverage = JurisdictionCoverageStatus(
-        org_id=profile.org_id,
-        state=profile.state or "MI",
-        county=profile.county,
-        city=profile.city,
-        pha_name=profile.pha_name,
-    )
+
+    kwargs: dict[str, Any] = {
+        "org_id": org_id,
+        "state": st or "MI",
+        "county": cnty,
+        "city": cty,
+        "coverage_version": "v1",
+        "completeness_status": "unknown",
+        "completeness_score": 0.0,
+        "confidence_score": 0.0,
+        "covered_categories_json": [],
+        "missing_categories_json": [],
+        "stale_categories_json": [],
+        "inferred_categories_json": [],
+        "conflicting_categories_json": [],
+        "required_categories_json": [],
+        "category_coverage_snapshot_json": {},
+        "category_last_verified_json": {},
+        "category_source_backing_json": {},
+        "completeness_snapshot_json": {},
+        "expected_rule_universe_json": {},
+        "category_coverage_details_json": {},
+        "category_unmet_reasons_json": {},
+        "unmet_categories_json": [],
+        "undiscovered_categories_json": [],
+        "weak_support_categories_json": [],
+        "authority_unmet_categories_json": [],
+        "source_ids_json": [],
+        "source_summary_json": {},
+        "source_freshness_json": _as_json_storage("source_freshness_json", {}),
+        "authority_score": 0.0,
+        "extraction_confidence": 0.0,
+        "conflict_count": 0,
+        "production_readiness": "not_ready",
+        "discovery_status": "not_started",
+        "is_stale": False,
+        "discovery_metadata_json": {},
+        "metadata_json": {},
+    }
+    if _coverage_has_attr("pha_name"):
+        kwargs["pha_name"] = pha
+
+    coverage = JurisdictionCoverageStatus(**kwargs)
     db.add(coverage)
     db.flush()
     return coverage
@@ -1618,32 +1715,95 @@ def sync_coverage_status_from_profile(
     db: Session, profile: JurisdictionProfile, *, commit: bool = False
 ) -> JurisdictionCoverageStatus:
     coverage = get_or_create_coverage_status_for_profile(db, profile)
-    detail = _loads_json_dict(profile.source_freshness_json).get("scoring", {})
+    detail = _loads_json_dict(getattr(profile, "source_freshness_json", None)).get("scoring", {})
     trust_decision = detail.get("trust_decision") or {}
-    coverage.completeness_score = float(profile.completeness_score or 0.0)
-    coverage.confidence_score = float(profile.completeness_score or 0.0)
-    coverage.completeness_status = profile.completeness_status or "missing"
-    coverage.coverage_version = profile.category_norm_version or "v2"
-    coverage.covered_categories_json = profile.covered_categories_json or "[]"
-    coverage.missing_categories_json = profile.missing_categories_json or "[]"
-    coverage.is_stale = bool(profile.is_stale)
-    coverage.stale_reason = profile.stale_reason
-    coverage.last_computed_at = _utcnow()
-    coverage.last_source_change_at = profile.freshest_source_at
-    coverage.source_summary_json = _dumps(
-        {
-            "category_statuses": detail.get("category_statuses", {}),
-            "stale_categories": detail.get("stale_categories", []),
-            "inferred_categories": detail.get("inferred_categories", []),
-            "conflicting_categories": detail.get("conflicting_categories", []),
-            "undiscovered_categories": detail.get("undiscovered_categories", []),
-            "weak_support_categories": detail.get("weak_support_categories", []),
-            "authority_unmet_categories": detail.get("authority_unmet_categories", []),
-            "unmet_categories": detail.get("unmet_categories", []),
-            "category_unmet_reasons": detail.get("category_unmet_reasons", {}),
-            "trust_decision": trust_decision,
-        }
+
+    coverage.completeness_score = float(getattr(profile, "completeness_score", 0.0) or 0.0)
+    coverage.confidence_score = float(getattr(profile, "completeness_score", 0.0) or 0.0)
+    coverage.completeness_status = getattr(profile, "completeness_status", None) or "missing"
+    coverage.coverage_version = getattr(profile, "category_norm_version", None) or "v2"
+    coverage.production_readiness = (
+        getattr(profile, "production_readiness", None)
+        or trust_decision.get("production_readiness")
+        or "not_ready"
     )
+    coverage.discovery_status = getattr(profile, "discovery_status", None) or "not_started"
+    coverage.is_stale = bool(getattr(profile, "is_stale", False))
+
+    coverage.covered_categories_json = _loads_json_list(getattr(profile, "covered_categories_json", None))
+    coverage.missing_categories_json = _loads_json_list(getattr(profile, "missing_categories_json", None))
+    coverage.stale_categories_json = _loads_json_list(getattr(profile, "stale_categories_json", None))
+    coverage.inferred_categories_json = _loads_json_list(getattr(profile, "inferred_categories_json", None))
+    coverage.conflicting_categories_json = _loads_json_list(getattr(profile, "conflicting_categories_json", None))
+    coverage.required_categories_json = _loads_json_list(getattr(profile, "required_categories_json", None))
+    coverage.unmet_categories_json = _loads_json_list(getattr(profile, "unmet_categories_json", None))
+    coverage.undiscovered_categories_json = _loads_json_list(getattr(profile, "undiscovered_categories_json", None))
+    coverage.weak_support_categories_json = _loads_json_list(getattr(profile, "weak_support_categories_json", None))
+    coverage.authority_unmet_categories_json = _loads_json_list(getattr(profile, "authority_unmet_categories_json", None))
+
+    coverage.category_coverage_snapshot_json = _loads_json_dict(
+        getattr(profile, "category_coverage_snapshot_json", None)
+    )
+    coverage.category_last_verified_json = _loads_json_dict(
+        getattr(profile, "category_last_verified_json", None)
+    )
+    coverage.category_source_backing_json = _loads_json_dict(
+        getattr(profile, "category_source_backing_json", None)
+    )
+
+    coverage.completeness_snapshot_json = _loads_json_dict(
+        getattr(profile, "completeness_snapshot_json", None)
+    )
+    coverage.expected_rule_universe_json = _loads_json_dict(
+        getattr(profile, "expected_rule_universe_json", None)
+    )
+    coverage.category_coverage_details_json = _loads_json_dict(
+        getattr(profile, "category_coverage_details_json", None)
+    )
+    coverage.category_unmet_reasons_json = _loads_json_dict(
+        getattr(profile, "category_unmet_reasons_json", None)
+    )
+
+    coverage.is_stale = bool(getattr(profile, "is_stale", False))
+    coverage.stale_reason = getattr(profile, "stale_reason", None)
+    coverage.last_computed_at = _utcnow()
+    coverage.last_source_change_at = getattr(profile, "freshest_source_at", None)
+
+    source_ids: list[int] = []
+    category_details = detail.get("category_details") or {}
+    if isinstance(category_details, dict):
+        for row in category_details.values():
+            if isinstance(row, dict):
+                for sid in list(row.get("source_ids") or []):
+                    try:
+                        source_ids.append(int(sid))
+                    except Exception:
+                        pass
+    coverage.source_ids_json = sorted(set(source_ids))
+    coverage.source_summary_json = {
+        "category_statuses": detail.get("category_statuses", {}),
+        "stale_categories": detail.get("stale_categories", []),
+        "inferred_categories": detail.get("inferred_categories", []),
+        "conflicting_categories": detail.get("conflicting_categories", []),
+        "undiscovered_categories": detail.get("undiscovered_categories", []),
+        "weak_support_categories": detail.get("weak_support_categories", []),
+        "authority_unmet_categories": detail.get("authority_unmet_categories", []),
+        "unmet_categories": detail.get("unmet_categories", []),
+        "category_unmet_reasons": detail.get("category_unmet_reasons", {}),
+        "trust_decision": trust_decision,
+    }
+    if _coverage_has_attr("source_freshness_json"):
+        coverage.source_freshness_json = _as_json_storage(
+            "source_freshness_json",
+            _loads_json_dict(getattr(profile, "source_freshness_json", None))
+            or {
+                "source_count": 0,
+                "authoritative_source_count": 0,
+                "stale_source_count": 0,
+                "stale_reason": getattr(profile, "stale_reason", None),
+                "is_stale": bool(getattr(profile, "is_stale", False)),
+            },
+        )
 
     db.add(coverage)
     if commit:
@@ -1652,7 +1812,6 @@ def sync_coverage_status_from_profile(
     else:
         db.flush()
     return coverage
-
 
 def profile_completeness_payload(db: Session, profile: JurisdictionProfile, *, stale_days: int = DEFAULT_STALE_DAYS) -> dict[str, Any]:
     breakdown = compute_profile_score_breakdown(db, profile, stale_days=stale_days)

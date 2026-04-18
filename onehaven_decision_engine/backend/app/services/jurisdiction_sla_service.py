@@ -404,14 +404,11 @@ def build_refresh_requirements(
     inventory_summary: dict[str, Any] | None = None,
     retry_due_at: datetime | None = None,
 ) -> dict[str, Any]:
+    inventory_summary = dict(inventory_summary or {})
+
     return {
         "next_step": next_step,
         "refresh_state": getattr(profile, "refresh_state", None),
-        "critical_fetch_failure_categories": list(requirements.get("critical_fetch_failure_categories") or []),
-        "legal_lockout_categories": list(requirements.get("legal_lockout_categories") or []),
-        "review_required_categories": list(requirements.get("review_required_categories") or []),
-        "rejected_source_count": int(requirements.get("rejected_source_count") or 0),
-        "guessed_source_count": int(requirements.get("guessed_source_count") or 0),
         "missing_categories": list(missing_categories or []),
         "stale_categories": list(stale_categories or []),
         "overdue_categories": list(overdue_categories or []),
@@ -419,15 +416,25 @@ def build_refresh_requirements(
         "legal_overdue_categories": list(legal_overdue_categories or []),
         "informational_overdue_categories": list(informational_overdue_categories or []),
         "stale_authoritative_categories": list(stale_authoritative_categories or []),
-        "inventory_summary": dict(inventory_summary or {}),
-        "critical_fetch_failure_categories": list((inventory_summary or {}).get("critical_fetch_failure_categories") or []),
-        "legal_lockout_categories": list((inventory_summary or {}).get("legal_lockout_categories") or []),
-        "review_required_categories": list((inventory_summary or {}).get("review_required_categories") or []),
-        "rejected_source_count": int((inventory_summary or {}).get("rejected_source_count") or 0),
-        "guessed_source_count": int((inventory_summary or {}).get("guessed_source_count") or 0),
+        "inventory_summary": inventory_summary,
+        "critical_fetch_failure_categories": list(inventory_summary.get("critical_fetch_failure_categories") or []),
+        "legal_lockout_categories": list(inventory_summary.get("legal_lockout_categories") or []),
+        "review_required_categories": list(inventory_summary.get("review_required_categories") or []),
+        "rejected_source_count": int(inventory_summary.get("rejected_source_count") or 0),
+        "guessed_source_count": int(inventory_summary.get("guessed_source_count") or 0),
+        "blocked_source_count": int(inventory_summary.get("blocked_source_count") or 0),
+        "fetch_failed_source_count": int(inventory_summary.get("fetch_failed_source_count") or 0),
+        "failed_binding_source_count": int(inventory_summary.get("failed_binding_source_count") or 0),
+        "safe_to_rely_on": bool(inventory_summary.get("safe_to_rely_on", True)),
+        "next_due_at": inventory_summary.get("next_due_at"),
         "next_search_retry_due_at": retry_due_at.isoformat() if retry_due_at else None,
-        "last_refresh_completed_at": getattr(profile, "last_refresh_completed_at", None).isoformat() if getattr(profile, "last_refresh_completed_at", None) else None,
+        "last_refresh_completed_at": (
+            getattr(profile, "last_refresh_completed_at", None).isoformat()
+            if getattr(profile, "last_refresh_completed_at", None)
+            else None
+        ),
     }
+
 
 
 def profile_next_actions(profile: JurisdictionProfile) -> dict[str, Any]:

@@ -35,8 +35,8 @@ from app.services.policy_source_service import (
 )
 from app.services.policy_change_detection_service import (
     compute_next_retry_due,
-    determine_profile_refresh_state,
-)
+    determine_profile_refresh_state as _policy_change_determine_profile_refresh_state,
+ )
 
 
 DEFAULT_JURISDICTION_STALE_DAYS = 90
@@ -92,6 +92,77 @@ def _norm_text(value: Optional[str]) -> Optional[str]:
         return None
     out = value.strip()
     return out or None
+
+def determine_profile_refresh_state(
+    *,
+    refresh_runs: list[dict[str, Any]] | None = None,
+    recompute_ok: bool | None = None,
+    missing_categories: list[str] | None = None,
+    stale_categories: list[str] | None = None,
+    overdue_categories: list[str] | None = None,
+    critical_overdue_categories: list[str] | None = None,
+    profile_is_stale: bool | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Compatibility wrapper for older policy_change_detection signatures.
+
+    Newer callers in this file pass overdue_categories / critical_overdue_categories.
+    Older implementations of policy_change_detection_service.determine_profile_refresh_state
+    may not accept those keyword args. This wrapper preserves backward compatibility
+    and guarantees refresh_state / status_reason / next_step keys.
+    """
+    try:
+        return _policy_change_determine_profile_refresh_state(
+            refresh_runs=refresh_runs,
+            recompute_ok=recompute_ok,
+            missing_categories=missing_categories,
+            stale_categories=stale_categories,
+            overdue_categories=overdue_categories,
+            critical_overdue_categories=critical_overdue_categories,
+            profile_is_stale=profile_is_stale,
+            **kwargs,
+        )
+    except TypeError:
+        base = _policy_change_determine_profile_refresh_state(
+            refresh_runs=refresh_runs,
+            recompute_ok=recompute_ok,
+            missing_categories=missing_categories,
+            stale_categories=stale_categories,
+            profile_is_stale=profile_is_stale,
+        )
+        out = dict(base or {})
+        refresh_state = str(out.get("refresh_state") or "").strip().lower()
+
+        missing = list(missing_categories or [])
+        stale = list(stale_categories or [])
+        overdue = list(overdue_categories or [])
+        critical_overdue = list(critical_overdue_categories or [])
+
+        if critical_overdue:
+            if not refresh_state or refresh_state == "healthy":
+                refresh_state = "blocked"
+            out["status_reason"] = out.get("status_reason") or "critical_refresh_overdue"
+            out["next_step"] = out.get("next_step") or "refresh"
+        elif overdue or stale or bool(profile_is_stale):
+            if not refresh_state or refresh_state == "healthy":
+                refresh_state = "degraded"
+            out["status_reason"] = out.get("status_reason") or "sources_or_categories_overdue"
+            out["next_step"] = out.get("next_step") or "refresh"
+        elif missing:
+            if not refresh_state:
+                refresh_state = "pending"
+            out["status_reason"] = out.get("status_reason") or "coverage_incomplete"
+            out["next_step"] = out.get("next_step") or "review"
+        elif recompute_ok and not refresh_state:
+            refresh_state = "healthy"
+            out["status_reason"] = None
+            out["next_step"] = "monitor"
+
+        out["refresh_state"] = refresh_state or "pending"
+        out.setdefault("status_reason", None)
+        out.setdefault("next_step", "refresh")
+        return out
+
 
 
 def _stale_cutoff(stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS) -> datetime:

@@ -17,8 +17,6 @@ from app.services.jurisdiction_completeness_service import profile_completeness_
 NOTIFICATION_ENTITY_TYPE = "jurisdiction_profile"
 
 
-
-
 @dataclass(frozen=True)
 class JurisdictionReviewQueueEntry:
     jurisdiction_profile_id: int
@@ -71,6 +69,7 @@ class JurisdictionReviewQueueEntry:
             "reviewed_at": self.reviewed_at,
             "payload": self.payload,
         }
+
 
 @dataclass(frozen=True)
 class JurisdictionNotification:
@@ -129,6 +128,52 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _loads_json_dict(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _loads_json_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _clean_str_list(values: Any) -> list[str]:
+    raw = values if isinstance(values, list) else _loads_json_list(values)
+    out: list[str] = []
+    for item in raw:
+        text = str(item).strip()
+        if text:
+            out.append(text)
+    return out
 
 
 def _scope_label_from_values(
@@ -243,9 +288,84 @@ def _list_overlap(left: list[str], right: list[str]) -> list[str]:
     return [str(x).strip() for x in left if str(x).strip() in right_set]
 
 
+def _collect_layered_category_lists(payload: dict[str, Any]) -> dict[str, list[str]]:
+    jurisdiction_types = payload.get("jurisdiction_types") or payload.get("category_bundles") or []
+    missing_required: set[str] = set()
+    missing_critical: set[str] = set()
+    stale_required: set[str] = set()
+    conflicting_required: set[str] = set()
+    unsatisfied_required: set[str] = set()
+
+    if isinstance(jurisdiction_types, list):
+        for layer in jurisdiction_types:
+            if not isinstance(layer, dict):
+                continue
+            missing_required.update(_clean_str_list(layer.get("missing_required_categories")))
+            missing_critical.update(_clean_str_list(layer.get("missing_critical_categories")))
+            stale_required.update(_clean_str_list(layer.get("stale_required_categories")))
+            conflicting_required.update(_clean_str_list(layer.get("conflicting_required_categories")))
+            unsatisfied_required.update(_clean_str_list(layer.get("unsatisfied_required_categories")))
+
+    return {
+        "missing_required_categories": sorted(missing_required),
+        "missing_critical_categories": sorted(missing_critical),
+        "stale_required_categories": sorted(stale_required),
+        "conflicting_required_categories": sorted(conflicting_required),
+        "unsatisfied_required_categories": sorted(unsatisfied_required),
+    }
+
+
+def _payload_category_lists(payload: dict[str, Any]) -> dict[str, list[str]]:
+    layered = _collect_layered_category_lists(payload)
+
+    missing_categories = sorted(
+        set(
+            _clean_str_list(payload.get("missing_categories"))
+            + _clean_str_list(payload.get("missing_required_categories"))
+            + layered["missing_required_categories"]
+            + layered["unsatisfied_required_categories"]
+        )
+    )
+    critical_missing = sorted(
+        set(
+            _clean_str_list(payload.get("missing_critical_categories"))
+            + layered["missing_critical_categories"]
+        )
+    )
+    stale_categories = sorted(
+        set(
+            _clean_str_list(payload.get("stale_categories"))
+            + _clean_str_list(payload.get("stale_required_categories"))
+            + layered["stale_required_categories"]
+        )
+    )
+    critical_stale = sorted(
+        set(
+            _list_overlap(_critical_categories(payload), stale_categories)
+            + _clean_str_list(payload.get("critical_stale_categories"))
+        )
+    )
+    conflicting_categories = sorted(
+        set(
+            _clean_str_list(payload.get("conflicting_categories"))
+            + _clean_str_list(payload.get("conflicting_required_categories"))
+            + layered["conflicting_required_categories"]
+        )
+    )
+
+    return {
+        "missing_categories": missing_categories,
+        "critical_missing_categories": critical_missing,
+        "stale_categories": stale_categories,
+        "critical_stale_categories": critical_stale,
+        "conflicting_categories": conflicting_categories,
+    }
+
+
 def _discovery_retry_exhausted(profile: JurisdictionProfile, payload: dict[str, Any]) -> bool:
-    source_freshness = _loads(getattr(profile, "source_freshness_json", None), {})
-    meta = payload.get("source_freshness") or {}
+    source_freshness = _loads_json_dict(getattr(profile, "source_freshness_json", None))
+    meta = _loads_json_dict(payload.get("source_freshness"))
+
     candidates = [
         source_freshness.get("discovery_retries_exhausted"),
         source_freshness.get("retry_exhausted"),
@@ -262,14 +382,16 @@ def _discovery_retry_exhausted(profile: JurisdictionProfile, payload: dict[str, 
     max_retry_count = _safe_int(
         source_freshness.get("discovery_retry_max")
         or source_freshness.get("discovery_max_retries")
+        or meta.get("discovery_retry_max")
+        or meta.get("discovery_max_retries")
         or 0,
         0,
     )
     return max_retry_count > 0 and retry_count >= max_retry_count
 
 
-def _authoritative_conflict_present(payload: dict[str, Any]) -> bool:
-    conflicting_categories = list(payload.get("conflicting_categories") or [])
+def _authoritative_conflict_present(payload: dict[str, Any], conflicting_categories: list[str] | None = None) -> bool:
+    conflicting_categories = list(conflicting_categories or payload.get("conflicting_categories") or [])
     category_details = payload.get("category_details") or {}
     if not conflicting_categories:
         return False
@@ -290,13 +412,20 @@ def evaluate_jurisdiction_gap_escalations(
     scope_label = _scope_label(profile)
 
     critical_categories = _critical_categories(payload)
-    missing_categories = list(payload.get("missing_categories") or [])
-    stale_categories = list(payload.get("stale_categories") or [])
-    conflicting_categories = list(payload.get("conflicting_categories") or [])
+    category_lists = _payload_category_lists(payload)
 
-    critical_missing = _list_overlap(critical_categories, missing_categories)
-    critical_stale = _list_overlap(critical_categories, stale_categories)
-    authoritative_conflict = _authoritative_conflict_present(payload)
+    missing_categories = category_lists["missing_categories"]
+    critical_missing = category_lists["critical_missing_categories"]
+    stale_categories = category_lists["stale_categories"]
+    critical_stale = category_lists["critical_stale_categories"]
+    conflicting_categories = category_lists["conflicting_categories"]
+
+    if not critical_missing:
+        critical_missing = _list_overlap(critical_categories, missing_categories)
+    if not critical_stale:
+        critical_stale = _list_overlap(critical_categories, stale_categories)
+
+    authoritative_conflict = _authoritative_conflict_present(payload, conflicting_categories)
     discovery_retries_exhausted = _discovery_retry_exhausted(profile, payload)
 
     escalation_reasons: list[dict[str, Any]] = []
@@ -358,6 +487,8 @@ def evaluate_jurisdiction_gap_escalations(
         "pha_name": getattr(profile, "pha_name", None),
         "completeness": payload,
         "critical_categories": critical_categories,
+        "missing_categories": missing_categories,
+        "stale_categories": stale_categories,
         "critical_missing_categories": critical_missing,
         "critical_stale_categories": critical_stale,
         "conflicting_categories": conflicting_categories,
@@ -387,6 +518,7 @@ def _build_base_stale_jurisdiction_notification(
         message=message,
         payload=payload,
     )
+
 
 def build_stale_rule_notification(
     *,
@@ -457,6 +589,7 @@ def should_notify_stale_rules(
         "missing_categories": missing_categories,
         "critical_stale_categories": critical_stale_categories,
     }
+
 
 def build_stale_jurisdiction_notification(
     db: Session,
@@ -746,7 +879,7 @@ def build_jurisdiction_review_queue(
         stmt = stmt.where(JurisdictionProfile.county == (county or "").strip().lower())
     if city is not None:
         stmt = stmt.where(JurisdictionProfile.city == (city or "").strip().lower())
-    if pha_name is not None:
+    if pha_name is not None and hasattr(JurisdictionProfile, "pha_name"):
         stmt = stmt.where(JurisdictionProfile.pha_name == ((pha_name or "").strip() or None))
     if limit is not None:
         stmt = stmt.limit(max(1, int(limit)))
@@ -1189,6 +1322,7 @@ def notify_impacted_properties_for_rule_change(
         "results": results,
     }
 
+
 def build_critical_stale_lockout_notification(
     *,
     profile: JurisdictionProfile,
@@ -1224,7 +1358,6 @@ def notify_if_profile_locked(
     return record_notification_event(db, payload=payload)
 
 
-
 def _review_queue_meta(profile: JurisdictionProfile) -> dict[str, Any]:
     meta = _loads(getattr(profile, "metadata_json", None), {})
     review = meta.get("jurisdiction_review_queue") or {}
@@ -1257,8 +1390,16 @@ def _source_change_rows(db: Session, *, profile: JurisdictionProfile, limit: int
         stmt = stmt.where(PolicySource.org_id.is_(None))
     else:
         stmt = stmt.where(or_(PolicySource.org_id == getattr(profile, "org_id", None), PolicySource.org_id.is_(None)))
-    rows = list(db.scalars(stmt.order_by(PolicySource.last_refresh_completed_at.desc().nullslast(), PolicySource.last_changed_at.desc().nullslast(), PolicySource.id.desc())).all())
-    out=[]
+    rows = list(
+        db.scalars(
+            stmt.order_by(
+                PolicySource.last_refresh_completed_at.desc().nullslast(),
+                PolicySource.last_changed_at.desc().nullslast(),
+                PolicySource.id.desc(),
+            )
+        ).all()
+    )
+    out = []
     for row in rows:
         change_summary = _loads(getattr(row, "last_change_summary_json", None), {})
         refresh_outcome = _loads(getattr(row, "last_refresh_outcome_json", None), {})
@@ -1266,17 +1407,19 @@ def _source_change_rows(db: Session, *, profile: JurisdictionProfile, limit: int
         refresh_state = str(getattr(row, "refresh_state", None) or "").strip().lower()
         if not change_kind and refresh_state not in {"failed", "blocked", "degraded", "validating"}:
             continue
-        out.append({
-            "source_id": int(getattr(row, "id", 0) or 0),
-            "title": getattr(row, "title", None),
-            "publisher": getattr(row, "publisher", None),
-            "url": getattr(row, "url", None),
-            "change_kind": change_kind or refresh_state or "changed",
-            "refresh_state": getattr(row, "refresh_state", None),
-            "refresh_status_reason": getattr(row, "refresh_status_reason", None),
-            "validation_due_at": getattr(row, "validation_due_at", None).isoformat() if getattr(row, "validation_due_at", None) else None,
-            "last_refresh_completed_at": getattr(row, "last_refresh_completed_at", None).isoformat() if getattr(row, "last_refresh_completed_at", None) else None,
-        })
+        out.append(
+            {
+                "source_id": int(getattr(row, "id", 0) or 0),
+                "title": getattr(row, "title", None),
+                "publisher": getattr(row, "publisher", None),
+                "url": getattr(row, "url", None),
+                "change_kind": change_kind or refresh_state or "changed",
+                "refresh_state": getattr(row, "refresh_state", None),
+                "refresh_status_reason": getattr(row, "refresh_status_reason", None),
+                "validation_due_at": getattr(row, "validation_due_at", None).isoformat() if getattr(row, "validation_due_at", None) else None,
+                "last_refresh_completed_at": getattr(row, "last_refresh_completed_at", None).isoformat() if getattr(row, "last_refresh_completed_at", None) else None,
+            }
+        )
         if len(out) >= limit:
             break
     return out
@@ -1305,23 +1448,25 @@ def _validation_failure_rows(db: Session, *, profile: JurisdictionProfile, limit
         else:
             stmt = stmt.where(or_(PolicyAssertion.org_id == getattr(profile, "org_id", None), PolicyAssertion.org_id.is_(None)))
     rows = list(db.scalars(stmt.order_by(PolicyAssertion.reviewed_at.desc().nullslast(), PolicyAssertion.id.desc())).all())
-    out=[]
+    out = []
     for row in rows:
         validation_state = str(getattr(row, "validation_state", None) or "").strip().lower()
         trust_state = str(getattr(row, "trust_state", None) or "").strip().lower()
         if validation_state not in {"conflicting", "unsupported", "ambiguous", "weak_support"} and trust_state not in {"needs_review", "downgraded"}:
             continue
-        out.append({
-            "assertion_id": int(getattr(row, "id", 0) or 0),
-            "rule_key": getattr(row, "rule_key", None),
-            "rule_category": getattr(row, "normalized_category", None) or getattr(row, "rule_category", None),
-            "validation_state": getattr(row, "validation_state", None),
-            "validation_reason": getattr(row, "validation_reason", None),
-            "trust_state": getattr(row, "trust_state", None),
-            "review_status": getattr(row, "review_status", None),
-            "source_id": getattr(row, "source_id", None),
-            "reviewed_at": getattr(row, "reviewed_at", None).isoformat() if getattr(row, "reviewed_at", None) else None,
-        })
+        out.append(
+            {
+                "assertion_id": int(getattr(row, "id", 0) or 0),
+                "rule_key": getattr(row, "rule_key", None),
+                "rule_category": getattr(row, "normalized_category", None) or getattr(row, "rule_category", None),
+                "validation_state": getattr(row, "validation_state", None),
+                "validation_reason": getattr(row, "validation_reason", None),
+                "trust_state": getattr(row, "trust_state", None),
+                "review_status": getattr(row, "review_status", None),
+                "source_id": getattr(row, "source_id", None),
+                "reviewed_at": getattr(row, "reviewed_at", None).isoformat() if getattr(row, "reviewed_at", None) else None,
+            }
+        )
         if len(out) >= limit:
             break
     return out
@@ -1340,24 +1485,30 @@ def build_review_queue_entries(
     if state:
         stmt = stmt.where(JurisdictionProfile.state == str(state).strip().upper())
     if county is not None:
-        stmt = stmt.where(JurisdictionProfile.county == ((county or '').strip().lower() or None))
+        stmt = stmt.where(JurisdictionProfile.county == ((county or "").strip().lower() or None))
     if city is not None:
-        stmt = stmt.where(JurisdictionProfile.city == ((city or '').strip().lower() or None))
-    if pha_name is not None and hasattr(JurisdictionProfile, 'pha_name'):
-        stmt = stmt.where(JurisdictionProfile.pha_name == ((pha_name or '').strip() or None))
+        stmt = stmt.where(JurisdictionProfile.city == ((city or "").strip().lower() or None))
+    if pha_name is not None and hasattr(JurisdictionProfile, "pha_name"):
+        stmt = stmt.where(JurisdictionProfile.pha_name == ((pha_name or "").strip() or None))
     if org_id is None:
         stmt = stmt.where(JurisdictionProfile.org_id.is_(None))
     else:
         stmt = stmt.where(or_(JurisdictionProfile.org_id == int(org_id), JurisdictionProfile.org_id.is_(None)))
     profiles = list(db.scalars(stmt.order_by(JurisdictionProfile.id.desc())).all())
-    entries=[]
-    severity_counts={"high":0,"medium":0,"low":0}
-    grouped={}
+    entries = []
+    severity_counts = {"high": 0, "medium": 0, "low": 0}
+    grouped = {}
     for profile in profiles:
         evaluation = evaluate_jurisdiction_gap_escalations(db, profile=profile)
         completeness = evaluation.get("completeness") or {}
         lockout = completeness.get("lockout") or {}
-        review_required_categories = sorted(set(list(completeness.get("supporting_only_categories") or []) + list(completeness.get("authority_unmet_categories") or []) + list(completeness.get("critical_stale_categories") or [])))
+        review_required_categories = sorted(
+            set(
+                list(completeness.get("supporting_only_categories") or [])
+                + list(completeness.get("authority_unmet_categories") or [])
+                + list(completeness.get("critical_stale_categories") or [])
+            )
+        )
         conflicting_categories = list(evaluation.get("conflicting_categories") or [])
         changed_sources = _source_change_rows(db, profile=profile)
         failed_validations = _validation_failure_rows(db, profile=profile)
@@ -1378,7 +1529,7 @@ def build_review_queue_entries(
             severity = "medium"
         else:
             severity = "low"
-        severity_rank = {"high":3,"medium":2,"low":1}.get(severity,1)
+        severity_rank = {"high": 3, "medium": 2, "low": 1}.get(severity, 1)
         decision_needed = "Resolve conflicting authority and choose governing rule" if conflicting_categories else "Confirm reviewer disposition and expiry" if changed_sources or failed_validations else "Review missing or stale critical categories"
         entry = JurisdictionReviewQueueEntry(
             jurisdiction_profile_id=int(profile.id),
@@ -1409,10 +1560,18 @@ def build_review_queue_entries(
                 "lockout": lockout,
             },
         )
-        entries.append(entry.as_dict())
+        entry_dict = entry.as_dict()
+        entries.append(entry_dict)
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
-        grouped.setdefault(entry.scope_label, []).append(entry.as_dict())
-    entries.sort(key=lambda row: (-int(row.get("severity_rank") or 0), row.get("scope_label") or "", -(row.get("source_change_count") or 0), -(row.get("validation_failure_count") or 0)))
+        grouped.setdefault(entry.scope_label, []).append(entry_dict)
+    entries.sort(
+        key=lambda row: (
+            -int(row.get("severity_rank") or 0),
+            row.get("scope_label") or "",
+            -(row.get("source_change_count") or 0),
+            -(row.get("validation_failure_count") or 0),
+        )
+    )
     return {
         "ok": True,
         "count": len(entries),
@@ -1432,6 +1591,7 @@ def persist_review_queue_decision(
     expires_at: datetime | None = None,
 ) -> dict[str, Any]:
     now = _utcnow()
+    previous_meta = _review_queue_meta(profile)
     payload = {
         "queue_status": "resolved" if reviewer_action in {"approved", "waived", "rejected", "resolved"} else "open",
         "reviewer_action": str(reviewer_action or "").strip() or None,
@@ -1448,7 +1608,7 @@ def persist_review_queue_decision(
         entity_type=NOTIFICATION_ENTITY_TYPE,
         entity_id=str(getattr(profile, "id")),
         action="jurisdiction_review_queue_decision",
-        before_json=_dumps({"previous_review_queue": _review_queue_meta(profile)}),
+        before_json=_dumps({"previous_review_queue": previous_meta}),
         after_json=_dumps(payload),
         created_at=now,
     )

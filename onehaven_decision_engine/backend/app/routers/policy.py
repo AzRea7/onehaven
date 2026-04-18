@@ -385,21 +385,11 @@ def _bootstrap_profile_from_active_assertions(
     if existing is not None:
         return existing
 
-    if not _has_active_projectable_assertions(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-    ):
-        return None
-
     profile = JurisdictionProfile()
     if hasattr(profile, "org_id"):
         profile.org_id = org_id
     if hasattr(profile, "state"):
-        profile.state = _norm_state(state)
+        profile.state = _norm_state(state) or "MI"
     if hasattr(profile, "county"):
         profile.county = _norm_lower(county)
     if hasattr(profile, "city"):
@@ -407,12 +397,12 @@ def _bootstrap_profile_from_active_assertions(
     if hasattr(profile, "pha_name"):
         profile.pha_name = _norm_text(pha_name)
     if hasattr(profile, "notes"):
-        profile.notes = notes or "Bootstrapped from active verified policy assertions."
+        profile.notes = notes or "Bootstrapped empty jurisdiction profile so operational health can resolve market scope."
     if hasattr(profile, "policy_json"):
         profile.policy_json = json.dumps(
             {
                 "bootstrapped": True,
-                "bootstrapped_from": "active_verified_assertions",
+                "bootstrapped_from": "empty_market_scope",
                 "state": _norm_state(state),
                 "county": _norm_lower(county),
                 "city": _norm_lower(city),
@@ -421,14 +411,51 @@ def _bootstrap_profile_from_active_assertions(
             ensure_ascii=False,
         )
     if hasattr(profile, "refresh_state"):
-        profile.refresh_state = "degraded"
+        profile.refresh_state = "pending"
     if hasattr(profile, "refresh_status_reason"):
-        profile.refresh_status_reason = "bootstrapped_from_active_verified_assertions"
+        profile.refresh_status_reason = "bootstrapped_empty_market_scope"
+    if hasattr(profile, "completeness_status"):
+        profile.completeness_status = "unknown"
+    if hasattr(profile, "completeness_score"):
+        profile.completeness_score = 0.0
+    if hasattr(profile, "confidence_score"):
+        profile.confidence_score = 0.0
+    if hasattr(profile, "missing_categories_json"):
+        profile.missing_categories_json = "[]"
+    if hasattr(profile, "stale_categories_json"):
+        profile.stale_categories_json = "[]"
+    if hasattr(profile, "inferred_categories_json"):
+        profile.inferred_categories_json = "[]"
+    if hasattr(profile, "conflicting_categories_json"):
+        profile.conflicting_categories_json = "[]"
+    if hasattr(profile, "required_categories_json"):
+        profile.required_categories_json = "[]"
+    if hasattr(profile, "covered_categories_json"):
+        profile.covered_categories_json = "[]"
+    if hasattr(profile, "unmet_categories_json"):
+        profile.unmet_categories_json = "[]"
+    if hasattr(profile, "undiscovered_categories_json"):
+        profile.undiscovered_categories_json = "[]"
+    if hasattr(profile, "weak_support_categories_json"):
+        profile.weak_support_categories_json = "[]"
+    if hasattr(profile, "authority_unmet_categories_json"):
+        profile.authority_unmet_categories_json = "[]"
 
-    db.add(profile)
-    db.commit()
-    db.refresh(profile)
-    return profile
+    try:
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        return profile
+    except Exception:
+        rollback_quietly(db)
+        return _market_profile_query(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        ).first()
 
 
 def _build_or_bootstrap_profile(
@@ -441,17 +468,21 @@ def _build_or_bootstrap_profile(
     pha_name: str | None,
     notes: str | None = None,
 ):
-    row = project_verified_assertions_to_profile(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-        notes=notes,
-    )
-    if row is not None:
-        return row
+    try:
+        row = project_verified_assertions_to_profile(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            notes=notes,
+        )
+        if row is not None:
+            return row
+    except Exception:
+        rollback_quietly(db)
+
     return _bootstrap_profile_from_active_assertions(
         db,
         org_id=org_id,
@@ -2129,9 +2160,31 @@ def post_manual_market_health_recompute(
     db: Session = Depends(get_db),
     principal=Depends(require_owner),
 ):
+    target_org_id = _manual_market_target_org_id(principal, payload.org_scope)
+
+    profile = _market_profile_query(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+    ).first()
+
+    if profile is None:
+        profile = _build_or_bootstrap_profile(
+            db,
+            org_id=target_org_id,
+            state=payload.state,
+            county=payload.county,
+            city=payload.city,
+            pha_name=payload.pha_name,
+            notes="Bootstrapped during manual health recompute.",
+        )
+
     health = get_jurisdiction_health(
         db,
-        org_id=_manual_market_target_org_id(principal, payload.org_scope),
+        org_id=target_org_id,
         state=payload.state,
         county=payload.county,
         city=payload.city,
@@ -2327,6 +2380,17 @@ def repair_market_route(
         pha_name=payload.pha_name,
     ).first()
 
+    if profile is None:
+        profile = _build_or_bootstrap_profile(
+            db,
+            org_id=target_org_id,
+            state=payload.state,
+            county=payload.county,
+            city=payload.city,
+            pha_name=payload.pha_name,
+            notes="Bootstrapped after repair_market_route.",
+        )
+
     source_rows = _market_sources_for_catalog(
         db,
         org_id=target_org_id,
@@ -2402,6 +2466,17 @@ def run_market_pipeline_route(
         city=payload.city,
         pha_name=payload.pha_name,
     ).first()
+
+    if profile is None:
+        profile = _build_or_bootstrap_profile(
+            db,
+            org_id=target_org_id,
+            state=payload.state,
+            county=payload.county,
+            city=payload.city,
+            pha_name=payload.pha_name,
+            notes="Bootstrapped after run_market_pipeline_route.",
+        )
 
     coverage = compute_coverage_status(
         db,
