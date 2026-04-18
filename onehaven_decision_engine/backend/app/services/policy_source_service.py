@@ -11,6 +11,12 @@ from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import or_, select
+
+from app.services.policy_fetch_service import (
+    build_fetch_metadata_payload,
+    fetch_official_source_with_fallback,
+    should_browser_fallback_on_result,
+)
 from sqlalchemy.orm import Session
 
 from app.domain.jurisdiction_categories import category_label, expected_rule_universe_for_scope, normalize_categories
@@ -939,6 +945,14 @@ def _compute_next_refresh_due_at(source: PolicySource, *, from_dt: Optional[date
     return base + timedelta(days=_effective_refresh_interval_days(source))
 
 
+def _official_block_retry_due(source: PolicySource, *, base_dt: datetime) -> datetime:
+    retry_count = int(getattr(source, "refresh_retry_count", 0) or 0)
+    if _is_official_host(getattr(source, "url", "") or ""):
+        hours = min(24, max(2, 2 * (retry_count + 1)))
+        return base_dt + timedelta(hours=hours)
+    return compute_next_retry_due(retry_count=retry_count, base_dt=base_dt)
+
+
 def _safe_text_from_http_response(resp: httpx.Response) -> str:
     content_type = (resp.headers.get("content-type") or "").lower()
     if "text" in content_type or "json" in content_type or "html" in content_type or "xml" in content_type:
@@ -1214,27 +1228,24 @@ def _probe_discovery_candidate(
     url: str,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    try:
-        with httpx.Client(timeout=timeout_seconds, follow_redirects=True) as client:
-            resp = client.get(url)
-            content_type = resp.headers.get("content-type")
-            ok = 200 <= int(resp.status_code) < 400
-            text = _safe_text_from_http_response(resp)
-            return {
-                "ok": ok,
-                "http_status": int(resp.status_code),
-                "content_type": content_type,
-                "title": _extract_title(text),
-                "fetch_error": None if ok else f"http_status_{int(resp.status_code)}",
-            }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "http_status": None,
-            "content_type": None,
-            "title": None,
-            "fetch_error": f"{type(exc).__name__}: {exc}",
-        }
+    fetch_result = fetch_official_source_with_fallback(
+        url=url,
+        timeout_seconds=timeout_seconds,
+        cache_ttl_seconds=900,
+    )
+    title = fetch_result.get("title")
+    if not title:
+        title = _extract_title(str(fetch_result.get("html") or ""))
+    return {
+        "ok": bool(fetch_result.get("ok")),
+        "http_status": fetch_result.get("http_status"),
+        "content_type": fetch_result.get("content_type"),
+        "title": title,
+        "fetch_error": fetch_result.get("fetch_error"),
+        "fetch_method": fetch_result.get("method"),
+        "from_cache": bool(fetch_result.get("from_cache")),
+        "final_url": fetch_result.get("url") or url,
+    }
 
 
 def _extract_title(text: str) -> Optional[str]:
@@ -2347,7 +2358,7 @@ def fetch_policy_source(
         source.freshness_reason = blocked_reason
         source.freshness_checked_at = now
         source.last_fetch_error = blocked_reason
-        source.next_refresh_due_at = compute_next_retry_due(retry_count=int(getattr(source, "refresh_retry_count", 0) or 0), base_dt=now)
+        source.next_refresh_due_at = _official_block_retry_due(source, base_dt=now)
         source.refresh_state = "blocked"
         source.refresh_status_reason = blocked_reason
         source.refresh_blocked_reason = blocked_reason
@@ -2398,6 +2409,8 @@ def fetch_policy_source(
     content_type: str | None = None
     extracted_text = ""
     fetch_error: str | None = None
+    fetch_meta: dict[str, Any] = {}
+    html_body = ""
 
     previous_current_version = db.scalar(
         select(PolicySourceVersion).where(
@@ -2408,16 +2421,20 @@ def fetch_policy_source(
     previous_version_id = int(previous_current_version.id) if previous_current_version is not None else None
     previous_fingerprint = getattr(source, "current_fingerprint", None) or getattr(source, "content_sha256", None)
 
-    try:
-        with httpx.Client(timeout=timeout_seconds, follow_redirects=True) as client:
-            resp = client.get(url)
-            http_status = int(resp.status_code)
-            content_type = resp.headers.get("content-type")
-            extracted_text = _safe_text_from_http_response(resp)
-            if http_status < 200 or http_status >= 400:
-                fetch_error = f"http_status_{http_status}"
-    except Exception as exc:
-        fetch_error = f"{type(exc).__name__}: {exc}"
+    fetch_result = fetch_official_source_with_fallback(
+        url=url,
+        timeout_seconds=timeout_seconds,
+        cache_ttl_seconds=3600,
+    )
+    fetch_meta = dict(fetch_result)
+    http_status = fetch_result.get("http_status")
+    content_type = fetch_result.get("content_type")
+    extracted_text = str(fetch_result.get("extracted_text") or "")
+    html_body = str(fetch_result.get("html") or "")
+    fetch_error = fetch_result.get("fetch_error")
+
+    if not extracted_text and html_body:
+        extracted_text = _html_to_text(html_body) if '_html_to_text' in globals() else html_body
 
     fingerprint = _fingerprint_for_text(extracted_text or "")
     authoritative = bool(int(getattr(source, "authority_rank", 0) or 0) >= 85)
@@ -2436,6 +2453,12 @@ def fetch_policy_source(
     db.add(version)
     db.flush()
 
+    if hasattr(version, "version_metadata_json"):
+        version.version_metadata_json = _json_dumps(
+            build_fetch_metadata_payload(fetch_meta=fetch_meta, fetched_at=now)
+        )
+        db.add(version)
+
     prior_versions = list(
         db.scalars(
             select(PolicySourceVersion).where(
@@ -2449,6 +2472,12 @@ def fetch_policy_source(
         row.is_current = False
         db.add(row)
 
+    retry_due_at = (
+        _official_block_retry_due(source, base_dt=now)
+        if fetch_error is not None
+        else None
+    )
+
     change_summary = build_source_change_summary(
         previous_fingerprint=previous_fingerprint,
         current_fingerprint=fingerprint or None,
@@ -2459,16 +2488,20 @@ def fetch_policy_source(
         authoritative=authoritative,
         previous_last_changed_at=getattr(source, "last_changed_at", None),
         raw_path=getattr(source, "raw_path", None),
-        retry_due_at=(
-            compute_next_retry_due(retry_count=int(getattr(source, "refresh_retry_count", 0) or 0), base_dt=now)
-            if fetch_error is not None
-            else None
-        ),
+        retry_due_at=retry_due_at,
     )
+
     state_payload = determine_source_refresh_state(
         fetch_ok=(fetch_error is None),
         change_summary=change_summary,
     )
+
+    if should_browser_fallback_on_result(fetch_meta) and _is_official_host(url):
+        state_payload["refresh_state"] = "retrying"
+        state_payload["status_reason"] = "blocked_official_requires_retry_or_manual_review"
+        state_payload["next_step"] = "retry_fetch"
+        state_payload["blocked_reason"] = None
+        state_payload["revalidation_required"] = False
 
     source.http_status = http_status
     source.last_http_status = http_status
@@ -2485,7 +2518,7 @@ def fetch_policy_source(
     source.next_refresh_due_at = (
         _compute_next_refresh_due_at(source, from_dt=now)
         if fetch_error is None
-        else compute_next_retry_due(retry_count=int(getattr(source, "refresh_retry_count", 0) or 0), base_dt=now)
+        else _official_block_retry_due(source, base_dt=now)
     )
     source.refresh_state = state_payload["refresh_state"]
     source.refresh_status_reason = state_payload["status_reason"]
@@ -2495,6 +2528,12 @@ def fetch_policy_source(
     source.revalidation_required = bool(state_payload.get("revalidation_required", False))
     source.validation_due_at = now if source.revalidation_required else None
     source.refresh_retry_count = 0 if fetch_error is None else int(getattr(source, "refresh_retry_count", 0) or 0) + 1
+
+    source_meta = _json_loads_dict(getattr(source, "source_metadata_json", None))
+    source_meta["last_fetch"] = build_fetch_metadata_payload(fetch_meta=fetch_meta, fetched_at=now)
+    if html_body and not source_meta.get("last_fetch", {}).get("title"):
+        source_meta["last_fetch"]["title"] = _extract_title(html_body)
+    source.source_metadata_json = _json_dumps(source_meta)
 
     if fetch_error is None:
         source.registry_status = "active"
@@ -2520,6 +2559,7 @@ def fetch_policy_source(
             "http_status": http_status,
             "fetch_error": fetch_error,
             "change_summary": change_summary,
+            "fetch_meta": build_fetch_metadata_payload(fetch_meta=fetch_meta, fetched_at=now),
         }
     )
 
@@ -2551,6 +2591,9 @@ def fetch_policy_source(
         "next_step": state_payload["next_step"],
         "retry_due_at": source.next_refresh_due_at.isoformat() if getattr(source, "next_refresh_due_at", None) else None,
         "revalidation_required": bool(state_payload.get("revalidation_required", False)),
+        "fetch_method": fetch_meta.get("method"),
+        "from_cache": bool(fetch_meta.get("from_cache")),
+        "final_url": fetch_meta.get("url") or url,
     }
     crawl_sync = sync_crawl_result_to_inventory(db, source=source, fetch_result=fetch_payload)
     db.commit()
@@ -2576,6 +2619,8 @@ def fetch_policy_source(
         "raw_path": getattr(source, "raw_path", None),
         "http_status": http_status,
         "content_type": content_type,
+        "fetch_method": fetch_meta.get("method"),
+        "from_cache": bool(fetch_meta.get("from_cache")),
         "next_refresh_due_at": source.next_refresh_due_at.isoformat() if getattr(source, "next_refresh_due_at", None) else None,
         "refresh_state": state_payload["refresh_state"],
         "status_reason": state_payload["status_reason"],

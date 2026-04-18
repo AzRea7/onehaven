@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     rent_calibration_max_mult: float = 1.30
     default_payment_standard_pct: float = 1.10
 
+    govinfo_api_key: str = ""
+    govinfo_base_url: str = "https://api.govinfo.gov"
+
     # ---- External APIs ----
     hud_user_token: str | None = None
     hud_base_url: str = "https://www.huduser.gov/hudapi/public"

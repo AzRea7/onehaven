@@ -103,6 +103,45 @@ def _json_loads_list(value: Any) -> list[Any]:
     return []
 
 
+
+
+def _coerce_dt_like(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    return None
+
+
+def _clean_reason(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _resolve_next_refresh_step(fetch_result: dict[str, Any], row: PolicySourceInventory, source: PolicySource) -> str:
+    explicit = _clean_reason(fetch_result.get("next_step") or fetch_result.get("next_refresh_step"))
+    if explicit:
+        return explicit
+    source_next = _clean_reason(getattr(source, "next_refresh_step", None))
+    if source_next:
+        return source_next
+    row_next = _clean_reason(getattr(row, "next_refresh_step", None))
+    if row_next:
+        return row_next
+    if bool(fetch_result.get("revalidation_required") or getattr(source, "revalidation_required", False)):
+        return "validate"
+    if bool(fetch_result.get("change_detected") or fetch_result.get("changed")):
+        return "extract"
+    return "monitor"
+
 def canonicalize_url(url: str) -> str:
     return (url or "").strip()
 
@@ -497,33 +536,53 @@ def update_inventory_after_fetch(
         row = sync_policy_source_into_inventory(db, source=source, org_id=getattr(source, "org_id", None))
     now = _utcnow()
     ok = bool(fetch_result.get("ok"))
-    fetch_error = fetch_result.get("fetch_error")
+    fetch_error = _clean_reason(fetch_result.get("fetch_error") or fetch_result.get("status_reason"))
     changed = bool(fetch_result.get("change_detected") or fetch_result.get("changed"))
-    refresh_state = str(fetch_result.get("refresh_state") or getattr(source, "refresh_state", None) or row.refresh_state or "pending")
-    next_step = str(fetch_result.get("next_step") or row.next_refresh_step or "monitor")
+    refresh_state = str(
+        fetch_result.get("refresh_state")
+        or getattr(source, "refresh_state", None)
+        or row.refresh_state
+        or ("healthy" if ok else "failed")
+    )
+    next_step = _resolve_next_refresh_step(fetch_result, row, source)
+    validation_due_at = (
+        _coerce_dt_like(fetch_result.get("validation_due_at"))
+        or _coerce_dt_like(getattr(source, "validation_due_at", None))
+        or getattr(row, "validation_due_at", None)
+    )
+    retry_due_at = (
+        _coerce_dt_like(fetch_result.get("retry_due_at"))
+        or _coerce_dt_like(getattr(source, "next_refresh_due_at", None))
+        or None
+    )
+
     row.policy_source_id = int(getattr(source, "id", 0) or 0) or row.policy_source_id
-    row.current_source_version_id = source_version_id or row.current_source_version_id
+    row.current_source_version_id = source_version_id or fetch_result.get("source_version_id") or row.current_source_version_id
     row.last_crawled_at = now
     row.last_seen_at = now
     row.last_http_status = fetch_result.get("http_status")
     row.last_error = fetch_error
-    row.canonical_fingerprint = fetch_result.get("current_fingerprint") or row.canonical_fingerprint
+    row.canonical_fingerprint = (
+        fetch_result.get("current_fingerprint")
+        or fetch_result.get("content_sha256")
+        or row.canonical_fingerprint
+    )
     row.refresh_state = refresh_state
-    row.refresh_status_reason = fetch_result.get("status_reason") or getattr(source, "refresh_status_reason", None)
+    row.refresh_status_reason = fetch_error or getattr(source, "refresh_status_reason", None)
     row.next_refresh_step = next_step
     row.revalidation_required = bool(fetch_result.get("revalidation_required") or getattr(source, "revalidation_required", False))
-    row.validation_due_at = fetch_result.get("validation_due_at") or getattr(source, "validation_due_at", None) or row.validation_due_at
+    row.validation_due_at = validation_due_at
     row.last_state_transition_at = getattr(source, "last_state_transition_at", None) or now
     if changed:
         row.last_change_detected_at = now
+
     if ok:
         row.crawl_status = INVENTORY_CRAWL_FETCHED
         row.lifecycle_state = INVENTORY_LIFECYCLE_ACCEPTED
         row.accepted_at = row.accepted_at or now
         row.rejected_at = None
         row.last_success_at = now
-        row.last_failure_at = row.last_failure_at
-        row.next_crawl_due_at = getattr(source, "next_refresh_due_at", None) or (now + timedelta(days=7))
+        row.next_crawl_due_at = retry_due_at or getattr(source, "next_refresh_due_at", None) or (now + timedelta(days=7))
         if row.revalidation_required:
             row.refresh_state = "validating"
             row.next_refresh_step = "validate"
@@ -533,8 +592,9 @@ def update_inventory_after_fetch(
         row.rejected_at = now
         row.last_failure_at = now
         row.failure_count = int(row.failure_count or 0) + 1
-        row.next_crawl_due_at = getattr(source, "next_refresh_due_at", None) or compute_next_retry_due(retry_count=int(row.failure_count or 0), base_dt=now)
+        row.next_crawl_due_at = retry_due_at or getattr(source, "next_refresh_due_at", None) or compute_next_retry_due(retry_count=int(row.failure_count or 0), base_dt=now)
         row.next_search_retry_due_at = row.next_crawl_due_at
+
     meta = _json_loads_dict(row.inventory_metadata_json)
     meta["last_fetch_result"] = dict(fetch_result)
     meta["last_fetch_stateful_summary"] = {
@@ -544,13 +604,23 @@ def update_inventory_after_fetch(
         "refresh_state": row.refresh_state,
         "next_refresh_step": row.next_refresh_step,
         "current_source_version_id": row.current_source_version_id,
+        "validation_due_at": row.validation_due_at.isoformat() if row.validation_due_at else None,
     }
+    if fetch_result.get("comparison_state"):
+        meta["comparison_state"] = fetch_result.get("comparison_state")
+    if fetch_result.get("change_kind"):
+        meta["change_kind"] = fetch_result.get("change_kind")
+    if fetch_result.get("actionable_outcome"):
+        meta["actionable_outcome"] = fetch_result.get("actionable_outcome")
+    if fetch_result.get("raw_path"):
+        meta["raw_path"] = fetch_result.get("raw_path")
     row.inventory_metadata_json = _json_dumps(meta)
     row.last_refresh_outcome_json = _json_dumps(fetch_result)
     row.last_change_summary_json = _json_dumps(fetch_result.get("change_summary") or {})
     db.add(row)
     db.flush()
     return row
+
 
 def mark_inventory_not_found(
 

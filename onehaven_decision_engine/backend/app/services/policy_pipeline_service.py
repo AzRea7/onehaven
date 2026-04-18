@@ -65,6 +65,7 @@ from app.services.policy_source_service import (
     refresh_policy_source_and_detect_changes,
 )
 from app.services.policy_validation_service import validate_market_assertions
+from app.services.policy_crawl_inventory_service import sync_crawl_result_to_inventory
 
 
 def _norm_state(s: Optional[str]) -> str:
@@ -687,6 +688,7 @@ def _run_source_refresh_batch(
 
     for source in sources:
         fetch_result = refresh_policy_source_and_detect_changes(db, source=source)
+        inventory_result = sync_crawl_result_to_inventory(db, source=source, fetch_result=fetch_result)
         content_changed = bool(fetch_result.get("change_detected") or fetch_result.get("changed"))
         extract_result: dict[str, Any]
         diff_result: dict[str, Any]
@@ -796,6 +798,7 @@ def _run_source_refresh_batch(
             {
                 "source_id": int(source.id),
                 "refresh": fetch_result,
+                "inventory": inventory_result,
                 "changed": content_changed,
                 "comparison_state": fetch_result.get("comparison_state"),
                 "change_kind": fetch_result.get("change_kind") or (fetch_result.get("change_summary") or {}).get("change_kind"),
@@ -955,6 +958,10 @@ def run_market_policy_pipeline(
         "refresh_summary": {
             **refresh_batch["summary"],
             "manual_review_assertion_ids": [],
+            "inventory_sync_failed_source_ids": [
+                row["source_id"] for row in refresh_batch["source_runs"]
+                if not bool((row.get("inventory") or {}).get("ok"))
+            ],
             "revalidation_required_source_ids": [
                 row["source_id"] for row in refresh_batch["source_runs"]
                 if bool((row.get("refresh") or {}).get("revalidation_required"))
@@ -1035,6 +1042,7 @@ def refresh_single_policy_source(
     pha = _norm_text(getattr(source, "pha_name", None))
 
     fetch_result = refresh_policy_source_and_detect_changes(db, source=source, force=True)
+    inventory_result = sync_crawl_result_to_inventory(db, source=source, fetch_result=fetch_result)
     content_changed = bool(fetch_result.get("change_detected") or fetch_result.get("changed"))
 
     if content_changed:
@@ -1150,6 +1158,7 @@ def refresh_single_policy_source(
         "source_id": int(source.id),
         "source_name": getattr(source, "source_name", None) or getattr(source, "title", None),
         "fetch_result": fetch_result,
+        "inventory_result": inventory_result,
         "stale_mark_result": stale_mark_result,
         "extract_result": {
             "created_count": len(extract_result_rows),
