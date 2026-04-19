@@ -461,3 +461,164 @@ def create_proof_gap_tasks_from_projection(db: Session, *, org_id: int, property
         created.append(int(getattr(task, "id", 0) or 0))
     db.commit()
     return {"created_count": len(created), "created_ids": created}
+
+
+# --- Step 7 additive failure task + deadlines extensions ---
+from datetime import timedelta as _step7_timedelta
+
+_step7_prev_collect_failure_task_blueprints = collect_failure_task_blueprints
+_step7_prev_create_failure_tasks_from_inspection = create_failure_tasks_from_inspection
+
+
+def _step7_item_meta(item: InspectionItem) -> dict[str, Any]:
+    try:
+        import json as _json
+        raw = getattr(item, "evidence_json", None)
+        if isinstance(raw, dict):
+            return dict(raw)
+        if isinstance(raw, str) and raw.strip().startswith('{'):
+            parsed = _json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+    return {}
+
+
+def _step7_deadline_days(item: InspectionItem) -> int | None:
+    for attr in ("correction_days",):
+        value = getattr(item, attr, None)
+        if value not in {None, "", 0}:
+            try:
+                return int(value)
+            except Exception:
+                pass
+    sev = _severity_rank(getattr(item, "severity", None))
+    if sev >= 4:
+        return 1
+    if sev >= 3:
+        return 30
+    return None
+
+
+def _step7_deadline(item: InspectionItem, inspection: Inspection) -> datetime | None:
+    days = _step7_deadline_days(item)
+    if days is None:
+        return None
+    base = getattr(inspection, "inspection_date", None) or _now()
+    return base + _step7_timedelta(days=int(days))
+
+
+def collect_failure_task_blueprints(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int | None = None,
+) -> dict[str, Any]:
+    payload = _step7_prev_collect_failure_task_blueprints(db, org_id=org_id, property_id=property_id, inspection_id=inspection_id)
+    if not payload.get("ok"):
+        return payload
+    inspection = None
+    iid = payload.get("inspection_id")
+    if iid is not None:
+        inspection = db.scalar(select(Inspection).where(Inspection.id == int(iid), Inspection.org_id == org_id, Inspection.property_id == property_id))
+    if inspection is None:
+        inspection = _latest_inspection(db, org_id=org_id, property_id=property_id)
+    if inspection is None:
+        return payload
+    item_rows = {int(getattr(row, 'id')): row for row in _inspection_items(db, inspection_id=int(inspection.id))}
+    enriched = []
+    for row in payload.get("items", []):
+        item = item_rows.get(int(row.get("inspection_item_id") or 0))
+        deadline = _step7_deadline(item, inspection) if item is not None else None
+        mapped = map_inspection_code(str(row.get("code") or ""))
+        out = dict(row)
+        out.update({
+            "deadline": deadline.isoformat() if deadline else None,
+            "deadline_days": _step7_deadline_days(item) if item is not None else None,
+            "deadline_reason": "nspire_lt_24h" if (_step7_deadline_days(item) == 1) else ("nspire_or_fail_30d" if (_step7_deadline_days(item) == 30) else None),
+            "default_fail_reason": mapped.default_fail_reason if mapped else None,
+            "pdf_context_available": bool(__import__('os').path.isdir('/mnt/data/pdfs') or __import__('os').path.isdir('/mnt/data/pfs')),
+        })
+        enriched.append(out)
+    payload["items"] = enriched
+    payload["deadline_count"] = sum(1 for row in enriched if row.get("deadline"))
+    payload["high_priority_count"] = sum(1 for row in enriched if str(row.get("priority") or "").lower() == "high")
+    return payload
+
+
+def create_failure_tasks_from_inspection(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int | None = None,
+) -> dict[str, Any]:
+    payload = collect_failure_task_blueprints(db, org_id=org_id, property_id=property_id, inspection_id=inspection_id)
+    if not payload.get("ok"):
+        return payload
+    created = 0
+    created_task_ids: list[int] = []
+    for item in payload.get("items", []):
+        title = str(item.get("title") or "").strip()
+        if not title or _task_exists(db, org_id=org_id, property_id=property_id, title=title):
+            continue
+        row = RehabTask(
+            org_id=org_id,
+            property_id=property_id,
+            title=title,
+            category=str(item.get("category") or item.get("rehab_category") or "compliance_repair"),
+            inspection_relevant=bool(item.get("inspection_relevant", True)),
+            status="blocked" if str(item.get("priority") or "").lower() == "high" else "todo",
+            cost_estimate=0.0,
+            vendor=None,
+            deadline=(datetime.fromisoformat(item["deadline"]) if item.get("deadline") else None),
+            notes=str(item.get("notes") or ""),
+            created_at=_now(),
+        )
+        if hasattr(row, "priority"):
+            row.priority = str(item.get("priority") or "med")
+        db.add(row)
+        db.flush()
+        created += 1
+        created_task_ids.append(int(row.id))
+    db.commit()
+    return {**payload, "created": created, "created_task_ids": created_task_ids}
+
+
+def build_failure_next_actions(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int | None = None,
+    limit: int = 5,
+) -> dict[str, Any]:
+    payload = collect_failure_task_blueprints(db, org_id=org_id, property_id=property_id, inspection_id=inspection_id)
+    if not payload.get("ok"):
+        return {"ok": False, "recommended_actions": [], "code": payload.get("code")}
+    items = list(payload.get("items") or [])
+    items.sort(key=lambda row: (
+        0 if str(row.get("priority") or "").lower() == "high" else 1,
+        row.get("deadline") or "9999",
+        str(row.get("title") or ""),
+    ))
+    recommended_actions = []
+    for row in items[: max(0, int(limit))]:
+        recommended_actions.append({
+            "code": row.get("code"),
+            "title": row.get("title"),
+            "priority": row.get("priority"),
+            "category": row.get("category") or row.get("rehab_category"),
+            "notes": row.get("notes"),
+            "deadline": row.get("deadline"),
+            "deadline_days": row.get("deadline_days"),
+            "requires_reinspection": bool(row.get("requires_reinspection", True)),
+        })
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "inspection_id": payload.get("inspection_id"),
+        "recommended_actions": recommended_actions,
+        "count": len(recommended_actions),
+    }

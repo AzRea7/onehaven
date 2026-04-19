@@ -591,6 +591,48 @@ def normalize_raw_answer_status(answer: Any) -> str:
     return normalize_inspection_item_status(answer)
 
 
+
+def _nspire_designation_rank(value: str | None) -> int:
+    raw = str(value or "").strip().upper()
+    if raw == "LT":
+        return 4
+    if raw == "S":
+        return 3
+    if raw == "M":
+        return 2
+    if raw == "L":
+        return 1
+    return 0
+
+
+def _severity_from_nspire_designation(value: str | None, fallback: str | None = None) -> str:
+    raw = str(value or "").strip().upper()
+    if raw == "LT":
+        return "critical"
+    if raw in {"S", "M"}:
+        return "fail"
+    if raw == "L":
+        return "warn"
+    return str(fallback or "fail").strip().lower() or "fail"
+
+
+def _default_correction_days_for_designation(value: str | None) -> int | None:
+    raw = str(value or "").strip().upper()
+    if raw == "LT":
+        return 1
+    if raw in {"S", "M"}:
+        return 30
+    return None
+
+
+def _normalized_rule_category(mapped: MappingResult | None, criterion: Any, fallback: str = "other") -> str:
+    if mapped is not None and getattr(mapped, "rehab_category", None):
+        return str(mapped.rehab_category).strip().lower() or fallback
+    if criterion is not None and getattr(criterion, "category", None):
+        return str(criterion.category).strip().lower() or fallback
+    return fallback
+
+
 def build_normalized_inspection_result(
     *,
     code: str,
@@ -618,19 +660,35 @@ def build_normalized_inspection_result(
 
     fail_reason = None
     remediation_guidance = None
-    category = "other"
+    category = _normalized_rule_category(mapped, criterion)
     severity = "fail"
     standard_label = None
     standard_citation = None
     not_applicable_allowed = False
+    nspire_designation = None
+    correction_days = None
+    affirmative_habitability_requirement = False
+    nspire_standard_key = None
+    nspire_standard_code = None
+    nspire_standard_label = None
+    nspire_deficiency_description = None
 
     if criterion is not None:
-        category = criterion.category
-        severity = criterion.severity
-        remediation_guidance = criterion.remediation_guidance
-        standard_label = criterion.standard_label
-        standard_citation = criterion.standard_citation
-        not_applicable_allowed = criterion.not_applicable_allowed
+        category = getattr(criterion, "category", category)
+        severity = getattr(criterion, "severity", severity)
+        remediation_guidance = getattr(criterion, "remediation_guidance", remediation_guidance)
+        standard_label = getattr(criterion, "standard_label", standard_label)
+        standard_citation = getattr(criterion, "standard_citation", standard_citation)
+        not_applicable_allowed = bool(getattr(criterion, "not_applicable_allowed", False))
+        nspire_standard_key = getattr(criterion, "nspire_standard_key", None)
+        nspire_standard_code = getattr(criterion, "nspire_standard_code", None)
+        nspire_standard_label = getattr(criterion, "nspire_standard_label", None)
+        nspire_deficiency_description = getattr(criterion, "nspire_deficiency_description", None)
+        nspire_designation = getattr(criterion, "nspire_designation", None)
+        correction_days = getattr(criterion, "correction_days", None)
+        affirmative_habitability_requirement = bool(
+            getattr(criterion, "affirmative_habitability_requirement", False)
+        )
 
     if isinstance(answer, dict):
         fail_reason = _extract_first_value(answer, ["fail_reason", "reason", "comment", "details"])
@@ -643,6 +701,19 @@ def build_normalized_inspection_result(
         notes = _extract_first_value(answer, ["notes", "note"], notes)
         evidence_json = answer.get("evidence_json", evidence_json)
         photo_references_json = answer.get("photo_references_json", photo_references_json)
+        category = str(answer.get("category") or category).strip().lower() or category
+        standard_label = answer.get("standard_label", standard_label)
+        standard_citation = answer.get("standard_citation", standard_citation)
+        nspire_standard_key = answer.get("nspire_standard_key", nspire_standard_key)
+        nspire_standard_code = answer.get("nspire_standard_code", nspire_standard_code)
+        nspire_standard_label = answer.get("nspire_standard_label", nspire_standard_label)
+        nspire_deficiency_description = answer.get(
+            "nspire_deficiency_description", nspire_deficiency_description
+        )
+        nspire_designation = answer.get("nspire_designation", nspire_designation)
+        correction_days = answer.get("correction_days", correction_days)
+        if "affirmative_habitability_requirement" in answer:
+            affirmative_habitability_requirement = bool(answer.get("affirmative_habitability_requirement"))
     else:
         if status == "fail" and mapped is not None:
             fail_reason = mapped.default_fail_reason
@@ -656,6 +727,17 @@ def build_normalized_inspection_result(
     if status == "fail" and not remediation_guidance and mapped is not None:
         remediation_guidance = mapped.rehab_title
 
+    nspire_designation = str(nspire_designation or "").strip().upper() or None
+    if correction_days is not None:
+        try:
+            correction_days = int(correction_days)
+        except Exception:
+            correction_days = _default_correction_days_for_designation(nspire_designation)
+    else:
+        correction_days = _default_correction_days_for_designation(nspire_designation)
+
+    severity = _severity_from_nspire_designation(nspire_designation, severity)
+
     severity_rank = {
         "info": 1,
         "warn": 2,
@@ -666,9 +748,16 @@ def build_normalized_inspection_result(
     severity_int = severity_rank.get(str(severity).lower(), 3)
     readiness_impact = 0.0
     if status == "fail":
-        readiness_impact = 25.0 if severity_int >= 4 else 15.0 if severity_int == 3 else 8.0 if severity_int == 2 else 0.0
+        if nspire_designation == "LT":
+            readiness_impact = 30.0
+        elif nspire_designation in {"S", "M"}:
+            readiness_impact = 18.0
+        elif nspire_designation == "L":
+            readiness_impact = 6.0
+        else:
+            readiness_impact = 25.0 if severity_int >= 4 else 15.0 if severity_int == 3 else 8.0 if severity_int == 2 else 0.0
     elif status in {"blocked", "inconclusive"}:
-        readiness_impact = 10.0 if severity_int >= 3 else 5.0
+        readiness_impact = 12.0 if severity_int >= 3 else 5.0
 
     return {
         "code": normalized_code,
@@ -692,6 +781,24 @@ def build_normalized_inspection_result(
         "standard_citation": standard_citation,
         "rehab_title": mapped.rehab_title if mapped else remediation_guidance,
         "rehab_category": mapped.rehab_category if mapped else category,
+        # Step 5 additive NSPIRE structure
+        "nspire_standard_key": nspire_standard_key,
+        "nspire_standard_code": nspire_standard_code,
+        "nspire_standard_label": nspire_standard_label,
+        "nspire_deficiency_description": nspire_deficiency_description,
+        "nspire_designation": nspire_designation,
+        "correction_days": correction_days,
+        "affirmative_habitability_requirement": bool(affirmative_habitability_requirement),
+        "structured_deficiency": {
+            "rule_id": mapped.inspection_rule_code if mapped else normalized_code,
+            "category": category,
+            "designation": nspire_designation,
+            "correction_days": correction_days,
+            "standard_key": nspire_standard_key,
+            "standard_code": nspire_standard_code,
+            "standard_label": nspire_standard_label,
+            "deficiency_description": nspire_deficiency_description,
+        },
     }
 
 
@@ -750,6 +857,7 @@ def map_raw_form_answers(payload: dict[str, Any] | list[dict[str, Any]] | None) 
         )
 
     return rows
+
 
 def build_property_item_outcome(
     *,
@@ -819,6 +927,17 @@ def build_property_item_outcome(
         "common_fail": bool(template_item.get("common_fail", True)),
         "not_applicable_allowed": bool(template_item.get("not_applicable_allowed", False)),
         "is_resolved": False,
+        # Step 5 additive NSPIRE fields
+        "nspire_standard_key": raw_result.get("nspire_standard_key") or template_item.get("nspire_standard_key"),
+        "nspire_standard_code": raw_result.get("nspire_standard_code") or template_item.get("nspire_standard_code"),
+        "nspire_standard_label": raw_result.get("nspire_standard_label") or template_item.get("nspire_standard_label"),
+        "nspire_deficiency_description": raw_result.get("nspire_deficiency_description") or template_item.get("nspire_deficiency_description"),
+        "nspire_designation": raw_result.get("nspire_designation") or template_item.get("nspire_designation"),
+        "correction_days": raw_result.get("correction_days") if raw_result.get("correction_days") is not None else template_item.get("correction_days"),
+        "affirmative_habitability_requirement": bool(
+            raw_result.get("affirmative_habitability_requirement")
+            or template_item.get("affirmative_habitability_requirement")
+        ),
     }
 
 
@@ -835,6 +954,10 @@ def summarize_property_item_outcomes(rows: list[dict[str, Any]] | None) -> dict[
         for row in rows
         if str(row.get("result_status") or "").lower() in {"todo", "pending", "scheduled", ""}
     )
+    life_threatening = sum(1 for row in rows if str(row.get("nspire_designation") or "").upper() == "LT")
+    severe = sum(1 for row in rows if str(row.get("nspire_designation") or "").upper() == "S")
+    moderate = sum(1 for row in rows if str(row.get("nspire_designation") or "").upper() == "M")
+    low = sum(1 for row in rows if str(row.get("nspire_designation") or "").upper() == "L")
 
     unresolved = failed + blocked + inconclusive + pending
     pass_rate = (passed / total) if total else None
@@ -854,4 +977,8 @@ def summarize_property_item_outcomes(rows: list[dict[str, Any]] | None) -> dict[
         "readiness_score": round(readiness_score, 2),
         "latest_inspection_passed": total > 0 and unresolved == 0,
         "requires_reinspection": failed > 0 or blocked > 0 or inconclusive > 0,
+        "life_threatening": life_threatening,
+        "severe": severe,
+        "moderate": moderate,
+        "low": low,
     }

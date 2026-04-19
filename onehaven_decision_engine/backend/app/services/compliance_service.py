@@ -1631,3 +1631,90 @@ def build_property_document_stack_snapshot(
         "documents": documents,
         "readiness_summary": readiness,
     }
+
+
+# --- Step 6 additive property-level compliance engine ---
+from datetime import timedelta as _pc_timedelta
+
+
+def _safe_property_compliance_resolution(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    try:
+        from ..services.property_compliance_resolution_service import resolve_property_compliance
+
+        payload = resolve_property_compliance(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        _rollback_quietly(db)
+        return {}
+
+
+def build_property_compliance_resolution(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    payload = _safe_property_compliance_resolution(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    if not payload:
+        prop = _safe_get_property(db, org_id=org_id, property_id=property_id)
+        if prop is None:
+            raise ValueError("property not found")
+        return {
+            "ok": False,
+            "property_id": int(property_id),
+            "property": {
+                "id": int(getattr(prop, "id")),
+                "address": getattr(prop, "address", None),
+                "city": getattr(prop, "city", None),
+                "county": getattr(prop, "county", None),
+                "state": getattr(prop, "state", None),
+                "zip": getattr(prop, "zip", None),
+            },
+            "status": "unknown",
+            "pass_fail_state": "unknown",
+            "is_compliant": False,
+            "missing_requirements": [],
+            "required_actions": [],
+            "deadlines": [],
+        }
+    return payload
+
+
+def answer_property_compliance_question(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    resolution = build_property_compliance_resolution(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "question": "Is this property compliant and what is missing?",
+        "answer": {
+            "is_compliant": bool(resolution.get("is_compliant")),
+            "pass_fail_state": resolution.get("pass_fail_state"),
+            "status": resolution.get("status"),
+            "missing_requirements": resolution.get("missing_requirements") or [],
+            "required_actions": resolution.get("required_actions") or [],
+            "deadlines": resolution.get("deadlines") or [],
+        },
+        "resolution": resolution,
+    }

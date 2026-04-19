@@ -429,3 +429,73 @@ def enrich_change_summary_with_diff(*, base_summary: dict[str, Any] | None, prev
         summary["changed"] = True
         summary["change_detected"] = True
     return summary
+
+
+# --- Step 4 additive patch v2: richer citation and authority diff summaries ---
+def _citation_payload_from_assertion_like(row: dict[str, Any] | None) -> dict[str, Any]:
+    row = dict(row or {})
+    citation = row.get("citation") if isinstance(row.get("citation"), dict) else {}
+    return {
+        "url": _normalize_text_for_fingerprint(citation.get("url") or row.get("citation_url")),
+        "title": _normalize_text_for_fingerprint(citation.get("title")),
+        "publisher": _normalize_text_for_fingerprint(citation.get("publisher")),
+        "locator": _normalize_text_for_fingerprint(citation.get("locator") or row.get("citation_locator")),
+        "pages": tuple(sorted(int(x) for x in (citation.get("pages") or row.get("citation_pages") or []) if str(x).strip().isdigit())),
+        "publication_type": _normalize_text_for_fingerprint(citation.get("publication_type") or row.get("publication_type")),
+        "is_pdf_backed": bool(citation.get("is_pdf_backed") or row.get("is_pdf_backed")),
+    }
+
+
+def build_citation_change_summary(*, previous_assertions: Iterable[dict[str, Any]] | None, current_assertions: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
+    prev = [_citation_payload_from_assertion_like(row) for row in (previous_assertions or [])]
+    curr = [_citation_payload_from_assertion_like(row) for row in (current_assertions or [])]
+    prev_set = {json.dumps(row, sort_keys=True, default=str) for row in prev}
+    curr_set = {json.dumps(row, sort_keys=True, default=str) for row in curr}
+    added = sorted(curr_set - prev_set)
+    removed = sorted(prev_set - curr_set)
+    return {
+        "changed": bool(added or removed),
+        "added_count": len(added),
+        "removed_count": len(removed),
+        "pdf_backed_current_count": sum(1 for row in curr if row.get("is_pdf_backed")),
+        "pinpoint_current_count": sum(1 for row in curr if row.get("locator") or row.get("pages")),
+    }
+
+
+def build_authority_change_summary(*, previous_assertions: Iterable[dict[str, Any]] | None, current_assertions: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
+    def _levels(rows):
+        counts = {}
+        for row in rows or []:
+            level = str((row or {}).get("authority_level") or "").strip().lower() or "unknown"
+            counts[level] = counts.get(level, 0) + 1
+        return counts
+    prev = _levels(previous_assertions)
+    curr = _levels(current_assertions)
+    changed = prev != curr
+    return {
+        "changed": changed,
+        "previous_levels": prev,
+        "current_levels": curr,
+    }
+
+
+_enrich_change_summary_with_diff_orig = enrich_change_summary_with_diff
+
+def enrich_change_summary_with_diff(*, base_summary: dict[str, Any] | None, previous_text: str | None = None, current_text: str | None = None, previous_assertions: Iterable[dict[str, Any]] | None = None, current_assertions: Iterable[dict[str, Any]] | None = None) -> dict[str, Any]:
+    summary = dict(_enrich_change_summary_with_diff_orig(
+        base_summary=base_summary,
+        previous_text=previous_text,
+        current_text=current_text,
+        previous_assertions=previous_assertions,
+        current_assertions=current_assertions,
+    ))
+    summary["citation_diff"] = build_citation_change_summary(previous_assertions=previous_assertions, current_assertions=current_assertions)
+    summary["authority_diff"] = build_authority_change_summary(previous_assertions=previous_assertions, current_assertions=current_assertions)
+    if summary["citation_diff"].get("changed") and not summary.get("change_kind"):
+        summary["change_kind"] = "citation_support_changed"
+    if summary["authority_diff"].get("changed") and summary.get("change_kind") in {None, "unchanged"}:
+        summary["change_kind"] = "authority_mix_changed"
+    if summary["citation_diff"].get("changed") or summary["authority_diff"].get("changed"):
+        summary["changed"] = True
+        summary["change_detected"] = True
+    return summary

@@ -17,6 +17,14 @@ from .checklist_templates import (
 from .inspection_rules import criteria_as_dicts, normalize_rule_code, normalize_severity
 
 
+def _safe_import_nspire_service():
+    try:
+        from app.services.nspire_import_service import list_active_nspire_rules
+        return {"list_active_nspire_rules": list_active_nspire_rules}
+    except Exception:
+        return {}
+
+
 def _baseline_hqs_items() -> list[dict[str, Any]]:
     """
     Full baseline catalog derived from the uploaded HUD-52580-A inspection form.
@@ -24,7 +32,129 @@ def _baseline_hqs_items() -> list[dict[str, Any]]:
     return criteria_as_dicts()
 
 
-def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
+def _nspire_rules(db: Session) -> list[dict[str, Any]]:
+    services = _safe_import_nspire_service()
+    fn = services.get("list_active_nspire_rules")
+    if fn is None:
+        return []
+    try:
+        rows = fn(db)
+        return [dict(row) for row in (rows or []) if isinstance(row, dict)]
+    except Exception:
+        return []
+
+
+def _nspire_key_variants(value: Any) -> list[str]:
+    raw = normalize_rule_code(value or "")
+    if not raw:
+        return []
+    vals = {raw}
+    vals.add(raw.replace("__", "_"))
+    vals.add(raw.replace("-", "_"))
+    return sorted(v for v in vals if v)
+
+
+def _build_nspire_index(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for row in rows or []:
+        keys = set()
+        for field in (
+            row.get("rule_key"),
+            row.get("standard_code"),
+            row.get("standard_label"),
+            row.get("deficiency_description"),
+        ):
+            for variant in _nspire_key_variants(field):
+                keys.add(variant)
+        for key in keys:
+            index[key] = row
+    return index
+
+
+def _source_name_from_item(item: dict[str, Any]) -> str | None:
+    source = item.get("source")
+    if isinstance(source, dict):
+        return str(source.get("name") or source.get("table") or source.get("type") or "").strip() or None
+    return None
+
+
+def _source_type_from_item(item: dict[str, Any]) -> str | None:
+    source = item.get("source")
+    if isinstance(source, dict):
+        return str(source.get("type") or "").strip() or None
+    return None
+
+
+def _severity_from_nspire_designation(designation: str | None, fallback: str | None) -> str:
+    raw = str(designation or "").strip().upper()
+    if raw == "LT":
+        return "critical"
+    if raw in {"S", "M"}:
+        return "fail"
+    if raw == "L":
+        return "warn"
+    return normalize_severity(fallback or "fail")
+
+
+def _enrich_item_with_nspire(item: dict[str, Any], nspire_index: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    code = normalize_rule_code(item.get("inspection_rule_code") or item.get("code") or "")
+    match = None
+    for key in (
+        item.get("nspire_standard_key"),
+        code,
+        item.get("standard_label"),
+        item.get("standard_citation"),
+    ):
+        for variant in _nspire_key_variants(key):
+            if variant in nspire_index:
+                match = nspire_index[variant]
+                break
+        if match is not None:
+            break
+
+    if match is None:
+        return {
+            **item,
+            "inspection_rule_code": code or item.get("inspection_rule_code") or item.get("code"),
+            "source_name": item.get("source_name") or _source_name_from_item(item),
+            "source_type": item.get("source_type") or _source_type_from_item(item),
+            "nspire_matched": False,
+        }
+
+    designation = str(match.get("severity_code") or "").strip().upper() or None
+    correction_days = match.get("correction_days")
+    try:
+        correction_days = int(correction_days) if correction_days is not None else None
+    except Exception:
+        correction_days = None
+
+    enriched = {
+        **item,
+        "inspection_rule_code": code or item.get("inspection_rule_code") or item.get("code"),
+        "severity": _severity_from_nspire_designation(designation, item.get("severity")),
+        "standard_label": item.get("standard_label") or match.get("standard_label"),
+        "standard_citation": item.get("standard_citation") or match.get("citation"),
+        "nspire_standard_key": item.get("nspire_standard_key") or normalize_rule_code(match.get("rule_key") or match.get("standard_code")),
+        "nspire_standard_code": item.get("nspire_standard_code") or match.get("standard_code"),
+        "nspire_standard_label": item.get("nspire_standard_label") or match.get("standard_label"),
+        "nspire_deficiency_description": item.get("nspire_deficiency_description") or match.get("deficiency_description"),
+        "nspire_designation": item.get("nspire_designation") or designation,
+        "correction_days": item.get("correction_days") if item.get("correction_days") is not None else correction_days,
+        "affirmative_habitability_requirement": bool(
+            item.get("affirmative_habitability_requirement")
+            or (
+                str(match.get("pass_fail") or "").strip().lower() == "fail"
+                and designation in {"LT", "S", "M"}
+            )
+        ),
+        "source_name": item.get("source_name") or match.get("source_name") or _source_name_from_item(item),
+        "source_type": item.get("source_type") or "nspire_catalog",
+        "nspire_matched": True,
+    }
+    return enriched
+
+
+def _normalize_item(item: dict[str, Any], *, nspire_index: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     code = normalize_rule_code(item.get("code") or item.get("rule_key") or "")
     description = str(item.get("description") or item.get("label") or code.replace("_", " ").title()).strip()
     category = str(item.get("category") or "other").strip().lower() or "other"
@@ -41,8 +171,7 @@ def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
     item_number = str(item.get("item_number") or "").strip() or None
     room_scope = str(item.get("room_scope") or "").strip().lower() or None
     not_applicable_allowed = bool(item.get("not_applicable_allowed", False))
-
-    return {
+    row = {
         "code": code,
         "description": description,
         "category": category,
@@ -60,7 +189,18 @@ def _normalize_item(item: dict[str, Any]) -> dict[str, Any]:
         "room_scope": room_scope,
         "not_applicable_allowed": not_applicable_allowed,
         "source": item.get("source"),
+        "inspection_rule_code": normalize_rule_code(item.get("inspection_rule_code") or code),
+        "nspire_standard_key": item.get("nspire_standard_key"),
+        "nspire_standard_code": item.get("nspire_standard_code"),
+        "nspire_standard_label": item.get("nspire_standard_label"),
+        "nspire_deficiency_description": item.get("nspire_deficiency_description"),
+        "nspire_designation": item.get("nspire_designation"),
+        "correction_days": item.get("correction_days"),
+        "affirmative_habitability_requirement": bool(item.get("affirmative_habitability_requirement", False)),
+        "source_name": item.get("source_name") or _source_name_from_item(item),
+        "source_type": item.get("source_type") or _source_type_from_item(item),
     }
+    return _enrich_item_with_nspire(row, nspire_index or {})
 
 
 def _load_hqs_rule_rows(db: Session) -> list[Any]:
@@ -75,9 +215,7 @@ def _load_hqs_addendum_rows(db: Session, *, org_id: int | None = None) -> list[A
         if hasattr(HqsAddendum, "org_id") and org_id is not None:
             return list(
                 db.scalars(
-                    select(HqsAddendum).where(
-                        (HqsAddendum.org_id == org_id) | (HqsAddendum.org_id.is_(None))
-                    )
+                    select(HqsAddendum).where((HqsAddendum.org_id == org_id) | (HqsAddendum.org_id.is_(None)))
                 ).all()
             )
         return list(db.scalars(select(HqsAddendum)).all())
@@ -85,78 +223,79 @@ def _load_hqs_addendum_rows(db: Session, *, org_id: int | None = None) -> list[A
         return []
 
 
-def _profile_hqs_items(profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
+def _profile_hqs_items(profile_summary: dict[str, Any], *, nspire_index: dict[str, dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     policy = profile_summary.get("policy") or {}
     if not isinstance(policy, dict):
         return []
 
     out: list[dict[str, Any]] = []
-    raw_items = (
-        policy.get("hqs_addenda")
-        or policy.get("hqs_overrides")
-        or policy.get("inspection_items")
-        or []
-    )
-
+    raw_items = policy.get("hqs_addenda") or policy.get("hqs_overrides") or policy.get("inspection_items") or []
     if isinstance(raw_items, list):
         for raw in raw_items:
             if not isinstance(raw, dict):
                 continue
             code = normalize_rule_code(raw.get("code") or raw.get("rule_key") or "")
-            if not code:
-                continue
-            out.append(
-                _normalize_item(
-                    {
-                        "code": code,
-                        "description": raw.get("description") or raw.get("label") or raw.get("title"),
-                        "category": raw.get("category") or "jurisdiction",
-                        "severity": raw.get("severity") or "fail",
-                        "suggested_fix": raw.get("suggested_fix") or raw.get("fix"),
-                        "fail_reason_hint": raw.get("fail_reason_hint") or raw.get("reason_hint"),
-                        "standard_label": raw.get("standard_label"),
-                        "standard_citation": raw.get("standard_citation"),
-                        "template_key": raw.get("template_key") or "hud_52580a",
-                        "template_version": raw.get("template_version") or "hud_52580a_2019",
-                        "sort_order": raw.get("sort_order") or 10_000,
-                        "section": raw.get("section"),
-                        "item_number": raw.get("item_number"),
-                        "room_scope": raw.get("room_scope"),
-                        "not_applicable_allowed": raw.get("not_applicable_allowed", False),
-                        "common_fail": raw.get("common_fail", True),
-                        "source": {"type": "jurisdiction_policy", "name": "profile_hqs_item"},
-                    }
+            if code:
+                out.append(
+                    _normalize_item(
+                        {
+                            "code": code,
+                            "description": raw.get("description") or raw.get("label") or raw.get("title"),
+                            "category": raw.get("category") or "jurisdiction",
+                            "severity": raw.get("severity") or "fail",
+                            "suggested_fix": raw.get("suggested_fix") or raw.get("fix"),
+                            "fail_reason_hint": raw.get("fail_reason_hint") or raw.get("reason_hint"),
+                            "standard_label": raw.get("standard_label"),
+                            "standard_citation": raw.get("standard_citation"),
+                            "template_key": raw.get("template_key") or "hud_52580a",
+                            "template_version": raw.get("template_version") or "hud_52580a_2019",
+                            "sort_order": raw.get("sort_order") or 10_000,
+                            "section": raw.get("section"),
+                            "item_number": raw.get("item_number"),
+                            "room_scope": raw.get("room_scope"),
+                            "not_applicable_allowed": raw.get("not_applicable_allowed", False),
+                            "common_fail": raw.get("common_fail", True),
+                            "source": {"type": "jurisdiction_policy", "name": "profile_hqs_item"},
+                            "nspire_standard_key": raw.get("nspire_standard_key"),
+                            "nspire_standard_code": raw.get("nspire_standard_code"),
+                            "nspire_standard_label": raw.get("nspire_standard_label"),
+                            "nspire_deficiency_description": raw.get("nspire_deficiency_description"),
+                            "nspire_designation": raw.get("nspire_designation"),
+                            "correction_days": raw.get("correction_days"),
+                            "affirmative_habitability_requirement": raw.get("affirmative_habitability_requirement", False),
+                        },
+                        nspire_index=nspire_index,
+                    )
                 )
-            )
 
     compliance = policy.get("compliance") or {}
-    if isinstance(compliance, dict):
-        if str(compliance.get("inspection_required") or "").strip().lower() in {"yes", "true", "required", "1"}:
-            out.append(
-                _normalize_item(
-                    {
-                        "code": "LOCAL_INSPECTION_REQUIRED",
-                        "description": "Jurisdiction requires local rental inspection readiness",
-                        "category": "jurisdiction",
-                        "severity": "fail",
-                        "suggested_fix": "Prepare the unit for local rental inspection and complete jurisdiction-specific inspection steps.",
-                        "fail_reason_hint": "Local inspection readiness requirement not satisfied.",
-                        "standard_label": "Local inspection requirement",
-                        "standard_citation": "Local jurisdiction policy",
-                        "template_key": "hud_52580a",
-                        "template_version": "hud_52580a_2019",
-                        "sort_order": 20_000,
-                        "section": "jurisdiction_overlay",
-                        "item_number": "J.1",
-                        "source": {"type": "jurisdiction_policy", "name": "inspection_required"},
-                    }
-                )
+    if isinstance(compliance, dict) and str(compliance.get("inspection_required") or "").strip().lower() in {"yes", "true", "required", "1"}:
+        out.append(
+            _normalize_item(
+                {
+                    "code": "LOCAL_INSPECTION_REQUIRED",
+                    "description": "Jurisdiction requires local rental inspection readiness",
+                    "category": "jurisdiction",
+                    "severity": "fail",
+                    "suggested_fix": "Prepare the unit for local rental inspection and complete jurisdiction-specific inspection steps.",
+                    "fail_reason_hint": "Local inspection readiness requirement not satisfied.",
+                    "standard_label": "Local inspection requirement",
+                    "standard_citation": "Local jurisdiction policy",
+                    "template_key": "hud_52580a",
+                    "template_version": "hud_52580a_2019",
+                    "sort_order": 20_000,
+                    "section": "jurisdiction_overlay",
+                    "item_number": "J.1",
+                    "source": {"type": "jurisdiction_policy", "name": "inspection_required"},
+                },
+                nspire_index=nspire_index,
             )
+        )
 
     return out
 
 
-def _contextual_items(prop: Property, profile_summary: dict[str, Any]) -> list[dict[str, Any]]:
+def _contextual_items(prop: Property, profile_summary: dict[str, Any], *, nspire_index: dict[str, dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
 
     year_built = getattr(prop, "year_built", None)
@@ -178,7 +317,8 @@ def _contextual_items(prop: Property, profile_summary: dict[str, Any]) -> list[d
                     "section": "contextual",
                     "item_number": "C.1",
                     "source": {"type": "contextual_rule", "reason": "pre_1978"},
-                }
+                },
+                nspire_index=nspire_index,
             )
         )
 
@@ -193,41 +333,42 @@ def _contextual_items(prop: Property, profile_summary: dict[str, Any]) -> list[d
                     "suggested_fix": "Inspect and repair manufactured-home anchoring, tie-downs, and ground attachment.",
                     "fail_reason_hint": "Manufactured home anchoring may be unsafe or missing.",
                     "standard_label": "Manufactured home tie-downs",
-                    "standard_citation": "HUD-52580-A 6.7",
+                    "standard_citation": "HUD inspection standard",
                     "template_key": "hud_52580a",
                     "template_version": "hud_52580a_2019",
                     "sort_order": 30_100,
                     "section": "building_exterior",
                     "item_number": "6.7",
                     "source": {"type": "contextual_rule", "reason": "manufactured_home"},
-                }
+                },
+                nspire_index=nspire_index,
             )
         )
 
     policy = profile_summary.get("policy") or {}
     compliance = policy.get("compliance") or {}
-    if isinstance(compliance, dict):
-        if str(compliance.get("local_agent_required") or "").strip().lower() in {"yes", "true", "required", "1"}:
-            out.append(
-                _normalize_item(
-                    {
-                        "code": "LOCAL_AGENT_DOCUMENTATION",
-                        "description": "Local agent / responsible party documentation should be ready for inspection packet",
-                        "category": "documents",
-                        "severity": "warn",
-                        "suggested_fix": "Prepare valid local agent or responsible party information required by the jurisdiction.",
-                        "fail_reason_hint": "Local agent / responsible party documentation missing.",
-                        "standard_label": "Local agent documentation",
-                        "standard_citation": "Local jurisdiction policy",
-                        "template_key": "hud_52580a",
-                        "template_version": "hud_52580a_2019",
-                        "sort_order": 30_200,
-                        "section": "contextual",
-                        "item_number": "C.2",
-                        "source": {"type": "contextual_rule", "reason": "local_agent_required"},
-                    }
-                )
+    if isinstance(compliance, dict) and str(compliance.get("local_agent_required") or "").strip().lower() in {"yes", "true", "required", "1"}:
+        out.append(
+            _normalize_item(
+                {
+                    "code": "LOCAL_AGENT_DOCUMENTATION",
+                    "description": "Local agent / responsible party documentation should be ready for inspection packet",
+                    "category": "documents",
+                    "severity": "warn",
+                    "suggested_fix": "Prepare valid local agent or responsible party information required by the jurisdiction.",
+                    "fail_reason_hint": "Local agent / responsible party documentation missing.",
+                    "standard_label": "Local agent documentation",
+                    "standard_citation": "Local jurisdiction policy",
+                    "template_key": "hud_52580a",
+                    "template_version": "hud_52580a_2019",
+                    "sort_order": 30_200,
+                    "section": "contextual",
+                    "item_number": "C.2",
+                    "source": {"type": "contextual_rule", "reason": "local_agent_required"},
+                },
+                nspire_index=nspire_index,
             )
+        )
 
     return out
 
@@ -246,23 +387,27 @@ def get_effective_hqs_items(
       3) HqsAddendum policy table overrides/extensions
       4) jurisdiction profile adds
       5) contextual property adds
+      6) NSPIRE enrichment metadata, when present in the imported catalog
     """
     profile_summary = profile_summary or {}
     baseline_items = _baseline_hqs_items()
+    nspire_rows = _nspire_rules(db)
+    nspire_index = _build_nspire_index(nspire_rows)
 
     items: dict[str, dict[str, Any]] = {
-        row["code"]: _normalize_item(
-            {
-                **row,
-                "source": {"type": "baseline_internal", "name": "HUD-52580-A full baseline"},
-            }
+        normalize_rule_code(row.get("code") or ""): _normalize_item(
+            {**row, "source": {"type": "baseline_internal", "name": "HUD-52580-A full baseline"}},
+            nspire_index=nspire_index,
         )
         for row in baseline_items
+        if normalize_rule_code(row.get("code") or "")
     }
 
     sources: list[dict[str, Any]] = [
         {"type": "baseline_internal", "name": "HUD-52580-A full baseline", "count": len(items)}
     ]
+    if nspire_rows:
+        sources.append({"type": "nspire_catalog", "name": "NSPIRE imported catalog", "count": len(nspire_rows)})
 
     rule_rows = _load_hqs_rule_rows(db)
     for row in rule_rows:
@@ -293,7 +438,15 @@ def get_effective_hqs_items(
                 else prior.get("not_applicable_allowed", False),
                 "common_fail": prior.get("common_fail", True),
                 "source": {"type": "policy_table", "table": "HqsRule"},
-            }
+                "nspire_standard_key": getattr(row, "nspire_standard_key", None),
+                "nspire_standard_code": getattr(row, "nspire_standard_code", None),
+                "nspire_standard_label": getattr(row, "nspire_standard_label", None),
+                "nspire_deficiency_description": getattr(row, "nspire_deficiency_description", None),
+                "nspire_designation": getattr(row, "nspire_designation", None),
+                "correction_days": getattr(row, "correction_days", None),
+                "affirmative_habitability_requirement": getattr(row, "affirmative_habitability_requirement", False),
+            },
+            nspire_index=nspire_index,
         )
     if rule_rows:
         sources.append({"type": "policy_table", "table": "HqsRule", "count": len(rule_rows)})
@@ -327,44 +480,52 @@ def get_effective_hqs_items(
                 else prior.get("not_applicable_allowed", False),
                 "common_fail": prior.get("common_fail", True),
                 "source": {"type": "policy_table", "table": "HqsAddendum"},
-            }
+                "nspire_standard_key": getattr(row, "nspire_standard_key", None),
+                "nspire_standard_code": getattr(row, "nspire_standard_code", None),
+                "nspire_standard_label": getattr(row, "nspire_standard_label", None),
+                "nspire_deficiency_description": getattr(row, "nspire_deficiency_description", None),
+                "nspire_designation": getattr(row, "nspire_designation", None),
+                "correction_days": getattr(row, "correction_days", None),
+                "affirmative_habitability_requirement": getattr(row, "affirmative_habitability_requirement", False),
+            },
+            nspire_index=nspire_index,
         )
     if addenda:
         sources.append({"type": "policy_table", "table": "HqsAddendum", "count": len(addenda)})
 
-    profile_items = _profile_hqs_items(profile_summary)
+    profile_items = _profile_hqs_items(profile_summary, nspire_index=nspire_index)
     for item in profile_items:
         items[item["code"]] = item
     if profile_items:
         sources.append({"type": "jurisdiction_policy", "name": "profile_hqs_items", "count": len(profile_items)})
 
-    ctx_items = _contextual_items(prop, profile_summary)
+    ctx_items = _contextual_items(prop, profile_summary, nspire_index=nspire_index)
     for item in ctx_items:
         items[item["code"]] = item
     if ctx_items:
-        sources.append({"type": "contextual_rules", "count": len(ctx_items)})
+        sources.append({"type": "contextual_rule", "name": "property_context", "count": len(ctx_items)})
 
-    ordered = sorted(
+    ordered_items = sorted(
         items.values(),
-        key=lambda x: (
-            str(x.get("template_key") or "hud_52580a"),
-            str(x.get("template_version") or "hud_52580a_2019"),
-            str(x.get("section") or ""),
-            str(x.get("item_number") or ""),
-            int(x.get("sort_order", 0) or 0),
-            str(x.get("category") or ""),
-            str(x.get("code") or ""),
+        key=lambda row: (
+            int(row.get("sort_order", 0) or 0),
+            str(row.get("section") or ""),
+            str(row.get("item_number") or ""),
+            str(row.get("code") or ""),
         ),
     )
-
     return {
-        "items": ordered,
+        "items": ordered_items,
         "sources": sources,
         "counts": {
-            "total": len(items),
+            "total": len(ordered_items),
             "baseline": len(baseline_items),
             "profile_items": len(profile_items),
             "contextual_items": len(ctx_items),
+            "nspire_rules": len(nspire_rows),
+            "nspire_enriched_items": sum(1 for row in ordered_items if row.get("nspire_matched")),
+            "life_threatening_items": sum(1 for row in ordered_items if str(row.get("nspire_designation") or "").upper() == "LT"),
+            "affirmative_habitability_items": sum(1 for row in ordered_items if row.get("affirmative_habitability_requirement")),
         },
     }
 
@@ -381,17 +542,7 @@ def build_property_inspection_packet(
     inspector_name: str | None = None,
     inspection_date: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Domain-only helper that turns the effective rule library into a property-scoped
-    inspection packet. Services can persist the returned rows directly into
-    property-specific inspection item tables.
-    """
-    effective = get_effective_hqs_items(
-        db,
-        org_id=org_id,
-        prop=prop,
-        profile_summary=profile_summary,
-    )
+    effective = get_effective_hqs_items(db, org_id=org_id, prop=prop, profile_summary=profile_summary)
     template_items = template_items_from_effective_rules(effective.get("items") or [])
     resolved_property_id = int(property_id or getattr(prop, "id", 0) or 0)
 
@@ -405,16 +556,7 @@ def build_property_inspection_packet(
         inspection_date=inspection_date,
     )
 
-    template_versions = sorted(
-        {
-            (
-                item.template_key,
-                item.template_version,
-            )
-            for item in template_items
-        }
-    )
-
+    template_versions = sorted({(item.template_key, item.template_version) for item in template_items})
     return {
         "property_id": resolved_property_id,
         "org_id": org_id,
@@ -422,10 +564,7 @@ def build_property_inspection_packet(
         "template_catalog": template_items_as_dicts(template_items),
         "template_sources": effective.get("sources") or [],
         "template_counts": effective.get("counts") or {},
-        "template_versions": [
-            {"template_key": key, "template_version": version}
-            for key, version in template_versions
-        ],
+        "template_versions": [{"template_key": key, "template_version": version} for key, version in template_versions],
         "inspection_items": checklist_rows,
         "summary": {
             "total_items": len(checklist_rows),
@@ -433,9 +572,10 @@ def build_property_inspection_packet(
             "critical_items": sum(1 for row in checklist_rows if str(row.get("severity")).lower() == "critical"),
             "fail_items": sum(1 for row in checklist_rows if str(row.get("severity")).lower() == "fail"),
             "warn_items": sum(1 for row in checklist_rows if str(row.get("severity")).lower() == "warn"),
+            "life_threatening_items": sum(1 for row in checklist_rows if str(row.get("nspire_designation") or "").upper() == "LT"),
+            "affirmative_habitability_items": sum(1 for row in checklist_rows if row.get("affirmative_habitability_requirement")),
         },
     }
-
 
 
 def hqs_items_lookup(
@@ -445,18 +585,12 @@ def hqs_items_lookup(
     prop: Property,
     profile_summary: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    effective = get_effective_hqs_items(
-        db,
-        org_id=org_id,
-        prop=prop,
-        profile_summary=profile_summary,
-    )
+    effective = get_effective_hqs_items(db, org_id=org_id, prop=prop, profile_summary=profile_summary)
     return {
         normalize_rule_code(item.get("code") or ""): item
         for item in (effective.get("items") or [])
         if normalize_rule_code(item.get("code") or "")
     }
-
 
 
 def explain_hqs_rule(
@@ -467,10 +601,5 @@ def explain_hqs_rule(
     code: str,
     profile_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    lookup = hqs_items_lookup(
-        db,
-        org_id=org_id,
-        prop=prop,
-        profile_summary=profile_summary,
-    )
+    lookup = hqs_items_lookup(db, org_id=org_id, prop=prop, profile_summary=profile_summary)
     return lookup.get(normalize_rule_code(code))

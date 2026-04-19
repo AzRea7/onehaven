@@ -22,6 +22,38 @@ class ChecklistTemplateItem:
     item_number: str | None = None
     room_scope: str | None = None
     not_applicable_allowed: bool = False
+    # Step 5 additive NSPIRE metadata
+    nspire_standard_key: str | None = None
+    nspire_standard_code: str | None = None
+    nspire_standard_label: str | None = None
+    nspire_deficiency_description: str | None = None
+    nspire_designation: str | None = None
+    correction_days: int | None = None
+    affirmative_habitability_requirement: bool = False
+    source_name: str | None = None
+    source_type: str | None = None
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in {"1", "true", "yes", "y", "required"}:
+        return True
+    if raw in {"0", "false", "no", "n"}:
+        return False
+    return default
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
 
 
 def base_hqs_template() -> list[ChecklistTemplateItem]:
@@ -43,6 +75,17 @@ def base_hqs_template() -> list[ChecklistTemplateItem]:
                 item_number=c.item_number,
                 room_scope=c.room_scope,
                 not_applicable_allowed=c.not_applicable_allowed,
+                nspire_standard_key=getattr(c, "nspire_standard_key", None),
+                nspire_standard_code=getattr(c, "nspire_standard_code", None),
+                nspire_standard_label=getattr(c, "nspire_standard_label", None),
+                nspire_deficiency_description=getattr(c, "nspire_deficiency_description", None),
+                nspire_designation=getattr(c, "nspire_designation", None),
+                correction_days=_coerce_int(getattr(c, "correction_days", None)),
+                affirmative_habitability_requirement=_coerce_bool(
+                    getattr(c, "affirmative_habitability_requirement", False)
+                ),
+                source_name=getattr(c, "source_name", None),
+                source_type=getattr(c, "source_type", None),
             )
         )
     return ordered_template_items(out)
@@ -70,6 +113,18 @@ def template_items_from_effective_rules(effective_items: Iterable[dict[str, Any]
                 item_number=raw.get("item_number"),
                 room_scope=raw.get("room_scope"),
                 not_applicable_allowed=bool(raw.get("not_applicable_allowed", False)),
+                nspire_standard_key=raw.get("nspire_standard_key"),
+                nspire_standard_code=raw.get("nspire_standard_code"),
+                nspire_standard_label=raw.get("nspire_standard_label"),
+                nspire_deficiency_description=raw.get("nspire_deficiency_description"),
+                nspire_designation=raw.get("nspire_designation"),
+                correction_days=_coerce_int(raw.get("correction_days")),
+                affirmative_habitability_requirement=_coerce_bool(
+                    raw.get("affirmative_habitability_requirement", False)
+                ),
+                source_name=raw.get("source_name")
+                or (raw.get("source") or {}).get("name") if isinstance(raw.get("source"), dict) else raw.get("source_name"),
+                source_type=(raw.get("source") or {}).get("type") if isinstance(raw.get("source"), dict) else raw.get("source_type"),
             )
         )
     return ordered_template_items(out)
@@ -174,6 +229,16 @@ def build_property_scoped_checklist_items(
                 "photo_references_json": "[]",
                 "is_resolved": False,
                 "requires_reinspection": False,
+                # Step 5 additive NSPIRE fields
+                "nspire_standard_key": item.nspire_standard_key,
+                "nspire_standard_code": item.nspire_standard_code,
+                "nspire_standard_label": item.nspire_standard_label,
+                "nspire_deficiency_description": item.nspire_deficiency_description,
+                "nspire_designation": item.nspire_designation,
+                "correction_days": item.correction_days,
+                "affirmative_habitability_requirement": item.affirmative_habitability_requirement,
+                "source_name": item.source_name,
+                "source_type": item.source_type,
             }
         )
     return rows

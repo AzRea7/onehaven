@@ -1049,3 +1049,40 @@ def inspection_schedule_summary(
         org_id=int(p.org_id),
         property_id=int(property_id),
     )
+
+
+# --- Step 7 additive inspection workflow endpoints ---
+@router.get("/property/{property_id}/template", response_model=dict)
+def inspection_template_preview(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
+    _require_inspection_preview_stage(db, org_id=p.org_id, property_id=property_id, action="preview inspection template")
+    from ..services.inspection_template_service import build_inspection_template
+    return build_inspection_template(db, org_id=p.org_id, property_id=property_id)
+
+
+@router.get("/property/{property_id}/task-preview", response_model=dict)
+def inspection_task_preview(
+    property_id: int,
+    inspection_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
+    _require_inspection_preview_stage(db, org_id=p.org_id, property_id=property_id, action="preview inspection tasks")
+    from ..services.inspection_failure_task_service import collect_failure_task_blueprints
+    return collect_failure_task_blueprints(db, org_id=p.org_id, property_id=property_id, inspection_id=inspection_id)
+
+
+@router.get("/property/{property_id}/operational-readiness", response_model=dict)
+def inspection_operational_readiness(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
+    _require_inspection_preview_stage(db, org_id=p.org_id, property_id=property_id, action="view operational readiness")
+    return build_property_readiness_summary(db, org_id=p.org_id, property_id=property_id)

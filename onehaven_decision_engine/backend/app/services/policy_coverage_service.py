@@ -1059,3 +1059,138 @@ def upsert_coverage_status(
     db.commit()
     db.refresh(row)
     return row
+
+
+# --- Step 4 additive patch v2: coverage summaries for real/verified/current rules and PDF-backed evidence ---
+def _rule_quality_bucket(row: dict[str, Any]) -> str:
+    if row.get("is_verified") and row.get("is_current"):
+        return "verified_current"
+    if row.get("is_verified"):
+        return "verified_not_current"
+    if row.get("is_real"):
+        return "real_not_verified"
+    return "untrusted"
+
+
+def _category_rule_quality_summary(rule_matrix: list[dict[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for row in rule_matrix:
+        category = str(row.get("category") or row.get("normalized_category") or "uncategorized").strip().lower() or "uncategorized"
+        bucket = _rule_quality_bucket(row)
+        item = out.setdefault(category, {
+            "category": category,
+            "rule_count": 0,
+            "verified_current_count": 0,
+            "verified_not_current_count": 0,
+            "real_not_verified_count": 0,
+            "untrusted_count": 0,
+            "pdf_backed_count": 0,
+            "pinpoint_citation_count": 0,
+            "authority_levels": [],
+        })
+        item["rule_count"] += 1
+        item[f"{bucket}_count"] += 1
+        if row.get("is_pdf_backed"):
+            item["pdf_backed_count"] += 1
+        if row.get("citation_has_pinpoint"):
+            item["pinpoint_citation_count"] += 1
+        level = str(row.get("authority_level") or "").strip()
+        if level and level not in item["authority_levels"]:
+            item["authority_levels"].append(level)
+    return out
+
+
+def _rule_currency_summary(rule_matrix: list[dict[str, Any]]) -> dict[str, Any]:
+    real_count = sum(1 for row in rule_matrix if row.get("is_real"))
+    verified_count = sum(1 for row in rule_matrix if row.get("is_verified"))
+    current_count = sum(1 for row in rule_matrix if row.get("is_current"))
+    verified_current_count = sum(1 for row in rule_matrix if row.get("is_verified") and row.get("is_current"))
+    pdf_backed_count = sum(1 for row in rule_matrix if row.get("is_pdf_backed"))
+    pinpoint_count = sum(1 for row in rule_matrix if row.get("citation_has_pinpoint"))
+    authoritative_current_count = sum(1 for row in rule_matrix if row.get("is_current") and str(row.get("authority_level") or "") == "authoritative_official")
+    return {
+        "real": real_count,
+        "verified": verified_count,
+        "current": current_count,
+        "verified_current": verified_current_count,
+        "pdf_backed": pdf_backed_count,
+        "pinpoint_citation": pinpoint_count,
+        "authoritative_current": authoritative_current_count,
+        "verified_current_ratio": round(verified_current_count / max(1, real_count), 6),
+    }
+
+
+_coverage_v2_orig_compute_coverage_status = compute_coverage_status
+
+def compute_coverage_status(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> dict:
+    payload = dict(_coverage_v2_orig_compute_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    ))
+    rule_matrix = list(payload.get("structured_rule_matrix") or [])
+    quality_by_category = _category_rule_quality_summary(rule_matrix)
+    currency_summary = _rule_currency_summary(rule_matrix)
+    payload["rule_quality_by_category"] = quality_by_category
+    payload["rule_currency_summary"] = currency_summary
+    payload["pdf_backed_rule_count"] = currency_summary["pdf_backed"]
+    payload["pinpoint_citation_rule_count"] = currency_summary["pinpoint_citation"]
+    payload["authoritative_current_rule_count"] = currency_summary["authoritative_current"]
+    payload["coverage_status_step4"] = (
+        "verified_current" if currency_summary["verified_current"] > 0 else
+        "verified_not_current" if currency_summary["verified"] > 0 else
+        "real_not_verified" if currency_summary["real"] > 0 else
+        payload.get("coverage_status")
+    )
+    return payload
+
+
+_coverage_v2_orig_upsert_coverage_status = upsert_coverage_status
+
+def upsert_coverage_status(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    notes: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> JurisdictionCoverageStatus:
+    row = _coverage_v2_orig_upsert_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        notes=notes,
+        focus=focus,
+    )
+    payload = compute_coverage_status(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, focus=focus)
+    if hasattr(row, "coverage_summary_json"):
+        row.coverage_summary_json = _dumps({
+            **_loads_dict(getattr(row, "coverage_summary_json", None)),
+            "rules_real_verified_current": payload.get("rules_real_verified_current", {}),
+            "change_detection_summary": payload.get("change_detection_summary", {}),
+            "rule_currency_summary": payload.get("rule_currency_summary", {}),
+            "rule_quality_by_category": payload.get("rule_quality_by_category", {}),
+        })
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row

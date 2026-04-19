@@ -995,3 +995,169 @@ def validate_market_assertions(
     result["verified_rule_count_step4"] = verified_count
     result["current_rule_count"] = current_count
     return result
+
+
+# --- Step 4 additive patch v2: stronger citation/currentness normalization with PDF-aware context ---
+def _citation_pages_from_payload(value):
+    payload = _loads_dict(value)
+    pages = payload.get("pages")
+    if isinstance(pages, list):
+        out = []
+        for page in pages:
+            try:
+                out.append(int(page))
+            except Exception:
+                continue
+        return out
+    page = payload.get("page")
+    try:
+        return [int(page)] if page is not None else []
+    except Exception:
+        return []
+
+
+def _citation_locator_text(payload: dict) -> str | None:
+    raw = str(payload.get("locator") or payload.get("section") or payload.get("heading") or payload.get("anchor") or "").strip()
+    return raw or None
+
+
+def _citation_source_kind(source: PolicySource | None, citation_payload: dict) -> str:
+    publication_type = str(getattr(source, "publication_type", None) or citation_payload.get("publication_type") or "").strip().lower()
+    url = str(getattr(source, "url", None) or citation_payload.get("url") or "").strip().lower()
+    if publication_type == "pdf" or url.endswith('.pdf'):
+        return "pdf"
+    if publication_type in {"api", "json", "json_api"}:
+        return "api"
+    return "html"
+
+
+def _normalized_citation_with_pdf_context(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    citation = _loads_dict(getattr(assertion, "citation_json", None))
+    raw_excerpt = str(getattr(assertion, "raw_excerpt", None) or citation.get("raw_excerpt") or "").strip() or None
+    pages = _citation_pages_from_payload(citation)
+    source_kind = _citation_source_kind(source, citation)
+    locator = _citation_locator_text(citation)
+    url = str(citation.get("url") or getattr(source, "url", None) or "").strip() or None
+    title = str(citation.get("title") or getattr(source, "title", None) or "").strip() or None
+    publisher = str(citation.get("publisher") or getattr(source, "publisher", None) or "").strip() or None
+    quality = _citation_quality_from_assertion(assertion)
+    has_pinpoint = bool(locator or pages)
+    return {
+        "url": url,
+        "title": title,
+        "publisher": publisher,
+        "publication_type": str(getattr(source, "publication_type", None) or citation.get("publication_type") or source_kind),
+        "source_kind": source_kind,
+        "raw_excerpt": raw_excerpt,
+        "pages": pages,
+        "page_count": len(pages),
+        "locator": locator,
+        "pinpoint_citation": has_pinpoint,
+        "citation_quality": round(float(quality), 6),
+        "is_pdf_backed": source_kind == "pdf",
+        "is_api_backed": source_kind == "api",
+        "is_html_backed": source_kind == "html",
+    }
+
+
+def _confidence_with_currentness(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    currentness = _source_currentness_summary(source)
+    citation = _normalized_citation_with_pdf_context(assertion, source)
+    confidence = _safe_float(getattr(assertion, "confidence", 0.0))
+    validation_state = str(getattr(assertion, "validation_state", None) or "").strip().lower()
+    effective = confidence
+    if currentness.get("is_current"):
+        effective += 0.05
+    if citation.get("pinpoint_citation"):
+        effective += 0.05
+    if citation.get("is_pdf_backed") and citation.get("page_count"):
+        effective += 0.03
+    if validation_state == "validated":
+        effective += 0.07
+    return {
+        "base_confidence": round(confidence, 6),
+        "effective_confidence": round(min(effective, 1.0), 6),
+        "is_current": bool(currentness.get("is_current")),
+        "pinpoint_citation": bool(citation.get("pinpoint_citation")),
+        "is_pdf_backed": bool(citation.get("is_pdf_backed")),
+    }
+
+
+_validation_v2_orig_assertion_normalization_payload = _assertion_normalization_payload
+
+def _assertion_normalization_payload(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    payload = dict(_validation_v2_orig_assertion_normalization_payload(assertion, source))
+    citation = _normalized_citation_with_pdf_context(assertion, source)
+    confidence_summary = _confidence_with_currentness(assertion, source)
+    payload["citation"] = citation
+    payload["citation_pages"] = citation.get("pages")
+    payload["citation_locator"] = citation.get("locator")
+    payload["citation_has_pinpoint"] = citation.get("pinpoint_citation")
+    payload["source_kind"] = citation.get("source_kind")
+    payload["publication_type"] = citation.get("publication_type")
+    payload["is_pdf_backed"] = citation.get("is_pdf_backed")
+    payload["is_api_backed"] = citation.get("is_api_backed")
+    payload["is_html_backed"] = citation.get("is_html_backed")
+    payload["effective_confidence"] = confidence_summary.get("effective_confidence")
+    payload["base_confidence"] = confidence_summary.get("base_confidence")
+    payload["evidence_strength"] = (
+        "strong" if (payload.get("is_verified") and payload.get("is_current") and citation.get("pinpoint_citation")) else
+        "moderate" if (payload.get("is_real") and citation.get("citation_quality", 0.0) >= 0.6) else
+        "weak"
+    )
+    return payload
+
+
+_validation_v2_orig_validate_assertion = validate_assertion
+
+def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    payload = dict(_validation_v2_orig_validate_assertion(assertion=assertion, source=source))
+    normalized = _assertion_normalization_payload(assertion, source)
+    payload["normalized_rule"] = normalized
+    payload["citation_payload"] = normalized.get("citation")
+    payload["citation_pages"] = normalized.get("citation_pages")
+    payload["citation_locator"] = normalized.get("citation_locator")
+    payload["citation_has_pinpoint"] = normalized.get("citation_has_pinpoint")
+    payload["source_kind"] = normalized.get("source_kind")
+    payload["publication_type"] = normalized.get("publication_type")
+    payload["is_pdf_backed"] = normalized.get("is_pdf_backed")
+    payload["effective_confidence"] = normalized.get("effective_confidence")
+    payload["evidence_strength"] = normalized.get("evidence_strength")
+    return payload
+
+
+_validation_v2_orig_validate_market_assertions = validate_market_assertions
+
+def validate_market_assertions(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    source_id: int | None = None,
+) -> dict[str, object]:
+    result = dict(_validation_v2_orig_validate_market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        source_id=source_id,
+    ))
+    normalized_rules = list(result.get("normalized_rules") or [])
+    result["pdf_backed_rule_count"] = sum(1 for row in normalized_rules if row.get("is_pdf_backed"))
+    result["pinpoint_citation_rule_count"] = sum(1 for row in normalized_rules if row.get("citation_has_pinpoint"))
+    result["strong_evidence_rule_count"] = sum(1 for row in normalized_rules if row.get("evidence_strength") == "strong")
+    result["normalization_summary"] = {
+        "real": int(result.get("real_rule_count") or 0),
+        "verified": int(result.get("verified_rule_count_step4") or 0),
+        "current": int(result.get("current_rule_count") or 0),
+        "verified_current": int(result.get("verified_current_rule_count") or 0),
+        "pdf_backed": int(result.get("pdf_backed_rule_count") or 0),
+        "pinpoint_citation": int(result.get("pinpoint_citation_rule_count") or 0),
+        "strong_evidence": int(result.get("strong_evidence_rule_count") or 0),
+    }
+    return result

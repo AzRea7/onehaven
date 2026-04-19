@@ -7,6 +7,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
+from mimetypes import guess_type
 from typing import Any
 from urllib.parse import urlparse
 
@@ -20,6 +21,8 @@ FETCH_CACHE_DIR = os.getenv("POLICY_FETCH_CACHE_DIR", "/tmp/policy_fetch_cache")
 PLAYWRIGHT_ENABLED = os.getenv("POLICY_PLAYWRIGHT_ENABLED", "1").strip() not in {"0", "false", "False"}
 PLAYWRIGHT_TIMEOUT_MS = int(os.getenv("POLICY_PLAYWRIGHT_TIMEOUT_MS", "25000"))
 PLAYWRIGHT_WAIT_UNTIL = os.getenv("POLICY_PLAYWRIGHT_WAIT_UNTIL", "domcontentloaded").strip() or "domcontentloaded"
+PDF_ROOTS_ENV = os.getenv("POLICY_SOURCE_PDF_ROOTS", "")
+LOCAL_PDF_MAX_BYTES = int(os.getenv("POLICY_LOCAL_PDF_MAX_BYTES", str(15 * 1024 * 1024)))
 
 BROWSER_FALLBACK_HOSTS = {
     "www.michigan.gov",
@@ -74,6 +77,113 @@ def _cache_key_for_url(url: str) -> str:
 
 def _cache_path_for_url(url: str) -> Path:
     return _ensure_fetch_cache_dir() / f"{_cache_key_for_url(url)}.json"
+
+def _iter_local_pdf_roots() -> list[Path]:
+    roots: list[Path] = []
+    for raw in [part.strip() for part in PDF_ROOTS_ENV.split(os.pathsep) if part.strip()]:
+        try:
+            path = Path(raw).expanduser().resolve()
+        except Exception:
+            continue
+        if path.exists() and path.is_dir():
+            roots.append(path)
+    return roots
+
+
+def _safe_filename(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._")
+
+
+def _candidate_pdf_names(candidate: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for value in [
+        candidate.get("document_name"),
+        candidate.get("pdf_filename"),
+        candidate.get("title"),
+        candidate.get("source_label"),
+    ]:
+        cleaned = _safe_filename(str(value or ""))
+        if not cleaned:
+            continue
+        if not cleaned.lower().endswith(".pdf"):
+            names.append(f"{cleaned}.pdf")
+        names.append(cleaned)
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in names:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(item)
+    return ordered
+
+
+def _load_local_pdf_bytes(path: Path) -> dict[str, Any]:
+    try:
+        raw = path.read_bytes()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "method": "local_pdf",
+            "url": path.as_uri(),
+            "http_status": None,
+            "content_type": "application/pdf",
+            "title": path.name,
+            "raw_bytes": b"",
+            "raw_text_preview": "",
+            "content_sha256": None,
+            "fetch_error": f"{type(exc).__name__}: {exc}",
+        }
+    if len(raw) > LOCAL_PDF_MAX_BYTES:
+        return {
+            "ok": False,
+            "method": "local_pdf",
+            "url": path.as_uri(),
+            "http_status": None,
+            "content_type": "application/pdf",
+            "title": path.name,
+            "raw_bytes": b"",
+            "raw_text_preview": "",
+            "content_sha256": None,
+            "fetch_error": "local_pdf_too_large",
+        }
+    preview = _json_bytes_to_text(raw[:10000])
+    return {
+        "ok": True,
+        "method": "local_pdf",
+        "url": path.as_uri(),
+        "http_status": None,
+        "content_type": "application/pdf",
+        "title": path.name,
+        "raw_bytes": raw,
+        "raw_text_preview": preview,
+        "content_sha256": hashlib.sha256(raw).hexdigest(),
+        "fetch_error": None,
+        "local_path": str(path),
+    }
+
+
+def _find_local_pdf_for_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    roots = _iter_local_pdf_roots()
+    if not roots:
+        return None
+    for root in roots:
+        for name in _candidate_pdf_names(candidate):
+            direct = root / name
+            if direct.exists() and direct.is_file():
+                return _load_local_pdf_bytes(direct)
+        title = str(candidate.get("title") or candidate.get("source_label") or "").strip().lower()
+        if not title:
+            continue
+        for match in root.rglob('*.pdf'):
+            if title in match.name.lower():
+                return _load_local_pdf_bytes(match)
+    return None
+
 
 
 def _read_fetch_cache(url: str, *, max_age_seconds: int = 3600) -> dict[str, Any] | None:
@@ -329,7 +439,7 @@ def _detect_content_fetch_mode(*, url: str, content_type: str | None, explicit_m
         return mode
     lower_url = str(url or "").strip().lower()
     ctype = str(content_type or "").strip().lower()
-    if lower_url.endswith('.pdf') or any(x in ctype for x in PDF_CONTENT_TYPES):
+    if lower_url.startswith("file://") or lower_url.endswith('.pdf') or any(x in ctype for x in PDF_CONTENT_TYPES):
         return "pdf"
     if "/json" in ctype or ctype.endswith("+json"):
         return "api"
@@ -346,34 +456,39 @@ def _summarize_error(fetch_error: str | None, http_status: int | None = None) ->
 
 
 def fetch_pdf_source(*, url: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
-    headers = _default_fetch_headers(url)
+    canonical = str(url or "").strip()
+    if canonical.startswith("file://"):
+        return _load_local_pdf_bytes(Path(canonical.replace("file://", "", 1)))
+    headers = _default_fetch_headers(canonical)
     try:
         with httpx.Client(timeout=timeout_seconds, follow_redirects=True, headers=headers) as client:
-            resp = client.get(url)
+            resp = client.get(canonical)
             content = bytes(resp.content or b"")
             ok = 200 <= int(resp.status_code) < 400
-            text = _json_bytes_to_text(content[:10000]) if not ok else ""
+            text = _json_bytes_to_text(content[:10000]) if not ok else _json_bytes_to_text(content[:5000])
             return {
                 "ok": ok,
                 "method": "httpx_pdf",
                 "url": str(resp.url),
                 "http_status": int(resp.status_code),
-                "content_type": resp.headers.get("content-type") or "application/pdf",
+                "content_type": resp.headers.get("content-type") or guess_type(str(resp.url))[0] or "application/pdf",
                 "title": Path(urlparse(str(resp.url)).path).name or None,
                 "raw_bytes": content,
                 "raw_text_preview": text,
+                "content_sha256": hashlib.sha256(content).hexdigest() if content else None,
                 "fetch_error": None if ok else f"http_status_{int(resp.status_code)}",
             }
     except Exception as exc:
         return {
             "ok": False,
             "method": "httpx_pdf",
-            "url": url,
+            "url": canonical,
             "http_status": None,
             "content_type": "application/pdf",
-            "title": Path(urlparse(url).path).name or None,
+            "title": Path(urlparse(canonical).path).name or None,
             "raw_bytes": b"",
             "raw_text_preview": "",
+            "content_sha256": None,
             "fetch_error": f"{type(exc).__name__}: {exc}",
         }
 
@@ -420,6 +535,7 @@ def fetch_api_source(*, url: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECON
 def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
     url = str(candidate.get("url") or "").strip()
     fetch_mode = str(candidate.get("fetch_mode") or "").strip().lower()
+    local_pdf_result = None
     if fetch_mode in MANUAL_ONLY_FETCH_MODES:
         return {
             "ok": False,
@@ -433,6 +549,19 @@ def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds:
             "fetch_error": "manual_required",
             "reason": "source family explicitly requires manual handling",
         }
+    if not url and fetch_mode == "pdf":
+        local_pdf_result = _find_local_pdf_for_candidate(candidate)
+        if local_pdf_result is not None:
+            result = local_pdf_result
+            detected_mode = _detect_content_fetch_mode(url=result.get("url") or url, content_type=result.get("content_type"), explicit_mode=fetch_mode)
+            return {
+                **result,
+                "resolution": "fetched" if result.get("ok") else "failed",
+                "next_step": "extract" if result.get("ok") else "retry_fetch",
+                "fetch_mode": detected_mode,
+                "reason": "local pdf fetch succeeded" if result.get("ok") else "local pdf fetch failed",
+                "fetched_at": datetime.utcnow().isoformat(),
+            }
     if not url:
         return {
             "ok": False,
@@ -445,6 +574,7 @@ def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds:
             "title": candidate.get("title"),
             "fetch_error": "missing_url",
             "reason": "no fetchable source URL is mapped for this source family",
+            "pdf_lookup_names": _candidate_pdf_names(candidate) if fetch_mode == "pdf" else [],
         }
 
     if fetch_mode == "api":
@@ -463,6 +593,7 @@ def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds:
             "fetch_mode": detected_mode,
             "reason": "fetch succeeded",
             "fetched_at": datetime.utcnow().isoformat(),
+            "pdf_lookup_names": _candidate_pdf_names(candidate) if detected_mode == "pdf" else [],
         }
 
     resolution, next_step = _summarize_error(result.get("fetch_error"), result.get("http_status"))
@@ -473,4 +604,5 @@ def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds:
         "fetch_mode": detected_mode,
         "reason": "fetch blocked" if resolution == "blocked" else ("manual review required" if resolution == "manual_required" else "fetch failed" if resolution == "failed" else "source unresolved"),
         "fetched_at": datetime.utcnow().isoformat(),
+        "pdf_lookup_names": _candidate_pdf_names(candidate) if detected_mode == "pdf" else [],
     }

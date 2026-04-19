@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -39,20 +40,26 @@ class GovInfoClient:
             resp.raise_for_status()
             return resp.json()
 
+    def build_public_url(self, path: str) -> str:
+        return f"{self.base_url}/{path.lstrip('/')}"
+
     def get_package_summary(self, package_id: str) -> dict[str, Any]:
-        return self._get(f"packages/{package_id}/summary")
+        return self._get(f"packages/{quote(package_id, safe='')}/summary")
 
     def get_package_metadata(self, package_id: str) -> dict[str, Any]:
-        return self._get(f"packages/{package_id}")
+        return self._get(f"packages/{quote(package_id, safe='')}")
 
     def get_granules(self, package_id: str, *, offset_mark: str = "*", page_size: int = 100) -> dict[str, Any]:
         return self._get(
-            f"packages/{package_id}/granules",
+            f"packages/{quote(package_id, safe='')}/granules",
             params={
                 "offsetMark": offset_mark,
                 "pageSize": int(page_size),
             },
         )
+
+    def get_granule(self, package_id: str, granule_id: str) -> dict[str, Any]:
+        return self._get(f"packages/{quote(package_id, safe='')}/granules/{quote(granule_id, safe='')}")
 
     def search_collections(
         self,
@@ -70,4 +77,40 @@ class GovInfoClient:
                 "pageSize": int(page_size),
                 "offsetMark": offset_mark,
             },
+        )
+
+    # --- Step 8 additive helpers ---
+    def search_cfr_title_24(
+        self,
+        *,
+        query: str,
+        page_size: int = 20,
+        offset_mark: str = "*",
+    ) -> dict[str, Any]:
+        return self.search_collections(
+            collections=["CFR"],
+            query=f'(title:24) AND ({query})',
+            page_size=page_size,
+            offset_mark=offset_mark,
+        )
+
+    def search_hud_hcv_materials(
+        self,
+        *,
+        query: str = 'Section 8 OR Housing Choice Voucher OR NSPIRE OR tenant-based assistance',
+        page_size: int = 20,
+        offset_mark: str = "*",
+    ) -> dict[str, Any]:
+        return self.search_collections(
+            collections=["CFR", "FR", "CHRG", "PLAW"],
+            query=query,
+            page_size=page_size,
+            offset_mark=offset_mark,
+        )
+
+    def search_title24_part(self, *, part_number: str, page_size: int = 20, offset_mark: str = "*") -> dict[str, Any]:
+        return self.search_cfr_title_24(
+            query=f'part:{part_number}',
+            page_size=page_size,
+            offset_mark=offset_mark,
         )

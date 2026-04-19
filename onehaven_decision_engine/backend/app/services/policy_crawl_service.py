@@ -145,6 +145,27 @@ from app.services.policy_fetch_service import fetch_policy_source_candidate
 from app.services.policy_discovery_service import discover_source_family_candidates
 
 
+def _resolution_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    out = {"fetched": 0, "manual_required": 0, "blocked": 0, "unresolved": 0, "failed": 0}
+    for row in rows:
+        key = str(row.get("resolution") or "failed").strip().lower()
+        if key in out:
+            out[key] += 1
+    return out
+
+
+def crawl_source_family_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    result = fetch_policy_source_candidate(candidate)
+    result["category"] = candidate.get("category")
+    result["source_family_id"] = candidate.get("source_family_id")
+    result["jurisdiction_id"] = candidate.get("jurisdiction_id")
+    result["authority_tier"] = candidate.get("authority_tier")
+    result["official_domain"] = candidate.get("official_domain")
+    result["host"] = candidate.get("host")
+    result["pdf_lookup_names"] = candidate.get("pdf_lookup_names") or result.get("pdf_lookup_names") or []
+    return result
+
+
 def crawl_discovered_candidates(
     db: Session,
     *,
@@ -174,22 +195,22 @@ def crawl_discovered_candidates(
     )
     results: list[dict[str, Any]] = []
     for candidate in discovery.get("candidates", []):
-        result = fetch_policy_source_candidate(candidate)
-        result["category"] = candidate.get("category")
-        result["source_family_id"] = candidate.get("source_family_id")
-        results.append(result)
+        results.append(crawl_source_family_candidate(candidate))
     if commit:
         db.commit()
     else:
         db.flush()
+    counts = _resolution_counts(results)
     return {
         "ok": True,
         "candidate_count": int(discovery.get("candidate_count") or 0),
-        "fetched_count": sum(1 for r in results if r.get("resolution") == "fetched"),
-        "manual_required_count": sum(1 for r in results if r.get("resolution") == "manual_required"),
-        "blocked_count": sum(1 for r in results if r.get("resolution") == "blocked"),
-        "unresolved_count": sum(1 for r in results if r.get("resolution") == "unresolved"),
-        "failed_count": sum(1 for r in results if r.get("resolution") == "failed"),
+        "fetched_count": counts["fetched"],
+        "manual_required_count": counts["manual_required"],
+        "blocked_count": counts["blocked"],
+        "unresolved_count": counts["unresolved"],
+        "failed_count": counts["failed"],
         "results": results,
         "discovery": discovery,
+        "resolution_counts": counts,
+        "pdf_result_count": sum(1 for r in results if str(r.get("fetch_mode") or "").strip().lower() == "pdf"),
     }

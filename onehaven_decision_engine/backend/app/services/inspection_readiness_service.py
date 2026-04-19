@@ -688,3 +688,118 @@ def build_property_readiness_with_schedule(
         "readiness_summary": readiness,
         "schedule_summary": schedule,
     }
+
+# --- Step 7 additive readiness + deadline extensions ---
+from datetime import timedelta as _step7_timedelta
+
+_step7_prev_build_property_readiness_summary = build_property_readiness_summary
+
+
+def _step7_deadline_for_row(base_dt, correction_days: int | None, severity_label: str | None):
+    if correction_days is None:
+        sev = str(severity_label or "").strip().lower()
+        if sev == "life_threatening":
+            correction_days = 1
+        elif sev in {"severe", "moderate", "critical", "fail"}:
+            correction_days = 30
+    if correction_days in {None, 0, "", False}:
+        return None
+    try:
+        return base_dt + _step7_timedelta(days=int(correction_days))
+    except Exception:
+        return None
+
+
+def _step7_checklist_meta(row: PropertyChecklistItem) -> dict[str, Any]:
+    try:
+        import json as _json
+        raw = getattr(row, "applies_if_json", None)
+        if isinstance(raw, dict):
+            return dict(raw)
+        if isinstance(raw, str) and raw.strip():
+            parsed = _json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+    return {}
+
+
+def _step7_deadline_summary(db: Session, *, org_id: int, property_id: int) -> dict[str, Any]:
+    latest = _safe_latest_inspection(db, org_id=org_id, property_id=property_id)
+    base_dt = getattr(latest, "inspection_date", None) or datetime.utcnow()
+    rows = _safe_checklist_rows(db, org_id=org_id, property_id=property_id)
+    due_rows = []
+    overdue = 0
+    upcoming_7d = 0
+    upcoming_30d = 0
+    now = datetime.utcnow()
+    for row in rows:
+        status = _status_from_checklist_row(row)
+        if status not in {"fail", "blocked", "pending"}:
+            continue
+        meta = _step7_checklist_meta(row)
+        correction_days = meta.get("correction_days")
+        designation = meta.get("nspire_designation") or _severity_label_from_row(row)
+        deadline = _step7_deadline_for_row(base_dt, correction_days, designation)
+        if deadline is None:
+            continue
+        if deadline < now:
+            overdue += 1
+        elif deadline <= now + _step7_timedelta(days=7):
+            upcoming_7d += 1
+        elif deadline <= now + _step7_timedelta(days=30):
+            upcoming_30d += 1
+        due_rows.append({
+            "item_code": str(getattr(row, "item_code", None) or ""),
+            "description": getattr(row, "description", None),
+            "status": status,
+            "severity": designation,
+            "correction_days": correction_days,
+            "deadline": deadline.isoformat(),
+            "nspire_standard_key": meta.get("nspire_standard_key"),
+            "standard_citation": meta.get("standard_citation"),
+        })
+    return {
+        "count": len(due_rows),
+        "overdue_count": overdue,
+        "due_in_7_days": upcoming_7d,
+        "due_in_30_days": upcoming_30d,
+        "rows": sorted(due_rows, key=lambda x: x.get("deadline") or "")[:50],
+    }
+
+
+def build_property_readiness_summary(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    base = _step7_prev_build_property_readiness_summary(db, org_id=org_id, property_id=property_id)
+    try:
+        deadlines = _step7_deadline_summary(db, org_id=org_id, property_id=property_id)
+        acquisition = dict(base.get("acquisition") or {})
+        readiness = dict(base.get("readiness") or {})
+        completion = dict(base.get("completion") or {})
+        operational_state = "ready"
+        if deadlines.get("overdue_count"):
+            operational_state = "overdue_repairs"
+        elif deadlines.get("count"):
+            operational_state = "repairs_required"
+        elif not bool(completion.get("is_compliant", False)):
+            operational_state = "not_ready"
+        acquisition.setdefault("next_actions", [])
+        if deadlines.get("overdue_count"):
+            acquisition["next_actions"].append("Resolve overdue inspection repairs immediately.")
+        elif deadlines.get("due_in_7_days"):
+            acquisition["next_actions"].append("Resolve near-term inspection repairs due within 7 days.")
+        base.update({
+            "repair_deadlines": deadlines,
+            "operational_state": operational_state,
+            "readiness": readiness,
+            "completion": completion,
+            "acquisition": acquisition,
+        })
+        return base
+    except Exception as e:
+        base["step7_readiness_error"] = str(e)
+        return base

@@ -815,3 +815,217 @@ def apply_raw_inspection_payload(
         },
         "template_lookup_count": len(template_by_code),
     }
+
+# --- Step 7 additive NSPIRE checklist + PDF context extensions ---
+import os as _step7_os
+from pathlib import Path as _Step7Path
+
+_step7_prev_build_inspection_template = build_inspection_template
+_step7_prev_ensure_template_backed_checklist = ensure_template_backed_checklist
+_step7_prev_apply_raw_inspection_payload = apply_raw_inspection_payload
+
+
+def _step7_pdf_roots() -> list[str]:
+    raw = _step7_os.getenv("POLICY_PDF_ROOTS") or _step7_os.getenv("POLICY_PDFS_ROOT") or _step7_os.getenv("POLICY_PDF_ROOT") or ""
+    roots: list[str] = []
+    for piece in str(raw).split(_step7_os.pathsep):
+        piece = str(piece).strip()
+        if piece:
+            roots.append(piece)
+    for fallback in ("/mnt/data/pdfs", "/mnt/data/pdfs", "/mnt/data/PDFs", "/mnt/data/pfs"):
+        if fallback not in roots and _step7_os.path.isdir(fallback):
+            roots.append(fallback)
+    return roots
+
+
+def _step7_pdf_context_for_item(item: dict[str, Any]) -> dict[str, Any]:
+    source = item.get("source") or {}
+    context = {
+        "pdf_roots": _step7_pdf_roots(),
+        "has_pdf_roots": bool(_step7_pdf_roots()),
+        "standard_citation": item.get("standard_citation"),
+        "standard_label": item.get("standard_label"),
+        "nspire_standard_code": item.get("nspire_standard_code") or item.get("standard_code"),
+        "nspire_standard_key": item.get("nspire_standard_key"),
+        "source_type": source.get("type") if isinstance(source, dict) else None,
+    }
+    return context
+
+
+def _step7_enrich_template_item_dict(item: dict[str, Any], effective_by_code: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    code = str(item.get("code") or "").strip().upper()
+    raw = dict(effective_by_code.get(code) or {})
+    enriched = dict(item)
+    severity = str(raw.get("nspire_designation") or raw.get("severity") or item.get("severity") or "fail").strip().lower()
+    correction_days = raw.get("correction_days")
+    if correction_days is None:
+        if severity == "life_threatening":
+            correction_days = 1
+        elif severity in {"severe", "moderate", "critical", "fail"}:
+            correction_days = 30
+    enriched.update({
+        "inspection_rule_code": raw.get("inspection_rule_code") or item.get("inspection_rule_code") or code,
+        "nspire_standard_key": raw.get("nspire_standard_key"),
+        "nspire_standard_code": raw.get("nspire_standard_code") or raw.get("standard_code"),
+        "nspire_standard_label": raw.get("nspire_standard_label") or raw.get("standard_label"),
+        "nspire_deficiency_description": raw.get("nspire_deficiency_description") or raw.get("description"),
+        "nspire_designation": raw.get("nspire_designation") or severity,
+        "correction_days": correction_days,
+        "affirmative_habitability_requirement": bool(raw.get("affirmative_habitability_requirement", False)),
+        "standard_label": raw.get("standard_label") or item.get("description"),
+        "standard_citation": raw.get("standard_citation") or item.get("standard_citation"),
+        "pdf_context": _step7_pdf_context_for_item(raw or item),
+    })
+    return enriched
+
+
+def build_inspection_template(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    profile_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    base = _step7_prev_build_inspection_template(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        profile_summary=profile_summary,
+    )
+    try:
+        prop = _get_property(db, org_id=org_id, property_id=property_id)
+        safe_profile = _safe_profile_summary(db, org_id=org_id, prop=prop, profile_summary=profile_summary)
+        effective = _safe_effective_hqs_items(db, org_id=org_id, prop=prop, profile_summary=safe_profile)
+        effective_by_code = {str((row.get("code") or "")).strip().upper(): dict(row) for row in (effective.get("items") or []) if str(row.get("code") or "").strip()}
+        items = [_step7_enrich_template_item_dict(dict(item), effective_by_code) for item in (base.get("items") or [])]
+        counts = dict(base.get("counts") or {})
+        counts.update({
+            "nspire_backed": sum(1 for row in items if row.get("nspire_standard_key") or row.get("nspire_standard_code")),
+            "life_threatening": sum(1 for row in items if str(row.get("nspire_designation") or "").strip().lower() == "life_threatening"),
+            "with_deadlines": sum(1 for row in items if row.get("correction_days") not in {None, 0, "", False}),
+            "pdf_context_available": int(bool(_step7_pdf_roots())),
+        })
+        return {
+            **base,
+            "items": items,
+            "counts": counts,
+            "template_context": {
+                "nsire_or_nspire_backed": bool(counts.get("nspire_backed")),
+                "pdf_roots": _step7_pdf_roots(),
+                "pdf_context_available": bool(_step7_pdf_roots()),
+            },
+        }
+    except Exception as e:
+        return {
+            **base,
+            "template_context": {
+                "pdf_roots": _step7_pdf_roots(),
+                "pdf_context_available": bool(_step7_pdf_roots()),
+                "enrichment_error": str(e),
+            },
+        }
+
+
+def ensure_template_backed_checklist(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    profile_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = _step7_prev_ensure_template_backed_checklist(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        profile_summary=profile_summary,
+    )
+    try:
+        template = result.get("template") or {}
+        template_by_code = {str((row.get("code") or "")).strip().upper(): row for row in (template.get("items") or []) if str(row.get("code") or "").strip()}
+        rows = _safe_find_checklist_items(db, org_id=org_id, property_id=property_id)
+        updated_step7 = 0
+        for row in rows:
+            code = str(getattr(row, "item_code", None) or "").strip().upper()
+            tpl = template_by_code.get(code)
+            if not tpl:
+                continue
+            meta = _json_loads(getattr(row, "applies_if_json", None), {})
+            if not isinstance(meta, dict):
+                meta = {}
+            meta.update({
+                "correction_days": tpl.get("correction_days"),
+                "nspire_designation": tpl.get("nspire_designation"),
+                "nspire_standard_key": tpl.get("nspire_standard_key"),
+                "nspire_standard_code": tpl.get("nspire_standard_code"),
+                "standard_citation": tpl.get("standard_citation"),
+                "pdf_context": tpl.get("pdf_context") or {},
+            })
+            desired = _j(meta)
+            if (getattr(row, "applies_if_json", None) or "") != desired:
+                row.applies_if_json = desired
+                if hasattr(row, "updated_at"):
+                    row.updated_at = _now()
+                db.add(row)
+                updated_step7 += 1
+        result["step7_updated_items"] = updated_step7
+        return result
+    except Exception as e:
+        result["step7_sync_error"] = str(e)
+        return result
+
+
+def apply_raw_inspection_payload(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    inspection_id: int,
+    raw_payload: dict[str, Any] | list[dict[str, Any]] | None,
+    sync_checklist: bool = True,
+) -> dict[str, Any]:
+    result = _step7_prev_apply_raw_inspection_payload(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+        inspection_id=inspection_id,
+        raw_payload=raw_payload,
+        sync_checklist=sync_checklist,
+    )
+    try:
+        rows = _find_inspection_items(db, inspection_id=inspection_id)
+        life_threatening = 0
+        severe = 0
+        moderate = 0
+        low = 0
+        for row in rows:
+            details = _json_loads(getattr(row, "evidence_json", None), [])
+            sev = str(getattr(row, "standard_label", None) or "").strip().lower()
+            applies = None
+            # fallback via checklist metadata
+            code = str(getattr(row, "code", None) or "").strip().upper()
+            for ci in _find_checklist_items(db, org_id=org_id, property_id=property_id):
+                if str(getattr(ci, "item_code", None) or "").strip().upper() == code:
+                    applies = _json_loads(getattr(ci, "applies_if_json", None), {})
+                    break
+            designation = None
+            if isinstance(applies, dict):
+                designation = str(applies.get("nspire_designation") or "").strip().lower() or None
+            if designation == "life_threatening":
+                life_threatening += 1
+            elif designation == "severe":
+                severe += 1
+            elif designation == "moderate":
+                moderate += 1
+            elif designation == "low":
+                low += 1
+        result["nspire_counts"] = {
+            "life_threatening": life_threatening,
+            "severe": severe,
+            "moderate": moderate,
+            "low": low,
+        }
+        result["pdf_context_available"] = bool(_step7_pdf_roots())
+        return result
+    except Exception as e:
+        result["step7_apply_error"] = str(e)
+        return result

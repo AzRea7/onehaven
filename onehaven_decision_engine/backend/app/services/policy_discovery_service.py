@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta
+import os
+from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -774,6 +776,95 @@ FETCH_MODE_PDF = "pdf"
 FETCH_MODE_MANUAL_REQUIRED = "manual-required"
 FETCH_MODE_UNKNOWN = "unknown"
 
+DISCOVERY_SOURCE_CURATED = "curated"
+DISCOVERY_SOURCE_DISCOVERED = "discovered"
+PDF_ROOTS_ENV = os.getenv("POLICY_SOURCE_PDF_ROOTS", "")
+
+
+def _iter_pdf_roots() -> list[Path]:
+    roots: list[Path] = []
+    for raw in [part.strip() for part in PDF_ROOTS_ENV.split(os.pathsep) if part.strip()]:
+        try:
+            path = Path(raw).expanduser().resolve()
+        except Exception:
+            continue
+        if path.exists() and path.is_dir():
+            roots.append(path)
+    return roots
+
+
+def _slugify_for_file(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    raw = raw.replace("&", "and")
+    raw = ''.join(ch if ch.isalnum() else '_' for ch in raw)
+    return raw.strip('_')
+
+
+def _candidate_pdf_lookup_names(*, category: str, source_label: str | None, city: str | None, county: str | None, state: str | None, pha_name: str | None) -> list[str]:
+    pieces = [
+        _slugify_for_file(source_label),
+        _slugify_for_file(category),
+        _slugify_for_file(city),
+        _slugify_for_file(county),
+        _slugify_for_file(state),
+        _slugify_for_file(pha_name),
+    ]
+    names: list[str] = []
+    for piece in pieces:
+        if not piece:
+            continue
+        names.append(f"{piece}.pdf")
+        names.append(piece)
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in names:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def _local_pdf_available(pdf_lookup_names: list[str]) -> bool:
+    roots = _iter_pdf_roots()
+    if not roots or not pdf_lookup_names:
+        return False
+    normalized = {name.lower() for name in pdf_lookup_names}
+    for root in roots:
+        for match in root.rglob('*.pdf'):
+            if match.name.lower() in normalized:
+                return True
+    return False
+
+
+def classify_candidate_authority(*, url: str | None, publisher: str | None, is_official: bool, authority_level: str | None) -> dict[str, Any]:
+    canonical = canonicalize_url(url or "")
+    host = urlparse(canonical).netloc.strip().lower() if canonical else ""
+    official_domain = bool(host.endswith('.gov') or host.endswith('.mi.us') or host.endswith('.org'))
+    authority_tier = str(authority_level or "").strip() or ("authoritative_official" if is_official or official_domain else "approved_official_supporting")
+    if authority_tier == "authoritative_official":
+        authority_rank = 100
+        authority_score = 1.0
+    elif authority_tier == "approved_official_supporting":
+        authority_rank = 85
+        authority_score = 0.85
+    elif authority_tier == "semi_authoritative_operational":
+        authority_rank = 65
+        authority_score = 0.65
+    else:
+        authority_rank = 40
+        authority_score = 0.4
+    return {
+        "host": host or None,
+        "official_domain": official_domain,
+        "authority_tier": authority_tier,
+        "authority_rank": authority_rank,
+        "authority_score": authority_score,
+        "publisher": _norm_text(publisher),
+    }
+
+
 FETCH_RESOLUTION_FETCHED = "fetched"
 FETCH_RESOLUTION_MANUAL_REQUIRED = "manual_required"
 FETCH_RESOLUTION_UNRESOLVED = "unresolved"
@@ -1038,9 +1129,11 @@ def discover_source_family_candidates(
                     authority_rank=100 if candidate.get("is_official_candidate") else 50,
                     authority_score=1.0 if candidate.get("is_official_candidate") else 0.5,
                     probe_result={
-                        "ok": bool(candidate.get("url")) and candidate.get("fetch_mode") != FETCH_MODE_MANUAL_REQUIRED,
-                        "fetch_error": "manual_required" if candidate.get("fetch_mode") == FETCH_MODE_MANUAL_REQUIRED else ("missing_url" if not candidate.get("url") else None),
+                        "ok": bool(candidate.get("fetch_ready")) and candidate.get("fetch_mode") != FETCH_MODE_MANUAL_REQUIRED,
+                        "fetch_error": "manual_required" if candidate.get("fetch_mode") == FETCH_MODE_MANUAL_REQUIRED else ("missing_url" if not candidate.get("fetch_ready") else None),
                         "candidate_status": candidate.get("candidate_status"),
+                        "official_domain": candidate.get("official_domain"),
+                        "host": candidate.get("host"),
                     },
                     metadata={
                         "source_family_id": candidate.get("source_family_id"),
@@ -1048,6 +1141,12 @@ def discover_source_family_candidates(
                         "fetch_mode": candidate.get("fetch_mode"),
                         "notes": candidate.get("notes"),
                         "coverage_hint": candidate.get("coverage_hint"),
+                        "official_domain": candidate.get("official_domain"),
+                        "host": candidate.get("host"),
+                        "expected_fetch_modes": candidate.get("expected_fetch_modes") or [],
+                        "pdf_lookup_names": candidate.get("pdf_lookup_names") or [],
+                        "has_local_pdf": bool(candidate.get("has_local_pdf")),
+                        "discovery_origin": candidate.get("discovery_origin"),
                     },
                 )
                 if candidate.get("fetch_mode") == FETCH_MODE_MANUAL_REQUIRED:
@@ -1124,6 +1223,7 @@ def discover_source_family_candidates(
         "manual_required_categories": sorted(set(manual_categories)),
         "unresolved_categories": unresolved_categories,
         "discovered_urls": sorted(set(discovered_urls)),
+        "pdf_candidates": [c for c in candidates if c.get("fetch_mode") == FETCH_MODE_PDF],
         "inventory_summary": summarize_inventory_for_scope(
             db,
             org_id=org_id,
