@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from app.config import settings
 from app.policy_models import JurisdictionProfile
 
@@ -79,17 +81,27 @@ def profile_lockout_payload(profile: JurisdictionProfile, completeness: dict) ->
     authority_gap_categories = _authority_gap_categories(completeness)
     is_stale = bool(completeness.get("is_stale"))
     refresh_state = getattr(profile, "refresh_state", None)
+    artifact_snapshot = _artifact_snapshot_from_completeness(completeness)
+    repo_pdf_count = int((artifact_snapshot.get('pdfs') or {}).get('count') or 0)
+    repo_policy_raw_count = int((artifact_snapshot.get('policy_raw') or {}).get('count') or 0)
 
     lockout_causing_categories = _dedupe(
         [c for c in critical_stale if c in LEGAL_BLOCKING_CATEGORIES]
         + [c for c in authority_gap_categories if c in LEGAL_BLOCKING_CATEGORIES]
         + [c for c in critical_binding_failures if c in LEGAL_BLOCKING_CATEGORIES]
     )
+    artifact_gap_categories = []
+    if repo_pdf_count <= 0 and repo_policy_raw_count <= 0:
+        for category in ('section8', 'program_overlay'):
+            if category in LEGAL_BLOCKING_CATEGORIES and category in authority_gap_categories:
+                artifact_gap_categories.append(category)
+
     informational_gap_categories = _dedupe(
         [c for c in stale if c not in set(lockout_causing_categories)]
         + [c for c in missing if c not in set(lockout_causing_categories)]
         + [c for c in weak_support if c not in set(lockout_causing_categories)]
         + [c for c in validation_pending if c not in set(lockout_causing_categories)]
+        + [c for c in artifact_gap_categories if c not in set(lockout_causing_categories)]
     )
 
     hard_lock = bool(getattr(settings, "jurisdiction_critical_stale_lockout_enabled", True)) and (
@@ -130,6 +142,17 @@ def profile_lockout_payload(profile: JurisdictionProfile, completeness: dict) ->
         "authority_gap_categories": authority_gap_categories,
         "lockout_causing_categories": lockout_causing_categories,
         "informational_gap_categories": informational_gap_categories,
+        "artifact_gap_categories": _dedupe(artifact_gap_categories),
+        "repo_artifact_snapshot": artifact_snapshot,
+        "repo_pdf_count": int(repo_pdf_count),
+        "repo_policy_raw_count": int(repo_policy_raw_count),
         "refresh_state": refresh_state,
         "blocking_state": refresh_state in {"blocked", "failed"} or hard_lock,
     }
+
+
+def _artifact_snapshot_from_completeness(completeness: dict) -> dict:
+    sla_summary = completeness.get('sla_summary') or {}
+    if isinstance(sla_summary, dict) and isinstance(sla_summary.get('repo_artifact_snapshot'), dict):
+        return dict(sla_summary.get('repo_artifact_snapshot') or {})
+    return {}

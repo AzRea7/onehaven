@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -364,6 +365,8 @@ def collect_profile_source_sla_summary(db: Session, *, profile: JurisdictionProf
     if due_values:
         next_due_at = min(due_values)
 
+    artifact_snapshot = _policy_artifact_snapshot()
+
     return {
         "source_count": len(scoped),
         "sources": sources_payload,
@@ -387,6 +390,10 @@ def collect_profile_source_sla_summary(db: Session, *, profile: JurisdictionProf
         "failed_binding_source_count": int(failed_binding_source_count),
         "safe_to_rely_on": not bool(legal_lockout_categories or critical_fetch_failure_categories),
         "next_due_at": next_due_at,
+        "repo_artifact_snapshot": artifact_snapshot,
+        "repo_artifact_support_state": artifact_snapshot.get("artifact_support_state"),
+        "repo_policy_raw_count": int((artifact_snapshot.get("policy_raw") or {}).get("count") or 0),
+        "repo_pdf_count": int((artifact_snapshot.get("pdfs") or {}).get("count") or 0),
     }
 
 
@@ -461,4 +468,114 @@ def profile_next_actions(profile: JurisdictionProfile) -> dict[str, Any]:
         "review_required_categories": list(requirements.get("review_required_categories") or []),
         "rejected_source_count": int(requirements.get("rejected_source_count") or 0),
         "guessed_source_count": int(requirements.get("guessed_source_count") or 0),
+    }
+
+
+def _repo_candidate_roots() -> list[Path]:
+    candidates: list[Path] = []
+    raw_values = [
+        getattr(settings, "policy_repo_root", None),
+        getattr(settings, "repo_root", None),
+        getattr(settings, "project_root", None),
+    ]
+    for value in raw_values:
+        if value:
+            try:
+                candidates.append(Path(str(value)).expanduser())
+            except Exception:
+                pass
+
+    cwd = Path.cwd()
+    candidates.extend([cwd, cwd.parent, cwd.parent.parent])
+    candidates.append(Path('/mnt/data'))
+
+    out: list[Path] = []
+    seen: set[str] = set()
+    for root in candidates:
+        try:
+            resolved = str(root.resolve())
+        except Exception:
+            resolved = str(root)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        out.append(root)
+    return out
+
+
+def _first_existing(paths: list[Path]) -> Path | None:
+    for path in paths:
+        try:
+            if path.exists():
+                return path
+        except Exception:
+            continue
+    return None
+
+
+def _policy_artifact_snapshot() -> dict[str, Any]:
+    roots = _repo_candidate_roots()
+    policy_raw = None
+    pdf_root = None
+    for root in roots:
+        candidates = [
+            root / 'backend' / 'policy_raw',
+            root / 'onehaven_decision_engine' / 'backend' / 'policy_raw',
+            root / 'policy_raw',
+        ]
+        found = _first_existing(candidates)
+        if found is not None:
+            policy_raw = found
+            break
+    for root in roots:
+        candidates = [
+            root / 'backend' / 'pdfs',
+            root / 'onehaven_decision_engine' / 'backend' / 'pdfs',
+            root / 'pdfs',
+            root / 'backend' / 'pdf',
+            root / 'onehaven_decision_engine' / 'backend' / 'pdf',
+            root / 'pdf',
+        ]
+        found = _first_existing(candidates)
+        if found is not None:
+            pdf_root = found
+            break
+
+    def _scan(path: Path | None, patterns: tuple[str, ...]) -> dict[str, Any]:
+        if path is None:
+            return {'exists': False, 'path': None, 'count': 0, 'latest_mtime': None, 'examples': []}
+        files: list[Path] = []
+        try:
+            for pat in patterns:
+                files.extend(path.rglob(pat))
+        except Exception:
+            files = []
+        deduped: dict[str, Path] = {}
+        for f in files:
+            deduped[str(f)] = f
+        rows = list(deduped.values())
+        latest = None
+        for f in rows:
+            try:
+                m = datetime.utcfromtimestamp(f.stat().st_mtime)
+                if latest is None or m > latest:
+                    latest = m
+            except Exception:
+                continue
+        return {
+            'exists': True,
+            'path': str(path),
+            'count': len(rows),
+            'latest_mtime': latest.isoformat() if latest else None,
+            'examples': [str(f) for f in sorted(rows)[:5]],
+        }
+
+    html = _scan(policy_raw, ('*.html', '*.htm'))
+    pdf = _scan(pdf_root, ('*.pdf',))
+    has_any = bool(html.get('count') or 0) or bool(pdf.get('count') or 0)
+    return {
+        'has_repo_artifacts': has_any,
+        'policy_raw': html,
+        'pdfs': pdf,
+        'artifact_support_state': 'artifact_backed' if has_any else 'no_repo_artifacts_found',
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -130,6 +131,7 @@ def get_jurisdiction_health(
     authority_gap_categories = _dedupe(list(lockout.get('authority_gap_categories') or []) + list(completeness.get('authority_unmet_categories') or []))
     informational_gap_categories = _dedupe(list(lockout.get('informational_gap_categories') or []) + list(completeness.get('inferred_categories') or []))
     operational_reason = _operational_reason(completeness, lockout, sla_summary, override_summary)
+    artifact_evidence = _repo_artifact_evidence({}, sla_summary)
 
     return {
         'ok': True,
@@ -163,6 +165,10 @@ def get_jurisdiction_health(
         'informational_stale_categories': list(completeness.get('informational_stale_categories') or sla_summary.get('informational_overdue_categories') or []),
         'stale_authoritative_categories': list(completeness.get('stale_authoritative_categories') or sla_summary.get('stale_authoritative_categories') or []),
         'override_summary': override_summary,
+        'artifact_evidence': artifact_evidence,
+        'repo_artifact_support_state': artifact_evidence.get('artifact_support_state'),
+        'repo_policy_raw_count': int(artifact_evidence.get('repo_policy_raw_count') or 0),
+        'repo_pdf_count': int(artifact_evidence.get('repo_pdf_count') or 0),
         'review_required': bool(override_summary.get('review_required')) or bool(override_summary.get('carrying_critical_override')) or not bool(completeness.get('safe_for_user_reliance')) or bool(sla_summary.get('review_required_categories')) or int(sla_summary.get('rejected_source_count') or 0) > 0,
         'refresh_state': getattr(profile, 'refresh_state', None),
         'last_validation_at': (sla_summary.get('latest_validated_at') if isinstance(sla_summary, dict) else None),
@@ -292,6 +298,7 @@ def get_manual_stale_review_dashboard(
             'stale_authoritative_categories': list(health.get('stale_authoritative_categories') or []),
             'validation_pending_categories': list(health.get('validation_pending_categories') or []),
             'authority_gap_categories': list(health.get('authority_gap_categories') or []),
+            'artifact_gap_categories': list((health.get('lockout') or {}).get('artifact_gap_categories') or []),
             'informational_gap_categories': list(health.get('informational_gap_categories') or []),
             'conflicting_categories': list(completeness.get('conflicting_categories') or []),
             'missing_categories': list(completeness.get('missing_categories') or []),
@@ -314,4 +321,21 @@ def get_manual_stale_review_dashboard(
         'count': len(items[:limit]),
         'summary': counts,
         'rows': items[:limit],
+    }
+
+
+def _repo_artifact_evidence(health: dict[str, Any], sla_summary: dict[str, Any]) -> dict[str, Any]:
+    artifact_snapshot = {}
+    if isinstance(sla_summary, dict):
+        artifact_snapshot = dict(sla_summary.get('repo_artifact_snapshot') or {})
+    policy_raw = artifact_snapshot.get('policy_raw') or {}
+    pdfs = artifact_snapshot.get('pdfs') or {}
+    return {
+        'artifact_support_state': artifact_snapshot.get('artifact_support_state') or 'unknown',
+        'repo_policy_raw_count': int(policy_raw.get('count') or 0),
+        'repo_pdf_count': int(pdfs.get('count') or 0),
+        'repo_policy_raw_latest_mtime': policy_raw.get('latest_mtime'),
+        'repo_pdf_latest_mtime': pdfs.get('latest_mtime'),
+        'repo_policy_raw_examples': list(policy_raw.get('examples') or []),
+        'repo_pdf_examples': list(pdfs.get('examples') or []),
     }

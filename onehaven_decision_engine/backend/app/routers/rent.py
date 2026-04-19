@@ -10,6 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
+from ..clients.federal_register import FederalRegisterClient
+from ..clients.govinfo import GovInfoClient
 from ..config import settings
 from ..db import get_db
 from ..models import (
@@ -40,6 +42,7 @@ from ..domain.rent_learning import (
     summarize_comps,
     update_calibration_from_observation,
 )
+from ..domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used
 from ..domain.underwriting import describe_rent_cap_reason
 
 router = APIRouter(prefix="/rent", tags=["rent"])
@@ -65,6 +68,191 @@ def _to_pos_float(v: Any) -> Optional[float]:
         return f if f > 0 else None
     except Exception:
         return None
+
+def _payment_standard_pct_value(raw: Any) -> float:
+    try:
+        if raw is None:
+            raw = getattr(settings, "default_payment_standard_pct", None)
+        if raw is None:
+            return 110.0
+        value = float(raw)
+        if 0 < value <= 3.0:
+            return float(value * 100.0)
+        return float(value)
+    except Exception:
+        return 110.0
+
+
+def _must_get_property(db: Session, *, property_id: int, org_id: int) -> Property:
+    prop = db.get(Property, property_id)
+    if not prop or prop.org_id != org_id:
+        raise HTTPException(status_code=404, detail="property not found")
+    return prop
+
+
+def _build_section8_payload(
+    *,
+    prop: Property,
+    ra: RentAssumption,
+    strategy: str,
+    payment_standard_pct: float,
+) -> dict[str, Any]:
+    market = _to_pos_float(getattr(ra, "market_rent_estimate", None))
+    section8_fmr = _to_pos_float(getattr(ra, "section8_fmr", None))
+    rr = _to_pos_float(getattr(ra, "rent_reasonableness_comp", None))
+    manual_override = _to_pos_float(getattr(ra, "approved_rent_ceiling", None))
+
+    approved_ceiling, candidates = compute_approved_ceiling(
+        section8_fmr=section8_fmr,
+        payment_standard_pct=payment_standard_pct,
+        rent_reasonableness_comp=rr,
+        manual_override=manual_override,
+    )
+    rent_decision = compute_rent_used(
+        strategy=strategy,
+        market=market,
+        approved=approved_ceiling,
+        candidates=candidates,
+    )
+
+    utility_allowance = _to_pos_float(
+        getattr(ra, "utility_allowance", None) or getattr(prop, "utility_allowance", None)
+    ) or 0.0
+    rent_to_owner = rent_decision.rent_used
+    gross_rent = None
+    if rent_to_owner is not None:
+        gross_rent = round(float(rent_to_owner) + float(utility_allowance), 2)
+
+    gross_rent_cap = approved_ceiling
+    gross_rent_compliant = None
+    if gross_rent is not None and gross_rent_cap is not None:
+        gross_rent_compliant = bool(gross_rent <= gross_rent_cap)
+
+    return {
+        "strategy": strategy,
+        "payment_standard_pct": float(payment_standard_pct),
+        "market_rent_estimate": market,
+        "section8_fmr": section8_fmr,
+        "rent_reasonableness_comp": rr,
+        "manual_override": manual_override,
+        "approved_rent_ceiling": approved_ceiling,
+        "rent_used": rent_decision.rent_used,
+        "cap_reason": rent_decision.cap_reason,
+        "explanation": rent_decision.explanation,
+        "ceiling_candidates": [{"type": c.type, "value": c.value} for c in (rent_decision.candidates or [])],
+        "rent_to_owner": rent_to_owner,
+        "utility_allowance": utility_allowance,
+        "gross_rent": gross_rent,
+        "gross_rent_cap": gross_rent_cap,
+        "gross_rent_compliant": gross_rent_compliant,
+        "bedrooms": int(getattr(prop, "bedrooms", 0) or 0),
+        "property_type": getattr(prop, "property_type", None),
+        "units": int(getattr(prop, "units", 0) or 0),
+    }
+
+
+def _collect_federal_updates(*, limit: int, include_public_inspection: bool) -> dict[str, Any]:
+    updates: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    try:
+        fr = FederalRegisterClient(timeout=30.0)
+        result = fr.search_documents(
+            conditions={
+                "agencies": ["housing-and-urban-development-department"],
+                "term": "housing choice voucher OR section 8 OR fair market rent OR nspire",
+            },
+            per_page=max(1, min(limit, 50)),
+            page=1,
+            order="newest",
+        )
+        for row in result.get("results", []) or []:
+            updates.append({
+                "source": "federal_register",
+                "document_number": row.get("document_number"),
+                "title": row.get("title"),
+                "type": row.get("type"),
+                "publication_date": row.get("publication_date"),
+                "effective_on": row.get("effective_on"),
+                "html_url": row.get("html_url"),
+                "pdf_url": row.get("pdf_url"),
+                "citation": row.get("citation"),
+                "agencies": [a.get("name") for a in (row.get("agencies") or []) if isinstance(a, dict)],
+            })
+    except Exception as e:
+        errors.append(f"FederalRegisterClient search failed: {e}")
+
+    if include_public_inspection:
+        try:
+            fr = FederalRegisterClient(timeout=30.0)
+            pi = fr.current_public_inspection()
+            docs = pi.get("results") or pi.get("documents") or []
+            for row in docs[: max(1, min(limit, 20))]:
+                agencies = row.get("agencies") or []
+                names = [a.get("name") for a in agencies if isinstance(a, dict)]
+                agency_text = " ".join(names).lower()
+                title_text = str(row.get("title") or "").lower()
+                if (
+                    "housing" in agency_text
+                    or "urban development" in agency_text
+                    or "voucher" in title_text
+                    or "section 8" in title_text
+                    or "fair market rent" in title_text
+                    or "nspire" in title_text
+                ):
+                    updates.append({
+                        "source": "federal_register_public_inspection",
+                        "document_number": row.get("document_number"),
+                        "title": row.get("title"),
+                        "type": row.get("type"),
+                        "publication_date": row.get("publication_date"),
+                        "effective_on": row.get("effective_on"),
+                        "html_url": row.get("html_url"),
+                        "pdf_url": row.get("pdf_url"),
+                        "citation": row.get("citation"),
+                        "agencies": names,
+                    })
+        except Exception as e:
+            errors.append(f"FederalRegisterClient public inspection failed: {e}")
+
+    try:
+        gov = GovInfoClient(timeout=30.0)
+        gov_search = gov.search_collections(
+            collections=["FR", "CFR"],
+            query='("housing choice voucher" OR "section 8" OR "fair market rent" OR NSPIRE OR HUD)',
+            page_size=max(1, min(limit, 20)),
+            offset_mark="*",
+        )
+        packages = gov_search.get("packages") or gov_search.get("results") or []
+        for row in packages:
+            updates.append({
+                "source": "govinfo",
+                "package_id": row.get("packageId") or row.get("package_id"),
+                "title": row.get("title"),
+                "collection_code": row.get("collectionCode") or row.get("collection_code"),
+                "date_issued": row.get("dateIssued") or row.get("date_issued"),
+                "last_modified": row.get("lastModified") or row.get("last_modified"),
+                "link": row.get("packageLink") or row.get("download") or row.get("granuleLink"),
+            })
+    except Exception as e:
+        errors.append(f"GovInfoClient search failed: {e}")
+
+    def _sort_key(row: dict[str, Any]) -> tuple[str, str]:
+        return (
+            str(row.get("publication_date") or row.get("date_issued") or row.get("last_modified") or ""),
+            str(row.get("title") or ""),
+        )
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in sorted(updates, key=_sort_key, reverse=True):
+        key = str(row.get("document_number") or row.get("package_id") or row.get("title") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+
+    return {"ok": True, "count": len(deduped[:limit]), "results": deduped[:limit], "errors": errors}
 
 
 def _audit(
@@ -527,4 +715,69 @@ def explain_rent(
         explanation=explanation,
         run_id=int(run.id),
         created_at=run.created_at,
+    )
+
+
+@router.get("/section8/compliance/{property_id}", response_model=dict)
+def section8_compliance(
+    property_id: int,
+    strategy: str = Query(default="section8"),
+    payment_standard_pct: float | None = Query(default=None, ge=0.5, le=1.5),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    prop = _must_get_property(db, property_id=property_id, org_id=p.org_id)
+    ra = db.execute(
+        select(RentAssumption).where(
+            RentAssumption.property_id == property_id,
+            RentAssumption.org_id == p.org_id,
+        )
+    ).scalar_one_or_none()
+    if not ra:
+        raise HTTPException(status_code=404, detail="rent assumption not found")
+
+    strategy = _norm_strategy(strategy)
+    payment_pct = _payment_standard_pct_value(payment_standard_pct)
+    payload = _build_section8_payload(
+        prop=prop,
+        ra=ra,
+        strategy=strategy,
+        payment_standard_pct=payment_pct,
+    )
+
+    compliant = bool(payload.get("gross_rent_compliant")) if payload.get("gross_rent_compliant") is not None else None
+    status = "compliant" if compliant is True else "non_compliant" if compliant is False else "insufficient_data"
+
+    return {
+        "ok": True,
+        "property_id": int(property_id),
+        "status": status,
+        **payload,
+        "property": {
+            "address": getattr(prop, "address", None),
+            "city": getattr(prop, "city", None),
+            "state": getattr(prop, "state", None),
+            "zip": getattr(prop, "zip", None),
+            "bedrooms": getattr(prop, "bedrooms", None),
+            "units": getattr(prop, "units", None),
+            "property_type": getattr(prop, "property_type", None),
+        },
+        "missing_inputs": [
+            key
+            for key in ("market_rent_estimate", "section8_fmr", "rent_reasonableness_comp")
+            if payload.get(key) is None
+        ],
+    }
+
+
+@router.get("/federal-updates", response_model=dict)
+def federal_updates(
+    limit: int = Query(default=10, ge=1, le=50),
+    include_public_inspection: bool = Query(default=True),
+    _db: Session = Depends(get_db),
+    _p=Depends(get_principal),
+):
+    return _collect_federal_updates(
+        limit=limit,
+        include_public_inspection=include_public_inspection,
     )

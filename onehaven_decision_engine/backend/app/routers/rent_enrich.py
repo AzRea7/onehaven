@@ -20,6 +20,7 @@ from ..services.rentcast_service import (
     persist_rentcast_comps_and_get_median,
 )
 from ..domain.rent_learning import recompute_rent_fields
+from ..domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used
 from ..domain.underwriting import describe_rent_cap_reason
 
 try:
@@ -100,6 +101,104 @@ def _payment_standard_setting(strategy: Optional[str]) -> float:
         return float(v) if v is not None else 1.0
     except Exception:
         return 1.0
+
+def _payment_standard_pct_percent(raw: Any) -> float:
+    try:
+        if raw is None:
+            raw = getattr(settings, "default_payment_standard_pct", None)
+        if raw is None:
+            return 110.0
+        value = float(raw)
+        if 0 < value <= 3.0:
+            return float(value * 100.0)
+        return float(value)
+    except Exception:
+        return 110.0
+
+
+def _build_section8_overlay(*, prop: Property, ra: RentAssumption, strategy: str) -> dict[str, Any]:
+    payment_pct = _payment_standard_pct_percent(getattr(settings, "default_payment_standard_pct", None))
+    market = None
+    try:
+        market = float(ra.market_rent_estimate) if ra.market_rent_estimate is not None else None
+        if market is not None and market <= 0:
+            market = None
+    except Exception:
+        market = None
+    section8_fmr = None
+    try:
+        section8_fmr = float(ra.section8_fmr) if ra.section8_fmr is not None else None
+        if section8_fmr is not None and section8_fmr <= 0:
+            section8_fmr = None
+    except Exception:
+        section8_fmr = None
+    rr = None
+    try:
+        rr = float(ra.rent_reasonableness_comp) if ra.rent_reasonableness_comp is not None else None
+        if rr is not None and rr <= 0:
+            rr = None
+    except Exception:
+        rr = None
+    manual_override = None
+    try:
+        manual_override = float(ra.approved_rent_ceiling) if ra.approved_rent_ceiling is not None else None
+        if manual_override is not None and manual_override <= 0:
+            manual_override = None
+    except Exception:
+        manual_override = None
+
+    approved_ceiling, candidates = compute_approved_ceiling(
+        section8_fmr=section8_fmr,
+        payment_standard_pct=payment_pct,
+        rent_reasonableness_comp=rr,
+        manual_override=manual_override,
+    )
+    decision = compute_rent_used(
+        strategy=_norm_strategy(strategy),
+        market=market,
+        approved=approved_ceiling,
+        candidates=candidates,
+    )
+
+    utility_allowance = 0.0
+    try:
+        utility_allowance = float(getattr(ra, "utility_allowance", None) or getattr(prop, "utility_allowance", None) or 0.0)
+        if utility_allowance < 0:
+            utility_allowance = 0.0
+    except Exception:
+        utility_allowance = 0.0
+
+    gross_rent = None
+    if decision.rent_used is not None:
+        gross_rent = round(float(decision.rent_used) + float(utility_allowance), 2)
+    gross_rent_compliant = None
+    if gross_rent is not None and approved_ceiling is not None:
+        gross_rent_compliant = bool(gross_rent <= approved_ceiling)
+
+    return {
+        "strategy": _norm_strategy(strategy),
+        "payment_standard_pct": float(payment_pct),
+        "market_rent_estimate": market,
+        "section8_fmr": section8_fmr,
+        "rent_reasonableness_comp": rr,
+        "approved_rent_ceiling": approved_ceiling,
+        "rent_used": decision.rent_used,
+        "cap_reason": decision.cap_reason,
+        "explanation": decision.explanation,
+        "ceiling_candidates": [{"type": c.type, "value": c.value} for c in (decision.candidates or [])],
+        "utility_allowance": utility_allowance,
+        "gross_rent": gross_rent,
+        "gross_rent_compliant": gross_rent_compliant,
+        "property": {
+            "address": getattr(prop, "address", None),
+            "city": getattr(prop, "city", None),
+            "state": getattr(prop, "state", None),
+            "zip": getattr(prop, "zip", None),
+            "bedrooms": getattr(prop, "bedrooms", None),
+            "units": getattr(prop, "units", None),
+            "property_type": getattr(prop, "property_type", None),
+        },
+    }
 
 
 def _hud_fmr_year() -> int:
@@ -798,3 +897,31 @@ def enrich_rent(
     p=Depends(get_principal),
 ):
     return _enrich_one(db, property_id, org_id=p.org_id, strategy=strategy)
+
+
+@router.get("/enrich/section8/{property_id}", response_model=dict)
+def enrich_section8_overlay(
+    property_id: int,
+    strategy: str = Query(default="section8"),
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    enrich_result = _enrich_one(db, property_id, org_id=p.org_id, strategy=strategy)
+
+    prop = db.get(Property, property_id)
+    if not prop or prop.org_id != p.org_id:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    ra = _get_or_create_rent_assumption(db, property_id, p.org_id)
+    overlay = _build_section8_overlay(prop=prop, ra=ra, strategy=strategy)
+
+    return {
+        "ok": True,
+        "enrich": enrich_result.model_dump() if hasattr(enrich_result, "model_dump") else enrich_result.dict(),
+        "section8": overlay,
+        "missing_inputs": [
+            key
+            for key in ("market_rent_estimate", "section8_fmr", "rent_reasonableness_comp")
+            if overlay.get(key) is None
+        ],
+    }
