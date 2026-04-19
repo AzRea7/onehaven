@@ -818,3 +818,180 @@ def _apply_validation_state_to_source(
         summary["revalidation_required"] = True
         summary["authority_use_type"] = "binding"
     return summary
+
+
+# --- Step 4 additive normalization + verification metadata ---
+def _loads_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _source_last_verified_iso(source: PolicySource | None) -> str | None:
+    if source is None:
+        return None
+    dt = getattr(source, "last_verified_at", None) or getattr(source, "freshness_checked_at", None) or getattr(source, "retrieved_at", None)
+    return dt.isoformat() if dt else None
+
+
+def _source_currentness_summary(source: PolicySource | None) -> dict[str, object]:
+    if source is None:
+        return {
+            "is_current": False,
+            "is_verified": False,
+            "is_real_source": False,
+            "current_reason": "missing_source",
+            "last_verified_at": None,
+        }
+    freshness_status = str(getattr(source, "freshness_status", "") or "").strip().lower()
+    refresh_state = str(getattr(source, "refresh_state", "") or "").strip().lower()
+    http_status = _source_http_status(source)
+    url_validation = _source_url_validation_summary(source)
+    is_real_source = bool(url_validation.get("url_allowed")) and bool(str(getattr(source, "url", "") or "").strip())
+    is_verified = bool(getattr(source, "is_authoritative", False)) or str(getattr(source, "authority_tier", "") or "").strip().lower() in {"authoritative_official", "approved_official_supporting"}
+    is_current = bool(url_validation.get("fetch_usable")) and freshness_status not in {"stale", "not_found", "blocked", "fetch_failed", "error"} and refresh_state not in {"blocked", "failed"} and (http_status is None or 200 <= int(http_status) < 400)
+    if not is_real_source:
+        reason = "not_real_source"
+    elif not is_current:
+        reason = freshness_status or refresh_state or "not_current"
+    else:
+        reason = "current"
+    return {
+        "is_current": is_current,
+        "is_verified": is_verified,
+        "is_real_source": is_real_source,
+        "current_reason": reason,
+        "last_verified_at": _source_last_verified_iso(source),
+    }
+
+
+def _assertion_normalization_payload(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    citation_json = _loads_dict(getattr(assertion, "citation_json", None))
+    url_validation = _source_url_validation_summary(source)
+    currentness = _source_currentness_summary(source)
+    normalized_category = normalize_category(getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None))
+    return {
+        "rule_key": getattr(assertion, "rule_key", None),
+        "normalized_category": normalized_category,
+        "display_category": normalized_category,
+        "value_text": str(getattr(assertion, "raw_excerpt", None) or citation_json.get("raw_excerpt") or getattr(assertion, "value_text", None) or "").strip() or None,
+        "citation": {
+            "text": str(getattr(assertion, "source_citation", None) or "").strip() or None,
+            "url": citation_json.get("url") or getattr(source, "url", None),
+            "title": citation_json.get("title") or getattr(source, "title", None),
+            "publisher": citation_json.get("publisher") or getattr(source, "publisher", None),
+            "raw_excerpt": citation_json.get("raw_excerpt") or str(getattr(assertion, "raw_excerpt", None) or "").strip() or None,
+        },
+        "confidence": round(_safe_float(getattr(assertion, "confidence", 0.0)), 6),
+        "citation_quality": round(_citation_quality_from_assertion(assertion), 6),
+        "authority_level": str(getattr(source, "authority_tier", None) or getattr(assertion, "authority_tier", None) or "derived_or_inferred"),
+        "authority_rank": int(getattr(source, "authority_rank", 0) or getattr(assertion, "authority_rank", 0) or 0),
+        "authority_score": round(_safe_float(getattr(source, "authority_score", 0.0) or getattr(assertion, "authority_score", 0.0)), 6),
+        "is_real": bool(currentness.get("is_real_source")) and bool(url_validation.get("trust_for_extraction")),
+        "is_verified": bool(currentness.get("is_verified")) and str(getattr(assertion, "validation_state", "") or "").strip().lower() == "validated",
+        "is_current": bool(currentness.get("is_current")),
+        "current_reason": currentness.get("current_reason"),
+        "last_verified_at": currentness.get("last_verified_at"),
+        "source_id": int(getattr(source, "id", 0) or 0) if source is not None else None,
+    }
+
+
+_validation_orig_validate_assertion = validate_assertion
+
+def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    payload = dict(_validation_orig_validate_assertion(assertion=assertion, source=source))
+    normalized = _assertion_normalization_payload(assertion, source)
+    payload["normalized_rule"] = normalized
+    payload["citation_payload"] = normalized.get("citation")
+    payload["authority_level"] = normalized.get("authority_level")
+    payload["authority_rank"] = normalized.get("authority_rank")
+    payload["authority_score"] = normalized.get("authority_score")
+    payload["is_real"] = normalized.get("is_real")
+    payload["is_verified"] = normalized.get("is_verified")
+    payload["is_current"] = normalized.get("is_current")
+    payload["current_reason"] = normalized.get("current_reason")
+    payload["last_verified_at"] = normalized.get("last_verified_at")
+    return payload
+
+
+_validation_orig_validate_market_assertions = validate_market_assertions
+
+def validate_market_assertions(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    source_id: int | None = None,
+) -> dict[str, object]:
+    result = dict(_validation_orig_validate_market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        source_id=source_id,
+    ))
+
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
+    stmt = select(PolicyAssertion).where(PolicyAssertion.state == st)
+    if hasattr(PolicyAssertion, "org_id"):
+        if org_id is None:
+            stmt = stmt.where(PolicyAssertion.org_id.is_(None))
+        else:
+            stmt = stmt.where(or_(PolicyAssertion.org_id == org_id, PolicyAssertion.org_id.is_(None)))
+    if cnty is None:
+        stmt = stmt.where(PolicyAssertion.county.is_(None))
+    else:
+        stmt = stmt.where(PolicyAssertion.county == cnty)
+    if cty is None:
+        stmt = stmt.where(PolicyAssertion.city.is_(None))
+    else:
+        stmt = stmt.where(PolicyAssertion.city == cty)
+    if hasattr(PolicyAssertion, "pha_name"):
+        if pha is None:
+            stmt = stmt.where(or_(PolicyAssertion.pha_name.is_(None), PolicyAssertion.pha_name == ""))
+        else:
+            stmt = stmt.where(PolicyAssertion.pha_name == pha)
+    if source_id is not None:
+        stmt = stmt.where(PolicyAssertion.source_id == int(source_id))
+    rows = list(db.scalars(stmt).all())
+
+    normalized_rules = []
+    real_count = verified_count = current_count = 0
+    for row in rows:
+        source = db.get(PolicySource, int(row.source_id)) if getattr(row, "source_id", None) is not None else None
+        normalized = _assertion_normalization_payload(row, source)
+        normalized["validation_state"] = getattr(row, "validation_state", None)
+        normalized["trust_state"] = getattr(row, "trust_state", None)
+        normalized_rules.append(normalized)
+        real_count += 1 if normalized.get("is_real") else 0
+        verified_count += 1 if normalized.get("is_verified") else 0
+        current_count += 1 if normalized.get("is_current") else 0
+
+    result["normalized_rules"] = normalized_rules
+    result["real_rule_count"] = real_count
+    result["verified_current_rule_count"] = sum(1 for row in normalized_rules if row.get("is_verified") and row.get("is_current"))
+    result["verified_rule_count_step4"] = verified_count
+    result["current_rule_count"] = current_count
+    return result

@@ -6,11 +6,13 @@ from typing import Any, Dict, List
 
 from .jurisdiction_categories import (
     authority_expectations_for_categories,
+    authority_scope_for_categories,
     expected_rule_universe_for_scope,
     get_required_categories,
     legally_binding_categories,
     operational_heuristic_categories,
     property_proof_required_categories,
+    required_source_families_for_categories,
     rule_family_inventory_dict,
 )
 
@@ -226,6 +228,14 @@ class JurisdictionDefault:
             "freshness_warning_enabled": True,
         }
 
+    def default_authority_scope_by_category(self, *, include_section8: bool = True) -> dict[str, str]:
+        categories = self.required_categories(include_section8=include_section8)
+        return authority_scope_for_categories(categories)
+
+    def default_required_source_families_by_category(self, *, include_section8: bool = True) -> dict[str, list[str]]:
+        categories = self.required_categories(include_section8=include_section8)
+        return required_source_families_for_categories(categories)
+
     def to_profile_policy(self) -> Dict[str, Any]:
         universe = self.expected_rule_universe(include_section8=True)
         discovery_hints = self.default_discovery_search_hints()
@@ -253,6 +263,14 @@ class JurisdictionDefault:
                 "jurisdiction_types": list(universe.get("jurisdiction_types", [])),
                 "tier_order": list(universe.get("tier_order", universe.get("jurisdiction_types", []))),
                 "expected_tier_rule_universe": dict(universe.get("category_bundles", {})),
+                "rule_family_inventory": dict(universe.get("rule_family_inventory", {})),
+                "legally_binding_categories": list(universe.get("legally_binding_categories", [])),
+                "operational_heuristic_categories": list(universe.get("operational_heuristic_categories", [])),
+                "property_proof_required_categories": list(universe.get("property_proof_required_categories", [])),
+                "authority_expectations": dict(universe.get("authority_expectations", {})),
+                "authority_scope_by_category": dict(universe.get("authority_scope_by_category", {})),
+                "required_source_families_by_category": dict(universe.get("required_source_families_by_category", {})),
+                "critical_source_families": list(universe.get("critical_source_families", [])),
             },
             "compliance": {
                 "rental_license_required": "yes" if self.rental_license_required else "no",
@@ -271,6 +289,8 @@ class JurisdictionDefault:
                 "bootstrap_enabled": True,
                 "max_retries": freshness_defaults.get("max_discovery_retries"),
                 "retry_backoff_hours": freshness_defaults.get("retry_backoff_hours"),
+                "required_source_families_by_category": dict(universe.get("required_source_families_by_category", {})),
+                "critical_source_families": list(universe.get("critical_source_families", [])),
             },
             "trust": {
                 "projection": trust_defaults,
@@ -807,6 +827,9 @@ def default_policy_for_scope(
             "operational_heuristic_categories": list(universe.get("operational_heuristic_categories", [])),
             "property_proof_required_categories": list(universe.get("property_proof_required_categories", [])),
             "authority_expectations": dict(universe.get("authority_expectations", {})),
+            "authority_scope_by_category": dict(universe.get("authority_scope_by_category", {})),
+            "required_source_families_by_category": dict(universe.get("required_source_families_by_category", {})),
+            "critical_source_families": list(universe.get("critical_source_families", [])),
             "family_bundles": dict(universe.get("family_bundles", {})),
         },
         "compliance": {
@@ -821,6 +844,8 @@ def default_policy_for_scope(
             "bootstrap_enabled": True,
             "max_retries": freshness_defaults.get("max_discovery_retries"),
             "retry_backoff_hours": freshness_defaults.get("retry_backoff_hours"),
+            "required_source_families_by_category": dict(universe.get("required_source_families_by_category", {})),
+            "critical_source_families": list(universe.get("critical_source_families", [])),
         },
         "trust": {
             "projection": trust_defaults,

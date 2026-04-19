@@ -1013,3 +1013,477 @@ def set_profile_operational_rollup(
     profile.policy_json = _dumps(policy)
     return profile
 
+
+
+# ---- Step 2 jurisdiction registry + source family mapping overlays ----
+try:
+    from app.domain.jurisdiction_categories import (
+        authority_scope_for_categories,
+        required_source_families_for_categories,
+    )
+except Exception:
+    authority_scope_for_categories = None  # type: ignore[assignment]
+    required_source_families_for_categories = None  # type: ignore[assignment]
+
+
+def _coverage_confidence_to_score(value: Any) -> float:
+    raw = str(value or '').strip().lower()
+    if raw == 'high':
+        return 0.95
+    if raw == 'medium':
+        return 0.75
+    if raw == 'low':
+        return 0.55
+    return 0.65
+
+
+def _registry_category_to_source_family(category: str) -> str:
+    c = str(category or '').strip().lower()
+    mapping = {
+        'rental_license': 'rental_registration',
+        'registration': 'rental_registration',
+        'inspection': 'rental_inspection',
+        'occupancy': 'certificate_of_occupancy',
+        'permits': 'permits_building',
+        'fees': 'fees_forms',
+        'documents': 'fees_forms',
+        'contacts': 'contact',
+        'program_overlay': 'program_overlay',
+        'section8': 'program_overlay',
+        'safety': 'local_code',
+        'lead': 'local_code',
+        'source_of_income': 'local_code',
+        'zoning': 'local_code',
+        'tax': 'local_code',
+        'utilities': 'local_code',
+    }
+    return mapping.get(c, 'local_code')
+
+
+def _flatten_source_evidence(policy: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for key in ('source_evidence', 'evidence'):
+        value = policy.get(key)
+        if isinstance(value, list):
+            for row in value:
+                if isinstance(row, dict):
+                    out.append(dict(row))
+        elif isinstance(value, dict):
+            for nested in value.values():
+                if isinstance(nested, list):
+                    for row in nested:
+                        if isinstance(row, dict):
+                            out.append(dict(row))
+                elif isinstance(nested, str) and nested.strip():
+                    out.append({'url': nested.strip(), 'label': key})
+    discovered = (((policy.get('meta') or {}).get('registry') or {}).get('source_family_matrix') or [])
+    if isinstance(discovered, list):
+        for row in discovered:
+            if isinstance(row, dict):
+                out.append(dict(row))
+    return out
+
+
+def _guess_official_website(policy: dict[str, Any], *, fallback: str | None = None) -> str | None:
+    candidates: list[str] = []
+    for key in ('official_website', 'official_site', 'official_url', 'website', 'url'):
+        value = policy.get(key)
+        if isinstance(value, str) and value.strip():
+            candidates.append(value.strip())
+    for row in _flatten_source_evidence(policy):
+        url = str(row.get('url') or '').strip()
+        if not url:
+            continue
+        if bool(row.get('is_official')) or 'official' in str(row.get('authority_level') or '').lower() or 'city' in url or '.gov' in url or '.org' in url:
+            candidates.append(url)
+    if fallback:
+        candidates.append(fallback)
+    for url in candidates:
+        if url.startswith('http://') or url.startswith('https://'):
+            return url
+    return None
+
+
+def _matching_evidence_for_category(policy: dict[str, Any], category: str) -> list[dict[str, Any]]:
+    c = str(category or '').strip().lower()
+    hits: list[dict[str, Any]] = []
+    needles = {c, _registry_category_to_source_family(c)}
+    if c == 'rental_license':
+        needles.update({'rental', 'license', 'registration'})
+    elif c == 'inspection':
+        needles.update({'inspection', 'nspire', 'hqs'})
+    elif c == 'occupancy':
+        needles.update({'occupancy', 'certificate'})
+    elif c == 'permits':
+        needles.update({'permit', 'building'})
+    elif c == 'fees':
+        needles.update({'fee', 'fees', 'form', 'packet'})
+    elif c == 'section8':
+        needles.update({'section 8', 'voucher', 'pha', 'housing authority'})
+    for row in _flatten_source_evidence(policy):
+        hay = ' '.join([
+            str(row.get('label') or ''),
+            str(row.get('title') or ''),
+            str(row.get('category') or ''),
+            str(row.get('source_kind') or ''),
+            str(row.get('publisher') or ''),
+            str(row.get('url') or ''),
+        ]).lower()
+        if any(n in hay for n in needles):
+            hits.append(row)
+    return hits
+
+
+def _dedupe_source_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        url = str(row.get('source_url') or row.get('url') or '').strip()
+        category = str(row.get('category') or '').strip().lower()
+        key = (category, url)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def _compute_registry_source_matrix(
+    *,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    policy: dict[str, Any],
+) -> dict[str, Any]:
+    universe = policy.get('expected_rule_universe') or _expected_rule_universe_payload(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=True,
+        tenant_waitlist_depth=((policy.get('operations') or {}).get('tenant_waitlist_depth') if isinstance(policy.get('operations'), dict) else None),
+    )
+    required_categories = list(policy.get('required_categories') or universe.get('required_categories') or [])
+    critical_categories = set(policy.get('critical_categories') or universe.get('critical_categories') or [])
+    authority_scope = dict(policy.get('authority_scope_by_category') or universe.get('authority_scope_by_category') or {})
+    required_source_families = dict(policy.get('required_source_families_by_category') or universe.get('required_source_families_by_category') or {})
+    official_site = _guess_official_website(policy)
+    rows: list[dict[str, Any]] = []
+    for category in required_categories:
+        families = list(required_source_families.get(category) or [])
+        mapped_family = _registry_category_to_source_family(category)
+        if mapped_family not in families:
+            families.append(mapped_family)
+        evidence_rows = _matching_evidence_for_category(policy, category)
+        source_url = None
+        source_label = None
+        source_kind = None
+        publisher_name = None
+        publisher_type = None
+        authority_level = 'authoritative_official' if authority_scope.get(category) in {'federal', 'state', 'county', 'city', 'local'} else 'approved_official_supporting'
+        is_official = False
+        if evidence_rows:
+            top = evidence_rows[0]
+            source_url = str(top.get('url') or '').strip() or official_site
+            source_label = str(top.get('label') or top.get('title') or category).strip() or category
+            source_kind = str(top.get('source_kind') or '').strip().lower() or None
+            publisher_name = str(top.get('publisher') or top.get('publisher_name') or '').strip() or None
+            publisher_type = str(top.get('publisher_type') or '').strip().lower() or None
+            authority_level = str(top.get('authority_level') or authority_level).strip().lower() or authority_level
+            is_official = bool(top.get('is_official')) or bool(source_url and ('.gov' in source_url or '.us/' in source_url or 'cityof' in source_url))
+        else:
+            source_url = official_site
+            source_label = f'{category.replace("_", " ").title()} official source' if official_site else f'{category.replace("_", " ").title()} source pending confirmation'
+            source_kind = 'official_site' if official_site else 'manual'
+            publisher_name = city.title() if city else county.title() + ' County' if county else state
+            publisher_type = 'municipality' if city else 'county' if county else 'state'
+            is_official = bool(official_site)
+        rows.append({
+            'category': category,
+            'source_family_category': mapped_family,
+            'required_source_families': families,
+            'authority_scope': authority_scope.get(category),
+            'critical': category in critical_categories,
+            'source_url': source_url,
+            'source_label': source_label,
+            'source_kind': source_kind,
+            'publisher_name': publisher_name,
+            'publisher_type': publisher_type,
+            'authority_level': authority_level,
+            'is_official': is_official,
+            'coverage_hint': f"{category} should resolve from {', '.join(families)}",
+        })
+    rows = _dedupe_source_rows(rows)
+    return {
+        'official_website': official_site,
+        'required_categories': required_categories,
+        'critical_categories': list(critical_categories),
+        'source_family_matrix': rows,
+    }
+
+
+def ensure_registry_source_mapping(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    policy: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        from app.services.jurisdiction_registry_service import (
+            JURISDICTION_TYPE_CITY,
+            JURISDICTION_TYPE_COUNTY,
+            JURISDICTION_TYPE_PHA,
+            JURISDICTION_TYPE_STATE,
+            ONBOARDING_DISCOVERED,
+            ONBOARDING_SITE_CONFIRMED,
+            ONBOARDING_SOURCE_MAPPED,
+            get_or_create_jurisdiction,
+            mark_onboarding_status,
+            resolve_jurisdiction_hierarchy,
+        )
+        from app.services.jurisdiction_source_family_service import (
+            FETCH_MODE_HTML,
+            FETCH_MODE_MANUAL,
+            SOURCE_STATUS_ACTIVE,
+            upsert_source_family,
+            get_source_families_for_jurisdiction,
+        )
+    except Exception:
+        return {'registry_enabled': False, 'official_website': _guess_official_website(policy), 'source_family_matrix': (_compute_registry_source_matrix(state=state, county=county, city=city, pha_name=pha_name, policy=policy).get('source_family_matrix') or [])}
+
+    st = _norm_state(state)
+    cnty = _norm_county(county)
+    cty = _norm_city(city)
+    scope = _compute_registry_source_matrix(state=st, county=cnty, city=cty, pha_name=_norm(pha_name), policy=policy)
+    official_website = scope.get('official_website')
+
+    state_row = get_or_create_jurisdiction(
+        db,
+        jurisdiction_type=JURISDICTION_TYPE_STATE,
+        state_code=st,
+        state_name=st,
+        official_website=official_website if not cnty and not cty else None,
+        onboarding_status=ONBOARDING_SITE_CONFIRMED if official_website and not cnty and not cty else ONBOARDING_DISCOVERED,
+        source_confidence=_coverage_confidence_to_score((policy.get('coverage') or {}).get('coverage_confidence') or policy.get('coverage_confidence')),
+        org_id=org_id,
+    )
+    county_row = None
+    city_row = None
+    pha_row = None
+    if cnty:
+        county_row = get_or_create_jurisdiction(
+            db,
+            jurisdiction_type=JURISDICTION_TYPE_COUNTY,
+            state_code=st,
+            county_name=cnty,
+            parent_jurisdiction_id=int(state_row.id),
+            official_website=official_website if not cty else None,
+            onboarding_status=ONBOARDING_SITE_CONFIRMED if official_website and not cty else ONBOARDING_DISCOVERED,
+            source_confidence=_coverage_confidence_to_score((policy.get('coverage') or {}).get('coverage_confidence') or policy.get('coverage_confidence')),
+            org_id=org_id,
+        )
+    if cty:
+        city_row = get_or_create_jurisdiction(
+            db,
+            jurisdiction_type=JURISDICTION_TYPE_CITY,
+            state_code=st,
+            county_name=cnty,
+            city_name=cty,
+            parent_jurisdiction_id=int(county_row.id if county_row else state_row.id),
+            official_website=official_website,
+            onboarding_status=ONBOARDING_SITE_CONFIRMED if official_website else ONBOARDING_DISCOVERED,
+            source_confidence=_coverage_confidence_to_score((policy.get('coverage') or {}).get('coverage_confidence') or policy.get('coverage_confidence')),
+            org_id=org_id,
+        )
+    if _norm(pha_name):
+        pha_row = get_or_create_jurisdiction(
+            db,
+            jurisdiction_type=JURISDICTION_TYPE_PHA,
+            state_code=st,
+            county_name=cnty,
+            city_name=_norm(pha_name),
+            parent_jurisdiction_id=int(city_row.id if city_row else county_row.id if county_row else state_row.id),
+            official_website=official_website,
+            onboarding_status=ONBOARDING_SITE_CONFIRMED if official_website else ONBOARDING_DISCOVERED,
+            source_confidence=_coverage_confidence_to_score((policy.get('coverage') or {}).get('coverage_confidence') or policy.get('coverage_confidence')),
+            org_id=org_id,
+        )
+
+    target = pha_row or city_row or county_row or state_row
+    mapped_rows: list[dict[str, Any]] = []
+    if target is not None:
+        for row in scope.get('source_family_matrix') or []:
+            fetch_mode = FETCH_MODE_HTML if row.get('source_url') else FETCH_MODE_MANUAL
+            saved = upsert_source_family(
+                db,
+                jurisdiction_id=int(target.id),
+                category=str(row.get('source_family_category') or 'local_code'),
+                source_url=row.get('source_url'),
+                source_label=row.get('source_label'),
+                source_kind=row.get('source_kind'),
+                publisher_name=row.get('publisher_name'),
+                publisher_type=row.get('publisher_type'),
+                authority_level=row.get('authority_level'),
+                fetch_mode=fetch_mode,
+                status=SOURCE_STATUS_ACTIVE,
+                is_official=bool(row.get('is_official')),
+                is_active=True,
+                notes=row.get('coverage_hint'),
+                coverage_hint=row.get('coverage_hint'),
+                review_state='seeded',
+            )
+            mapped_rows.append({
+                'id': int(saved.id),
+                'category': row.get('category'),
+                'source_family_category': saved.category,
+                'source_url': saved.source_url,
+                'source_label': saved.source_label,
+                'authority_level': saved.authority_level,
+                'is_official': bool(saved.is_official),
+                'coverage_hint': saved.coverage_hint,
+            })
+        final_status = ONBOARDING_SOURCE_MAPPED if mapped_rows else ONBOARDING_SITE_CONFIRMED if official_website else ONBOARDING_DISCOVERED
+        mark_onboarding_status(db, jurisdiction_id=int(target.id), onboarding_status=final_status)
+        hierarchy = resolve_jurisdiction_hierarchy(db, state_code=st, county_name=cnty, city_name=cty)
+    else:
+        hierarchy = {'state': None, 'county': None, 'city': None}
+        final_status = ONBOARDING_DISCOVERED
+
+    return {
+        'registry_enabled': True,
+        'official_website': official_website,
+        'onboarding_status': final_status,
+        'jurisdiction_id': int(target.id) if target is not None else None,
+        'jurisdiction_slug': getattr(target, 'slug', None) if target is not None else None,
+        'registry_hierarchy': {
+            'state': {'id': int(hierarchy['state'].id), 'slug': hierarchy['state'].slug, 'display_name': hierarchy['state'].display_name} if hierarchy.get('state') else None,
+            'county': {'id': int(hierarchy['county'].id), 'slug': hierarchy['county'].slug, 'display_name': hierarchy['county'].display_name} if hierarchy.get('county') else None,
+            'city': {'id': int(hierarchy['city'].id), 'slug': hierarchy['city'].slug, 'display_name': hierarchy['city'].display_name} if hierarchy.get('city') else None,
+            'pha': {'id': int(pha_row.id), 'slug': pha_row.slug, 'display_name': pha_row.display_name} if pha_row is not None else None,
+        },
+        'source_family_matrix': mapped_rows or list(scope.get('source_family_matrix') or []),
+        'required_categories': list(scope.get('required_categories') or []),
+        'critical_categories': list(scope.get('critical_categories') or []),
+    }
+
+
+_step2_base_resolve_profile = resolve_profile
+_step2_base_upsert_profile = upsert_profile
+_step2_base_summarize_profile = summarize_profile
+
+
+def resolve_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    city: Optional[str] = None,
+    county: Optional[str] = None,
+    state: str = 'MI',
+):
+    out = _step2_base_resolve_profile(db, org_id=org_id, city=city, county=county, state=state)
+    policy = dict(out.get('policy') or {})
+    registry = ensure_registry_source_mapping(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=out.get('pha_name'),
+        policy=policy,
+    )
+    meta = dict(policy.get('meta') or {})
+    meta['registry'] = registry
+    policy['meta'] = meta
+    out['policy'] = policy
+    out['official_website'] = registry.get('official_website')
+    out['onboarding_status'] = registry.get('onboarding_status')
+    out['registry_hierarchy'] = registry.get('registry_hierarchy')
+    out['source_family_matrix'] = registry.get('source_family_matrix')
+    return out
+
+
+def upsert_profile(
+    db: Session,
+    *,
+    org_id: int,
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    friction_multiplier: float,
+    pha_name: Optional[str],
+    policy: Any,
+    notes: Optional[str],
+) -> JurisdictionProfile:
+    row = _step2_base_upsert_profile(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        friction_multiplier=friction_multiplier,
+        pha_name=pha_name,
+        policy=policy,
+        notes=notes,
+    )
+    policy_dict = _loads(getattr(row, 'policy_json', None), {})
+    if not isinstance(policy_dict, dict):
+        policy_dict = {}
+    registry = ensure_registry_source_mapping(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        policy=policy_dict,
+    )
+    meta = dict(policy_dict.get('meta') or {})
+    meta['registry'] = registry
+    policy_dict['meta'] = meta
+    if registry.get('official_website') and not policy_dict.get('official_website'):
+        policy_dict['official_website'] = registry.get('official_website')
+    row.policy_json = _dumps(policy_dict)
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def summarize_profile(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    city: Optional[str],
+    county: Optional[str],
+    state: str = 'MI',
+    pha_name: Optional[str] = None,
+) -> dict[str, Any]:
+    out = _step2_base_summarize_profile(
+        db,
+        org_id=org_id,
+        city=city,
+        county=county,
+        state=state,
+        pha_name=pha_name,
+    )
+    policy = dict(out.get('policy') or {})
+    registry = ensure_registry_source_mapping(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        policy=policy,
+    )
+    out['official_website'] = registry.get('official_website')
+    out['onboarding_status'] = registry.get('onboarding_status')
+    out['registry_hierarchy'] = registry.get('registry_hierarchy')
+    out['source_family_matrix'] = registry.get('source_family_matrix')
+    return out

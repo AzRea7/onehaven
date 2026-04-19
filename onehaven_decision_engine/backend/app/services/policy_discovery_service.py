@@ -103,8 +103,6 @@ def _json_loads_list(value: Any) -> list[Any]:
     return []
 
 
-
-
 def _coerce_dt_like(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -512,8 +510,6 @@ def record_discovery_attempt(
     db.flush()
     return row
 
-
-
 def update_inventory_after_fetch(
     db: Session,
     *,
@@ -770,4 +766,371 @@ def summarize_inventory_for_scope(
             }
             for row in rows
         ],
+    }
+
+FETCH_MODE_API = "api"
+FETCH_MODE_HTML = "html"
+FETCH_MODE_PDF = "pdf"
+FETCH_MODE_MANUAL_REQUIRED = "manual-required"
+FETCH_MODE_UNKNOWN = "unknown"
+
+FETCH_RESOLUTION_FETCHED = "fetched"
+FETCH_RESOLUTION_MANUAL_REQUIRED = "manual_required"
+FETCH_RESOLUTION_UNRESOLVED = "unresolved"
+FETCH_RESOLUTION_BLOCKED = "blocked"
+FETCH_RESOLUTION_FAILED = "failed"
+
+_BLOCKED_HTTP_STATUSES = {401, 403, 405, 406, 407, 429, 451}
+_PDF_CONTENT_HINTS = ("application/pdf", ".pdf")
+_API_PATH_HINTS = ("/api/", "api.")
+
+
+def _normalize_fetch_mode(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {FETCH_MODE_API, FETCH_MODE_HTML, FETCH_MODE_PDF, FETCH_MODE_MANUAL_REQUIRED}:
+        return raw
+    return FETCH_MODE_UNKNOWN
+
+
+def infer_fetch_mode(*, url: str | None, source_kind: str | None = None, publication_type: str | None = None, fetch_mode: str | None = None) -> str:
+    explicit = _normalize_fetch_mode(fetch_mode)
+    if explicit != FETCH_MODE_UNKNOWN:
+        return explicit
+    kind = str(source_kind or "").strip().lower()
+    publication = str(publication_type or "").strip().lower()
+    canonical = canonicalize_url(url or "")
+    lower_url = canonical.lower()
+    if publication == "pdf" or lower_url.endswith('.pdf'):
+        return FETCH_MODE_PDF
+    if kind in {"api", "json_api", "rss_api"}:
+        return FETCH_MODE_API
+    if any(token in lower_url for token in _API_PATH_HINTS):
+        return FETCH_MODE_API
+    if canonical:
+        return FETCH_MODE_HTML
+    return FETCH_MODE_UNKNOWN
+
+
+def classify_fetch_resolution(fetch_result: dict[str, Any]) -> str:
+    status = fetch_result.get("http_status")
+    error = str(fetch_result.get("fetch_error") or "").lower()
+    resolution = str(fetch_result.get("resolution") or "").strip().lower()
+    if resolution in {
+        FETCH_RESOLUTION_FETCHED,
+        FETCH_RESOLUTION_MANUAL_REQUIRED,
+        FETCH_RESOLUTION_UNRESOLVED,
+        FETCH_RESOLUTION_BLOCKED,
+        FETCH_RESOLUTION_FAILED,
+    }:
+        return resolution
+    if fetch_result.get("ok"):
+        return FETCH_RESOLUTION_FETCHED
+    if status in _BLOCKED_HTTP_STATUSES or any(t in error for t in ["captcha", "forbidden", "blocked", "anti-bot", "manual"]):
+        return FETCH_RESOLUTION_MANUAL_REQUIRED if str(fetch_result.get("next_step") or "").strip().lower() == "manual_review" else FETCH_RESOLUTION_BLOCKED
+    if error in {"no_source", "missing_url", "not_configured", "manual_required", "probe_skipped"}:
+        return FETCH_RESOLUTION_UNRESOLVED if error != "manual_required" else FETCH_RESOLUTION_MANUAL_REQUIRED
+    if error:
+        return FETCH_RESOLUTION_FAILED
+    return FETCH_RESOLUTION_UNRESOLVED
+
+
+def source_family_expected_modes(category: str | None) -> list[str]:
+    normalized = str(category or "").strip().lower()
+    mapping = {
+        "section8": [FETCH_MODE_HTML, FETCH_MODE_PDF],
+        "program_overlay": [FETCH_MODE_HTML, FETCH_MODE_PDF],
+        "inspection": [FETCH_MODE_HTML, FETCH_MODE_PDF],
+        "rental_license": [FETCH_MODE_HTML, FETCH_MODE_PDF],
+        "registration": [FETCH_MODE_HTML, FETCH_MODE_PDF],
+        "occupancy": [FETCH_MODE_HTML, FETCH_MODE_PDF],
+        "permits": [FETCH_MODE_HTML, FETCH_MODE_PDF],
+        "fees": [FETCH_MODE_HTML, FETCH_MODE_PDF],
+        "contacts": [FETCH_MODE_HTML],
+        "documents": [FETCH_MODE_PDF, FETCH_MODE_HTML],
+    }
+    return list(mapping.get(normalized, [FETCH_MODE_HTML]))
+
+
+def build_source_family_candidate(
+    *,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None,
+    program_type: str | None,
+    category: str,
+    source_url: str | None,
+    source_label: str | None,
+    source_kind: str | None,
+    publisher_name: str | None,
+    authority_level: str | None,
+    fetch_mode: str | None,
+    notes: str | None = None,
+    coverage_hint: str | None = None,
+    is_official: bool = False,
+    is_active: bool = True,
+    source_family_id: int | None = None,
+    jurisdiction_id: int | None = None,
+) -> dict[str, Any]:
+    mode = infer_fetch_mode(
+        url=source_url,
+        source_kind=source_kind,
+        publication_type=None,
+        fetch_mode=fetch_mode,
+    )
+    canonical_url = canonicalize_url(source_url or "")
+    if not is_active:
+        candidate_status = "inactive"
+    elif not canonical_url:
+        candidate_status = "unresolved"
+    elif mode == FETCH_MODE_MANUAL_REQUIRED:
+        candidate_status = "manual_required"
+    else:
+        candidate_status = "candidate"
+    return {
+        "state": _norm_state(state),
+        "county": _norm_lower(county),
+        "city": _norm_lower(city),
+        "pha_name": _norm_text(pha_name),
+        "program_type": _norm_text(program_type),
+        "category": str(category or "").strip().lower(),
+        "url": canonical_url or None,
+        "title": _norm_text(source_label),
+        "publisher": _norm_text(publisher_name),
+        "source_type": _norm_text(source_kind) or "source_family",
+        "publication_type": "pdf" if mode == FETCH_MODE_PDF else ("api" if mode == FETCH_MODE_API else "html"),
+        "authority_tier": _norm_text(authority_level),
+        "fetch_mode": mode,
+        "category_hints": normalize_categories([category]),
+        "search_terms": [x for x in [_norm_text(source_label), _norm_text(city), _norm_text(county), _norm_text(state)] if x],
+        "candidate_status": candidate_status,
+        "notes": _norm_text(notes),
+        "coverage_hint": _norm_text(coverage_hint),
+        "is_official_candidate": bool(is_official),
+        "is_active": bool(is_active),
+        "source_family_id": source_family_id,
+        "jurisdiction_id": jurisdiction_id,
+    }
+
+_DISCOVERY_UNRESOLVED = "unresolved"
+_DISCOVERY_MANUAL_REQUIRED = "manual_required"
+_DISCOVERY_DISCOVERED = "discovered"
+
+
+def _safe_import_step2_services():
+    try:
+        from app.services.jurisdiction_source_family_service import get_source_families_for_jurisdiction
+        from app.services.jurisdiction_registry_service import (
+            find_jurisdiction_by_id,
+            find_jurisdiction_by_slug,
+            get_or_create_jurisdiction,
+            list_child_jurisdictions,
+        )
+        return {
+            "get_source_families_for_jurisdiction": get_source_families_for_jurisdiction,
+            "find_jurisdiction_by_id": find_jurisdiction_by_id,
+            "find_jurisdiction_by_slug": find_jurisdiction_by_slug,
+            "get_or_create_jurisdiction": get_or_create_jurisdiction,
+            "list_child_jurisdictions": list_child_jurisdictions,
+        }
+    except Exception:
+        return {}
+
+
+def _source_family_rows_for_scope(
+    db: Session,
+    *,
+    jurisdiction_id: int | None = None,
+) -> list[Any]:
+    services = _safe_import_step2_services()
+    getter = services.get("get_source_families_for_jurisdiction")
+    if getter is None or jurisdiction_id is None:
+        return []
+    try:
+        return list(getter(db, jurisdiction_id=int(jurisdiction_id), include_inactive=True) or [])
+    except Exception:
+        return []
+
+
+def discover_source_family_candidates(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    program_type: str | None = None,
+    jurisdiction_id: int | None = None,
+    expected_categories: list[str] | None = None,
+    expected_tiers: list[str] | None = None,
+    commit: bool = False,
+) -> dict[str, Any]:
+    hints = expected_inventory_hints(state=state, county=county, city=city, pha_name=pha_name, include_section8=True)
+    expected_categories = normalize_categories(expected_categories or hints.get("expected_categories") or [])
+    expected_tiers = [str(x).strip().lower() for x in (expected_tiers or hints.get("expected_tiers") or []) if str(x).strip()]
+
+    family_rows = _source_family_rows_for_scope(db, jurisdiction_id=jurisdiction_id)
+    candidates: list[dict[str, Any]] = []
+    discovered_urls: list[str] = []
+    missing_categories: list[str] = []
+    manual_categories: list[str] = []
+
+    family_by_category: dict[str, list[Any]] = {}
+    for row in family_rows:
+        category = str(getattr(row, "category", None) or "").strip().lower()
+        if not category:
+            continue
+        family_by_category.setdefault(category, []).append(row)
+
+    for category in expected_categories:
+        rows = family_by_category.get(category, [])
+        if not rows:
+            missing_categories.append(category)
+            continue
+        active_for_category = False
+        for row in rows:
+            candidate = build_source_family_candidate(
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                program_type=program_type,
+                category=category,
+                source_url=getattr(row, "source_url", None),
+                source_label=getattr(row, "source_label", None),
+                source_kind=getattr(row, "source_kind", None),
+                publisher_name=getattr(row, "publisher_name", None),
+                authority_level=getattr(row, "authority_level", None),
+                fetch_mode=getattr(row, "fetch_mode", None),
+                notes=getattr(row, "notes", None),
+                coverage_hint=getattr(row, "coverage_hint", None),
+                is_official=bool(getattr(row, "is_official", False)),
+                is_active=bool(getattr(row, "is_active", True)),
+                source_family_id=int(getattr(row, "id", 0) or 0) or None,
+                jurisdiction_id=int(getattr(row, "jurisdiction_id", 0) or 0) or jurisdiction_id,
+            )
+            candidates.append(candidate)
+            if candidate.get("url"):
+                discovered_urls.append(candidate["url"])
+            if candidate.get("candidate_status") == _DISCOVERY_MANUAL_REQUIRED:
+                manual_categories.append(category)
+            if candidate.get("candidate_status") not in {"inactive", _DISCOVERY_UNRESOLVED}:
+                active_for_category = True
+                inventory_row = upsert_discovery_candidate_inventory(
+                    db,
+                    org_id=org_id,
+                    state=state,
+                    county=county,
+                    city=city,
+                    pha_name=pha_name,
+                    program_type=program_type,
+                    url=candidate.get("url") or f"manual-required://{source_inventory_scope_key(state=state, county=county, city=city, pha_name=pha_name, program_type=program_type)}/{category}",
+                    title=candidate.get("title"),
+                    publisher=candidate.get("publisher"),
+                    source_type=candidate.get("source_type"),
+                    publication_type=candidate.get("publication_type"),
+                    category_hints=candidate.get("category_hints") or [category],
+                    search_terms=candidate.get("search_terms") or [],
+                    expected_categories=expected_categories,
+                    expected_tiers=expected_tiers,
+                    authority_tier=candidate.get("authority_tier"),
+                    authority_rank=100 if candidate.get("is_official_candidate") else 50,
+                    authority_score=1.0 if candidate.get("is_official_candidate") else 0.5,
+                    probe_result={
+                        "ok": bool(candidate.get("url")) and candidate.get("fetch_mode") != FETCH_MODE_MANUAL_REQUIRED,
+                        "fetch_error": "manual_required" if candidate.get("fetch_mode") == FETCH_MODE_MANUAL_REQUIRED else ("missing_url" if not candidate.get("url") else None),
+                        "candidate_status": candidate.get("candidate_status"),
+                    },
+                    metadata={
+                        "source_family_id": candidate.get("source_family_id"),
+                        "jurisdiction_id": candidate.get("jurisdiction_id"),
+                        "fetch_mode": candidate.get("fetch_mode"),
+                        "notes": candidate.get("notes"),
+                        "coverage_hint": candidate.get("coverage_hint"),
+                    },
+                )
+                if candidate.get("fetch_mode") == FETCH_MODE_MANUAL_REQUIRED:
+                    inventory_row.crawl_status = INVENTORY_CRAWL_NOT_FOUND
+                    inventory_row.lifecycle_state = INVENTORY_LIFECYCLE_DISCOVERED
+                    inventory_row.candidate_status_reason = "manual_required"
+                    inventory_row.refresh_state = "manual_only"
+                    inventory_row.refresh_status_reason = "manual_required"
+                    inventory_row.next_refresh_step = "manual_review"
+                    db.add(inventory_row)
+        if not active_for_category:
+            missing_categories.append(category)
+
+    unresolved_categories = sorted(set(missing_categories))
+    if unresolved_categories:
+        mark_inventory_not_found(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            program_type=program_type,
+            expected_categories=unresolved_categories,
+            expected_tiers=expected_tiers,
+            search_terms=[x for x in [city, county, state, pha_name] if x],
+            metadata={"reason": "no_source_family_mapping", "jurisdiction_id": jurisdiction_id},
+        )
+
+    attempt_status = "completed"
+    not_found = False
+    if not candidates:
+        attempt_status = "completed_no_candidates"
+        not_found = True
+    elif unresolved_categories and len(unresolved_categories) == len(expected_categories):
+        attempt_status = "completed_unresolved"
+        not_found = True
+
+    record_discovery_attempt(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        program_type=program_type,
+        query_text=f"source family discovery for {city or county or state}",
+        searched_categories=expected_categories,
+        searched_tiers=expected_tiers,
+        result_urls=sorted(set(discovered_urls)),
+        attempt_type="source_family_discovery",
+        status=attempt_status,
+        not_found=not_found,
+        metadata={
+            "jurisdiction_id": jurisdiction_id,
+            "manual_categories": sorted(set(manual_categories)),
+            "unresolved_categories": unresolved_categories,
+            "candidate_count": len(candidates),
+        },
+    )
+
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+
+    return {
+        "ok": True,
+        "jurisdiction_id": jurisdiction_id,
+        "expected_categories": expected_categories,
+        "expected_tiers": expected_tiers,
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+        "manual_required_categories": sorted(set(manual_categories)),
+        "unresolved_categories": unresolved_categories,
+        "discovered_urls": sorted(set(discovered_urls)),
+        "inventory_summary": summarize_inventory_for_scope(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            program_type=program_type,
+        ),
     }

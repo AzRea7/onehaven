@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..db import SessionLocal
 from ..models import JurisdictionRule
 from ..domain.jurisdiction_defaults import defaults_for_michigan
+from ..services.jurisdiction_profile_service import ensure_registry_source_mapping
 
 
 def _notes_from_default(default) -> str:
@@ -27,6 +28,8 @@ def _notes_from_default(default) -> str:
     legal_categories = coverage.get("legally_binding_categories") or universe.get("legally_binding_categories") or []
     operational_categories = coverage.get("operational_heuristic_categories") or universe.get("operational_heuristic_categories") or []
     property_proof_categories = coverage.get("property_proof_required_categories") or universe.get("property_proof_required_categories") or []
+    source_families = coverage.get("required_source_families_by_category") or universe.get("required_source_families_by_category") or {}
+    authority_scope = coverage.get("authority_scope_by_category") or universe.get("authority_scope_by_category") or {}
 
     note_parts = [
         default.notes or "",
@@ -37,6 +40,8 @@ def _notes_from_default(default) -> str:
         f"Property-proof families: {', '.join(property_proof_categories)}." if property_proof_categories else "",
         f"Discovery base terms: {', '.join(discovery.get('base_terms') or [])}." if discovery.get("base_terms") else "",
         f"Primary source hints: {', '.join(discovery.get('preferred_source_kinds') or [])}." if discovery.get("preferred_source_kinds") else "",
+        f"Authority scope by category: {'; '.join(f'{k}:{v}' for k, v in authority_scope.items())}." if authority_scope else "",
+        f"Required source families: {'; '.join(f'{k}->{', '.join(v)}' for k, v in source_families.items())}." if source_families else "",
         f"Authoritative source threshold: {thresholds.get('authoritative_source')}." if thresholds.get("authoritative_source") is not None else "",
         f"Default stale-days threshold: {freshness.get('stale_days')}." if freshness.get("stale_days") is not None else "",
         f"Projection trust minimum: {trust.get('min_completeness_score_for_trust')}." if trust.get("min_completeness_score_for_trust") is not None else "",
@@ -88,14 +93,34 @@ def upsert_rule(db: Session, org_id: int, payload: dict) -> JurisdictionRule:
     return rule
 
 
+def seed_registry_and_sources(db: Session, org_id: int) -> list[dict]:
+    synced: list[dict] = []
+    for default in defaults_for_michigan():
+        policy = default.to_profile_policy()
+        synced.append(
+            ensure_registry_source_mapping(
+                db,
+                org_id=org_id,
+                state=default.state,
+                county=getattr(default, 'county', None),
+                city=default.city,
+                pha_name=getattr(default, 'housing_authority', None),
+                policy=policy,
+            )
+        )
+    return synced
+
+
 def main():
     org_id = 1
     db = SessionLocal()
     try:
         for payload in SEED:
             upsert_rule(db, org_id, payload)
+        registry_synced = seed_registry_and_sources(db, org_id)
         db.commit()
         print(f"Seeded {len(SEED)} jurisdiction rules into org_id={org_id}.")
+        print(f"Synced {len(registry_synced)} jurisdiction registry/source-family mappings.")
     finally:
         db.close()
 

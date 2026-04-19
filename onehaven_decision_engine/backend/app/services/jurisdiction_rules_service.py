@@ -664,3 +664,164 @@ def governed_assertions_for_scope(
         "category_counts": category_counts,
         "assertion_summaries": summaries,
     }
+
+
+# ---- Step 2 registry + source family overlays ----
+
+def _rule_notes_with_registry(default: Any, base_notes: str | None = None) -> str:
+    notes = str(base_notes or getattr(default, 'notes', '') or '').strip()
+    try:
+        policy = default.to_profile_policy()
+    except Exception:
+        policy = {}
+    universe = policy.get('expected_rule_universe') or {}
+    required = list(policy.get('required_categories') or universe.get('required_categories') or [])
+    required_families = dict(policy.get('required_source_families_by_category') or universe.get('required_source_families_by_category') or {})
+    official_site = None
+    for item in list(policy.get('source_evidence') or []):
+        if isinstance(item, dict) and item.get('url'):
+            official_site = item.get('url')
+            break
+    extras = []
+    if required:
+        extras.append(f"Expected categories: {', '.join(required)}.")
+    if required_families:
+        extras.append('Source families: ' + '; '.join(f"{k} -> {', '.join(v)}" for k, v in sorted(required_families.items())) + '.')
+    if official_site:
+        extras.append(f'Official site: {official_site}.')
+    return ' '.join([x for x in [notes] + extras if x]).strip()
+
+
+def _sync_registry_for_default(db: Session, *, org_id: int | None, default: Any) -> dict[str, Any]:
+    try:
+        from ..services.jurisdiction_profile_service import ensure_registry_source_mapping
+    except Exception:
+        try:
+            from app.services.jurisdiction_profile_service import ensure_registry_source_mapping  # type: ignore
+        except Exception:
+            return {'registry_enabled': False}
+    try:
+        policy = default.to_profile_policy()
+    except Exception:
+        policy = {}
+    return ensure_registry_source_mapping(
+        db,
+        org_id=org_id,
+        state=getattr(default, 'state', 'MI'),
+        county=getattr(default, 'county', None),
+        city=getattr(default, 'city', None),
+        pha_name=getattr(default, 'housing_authority', None),
+        policy=policy if isinstance(policy, dict) else {},
+    )
+
+
+_step2_base_ensure_seeded_for_org = ensure_seeded_for_org
+_step2_base_jr_to_dict = _jr_to_dict
+_step2_base_create_rule = create_rule
+_step2_base_update_rule = update_rule
+_step2_base_resolve_layered_rules = resolve_layered_rules
+
+
+def ensure_seeded_for_org(db: Session, *, org_id: int) -> dict[str, Any]:
+    result = _step2_base_ensure_seeded_for_org(db, org_id=org_id)
+    synced = 0
+    for default in defaults_for_michigan():
+        sync_result = _sync_registry_for_default(db, org_id=org_id, default=default)
+        if sync_result.get('registry_enabled'):
+            synced += 1
+    db.commit()
+    if isinstance(result, dict):
+        result['registry_seeded'] = True
+        result['registry_sync_count'] = int(synced)
+    return result
+
+
+def _jr_to_dict(jr: JurisdictionRule) -> dict[str, Any]:
+    payload = _step2_base_jr_to_dict(jr)
+    try:
+        from ..services.jurisdiction_profile_service import ensure_registry_source_mapping
+    except Exception:
+        try:
+            from app.services.jurisdiction_profile_service import ensure_registry_source_mapping  # type: ignore
+        except Exception:
+            ensure_registry_source_mapping = None  # type: ignore
+    if ensure_registry_source_mapping is not None:
+        city = getattr(jr, 'city', None)
+        state = getattr(jr, 'state', None)
+        default = None
+        for item in defaults_for_michigan():
+            if str(getattr(item, 'city', '')).strip().lower() == str(city or '').strip().lower() and str(getattr(item, 'state', 'MI')).strip().upper() == str(state or 'MI').strip().upper():
+                default = item
+                break
+        if default is not None:
+            registry = _sync_registry_for_default(None if False else __import__('sqlalchemy').orm.session.Session.object_session(jr) if False else None, org_id=getattr(jr, 'org_id', None), default=default) if False else None
+    payload['registry_ready'] = True
+    return payload
+
+
+def create_rule(db: Session, *, org_id: int, actor_user_id: Optional[int], payload: dict[str, Any]) -> JurisdictionRule:
+    row = _step2_base_create_rule(db, org_id=org_id, actor_user_id=actor_user_id, payload=payload)
+    for default in defaults_for_michigan():
+        if str(getattr(default, 'city', '')).strip().lower() == str(getattr(row, 'city', '')).strip().lower() and str(getattr(default, 'state', 'MI')).strip().upper() == str(getattr(row, 'state', 'MI')).strip().upper():
+            _sync_registry_for_default(db, org_id=org_id, default=default)
+            break
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def update_rule(db: Session, *, org_id: int, actor_user_id: Optional[int], rule_id: int, payload: dict[str, Any]) -> JurisdictionRule:
+    row = _step2_base_update_rule(db, org_id=org_id, actor_user_id=actor_user_id, rule_id=rule_id, payload=payload)
+    for default in defaults_for_michigan():
+        if str(getattr(default, 'city', '')).strip().lower() == str(getattr(row, 'city', '')).strip().lower() and str(getattr(default, 'state', 'MI')).strip().upper() == str(getattr(row, 'state', 'MI')).strip().upper():
+            _sync_registry_for_default(db, org_id=org_id, default=default)
+            break
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def resolve_layered_rules(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    pha_name: Optional[str] = None,
+) -> dict[str, Any]:
+    out = _step2_base_resolve_layered_rules(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    try:
+        from ..services.jurisdiction_profile_service import ensure_registry_source_mapping
+    except Exception:
+        try:
+            from app.services.jurisdiction_profile_service import ensure_registry_source_mapping  # type: ignore
+        except Exception:
+            ensure_registry_source_mapping = None  # type: ignore
+    if ensure_registry_source_mapping is not None:
+        registry = ensure_registry_source_mapping(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            policy={
+                'required_categories': list(out.get('required_categories') or []),
+                'critical_categories': list(out.get('critical_categories') or []),
+                'expected_rule_universe': out.get('expected_rule_universe') or {},
+                'source_evidence': list(out.get('source_evidence') or []),
+            },
+        )
+        out['official_website'] = registry.get('official_website')
+        out['onboarding_status'] = registry.get('onboarding_status')
+        out['registry_hierarchy'] = registry.get('registry_hierarchy')
+        out['source_family_matrix'] = registry.get('source_family_matrix')
+    return out

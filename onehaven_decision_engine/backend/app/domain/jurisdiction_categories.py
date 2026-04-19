@@ -32,6 +32,15 @@ JURISDICTION_TYPE_PHA_PROGRAM_OVERLAY = JURISDICTION_TYPE_SECTION8_OVERLAY
 BINDING_TYPE_LEGAL = "legally_binding"
 BINDING_TYPE_OPERATIONAL = "operational_heuristic"
 
+AUTHORITY_SCOPE_FEDERAL = "federal"
+AUTHORITY_SCOPE_STATE = "state"
+AUTHORITY_SCOPE_COUNTY = "county"
+AUTHORITY_SCOPE_LOCAL = "local"
+AUTHORITY_SCOPE_LOCAL_AND_STATE = "local_and_state"
+AUTHORITY_SCOPE_FEDERAL_AND_STATE = "federal_and_state"
+AUTHORITY_SCOPE_FEDERAL_AND_LOCAL = "federal_and_local"
+AUTHORITY_SCOPE_FEDERAL_STATE_LOCAL = "federal_state_local"
+
 CANONICAL_JURISDICTION_CATEGORIES: tuple[str, ...] = (
     CATEGORY_RENTAL_LICENSE,
     CATEGORY_INSPECTION,
@@ -188,6 +197,25 @@ _LEAD_FOCUSED_CITIES = {
     "ecorse",
 }
 
+SOURCE_FAMILY_DISPLAY_NAMES: dict[str, str] = {
+    "federal_regulation": "Federal regulation / HUD standard",
+    "federal_program_guide": "Federal program guide",
+    "state_statute": "State statute / code",
+    "state_program_rule": "State housing program rule",
+    "county_code": "County code / ordinance",
+    "county_program_page": "County program page",
+    "municipal_code": "Municipal code / ordinance",
+    "city_program_page": "City program page",
+    "city_form": "City form / packet",
+    "permit_portal": "Permit portal / building department",
+    "fee_schedule": "Official fee schedule",
+    "pha_admin_plan": "PHA administrative plan",
+    "pha_program_page": "PHA program page",
+    "inspection_standards": "Inspection standards / checklist",
+    "public_contact_directory": "Official contact directory",
+}
+
+
 _EXPECTED_CATEGORY_BUNDLES: dict[str, dict[str, tuple[str, ...]]] = {
     JURISDICTION_TYPE_STATE: {
         "required": (CATEGORY_SAFETY, CATEGORY_LEAD, CATEGORY_SOURCE_OF_INCOME, CATEGORY_PERMITS),
@@ -233,6 +261,8 @@ class JurisdictionRuleFamily:
     display_name: str
     binding_type: str
     authority_expectation: str
+    authority_scope: str
+    required_source_families: list[str]
     property_proof_expectation: str
     default_jurisdiction_types: list[str]
     description: str
@@ -254,7 +284,10 @@ class JurisdictionExpectedRuleUniverse:
     legally_binding_categories: list[str] | None = None
     operational_heuristic_categories: list[str] | None = None
     authority_expectations: dict[str, str] | None = None
+    authority_scope_by_category: dict[str, str] | None = None
     property_proof_required_categories: list[str] | None = None
+    required_source_families_by_category: dict[str, list[str]] | None = None
+    critical_source_families: list[str] | None = None
     family_bundles: dict[str, list[str]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -264,7 +297,10 @@ class JurisdictionExpectedRuleUniverse:
         payload.setdefault("legally_binding_categories", [])
         payload.setdefault("operational_heuristic_categories", [])
         payload.setdefault("authority_expectations", {})
+        payload.setdefault("authority_scope_by_category", {})
         payload.setdefault("property_proof_required_categories", [])
+        payload.setdefault("required_source_families_by_category", {})
+        payload.setdefault("critical_source_families", [])
         payload.setdefault("family_bundles", {})
         return payload
 
@@ -366,6 +402,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_RENTAL_LICENSE],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="authoritative_official",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["municipal_code", "city_program_page", "city_form"],
         property_proof_expectation="license number or issuance evidence usually property-specific",
         default_jurisdiction_types=[JURISDICTION_TYPE_CITY],
         description="Whether the operator must hold a rental or landlord license for the property.",
@@ -377,6 +415,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_REGISTRATION],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="authoritative_official",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["municipal_code", "city_program_page", "city_form", "county_code", "county_program_page"],
         property_proof_expectation="registration confirmation, certificate, or registry lookup",
         default_jurisdiction_types=[JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
         description="Whether the rental must be registered with a city, county, or other local authority.",
@@ -388,6 +428,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_INSPECTION],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="authoritative_official",
+        authority_scope=AUTHORITY_SCOPE_LOCAL_AND_STATE,
+        required_source_families=["municipal_code", "city_program_page", "inspection_standards", "city_form", "county_code", "county_program_page", "state_statute"],
         property_proof_expectation="inspection pass, scheduled inspection, or cycle evidence",
         default_jurisdiction_types=[JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_SECTION8_OVERLAY],
         description="Inspection authority, cadence, triggers, and pass conditions for rental operation.",
@@ -399,6 +441,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_OCCUPANCY],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="authoritative_official",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["municipal_code", "city_program_page", "city_form"],
         property_proof_expectation="certificate of occupancy or equivalent local clearance",
         default_jurisdiction_types=[JURISDICTION_TYPE_CITY],
         description="Certificate of occupancy and similar occupancy-clearance requirements.",
@@ -410,6 +454,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_SAFETY],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="authoritative_official",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["municipal_code", "city_program_page", "city_form"],
         property_proof_expectation="inspection evidence, violations history, or remediation records",
         default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
         description="General housing, health, and safety standards that must be met for lawful occupancy.",
@@ -421,6 +467,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_LEAD],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="authoritative_official",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["municipal_code", "city_program_page", "city_form"],
         property_proof_expectation="lead disclosure, clearance, abatement, or risk assessment evidence",
         default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_CITY],
         description="Lead disclosure, clearance, and related health protections.",
@@ -432,6 +480,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_PERMITS],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="authoritative_official",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["municipal_code", "city_program_page", "city_form"],
         property_proof_expectation="permit number, permit status, or final sign-off",
         default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
         description="Permit requirements affecting rehab, repair, or rental readiness work.",
@@ -443,6 +493,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_SOURCE_OF_INCOME],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="authoritative_official",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["municipal_code", "city_program_page", "city_form"],
         property_proof_expectation="generally not property-specific; applied operationally in screening",
         default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_SECTION8_OVERLAY],
         description="Rules protecting voucher holders or other income sources during screening.",
@@ -454,6 +506,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_SECTION8],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="approved_official_supporting",
+        authority_scope=AUTHORITY_SCOPE_FEDERAL_AND_LOCAL,
+        required_source_families=["federal_regulation", "federal_program_guide", "pha_admin_plan", "pha_program_page", "inspection_standards"],
         property_proof_expectation="packet completion, HAP execution, or inspection approval",
         default_jurisdiction_types=[JURISDICTION_TYPE_SECTION8_OVERLAY],
         description="Voucher-program rules specific to landlord participation and approval.",
@@ -465,6 +519,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_PROGRAM_OVERLAY],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="approved_official_supporting",
+        authority_scope=AUTHORITY_SCOPE_FEDERAL_STATE_LOCAL,
+        required_source_families=["state_program_rule", "pha_admin_plan", "pha_program_page", "federal_program_guide"],
         property_proof_expectation="generally program evidence rather than parcel evidence",
         default_jurisdiction_types=[JURISDICTION_TYPE_SECTION8_OVERLAY, JURISDICTION_TYPE_STATE],
         description="PHA, MSHDA, and other administered program overlays that constrain operations.",
@@ -476,6 +532,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_DOCUMENTS],
         binding_type=BINDING_TYPE_OPERATIONAL,
         authority_expectation="approved_official_supporting",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["city_form", "city_program_page", "pha_program_page", "pha_admin_plan"],
         property_proof_expectation="forms, packets, checklists, and filing receipts",
         default_jurisdiction_types=[JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_SECTION8_OVERLAY],
         description="Operational document package expectations needed to complete a compliant filing path.",
@@ -487,6 +545,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_FEES],
         binding_type=BINDING_TYPE_OPERATIONAL,
         authority_expectation="approved_official_supporting",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["fee_schedule", "city_program_page", "county_program_page"],
         property_proof_expectation="fee schedule, receipt, invoice, or payment confirmation",
         default_jurisdiction_types=[JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_COUNTY],
         description="Administrative fee expectations that affect readiness but are often operational details.",
@@ -498,6 +558,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_CONTACTS],
         binding_type=BINDING_TYPE_OPERATIONAL,
         authority_expectation="approved_official_supporting",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["public_contact_directory", "city_program_page", "county_program_page", "pha_program_page"],
         property_proof_expectation="contact roster or named authority reference",
         default_jurisdiction_types=[JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY, JURISDICTION_TYPE_SECTION8_OVERLAY],
         description="Who administers the program, receives filings, and answers compliance questions.",
@@ -509,6 +571,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_ZONING],
         binding_type=BINDING_TYPE_LEGAL,
         authority_expectation="authoritative_official",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["municipal_code", "city_program_page", "city_form"],
         property_proof_expectation="zoning map, zoning district, or use clearance",
         default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
         description="Land-use restrictions relevant to rental operation and rehab strategy.",
@@ -520,6 +584,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_TAX],
         binding_type=BINDING_TYPE_OPERATIONAL,
         authority_expectation="semi_authoritative_operational",
+        authority_scope=AUTHORITY_SCOPE_LOCAL_AND_STATE,
+        required_source_families=["county_program_page", "city_program_page", "state_statute"],
         property_proof_expectation="tax bill, assessor record, or city billing program evidence",
         default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
         description="Tax-related supporting expectations that matter operationally but may not block licensure.",
@@ -531,6 +597,8 @@ _RULE_FAMILY_INVENTORY: dict[str, JurisdictionRuleFamily] = {
         display_name=CATEGORY_DISPLAY_NAMES[CATEGORY_UTILITIES],
         binding_type=BINDING_TYPE_OPERATIONAL,
         authority_expectation="semi_authoritative_operational",
+        authority_scope=AUTHORITY_SCOPE_LOCAL,
+        required_source_families=["city_program_page", "county_program_page", "public_contact_directory"],
         property_proof_expectation="utility account proof or service transfer evidence",
         default_jurisdiction_types=[JURISDICTION_TYPE_STATE, JURISDICTION_TYPE_COUNTY, JURISDICTION_TYPE_CITY],
         description="Utility setup or transfer requirements used as operational readiness signals.",
@@ -560,6 +628,27 @@ def operational_heuristic_categories(categories: Iterable[Any] | None = None) ->
 def authority_expectations_for_categories(categories: Iterable[Any] | None = None) -> dict[str, str]:
     selected = normalize_categories(categories) if categories is not None else list(CANONICAL_JURISDICTION_CATEGORIES)
     return {c: _RULE_FAMILY_INVENTORY[c].authority_expectation for c in selected if c in _RULE_FAMILY_INVENTORY}
+
+
+def authority_scope_for_categories(categories: Iterable[Any] | None = None) -> dict[str, str]:
+    selected = normalize_categories(categories) if categories is not None else list(CANONICAL_JURISDICTION_CATEGORIES)
+    return {c: _RULE_FAMILY_INVENTORY[c].authority_scope for c in selected if c in _RULE_FAMILY_INVENTORY}
+
+
+def required_source_families_for_categories(categories: Iterable[Any] | None = None) -> dict[str, list[str]]:
+    selected = normalize_categories(categories) if categories is not None else list(CANONICAL_JURISDICTION_CATEGORIES)
+    return {c: list(_RULE_FAMILY_INVENTORY[c].required_source_families) for c in selected if c in _RULE_FAMILY_INVENTORY}
+
+
+def all_required_source_families(categories: Iterable[Any] | None = None) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for family_list in required_source_families_for_categories(categories).values():
+        for family in family_list:
+            if family not in seen:
+                seen.add(family)
+                ordered.append(family)
+    return ordered
 
 
 def property_proof_required_categories(categories: Iterable[Any] | None = None) -> list[str]:
@@ -749,7 +838,10 @@ def expected_rule_universe_for_scope(
         legally_binding_categories=legally_binding_categories(required_norm + optional_norm),
         operational_heuristic_categories=operational_heuristic_categories(required_norm + optional_norm),
         authority_expectations=authority_expectations_for_categories(required_norm + optional_norm),
+        authority_scope_by_category=authority_scope_for_categories(required_norm + optional_norm),
         property_proof_required_categories=property_proof_required_categories(required_norm + optional_norm),
+        required_source_families_by_category=required_source_families_for_categories(required_norm + optional_norm),
+        critical_source_families=all_required_source_families(critical_norm),
         family_bundles=family_bundles_for_jurisdiction_types(jurisdiction_types),
     )
 
@@ -807,6 +899,26 @@ def get_critical_categories(
         include_section8=include_section8,
         tenant_waitlist_depth=tenant_waitlist_depth,
     ).critical_categories
+
+
+def required_source_families_for_scope(
+    *,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> dict[str, list[str]]:
+    universe = expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
+    return dict(universe.required_source_families_by_category or {})
 
 
 def get_optional_categories(

@@ -474,3 +474,38 @@ def resolve_for_property(
         "resolved": out,
         "profile": _profile_admin_payload(db, profile_row) if profile_row is not None else None,
     }
+
+# ---- Step 2 registry + source mapping admin overlays ----
+
+def _load_registry_meta_for_profile(row: JurisdictionProfile) -> dict[str, Any]:
+    policy = _policy_json_dict(row)
+    meta = policy.get('meta') or {}
+    if not isinstance(meta, dict):
+        meta = {}
+    registry = meta.get('registry') or {}
+    return registry if isinstance(registry, dict) else {}
+
+
+_step2_base_coverage_matrix_payload = _coverage_matrix_payload
+_step2_base_profile_admin_payload = _profile_admin_payload
+
+
+def _coverage_matrix_payload(db: Session, row: JurisdictionProfile) -> dict[str, Any]:
+    payload = _step2_base_coverage_matrix_payload(db, row)
+    registry = _load_registry_meta_for_profile(row)
+    payload['official_website'] = registry.get('official_website')
+    payload['onboarding_status'] = registry.get('onboarding_status')
+    payload['registry_hierarchy'] = registry.get('registry_hierarchy')
+    payload['source_family_matrix'] = registry.get('source_family_matrix') or []
+    return payload
+
+
+def _profile_admin_payload(db: Session, r: JurisdictionProfile) -> dict[str, Any]:
+    payload = _step2_base_profile_admin_payload(db, r)
+    registry = _load_registry_meta_for_profile(r)
+    payload['official_website'] = registry.get('official_website')
+    payload['onboarding_status'] = registry.get('onboarding_status')
+    payload['registry_hierarchy'] = registry.get('registry_hierarchy')
+    payload['source_family_matrix'] = registry.get('source_family_matrix') or []
+    payload['registry_enabled'] = bool(registry)
+    return payload

@@ -139,3 +139,57 @@ def sync_crawl_result_to_inventory(
         "current_source_version_id": getattr(inventory, "current_source_version_id", None) if inventory is not None else None,
         "last_change_summary": change_summary,
     }
+
+
+from app.services.policy_fetch_service import fetch_policy_source_candidate
+from app.services.policy_discovery_service import discover_source_family_candidates
+
+
+def crawl_discovered_candidates(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    program_type: str | None = None,
+    jurisdiction_id: int | None = None,
+    expected_categories: list[str] | None = None,
+    expected_tiers: list[str] | None = None,
+    commit: bool = False,
+) -> dict[str, Any]:
+    discovery = discover_source_family_candidates(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        program_type=program_type,
+        jurisdiction_id=jurisdiction_id,
+        expected_categories=expected_categories,
+        expected_tiers=expected_tiers,
+        commit=False,
+    )
+    results: list[dict[str, Any]] = []
+    for candidate in discovery.get("candidates", []):
+        result = fetch_policy_source_candidate(candidate)
+        result["category"] = candidate.get("category")
+        result["source_family_id"] = candidate.get("source_family_id")
+        results.append(result)
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    return {
+        "ok": True,
+        "candidate_count": int(discovery.get("candidate_count") or 0),
+        "fetched_count": sum(1 for r in results if r.get("resolution") == "fetched"),
+        "manual_required_count": sum(1 for r in results if r.get("resolution") == "manual_required"),
+        "blocked_count": sum(1 for r in results if r.get("resolution") == "blocked"),
+        "unresolved_count": sum(1 for r in results if r.get("resolution") == "unresolved"),
+        "failed_count": sum(1 for r in results if r.get("resolution") == "failed"),
+        "results": results,
+        "discovery": discovery,
+    }

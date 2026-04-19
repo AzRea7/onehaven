@@ -309,3 +309,168 @@ def build_fetch_metadata_payload(*, fetch_meta: dict[str, Any], fetched_at: date
         "fetch_error": fetch_meta.get("fetch_error"),
         "fetched_at": fetched_at.isoformat(),
     }
+
+
+PDF_CONTENT_TYPES = {"application/pdf", "application/x-pdf"}
+BLOCKED_HTTP_STATUSES = {401, 403, 405, 406, 407, 429, 451}
+MANUAL_ONLY_FETCH_MODES = {"manual-required", "manual_required", "manual"}
+
+
+def _json_bytes_to_text(content: bytes) -> str:
+    try:
+        return content.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _detect_content_fetch_mode(*, url: str, content_type: str | None, explicit_mode: str | None = None) -> str:
+    mode = str(explicit_mode or "").strip().lower()
+    if mode in {"api", "html", "pdf", "manual-required"}:
+        return mode
+    lower_url = str(url or "").strip().lower()
+    ctype = str(content_type or "").strip().lower()
+    if lower_url.endswith('.pdf') or any(x in ctype for x in PDF_CONTENT_TYPES):
+        return "pdf"
+    if "/json" in ctype or ctype.endswith("+json"):
+        return "api"
+    return "html"
+
+
+def _summarize_error(fetch_error: str | None, http_status: int | None = None) -> tuple[str, str]:
+    err = str(fetch_error or "").strip().lower()
+    if http_status in BLOCKED_HTTP_STATUSES or any(token in err for token in ["captcha", "forbidden", "anti-bot", "blocked"]):
+        return "blocked", "manual_review"
+    if err in {"missing_url", "manual_required", "no_source", "not_configured"}:
+        return "manual_required" if err == "manual_required" else "unresolved", "manual_review" if err == "manual_required" else "resolve_source"
+    return "failed", "retry_fetch"
+
+
+def fetch_pdf_source(*, url: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+    headers = _default_fetch_headers(url)
+    try:
+        with httpx.Client(timeout=timeout_seconds, follow_redirects=True, headers=headers) as client:
+            resp = client.get(url)
+            content = bytes(resp.content or b"")
+            ok = 200 <= int(resp.status_code) < 400
+            text = _json_bytes_to_text(content[:10000]) if not ok else ""
+            return {
+                "ok": ok,
+                "method": "httpx_pdf",
+                "url": str(resp.url),
+                "http_status": int(resp.status_code),
+                "content_type": resp.headers.get("content-type") or "application/pdf",
+                "title": Path(urlparse(str(resp.url)).path).name or None,
+                "raw_bytes": content,
+                "raw_text_preview": text,
+                "fetch_error": None if ok else f"http_status_{int(resp.status_code)}",
+            }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "method": "httpx_pdf",
+            "url": url,
+            "http_status": None,
+            "content_type": "application/pdf",
+            "title": Path(urlparse(url).path).name or None,
+            "raw_bytes": b"",
+            "raw_text_preview": "",
+            "fetch_error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def fetch_api_source(*, url: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+    headers = _default_fetch_headers(url)
+    headers["Accept"] = "application/json,text/plain;q=0.9,*/*;q=0.8"
+    try:
+        with httpx.Client(timeout=timeout_seconds, follow_redirects=True, headers=headers) as client:
+            resp = client.get(url)
+            body = resp.text or ""
+            ok = 200 <= int(resp.status_code) < 400
+            parsed_json = None
+            if ok:
+                try:
+                    parsed_json = resp.json()
+                except Exception:
+                    parsed_json = None
+            return {
+                "ok": ok,
+                "method": "httpx_api",
+                "url": str(resp.url),
+                "http_status": int(resp.status_code),
+                "content_type": resp.headers.get("content-type") or "application/json",
+                "title": None,
+                "json": parsed_json,
+                "extracted_text": body[:20000],
+                "fetch_error": None if ok else f"http_status_{int(resp.status_code)}",
+            }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "method": "httpx_api",
+            "url": url,
+            "http_status": None,
+            "content_type": "application/json",
+            "title": None,
+            "json": None,
+            "extracted_text": "",
+            "fetch_error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+    url = str(candidate.get("url") or "").strip()
+    fetch_mode = str(candidate.get("fetch_mode") or "").strip().lower()
+    if fetch_mode in MANUAL_ONLY_FETCH_MODES:
+        return {
+            "ok": False,
+            "resolution": "manual_required",
+            "next_step": "manual_review",
+            "fetch_mode": fetch_mode or "manual-required",
+            "url": url or None,
+            "http_status": None,
+            "content_type": None,
+            "title": candidate.get("title"),
+            "fetch_error": "manual_required",
+            "reason": "source family explicitly requires manual handling",
+        }
+    if not url:
+        return {
+            "ok": False,
+            "resolution": "unresolved",
+            "next_step": "resolve_source",
+            "fetch_mode": fetch_mode or "unknown",
+            "url": None,
+            "http_status": None,
+            "content_type": None,
+            "title": candidate.get("title"),
+            "fetch_error": "missing_url",
+            "reason": "no fetchable source URL is mapped for this source family",
+        }
+
+    if fetch_mode == "api":
+        result = fetch_api_source(url=url, timeout_seconds=timeout_seconds)
+    elif fetch_mode == "pdf":
+        result = fetch_pdf_source(url=url, timeout_seconds=timeout_seconds)
+    else:
+        result = fetch_official_source_with_fallback(url=url, timeout_seconds=timeout_seconds)
+
+    detected_mode = _detect_content_fetch_mode(url=url, content_type=result.get("content_type"), explicit_mode=fetch_mode)
+    if result.get("ok"):
+        return {
+            **result,
+            "resolution": "fetched",
+            "next_step": "extract",
+            "fetch_mode": detected_mode,
+            "reason": "fetch succeeded",
+            "fetched_at": datetime.utcnow().isoformat(),
+        }
+
+    resolution, next_step = _summarize_error(result.get("fetch_error"), result.get("http_status"))
+    return {
+        **result,
+        "resolution": resolution,
+        "next_step": next_step,
+        "fetch_mode": detected_mode,
+        "reason": "fetch blocked" if resolution == "blocked" else ("manual review required" if resolution == "manual_required" else "fetch failed" if resolution == "failed" else "source unresolved"),
+        "fetched_at": datetime.utcnow().isoformat(),
+    }

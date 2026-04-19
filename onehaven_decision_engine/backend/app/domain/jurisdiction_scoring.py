@@ -6,7 +6,12 @@ import json
 
 from ..models import JurisdictionRule
 from ..policy_models import JurisdictionProfile
-from .jurisdiction_categories import compute_completeness_score, expected_rule_universe_for_scope, normalize_categories
+from .jurisdiction_categories import (
+    compute_completeness_score,
+    expected_rule_universe_for_scope,
+    normalize_categories,
+    required_source_families_for_categories,
+)
 
 
 @dataclass(frozen=True)
@@ -34,10 +39,15 @@ class JurisdictionCompleteness:
     missing_categories: list[str]
     critical_categories: list[str] | None = None
     optional_categories: list[str] | None = None
+    critical_missing_categories: list[str] | None = None
+    noncritical_missing_categories: list[str] | None = None
     legally_binding_categories: list[str] | None = None
     operational_heuristic_categories: list[str] | None = None
     property_proof_required_categories: list[str] | None = None
     authority_expectations: dict[str, str] | None = None
+    authority_scope_by_category: dict[str, str] | None = None
+    required_source_families_by_category: dict[str, list[str]] | None = None
+    critical_source_families: list[str] | None = None
     expected_rule_universe: dict[str, Any] | None = None
 
 
@@ -108,18 +118,27 @@ def compute_category_completeness(
     explicit_required = normalize_categories(required_categories)
     effective_required = explicit_required or list(universe.required_categories)
     coverage = compute_completeness_score(effective_required, covered_categories)
+    missing_categories = list(coverage.missing_categories)
+    critical_categories = list(universe.critical_categories)
+    critical_missing = [category for category in missing_categories if category in set(critical_categories)]
+    noncritical_missing = [category for category in missing_categories if category not in set(critical_categories)]
     return JurisdictionCompleteness(
         completeness_score=coverage.completeness_score,
         completeness_status=coverage.completeness_status,
         required_categories=coverage.required_categories,
         covered_categories=coverage.covered_categories,
-        missing_categories=coverage.missing_categories,
-        critical_categories=list(universe.critical_categories),
+        missing_categories=missing_categories,
+        critical_categories=critical_categories,
         optional_categories=list(universe.optional_categories),
+        critical_missing_categories=critical_missing,
+        noncritical_missing_categories=noncritical_missing,
         legally_binding_categories=list(universe.legally_binding_categories or []),
         operational_heuristic_categories=list(universe.operational_heuristic_categories or []),
         property_proof_required_categories=list(universe.property_proof_required_categories or []),
         authority_expectations=dict(universe.authority_expectations or {}),
+        authority_scope_by_category=dict(universe.authority_scope_by_category or {}),
+        required_source_families_by_category=dict(universe.required_source_families_by_category or {}),
+        critical_source_families=list(universe.critical_source_families or []),
         expected_rule_universe=universe.to_dict(),
     )
 
@@ -171,7 +190,19 @@ def derive_categories_from_rule(jr: Optional[JurisdictionRule]) -> list[str]:
         categories.append("inspection")
 
     if getattr(jr, "tenant_waitlist_depth", None):
-        categories.append("section8")
+        categories.extend(["section8", "program_overlay"])
+
+    if getattr(jr, "registration_fee", None) is not None:
+        categories.append("fees")
+
+    if getattr(jr, "inspection_authority", None):
+        categories.append("contacts")
+
+    notes = str(getattr(jr, "notes", "") or "").lower()
+    if "certificate of occupancy" in notes or "occupancy" in notes:
+        categories.append("occupancy")
+    if "permit" in notes or "rehab" in notes:
+        categories.append("permits")
 
     try:
         fps = json.loads(jr.typical_fail_points_json) if jr.typical_fail_points_json else []

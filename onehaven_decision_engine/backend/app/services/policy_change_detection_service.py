@@ -314,3 +314,118 @@ def determine_profile_refresh_state(
         "next_step": next_step,
         "summary": summary,
     }
+
+
+# --- Step 4 additive normalization + diff helpers ---
+def _json_loads_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _normalize_text_for_fingerprint(value: Any) -> str:
+    text = str(value or "")
+    text = " ".join(text.split())
+    return text.strip().lower()
+
+
+def build_text_diff_summary(*, previous_text: str | None, current_text: str | None, max_examples: int = 8) -> dict[str, Any]:
+    previous_norm = _normalize_text_for_fingerprint(previous_text)
+    current_norm = _normalize_text_for_fingerprint(current_text)
+    previous_tokens = [tok for tok in previous_norm.split(" ") if tok]
+    current_tokens = [tok for tok in current_norm.split(" ") if tok]
+    previous_set = set(previous_tokens)
+    current_set = set(current_tokens)
+    added = sorted(current_set - previous_set)
+    removed = sorted(previous_set - current_set)
+    overlap = len(previous_set & current_set)
+    base = max(1, len(previous_set | current_set))
+    similarity = round(overlap / float(base), 6)
+    return {
+        "previous_length": len(previous_norm),
+        "current_length": len(current_norm),
+        "changed": previous_norm != current_norm,
+        "similarity": similarity,
+        "added_token_count": len(added),
+        "removed_token_count": len(removed),
+        "added_examples": added[:max_examples],
+        "removed_examples": removed[:max_examples],
+    }
+
+
+def build_assertion_fingerprint_payload(assertion_like: dict[str, Any] | None) -> dict[str, Any]:
+    row = dict(assertion_like or {})
+    return {
+        "rule_key": str(row.get("rule_key") or "").strip().lower() or None,
+        "category": str(row.get("normalized_category") or row.get("rule_category") or "").strip().lower() or None,
+        "value_text": _normalize_text_for_fingerprint(row.get("value_text") or row.get("value") or row.get("raw_excerpt")),
+        "source_citation": _normalize_text_for_fingerprint(row.get("source_citation")),
+        "citation_url": _normalize_text_for_fingerprint((row.get("citation") or {}).get("url") if isinstance(row.get("citation"), dict) else row.get("citation_url")),
+        "confidence": round(float(row.get("confidence") or 0.0), 6) if str(row.get("confidence") or "").strip() else 0.0,
+        "validation_state": str(row.get("validation_state") or "").strip().lower() or None,
+        "trust_state": str(row.get("trust_state") or "").strip().lower() or None,
+    }
+
+
+def build_assertion_change_summary(*, previous_assertions: Iterable[dict[str, Any]] | None, current_assertions: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
+    previous_rows = [build_assertion_fingerprint_payload(row) for row in (previous_assertions or [])]
+    current_rows = [build_assertion_fingerprint_payload(row) for row in (current_assertions or [])]
+
+    def _key(row: dict[str, Any]) -> str:
+        return "|".join([
+            str(row.get("rule_key") or "-"),
+            str(row.get("category") or "-"),
+            str(row.get("citation_url") or "-"),
+        ])
+
+    prev_map = {_key(row): row for row in previous_rows}
+    curr_map = {_key(row): row for row in current_rows}
+    prev_keys = set(prev_map)
+    curr_keys = set(curr_map)
+    added_keys = sorted(curr_keys - prev_keys)
+    removed_keys = sorted(prev_keys - curr_keys)
+    changed_keys: list[str] = []
+    changed_fields: dict[str, list[str]] = {}
+    for key in sorted(prev_keys & curr_keys):
+        prev = prev_map[key]
+        curr = curr_map[key]
+        fields = [name for name in ["value_text", "confidence", "validation_state", "trust_state", "source_citation"] if prev.get(name) != curr.get(name)]
+        if fields:
+            changed_keys.append(key)
+            changed_fields[key] = fields
+
+    return {
+        "changed": bool(added_keys or removed_keys or changed_keys),
+        "added_count": len(added_keys),
+        "removed_count": len(removed_keys),
+        "changed_count": len(changed_keys),
+        "added_rule_keys": [curr_map[key].get("rule_key") for key in added_keys[:12]],
+        "removed_rule_keys": [prev_map[key].get("rule_key") for key in removed_keys[:12]],
+        "changed_rule_keys": [curr_map[key].get("rule_key") for key in changed_keys[:12]],
+        "changed_fields": changed_fields,
+    }
+
+
+def enrich_change_summary_with_diff(*, base_summary: dict[str, Any] | None, previous_text: str | None = None, current_text: str | None = None, previous_assertions: Iterable[dict[str, Any]] | None = None, current_assertions: Iterable[dict[str, Any]] | None = None) -> dict[str, Any]:
+    summary = dict(base_summary or {})
+    summary["text_diff"] = build_text_diff_summary(previous_text=previous_text, current_text=current_text)
+    summary["assertion_diff"] = build_assertion_change_summary(previous_assertions=previous_assertions, current_assertions=current_assertions)
+    if summary["assertion_diff"].get("changed") and not summary.get("change_kind"):
+        summary["change_kind"] = "structured_rules_changed"
+    if summary["text_diff"].get("changed") or summary["assertion_diff"].get("changed"):
+        summary["changed"] = True
+        summary["change_detected"] = True
+    return summary

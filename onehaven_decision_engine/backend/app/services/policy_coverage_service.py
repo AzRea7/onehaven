@@ -891,3 +891,171 @@ def upsert_coverage_status(
     db.commit()
     db.refresh(row)
     return row
+
+# --- Step 4 additive coverage normalization layer ---
+def _loads_list(v: Any) -> list[Any]:
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return list(v)
+    if isinstance(v, tuple):
+        return list(v)
+    if isinstance(v, str):
+        raw = v.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _assertion_currentness(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, Any]:
+    validation_state = str(getattr(assertion, "validation_state", "") or "").strip().lower()
+    trust_state = str(getattr(assertion, "trust_state", "") or "").strip().lower()
+    freshness_status = str(getattr(source, "freshness_status", "") or "").strip().lower() if source is not None else ""
+    refresh_state = str(getattr(source, "refresh_state", "") or "").strip().lower() if source is not None else ""
+    is_real = source is not None and bool(str(getattr(source, "url", "") or "").strip()) and _source_authority_rank(source) >= AUTHORITY_TIER_RANKS["approved_official_supporting"]
+    is_verified = validation_state == "validated" and trust_state in {"trusted", "validated"}
+    is_current = is_real and is_verified and freshness_status not in {"stale", "blocked", "fetch_failed", "error"} and refresh_state not in {"blocked", "failed"}
+    return {
+        "is_real": is_real,
+        "is_verified": is_verified,
+        "is_current": is_current,
+        "authority_tier": _source_authority_tier(source) if source is not None else "derived_or_inferred",
+        "last_verified_at": (getattr(source, "last_verified_at", None).isoformat() if source is not None and getattr(source, "last_verified_at", None) else None),
+    }
+
+
+def _structured_rule_matrix(assertions: list[PolicyAssertion], sources_by_id: dict[int, PolicySource]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for assertion in assertions:
+        source = sources_by_id.get(int(assertion.source_id)) if getattr(assertion, "source_id", None) is not None else None
+        currentness = _assertion_currentness(assertion, source)
+        citation = _loads_dict(getattr(assertion, "citation_json", None))
+        out.append({
+            "assertion_id": int(getattr(assertion, "id", 0) or 0),
+            "rule_key": getattr(assertion, "rule_key", None),
+            "category": getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None),
+            "coverage_status": getattr(assertion, "coverage_status", None),
+            "validation_state": getattr(assertion, "validation_state", None),
+            "trust_state": getattr(assertion, "trust_state", None),
+            "confidence": float(getattr(assertion, "confidence", 0.0) or 0.0),
+            "citation_quality": _citation_quality_for_assertion(assertion),
+            "authority_tier": currentness.get("authority_tier"),
+            "is_real": currentness.get("is_real"),
+            "is_verified": currentness.get("is_verified"),
+            "is_current": currentness.get("is_current"),
+            "last_verified_at": currentness.get("last_verified_at"),
+            "citation_url": citation.get("url") or (getattr(source, "url", None) if source is not None else None),
+        })
+    return out
+
+
+def _change_detection_summary_for_assertions(assertions: list[PolicyAssertion]) -> dict[str, Any]:
+    changed = 0
+    revalidation_required = 0
+    kinds: dict[str, int] = {}
+    for assertion in assertions:
+        summary = _loads_dict(getattr(assertion, "change_summary", None))
+        validation = _loads_dict(summary.get("validation"))
+        if summary.get("changed") or summary.get("change_detected"):
+            changed += 1
+        if validation.get("requires_revalidation"):
+            revalidation_required += 1
+        kind = str(summary.get("change_kind") or "none").strip().lower()
+        kinds[kind] = kinds.get(kind, 0) + 1
+    return {
+        "changed_assertion_count": changed,
+        "revalidation_required_count": revalidation_required,
+        "change_kinds": kinds,
+    }
+
+
+_coverage_orig_compute_coverage_status = compute_coverage_status
+
+def compute_coverage_status(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> dict:
+    payload = dict(_coverage_orig_compute_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    ))
+    assertions = _market_assertions(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name)
+    sources = _market_sources(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name)
+    sources_by_id = {int(src.id): src for src in sources if getattr(src, "id", None) is not None}
+    rule_matrix = _structured_rule_matrix(assertions, sources_by_id)
+    real_rule_count = sum(1 for row in rule_matrix if row.get("is_real"))
+    verified_rule_count = sum(1 for row in rule_matrix if row.get("is_verified"))
+    current_rule_count = sum(1 for row in rule_matrix if row.get("is_current"))
+    verified_current_rule_count = sum(1 for row in rule_matrix if row.get("is_verified") and row.get("is_current"))
+    change_detection = _change_detection_summary_for_assertions(assertions)
+    payload["structured_rule_matrix"] = rule_matrix
+    payload["real_rule_count"] = real_rule_count
+    payload["verified_rule_count_step4"] = verified_rule_count
+    payload["current_rule_count"] = current_rule_count
+    payload["verified_current_rule_count"] = verified_current_rule_count
+    payload["rules_real_verified_current"] = {
+        "real": real_rule_count,
+        "verified": verified_rule_count,
+        "current": current_rule_count,
+        "verified_current": verified_current_rule_count,
+    }
+    payload["change_detection_summary"] = change_detection
+    payload["coverage_status_step4"] = (
+        "verified_current" if verified_current_rule_count > 0 else
+        "verified_not_current" if verified_rule_count > 0 else
+        "real_not_verified" if real_rule_count > 0 else
+        payload.get("coverage_status")
+    )
+    return payload
+
+
+_coverage_orig_upsert_coverage_status = upsert_coverage_status
+
+def upsert_coverage_status(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    notes: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> JurisdictionCoverageStatus:
+    row = _coverage_orig_upsert_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        notes=notes,
+        focus=focus,
+    )
+    payload = compute_coverage_status(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, focus=focus)
+    if hasattr(row, "coverage_summary_json"):
+        row.coverage_summary_json = _dumps({
+            **_loads_dict(getattr(row, "coverage_summary_json", None)),
+            "rules_real_verified_current": payload.get("rules_real_verified_current", {}),
+            "change_detection_summary": payload.get("change_detection_summary", {}),
+        })
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
