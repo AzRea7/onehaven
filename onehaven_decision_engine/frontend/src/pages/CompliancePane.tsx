@@ -245,6 +245,34 @@ function formatDate(v: any) {
   return d.toLocaleString();
 }
 
+function extractPdfCatalog(...sources: any[]) {
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    const direct = source.pdf_catalog;
+    if (direct && typeof direct === "object") return direct;
+    const op =
+      source.operational_status ||
+      source.operational_health ||
+      source.health ||
+      null;
+    if (op && typeof op === "object") {
+      if (op.pdf_catalog && typeof op.pdf_catalog === "object")
+        return op.pdf_catalog;
+      const count = Number(
+        op.repo_pdf_count || op.artifact_evidence?.repo_pdf_count || 0,
+      );
+      const names = Array.isArray(op.repo_pdf_names)
+        ? op.repo_pdf_names
+        : Array.isArray(op.artifact_evidence?.repo_pdf_names)
+          ? op.artifact_evidence.repo_pdf_names
+          : [];
+      if (count || names.length)
+        return { available: count > 0, count, sample_names: names };
+    }
+  }
+  return null;
+}
+
 function BoundaryNotice({
   title,
   children,
@@ -497,6 +525,12 @@ export default function CompliancePane() {
     : Array.isArray(selectedOperationalStatus?.reasons)
       ? selectedOperationalStatus?.reasons
       : [];
+  const selectedPdfCatalog = extractPdfCatalog(
+    selectedResolvedRules,
+    selectedOperationalStatus,
+    selectedBrief?.brief?.coverage,
+    selectedBrief,
+  );
 
   async function runManualPolicyAction(action: string) {
     if (!selectedProperty) return;
@@ -632,7 +666,12 @@ export default function CompliancePane() {
         ) : null}
 
         <BoundaryNotice title="Operational trust boundary" tone="warn">
-          OneHaven shows whether this workflow is operationally safe to rely on based on the rules, proof, freshness, and validation currently in the system. It does <strong>not</strong> provide legal advice or guarantee legal compliance. Verify critical requirements like registration, inspections, occupancy approval, lead documents, and subsidy paperwork with the authoritative source before acting.
+          OneHaven shows whether this workflow is operationally safe to rely on
+          based on the rules, proof, freshness, and validation currently in the
+          system. It does <strong>not</strong> provide legal advice or guarantee
+          legal compliance. Verify critical requirements like registration,
+          inspections, occupancy approval, lead documents, and subsidy paperwork
+          with the authoritative source before acting.
         </BoundaryNotice>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -997,22 +1036,31 @@ export default function CompliancePane() {
                 />
               </Surface>
             ) : detailError ? (
-              <><Surface
+              <>
+                <Surface
                   tone="danger"
                   title="Selected property"
                   subtitle="Could not load details"
                 >
                   <div className="text-sm text-red-300">{detailError}</div>
-                </Surface><BoundaryNotice
-                  title={selectedSafeToRely ? "Operationally usable, not legal advice" : "Human review still needed"}
+                </Surface>
+                <BoundaryNotice
+                  title={
+                    selectedSafeToRely
+                      ? "Operationally usable, not legal advice"
+                      : "Human review still needed"
+                  }
                   tone={selectedSafeToRely ? "good" : "bad"}
                 >
-                    {selectedSafeToRely
-                      ? "The system currently sees enough governed rule and proof coverage to support operations, but you should still verify critical requirements before representing the property as legally compliant."
-                      : "This property should not be represented as cleared. Resolve the blocking proof, trust, freshness, or review issues first, and verify critical requirements with the authoritative jurisdiction source or qualified legal/compliance review."}
-                    <div className="mt-2">Any copied, exported, or shared compliance summary should keep this same boundary language.</div>
-                  </BoundaryNotice></>
-
+                  {selectedSafeToRely
+                    ? "The system currently sees enough governed rule and proof coverage to support operations, but you should still verify critical requirements before representing the property as legally compliant."
+                    : "This property should not be represented as cleared. Resolve the blocking proof, trust, freshness, or review issues first, and verify critical requirements with the authoritative jurisdiction source or qualified legal/compliance review."}
+                  <div className="mt-2">
+                    Any copied, exported, or shared compliance summary should
+                    keep this same boundary language.
+                  </div>
+                </BoundaryNotice>
+              </>
             ) : detailLoading && !selectedReadiness && !selectedBrief ? (
               <Surface
                 title="Selected property"
@@ -1216,6 +1264,25 @@ export default function CompliancePane() {
 
                     <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+                        PDF evidence catalog
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-app-0">
+                        {selectedPdfCatalog?.count
+                          ? `${selectedPdfCatalog.count} loaded`
+                          : "Not loaded"}
+                      </div>
+                      <div className="mt-1 text-xs text-app-4">
+                        {Array.isArray(selectedPdfCatalog?.sample_names) &&
+                        selectedPdfCatalog.sample_names.length
+                          ? selectedPdfCatalog.sample_names
+                              .slice(0, 3)
+                              .join(", ")
+                          : "Operational trust is stronger when the standards PDF dataset is present."}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
                         Rule version
                       </div>
                       <div className="mt-2 text-sm font-semibold text-app-0">
@@ -1283,6 +1350,19 @@ export default function CompliancePane() {
                           {selectedBrief?.brief?.coverage?.stale_reason ||
                             selectedRow?.jurisdiction?.stale_reason ||
                             "Local rule data is stale and needs review."}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {selectedPdfCatalog && !selectedPdfCatalog.available ? (
+                    <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] px-4 py-3">
+                      <div className="flex items-start gap-2 text-sm text-amber-100">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div>
+                          Local PDF standards dataset is not loaded in this
+                          runtime. Show this property as informational until
+                          source-backed evidence is restored.
                         </div>
                       </div>
                     </div>

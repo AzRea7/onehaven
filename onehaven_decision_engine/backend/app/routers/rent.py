@@ -42,7 +42,7 @@ from ..domain.rent_learning import (
     summarize_comps,
     update_calibration_from_observation,
 )
-from ..domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used
+from ..domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used, summarize_nspire_pdf_dataset
 from ..domain.underwriting import describe_rent_cap_reason
 
 router = APIRouter(prefix="/rent", tags=["rent"])
@@ -252,7 +252,7 @@ def _collect_federal_updates(*, limit: int, include_public_inspection: bool) -> 
         seen.add(key)
         deduped.append(row)
 
-    return {"ok": True, "count": len(deduped[:limit]), "results": deduped[:limit], "errors": errors}
+    return {"ok": True, "count": len(deduped[:limit]), "results": deduped[:limit], "errors": errors, "nspire_pdf_catalog": summarize_nspire_pdf_dataset()}
 
 
 def _audit(
@@ -767,6 +767,7 @@ def section8_compliance(
             for key in ("market_rent_estimate", "section8_fmr", "rent_reasonableness_comp")
             if payload.get(key) is None
         ],
+        "nspire_pdf_catalog": summarize_nspire_pdf_dataset(),
     }
 
 

@@ -778,7 +778,100 @@ FETCH_MODE_UNKNOWN = "unknown"
 
 DISCOVERY_SOURCE_CURATED = "curated"
 DISCOVERY_SOURCE_DISCOVERED = "discovered"
-PDF_ROOTS_ENV = os.getenv("POLICY_SOURCE_PDF_ROOTS", "")
+PDF_ROOTS_ENV = os.getenv("POLICY_SOURCE_PDF_ROOTS", "") or os.getenv("POLICY_PDFS_ROOT", "") or os.getenv("POLICY_PDF_ROOT", "") or os.getenv("NSPIRE_PDF_ROOT", "")
+
+
+DEFAULT_EMBEDDED_PDF_ROOTS = [
+    Path("backend/data/pdfs"),
+    Path("/app/backend/data/pdfs"),
+    Path("/mnt/data/step3_zip/pdfs"),
+    Path("/mnt/data/pdfs"),
+    Path("/mnt/data/pdfs(1)"),
+]
+NSPIRE_EMBEDDED_PDF_FILES = [
+    "NSPIRE-Standard-Address-and-Signage_20230811.pdf",
+    "NSPIRE-Standard-Bathtub-and-Shower_20230811.pdf",
+    "NSPIRE-Standard-Cabinet-and-Storage_20230811.pdf",
+    "NSPIRE-Standard-Call-for-Aid-System_20230620.pdf",
+    "NSPIRE-Standard-Carbon-Monoxide-Alarm_20230811.pdf",
+    "NSPIRE-Standard-Ceiling_20230811.pdf",
+    "NSPIRE-Standard-Chimney_20230811.pdf",
+    "NSPIRE-Standard-Clothes-Dryer-Exhaust-Vent_20230620.pdf",
+    "NSPIRE-Standard-Cooking-Appliance_20230811.pdf",
+    "NSPIRE-Standard-Door-Entry_20230811.pdf",
+    "NSPIRE-Standard-Door-Fire-Labeled_20230811.pdf",
+    "NSPIRE-Standard-Door-General_20230811.pdf",
+    "NSPIRE-Standard-Drain_20230620.pdf",
+    "NSPIRE-Standard-Egress_20230811.pdf",
+    "NSPIRE-Standard-Electrical-Conductor-Outlet-and-Switch_20230811.pdf",
+    "NSPIRE-Standard-Electrical-GFCI-AFCI-Outlet-or-Breaker_20230811.pdf",
+    "NSPIRE-Standard-Electrical-Service-Panel_20230811.pdf",
+    "NSPIRE-Standard-Elevator_20230811.pdf",
+    "NSPIRE-Standard-Exit-Sign_20230620.pdf",
+    "NSPIRE-Standard-Fence-and-Gate_20230811.pdf",
+    "NSPIRE-Standard-Fire-Escape_20230620.pdf",
+    "NSPIRE-Standard-Fire-Extinguisher_20230620.pdf",
+    "NSPIRE-Standard-Flammable-and-Combustible-Item_20230620.pdf",
+    "NSPIRE-Standard-Floor_20230811.pdf",
+    "NSPIRE-Standard-Food-Preparation-Area_20230811.pdf",
+    "NSPIRE-Standard-Foundation_20230811.pdf",
+    "NSPIRE-Standard-Garage-Door_20230620.pdf",
+    "NSPIRE-Standard-Grab-Bar_20230620.pdf",
+    "NSPIRE-Standard-Guardrail_20230811.pdf",
+    "NSPIRE-Standard-HVAC_20230811.pdf",
+    "NSPIRE-Standard-Handrail_20230620.pdf",
+    "NSPIRE-Standard-Infestation_20230811.pdf",
+    "NSPIRE-Standard-Leak-Gas-or-Oil_20230811.pdf",
+    "NSPIRE-Standard-Leak-Sewage-System_20230811.pdf",
+    "NSPIRE-Standard-Leak-Water_20230620.pdf",
+    "NSPIRE-Standard-Lighting-Auxiliary_20230811.pdf",
+    "NSPIRE-Standard-Lighting-Exterior_20230811.pdf",
+    "NSPIRE-Standard-Lighting-Interior_20230811.pdf",
+    "NSPIRE-Standard-Litter_20230620.pdf",
+    "NSPIRE-Standard-Minimum-Electrical-Lighting_20230811.pdf",
+    "NSPIRE-Standard-Mold-like-Substance_20230811.pdf",
+    "NSPIRE-Standard-Parking-Lot_20230811.pdf",
+    "NSPIRE-Standard-Potential-LBP-Hazards-Visual-Assess_20230811.pdf",
+    "NSPIRE-Standard-Private-Roads-and-Driveways_20230620.pdf",
+    "NSPIRE-Standard-Refrigerator_20230620.pdf",
+    "NSPIRE-Standard-Retaining-Wall_20230620.pdf",
+    "NSPIRE-Standard-Roof-Assembly_20230811.pdf",
+    "NSPIRE-Standard-Sharp-Edges_20230620.pdf",
+    "NSPIRE-Standard-Sidewalk-Walkway-and-Ramp_20230620.pdf",
+    "NSPIRE-Standard-Sink_20230811.pdf",
+    "NSPIRE-Standard-Site-Drainage_20230620.pdf",
+    "NSPIRE-Standard-Smoke-Alarm_20230811.pdf",
+    "NSPIRE-Standard-Sprinkler-Assembly_20230620.pdf",
+    "NSPIRE-Standard-Steps-and-Stairs_20230620.pdf",
+    "NSPIRE-Standard-Structural-System_20230620.pdf",
+    "NSPIRE-Standard-Toilet_20230811.pdf",
+    "NSPIRE-Standard-Trash-Chute_20230620.pdf",
+    "NSPIRE-Standard-Trip-Hazard_20230811.pdf",
+    "NSPIRE-Standard-Ventilation_20230811.pdf",
+    "NSPIRE-Standard-Wall-Exterior_20230811.pdf",
+    "NSPIRE-Standard-Wall-Interior_20230811.pdf",
+    "NSPIRE-Standard-Water-Heater_20230620.pdf",
+    "NSPIRE-Standard-Window_20230811.pdf"
+]
+NSPIRE_CATEGORY_TOKENS: dict[str, list[str]] = {
+    "inspection": ["nspire", "standard", "alarm", "egress", "electrical", "fire", "hvac", "leak", "mold", "roof", "window", "door", "wall", "floor", "smoke", "carbon", "structural"],
+    "safety": ["alarm", "carbon", "smoke", "fire", "egress", "exit", "handrail", "guardrail", "trip", "sharp"],
+    "lead": ["lbp", "lead"],
+    "section8": ["nspire", "standard"],
+    "program_overlay": ["nspire", "standard"],
+    "documents": ["nspire", "standard"],
+}
+
+def _known_pdf_roots() -> list[Path]:
+    roots: list[Path] = []
+    for path in DEFAULT_EMBEDDED_PDF_ROOTS:
+        try:
+            resolved = path.expanduser().resolve()
+        except Exception:
+            continue
+        if resolved.exists() and resolved.is_dir() and resolved not in roots:
+            roots.append(resolved)
+    return roots
 
 
 def _iter_pdf_roots() -> list[Path]:
@@ -788,7 +881,10 @@ def _iter_pdf_roots() -> list[Path]:
             path = Path(raw).expanduser().resolve()
         except Exception:
             continue
-        if path.exists() and path.is_dir():
+        if path.exists() and path.is_dir() and path not in roots:
+            roots.append(path)
+    for path in _known_pdf_roots():
+        if path not in roots:
             roots.append(path)
     return roots
 
@@ -801,6 +897,8 @@ def _slugify_for_file(value: Any) -> str:
 
 
 def _candidate_pdf_lookup_names(*, category: str, source_label: str | None, city: str | None, county: str | None, state: str | None, pha_name: str | None) -> list[str]:
+    normalized_category = str(category or "").strip().lower()
+    names: list[str] = []
     pieces = [
         _slugify_for_file(source_label),
         _slugify_for_file(category),
@@ -809,17 +907,40 @@ def _candidate_pdf_lookup_names(*, category: str, source_label: str | None, city
         _slugify_for_file(state),
         _slugify_for_file(pha_name),
     ]
-    names: list[str] = []
     for piece in pieces:
         if not piece:
             continue
         names.append(f"{piece}.pdf")
         names.append(piece)
+
+    label_slug = _slugify_for_file(source_label).replace("_", "-")
+    if label_slug:
+        names.append(f"NSPIRE-Standard-{label_slug}.pdf")
+        names.append(f"NSPIRE-Standard-{label_slug}_20230811.pdf")
+        names.append(f"NSPIRE-Standard-{label_slug}_20230620.pdf")
+
+    token_pool = [
+        str(source_label or "").strip().lower(),
+        normalized_category,
+        str(city or "").strip().lower(),
+        str(county or "").strip().lower(),
+        str(state or "").strip().lower(),
+        str(pha_name or "").strip().lower(),
+    ]
+    token_pool.extend(NSPIRE_CATEGORY_TOKENS.get(normalized_category, []))
+    token_pool = [tok for tok in token_pool if tok]
+
+    for filename in NSPIRE_EMBEDDED_PDF_FILES:
+        lowered = filename.lower()
+        if normalized_category in {"inspection", "safety", "section8", "program_overlay", "documents", "lead"}:
+            if any(tok in lowered for tok in token_pool):
+                names.append(filename)
+
     seen: set[str] = set()
     out: list[str] = []
     for item in names:
         key = item.lower()
-        if key in seen:
+        if not item or key in seen:
             continue
         seen.add(key)
         out.append(item)
@@ -1126,8 +1247,8 @@ def discover_source_family_candidates(
                     expected_categories=expected_categories,
                     expected_tiers=expected_tiers,
                     authority_tier=candidate.get("authority_tier"),
-                    authority_rank=100 if candidate.get("is_official_candidate") else 50,
-                    authority_score=1.0 if candidate.get("is_official_candidate") else 0.5,
+                    authority_rank=int(candidate.get("authority_rank") or (100 if candidate.get("is_official_candidate") else 50)),
+                    authority_score=float(candidate.get("authority_score") or (1.0 if candidate.get("is_official_candidate") else 0.5)),
                     probe_result={
                         "ok": bool(candidate.get("fetch_ready")) and candidate.get("fetch_mode") != FETCH_MODE_MANUAL_REQUIRED,
                         "fetch_error": "manual_required" if candidate.get("fetch_mode") == FETCH_MODE_MANUAL_REQUIRED else ("missing_url" if not candidate.get("fetch_ready") else None),

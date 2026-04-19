@@ -20,7 +20,7 @@ from ..services.rentcast_service import (
     persist_rentcast_comps_and_get_median,
 )
 from ..domain.rent_learning import recompute_rent_fields
-from ..domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used
+from ..domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used, summarize_nspire_pdf_dataset
 from ..domain.underwriting import describe_rent_cap_reason
 
 try:
@@ -66,6 +66,7 @@ class RentEnrichOut(BaseModel):
     rentcast: dict[str, Any] = Field(default_factory=dict)
 
     updated_fields: list[str] = Field(default_factory=list)
+    nspire_pdf_catalog: dict[str, Any] = Field(default_factory=dict)
 
 
 class RentEnrichBatchIn(BaseModel):
@@ -924,4 +925,5 @@ def enrich_section8_overlay(
             for key in ("market_rent_estimate", "section8_fmr", "rent_reasonableness_comp")
             if overlay.get(key) is None
         ],
+        "nspire_pdf_catalog": summarize_nspire_pdf_dataset(),
     }

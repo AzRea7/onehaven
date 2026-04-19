@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import desc, select
@@ -236,6 +238,20 @@ def _checklist_as_scored_rows(rows: list[PropertyChecklistItem]) -> list[dict[st
         )
     return out
 
+
+
+
+def _step7_pdf_dataset_status() -> dict[str, Any]:
+    roots: list[str] = []
+    raw = os.getenv("POLICY_PDFS_ROOT", "") or os.getenv("POLICY_PDF_ROOTS", "") or os.getenv("POLICY_PDF_ROOT", "") or os.getenv("NSPIRE_PDF_ROOT", "")
+    for piece in str(raw).split(os.pathsep):
+        piece = str(piece).strip()
+        if piece and Path(piece).exists():
+            roots.append(str(Path(piece)))
+    for fallback in (Path("backend/data/pdfs").resolve(), Path("/app/backend/data/pdfs"), Path("/mnt/data/pdfs"), Path("/mnt/data/PDFs"), Path("/mnt/data/pfs"), Path(r"/mnt/data/step67_pdf_zip/pdfs")):
+        if fallback.exists() and str(fallback) not in roots:
+            roots.append(str(fallback))
+    return {"available": bool(roots), "roots": roots}
 
 def _completion_projection_pct(
     *,
@@ -794,6 +810,7 @@ def build_property_readiness_summary(
             acquisition["next_actions"].append("Resolve near-term inspection repairs due within 7 days.")
         base.update({
             "repair_deadlines": deadlines,
+            "pdf_dataset_status": _step7_pdf_dataset_status(),
             "operational_state": operational_state,
             "readiness": readiness,
             "completion": completion,

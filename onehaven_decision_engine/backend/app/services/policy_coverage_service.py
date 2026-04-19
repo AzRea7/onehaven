@@ -1194,3 +1194,117 @@ def upsert_coverage_status(
     db.commit()
     db.refresh(row)
     return row
+
+
+# --- Step 4 additive patch v3: surface uploaded NSPIRE PDF zip coverage context ---
+from pathlib import Path
+import zipfile
+
+_COVERAGE_STEP4_ZIP_CANDIDATES = [
+    Path(os.getenv("NSPIRE_PDF_ZIP_PATH", "")).expanduser() if os.getenv("NSPIRE_PDF_ZIP_PATH") else None,
+    Path("/mnt/data/pdfs(1).zip"),
+]
+_COVERAGE_STEP4_DIR_CANDIDATES = [
+    Path(os.getenv("NSPIRE_PDF_ROOT", "")).expanduser() if os.getenv("NSPIRE_PDF_ROOT") else None,
+    Path("backend/data/pdfs"),
+    Path("/app/backend/data/pdfs"),
+    Path("/mnt/data/step4_pdf_catalog/pdfs"),
+]
+
+
+def _coverage_step4_pdf_catalog_names() -> list[str]:
+    names=[]; seen=set()
+    for maybe_dir in _COVERAGE_STEP4_DIR_CANDIDATES:
+        if not maybe_dir: continue
+        try: path=maybe_dir.resolve()
+        except Exception: path=maybe_dir
+        if path.exists() and path.is_dir():
+            for pdf in path.rglob('*.pdf'):
+                key=pdf.name.lower()
+                if key in seen: continue
+                seen.add(key); names.append(pdf.name)
+    if names:
+        return sorted(names)
+    for maybe_zip in _COVERAGE_STEP4_ZIP_CANDIDATES:
+        if not maybe_zip or not maybe_zip.exists():
+            continue
+        try:
+            with zipfile.ZipFile(maybe_zip) as zf:
+                for name in zf.namelist():
+                    if name.lower().endswith('.pdf'):
+                        base=Path(name).name; key=base.lower()
+                        if key in seen: continue
+                        seen.add(key); names.append(base)
+        except Exception:
+            continue
+    return sorted(names)
+
+
+_coverage_v3_orig_compute_coverage_status = compute_coverage_status
+
+def compute_coverage_status(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> dict:
+    payload = dict(_coverage_v3_orig_compute_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    ))
+    rule_matrix = list(payload.get("structured_rule_matrix") or [])
+    catalog_names = _coverage_step4_pdf_catalog_names()
+    matched = sorted({str(row.get("matched_pdf_name")) for row in rule_matrix if row.get("matched_pdf_name")})
+    payload["pdf_catalog_summary"] = {
+        "pdf_count": len(catalog_names),
+        "pdf_names": catalog_names,
+        "matched_pdf_count": len(matched),
+        "matched_pdf_names": matched,
+        "matched_rule_count": sum(1 for row in rule_matrix if row.get("matched_pdf_name")),
+    }
+    payload["pdf_catalog_matched_rule_count"] = payload["pdf_catalog_summary"]["matched_rule_count"]
+    return payload
+
+
+_coverage_v3_orig_upsert_coverage_status = upsert_coverage_status
+
+def upsert_coverage_status(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    notes: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> JurisdictionCoverageStatus:
+    row = _coverage_v3_orig_upsert_coverage_status(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        notes=notes,
+        focus=focus,
+    )
+    payload = compute_coverage_status(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, focus=focus)
+    if hasattr(row, "coverage_summary_json"):
+        row.coverage_summary_json = _dumps({
+            **_loads_dict(getattr(row, "coverage_summary_json", None)),
+            "pdf_catalog_summary": payload.get("pdf_catalog_summary", {}),
+        })
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row

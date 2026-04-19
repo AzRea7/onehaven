@@ -26,6 +26,37 @@ STATUS_WARN = "warn"
 STATUS_UNKNOWN = "unknown"
 STATUS_NA = "not_applicable"
 
+
+def _embedded_pdf_roots() -> list[Path]:
+    roots: list[Path] = []
+    env_raw = os.getenv("POLICY_PDFS_ROOT", "") or os.getenv("POLICY_PDF_ROOTS", "") or os.getenv("POLICY_PDF_ROOT", "") or os.getenv("NSPIRE_PDF_ROOT", "")
+    for piece in str(env_raw).split(os.pathsep):
+        piece = str(piece).strip()
+        if not piece:
+            continue
+        try:
+            path = Path(piece).expanduser().resolve()
+        except Exception:
+            continue
+        if path.exists() and path.is_dir() and path not in roots:
+            roots.append(path)
+    for fallback in (
+        Path("backend/data/pdfs").resolve(),
+        Path("/app/backend/data/pdfs"),
+        Path("/mnt/data/pdfs"),
+        Path("/mnt/data/PDFs"),
+        Path("/mnt/data/pfs"),
+        Path(r"/mnt/data/step67_pdf_zip/pdfs"),
+    ):
+        try:
+            path = Path(fallback)
+        except Exception:
+            continue
+        if path.exists() and path.is_dir() and path not in roots:
+            roots.append(path)
+    return roots
+
+
 SEVERITY_RANK = {
     "life_threatening": 5,
     "critical": 5,
@@ -707,7 +738,7 @@ def resolve_property_compliance(
         "pdf_context": {
             "roots": [str(p) for p in _pdf_roots()],
             "matched_files": pdf_context,
-            "note": "PDF context is used when POLICY_PDFS_ROOT or POLICY_PDF_ROOTS points at a local folder of official PDFs.",
+            "note": "PDF context is used from configured roots, backend/data/pdfs, and the uploaded NSPIRE ZIP extraction when available.",
         },
         "resolved_at": _utcnow().isoformat(),
     }

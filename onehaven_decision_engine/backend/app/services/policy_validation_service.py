@@ -1161,3 +1161,183 @@ def validate_market_assertions(
         "strong_evidence": int(result.get("strong_evidence_rule_count") or 0),
     }
     return result
+
+
+# --- Step 4 additive patch v3: use uploaded NSPIRE PDF zip catalog as real evidence context ---
+from pathlib import Path
+import zipfile
+import re as _step4_re
+
+_STEP4_DEFAULT_ZIP_PATHS = [
+    Path(os.getenv("NSPIRE_PDF_ZIP_PATH", "")).expanduser() if os.getenv("NSPIRE_PDF_ZIP_PATH") else None,
+    Path("/mnt/data/pdfs(1).zip"),
+]
+_STEP4_DEFAULT_PDF_DIRS = [
+    Path(os.getenv("NSPIRE_PDF_ROOT", "")).expanduser() if os.getenv("NSPIRE_PDF_ROOT") else None,
+    Path("backend/data/pdfs"),
+    Path("/app/backend/data/pdfs"),
+    Path("/mnt/data/step4_pdf_catalog/pdfs"),
+]
+
+
+def _step4_iter_pdf_catalog_names() -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for maybe_dir in _STEP4_DEFAULT_PDF_DIRS:
+        if not maybe_dir:
+            continue
+        try:
+            path = maybe_dir.resolve()
+        except Exception:
+            path = maybe_dir
+        if path.exists() and path.is_dir():
+            for pdf in path.rglob("*.pdf"):
+                key = pdf.name.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                names.append(pdf.name)
+    if names:
+        return sorted(names)
+    for maybe_zip in _STEP4_DEFAULT_ZIP_PATHS:
+        if not maybe_zip:
+            continue
+        if maybe_zip.exists() and maybe_zip.is_file():
+            try:
+                with zipfile.ZipFile(maybe_zip) as zf:
+                    for name in zf.namelist():
+                        if name.lower().endswith('.pdf'):
+                            base = Path(name).name
+                            key = base.lower()
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            names.append(base)
+            except Exception:
+                continue
+    return sorted(names)
+
+
+def _step4_pdf_catalog_summary() -> dict[str, object]:
+    names = _step4_iter_pdf_catalog_names()
+    return {
+        "pdf_count": len(names),
+        "pdf_names": names,
+    }
+
+
+def _step4_tokenize(value: object) -> list[str]:
+    text = str(value or "").strip().lower()
+    text = text.replace("&", " and ")
+    tokens = [tok for tok in _step4_re.split(r"[^a-z0-9]+", text) if tok and tok not in {"nspire", "standard", "pdf", "and", "the", "of"}]
+    return tokens
+
+
+def _step4_match_pdf_catalog(*, assertion: PolicyAssertion, source: PolicySource | None, citation: dict[str, object] | None = None) -> dict[str, object]:
+    catalog = _step4_iter_pdf_catalog_names()
+    if not catalog:
+        return {"matched": False, "matched_pdf_name": None, "matched_pdf_path": None, "catalog_size": 0, "match_score": 0.0}
+    fields = [
+        getattr(assertion, "rule_key", None),
+        getattr(assertion, "normalized_category", None),
+        getattr(assertion, "rule_category", None),
+        getattr(assertion, "source_citation", None),
+        getattr(assertion, "raw_excerpt", None),
+        getattr(source, "title", None) if source is not None else None,
+        getattr(source, "publisher", None) if source is not None else None,
+        (citation or {}).get("title") if isinstance(citation, dict) else None,
+        (citation or {}).get("locator") if isinstance(citation, dict) else None,
+    ]
+    wanted = []
+    for field in fields:
+        wanted.extend(_step4_tokenize(field))
+    wanted = sorted(set(tok for tok in wanted if len(tok) >= 3))
+    best_name = None
+    best_score = 0.0
+    for name in catalog:
+        low = name.lower()
+        score = 0.0
+        for tok in wanted:
+            if tok in low:
+                score += 1.0
+        if score > best_score:
+            best_score = score
+            best_name = name
+    matched = best_name is not None and best_score >= 1.0
+    matched_path = None
+    if matched:
+        for maybe_dir in _STEP4_DEFAULT_PDF_DIRS:
+            if not maybe_dir:
+                continue
+            try:
+                path = maybe_dir.resolve()
+            except Exception:
+                path = maybe_dir
+            candidate = path / str(best_name)
+            if candidate.exists():
+                matched_path = str(candidate)
+                break
+    return {
+        "matched": matched,
+        "matched_pdf_name": best_name,
+        "matched_pdf_path": matched_path,
+        "catalog_size": len(catalog),
+        "match_score": round(float(best_score), 6),
+    }
+
+
+_step4_v3_orig_assertion_normalization_payload = _assertion_normalization_payload
+
+def _assertion_normalization_payload(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    payload = dict(_step4_v3_orig_assertion_normalization_payload(assertion, source))
+    citation = dict(payload.get("citation") or {})
+    pdf_match = _step4_match_pdf_catalog(assertion=assertion, source=source, citation=citation)
+    payload["pdf_catalog_match"] = pdf_match
+    payload["matched_pdf_name"] = pdf_match.get("matched_pdf_name")
+    payload["matched_pdf_path"] = pdf_match.get("matched_pdf_path")
+    payload["pdf_catalog_match_score"] = pdf_match.get("match_score")
+    payload["pdf_catalog_size"] = pdf_match.get("catalog_size")
+    payload["is_pdf_backed"] = bool(payload.get("is_pdf_backed") or pdf_match.get("matched"))
+    citation["matched_pdf_name"] = pdf_match.get("matched_pdf_name")
+    citation["matched_pdf_path"] = pdf_match.get("matched_pdf_path")
+    citation["pdf_catalog_match_score"] = pdf_match.get("match_score")
+    citation["pdf_catalog_size"] = pdf_match.get("catalog_size")
+    citation["is_pdf_backed"] = bool(citation.get("is_pdf_backed") or pdf_match.get("matched"))
+    if pdf_match.get("matched") and not citation.get("pages"):
+        citation["catalog_backed"] = True
+    payload["citation"] = citation
+    if pdf_match.get("matched") and payload.get("evidence_strength") == "weak" and payload.get("is_real"):
+        payload["evidence_strength"] = "moderate"
+    return payload
+
+
+_step4_v3_orig_validate_market_assertions = validate_market_assertions
+
+def validate_market_assertions(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    source_id: int | None = None,
+) -> dict[str, object]:
+    result = dict(_step4_v3_orig_validate_market_assertions(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        source_id=source_id,
+    ))
+    normalized_rules = list(result.get("normalized_rules") or [])
+    matched_names = sorted({str(row.get("matched_pdf_name")) for row in normalized_rules if row.get("matched_pdf_name")})
+    result["pdf_catalog_summary"] = {
+        **_step4_pdf_catalog_summary(),
+        "matched_pdf_count": len(matched_names),
+        "matched_pdf_names": matched_names,
+    }
+    result["pdf_catalog_matched_rule_count"] = sum(1 for row in normalized_rules if row.get("matched_pdf_name"))
+    return result

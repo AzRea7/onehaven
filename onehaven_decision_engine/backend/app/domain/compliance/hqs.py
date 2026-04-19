@@ -136,6 +136,9 @@ def top_fix_candidates(items: Iterable[dict[str, Any]], *, limit: int = 10) -> l
                 "affirmative_habitability_requirement": bool(row.get("affirmative_habitability_requirement")),
                 "suggested_fix": row.get("suggested_fix"),
                 "fail_reason_hint": row.get("fail_reason_hint"),
+                "source_pdf_name": row.get("source_pdf_name"),
+                "source_pdf_path": row.get("source_pdf_path"),
+                "source_citation": row.get("source_citation") or row.get("standard_citation"),
                 "score": rank,
             }
         )

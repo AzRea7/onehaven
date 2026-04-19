@@ -499,3 +499,44 @@ def enrich_change_summary_with_diff(*, base_summary: dict[str, Any] | None, prev
         summary["changed"] = True
         summary["change_detected"] = True
     return summary
+
+
+# --- Step 4 additive patch v3: diff matched NSPIRE PDF support from uploaded zip catalog ---
+
+def build_pdf_catalog_change_summary(*, previous_assertions: Iterable[dict[str, Any]] | None, current_assertions: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
+    def _names(rows):
+        out=[]
+        for row in rows or []:
+            name = str((row or {}).get("matched_pdf_name") or "").strip()
+            if name:
+                out.append(name)
+        return sorted(set(out))
+    prev = _names(previous_assertions)
+    curr = _names(current_assertions)
+    prev_set = set(prev)
+    curr_set = set(curr)
+    return {
+        "changed": prev_set != curr_set,
+        "previous_pdf_names": prev,
+        "current_pdf_names": curr,
+        "added_pdf_names": sorted(curr_set - prev_set),
+        "removed_pdf_names": sorted(prev_set - curr_set),
+    }
+
+
+_step4_v3_orig_enrich_change_summary_with_diff = enrich_change_summary_with_diff
+
+def enrich_change_summary_with_diff(*, base_summary: dict[str, Any] | None, previous_text: str | None = None, current_text: str | None = None, previous_assertions: Iterable[dict[str, Any]] | None = None, current_assertions: Iterable[dict[str, Any]] | None = None) -> dict[str, Any]:
+    summary = dict(_step4_v3_orig_enrich_change_summary_with_diff(
+        base_summary=base_summary,
+        previous_text=previous_text,
+        current_text=current_text,
+        previous_assertions=previous_assertions,
+        current_assertions=current_assertions,
+    ))
+    summary["pdf_catalog_diff"] = build_pdf_catalog_change_summary(previous_assertions=previous_assertions, current_assertions=current_assertions)
+    if summary["pdf_catalog_diff"].get("changed") and summary.get("change_kind") in {None, "unchanged"}:
+        summary["change_kind"] = "pdf_support_changed"
+        summary["changed"] = True
+        summary["change_detected"] = True
+    return summary

@@ -672,6 +672,9 @@ def build_normalized_inspection_result(
     nspire_standard_code = None
     nspire_standard_label = None
     nspire_deficiency_description = None
+    source_pdf_name = None
+    source_pdf_path = None
+    source_citation = None
 
     if criterion is not None:
         category = getattr(criterion, "category", category)
@@ -689,6 +692,9 @@ def build_normalized_inspection_result(
         affirmative_habitability_requirement = bool(
             getattr(criterion, "affirmative_habitability_requirement", False)
         )
+        source_pdf_name = getattr(criterion, "source_pdf_name", None)
+        source_pdf_path = getattr(criterion, "source_pdf_path", None)
+        source_citation = getattr(criterion, "source_citation", None) or getattr(criterion, "standard_citation", None)
 
     if isinstance(answer, dict):
         fail_reason = _extract_first_value(answer, ["fail_reason", "reason", "comment", "details"])
@@ -714,6 +720,9 @@ def build_normalized_inspection_result(
         correction_days = answer.get("correction_days", correction_days)
         if "affirmative_habitability_requirement" in answer:
             affirmative_habitability_requirement = bool(answer.get("affirmative_habitability_requirement"))
+        source_pdf_name = answer.get("source_pdf_name", source_pdf_name)
+        source_pdf_path = answer.get("source_pdf_path", source_pdf_path)
+        source_citation = answer.get("source_citation", source_citation or standard_citation)
     else:
         if status == "fail" and mapped is not None:
             fail_reason = mapped.default_fail_reason
@@ -789,6 +798,9 @@ def build_normalized_inspection_result(
         "nspire_designation": nspire_designation,
         "correction_days": correction_days,
         "affirmative_habitability_requirement": bool(affirmative_habitability_requirement),
+        "source_pdf_name": source_pdf_name,
+        "source_pdf_path": source_pdf_path,
+        "source_citation": source_citation or standard_citation,
         "structured_deficiency": {
             "rule_id": mapped.inspection_rule_code if mapped else normalized_code,
             "category": category,
@@ -798,6 +810,9 @@ def build_normalized_inspection_result(
             "standard_code": nspire_standard_code,
             "standard_label": nspire_standard_label,
             "deficiency_description": nspire_deficiency_description,
+            "source_pdf_name": source_pdf_name,
+            "source_pdf_path": source_pdf_path,
+            "source_citation": source_citation or standard_citation,
         },
     }
 

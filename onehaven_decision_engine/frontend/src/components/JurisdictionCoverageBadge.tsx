@@ -63,6 +63,10 @@ type CoverageLike = {
   authority_gap_categories?: string[] | null;
   last_validation_at?: string | null;
   next_due_step?: string | null;
+  repo_artifact_support_state?: string | null;
+  repo_policy_raw_count?: number | null;
+  repo_pdf_count?: number | null;
+  repo_pdf_names?: string[] | null;
 };
 
 function norm(value: unknown) {
@@ -238,10 +242,29 @@ export default function JurisdictionCoverageBadge({
   const authorityGaps = Array.isArray((c as any).authority_gap_categories)
     ? (c as any).authority_gap_categories
     : [];
-  const lastValidationAt =
-    (c as any).last_validation_at || null;
+  const lastValidationAt = (c as any).last_validation_at || null;
   const nextDueStep =
     (c as any).next_due_step || nextActions?.next_step || null;
+
+  const repoArtifactSupportState =
+    (c as any).repo_artifact_support_state ||
+    (c as any).artifact_evidence?.artifact_support_state ||
+    null;
+  const repoPolicyRawCount = Number(
+    (c as any).repo_policy_raw_count ||
+      (c as any).artifact_evidence?.repo_policy_raw_count ||
+      0,
+  );
+  const repoPdfCount = Number(
+    (c as any).repo_pdf_count ||
+      (c as any).artifact_evidence?.repo_pdf_count ||
+      0,
+  );
+  const repoPdfNames = Array.isArray((c as any).repo_pdf_names)
+    ? (c as any).repo_pdf_names
+    : Array.isArray((c as any).artifact_evidence?.repo_pdf_names)
+      ? (c as any).artifact_evidence.repo_pdf_names
+      : [];
 
   if (compact) {
     return (

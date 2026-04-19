@@ -21,8 +21,16 @@ FETCH_CACHE_DIR = os.getenv("POLICY_FETCH_CACHE_DIR", "/tmp/policy_fetch_cache")
 PLAYWRIGHT_ENABLED = os.getenv("POLICY_PLAYWRIGHT_ENABLED", "1").strip() not in {"0", "false", "False"}
 PLAYWRIGHT_TIMEOUT_MS = int(os.getenv("POLICY_PLAYWRIGHT_TIMEOUT_MS", "25000"))
 PLAYWRIGHT_WAIT_UNTIL = os.getenv("POLICY_PLAYWRIGHT_WAIT_UNTIL", "domcontentloaded").strip() or "domcontentloaded"
-PDF_ROOTS_ENV = os.getenv("POLICY_SOURCE_PDF_ROOTS", "")
+PDF_ROOTS_ENV = os.getenv("POLICY_SOURCE_PDF_ROOTS", "") or os.getenv("POLICY_PDFS_ROOT", "") or os.getenv("POLICY_PDF_ROOT", "") or os.getenv("NSPIRE_PDF_ROOT", "")
 LOCAL_PDF_MAX_BYTES = int(os.getenv("POLICY_LOCAL_PDF_MAX_BYTES", str(15 * 1024 * 1024)))
+
+DEFAULT_EMBEDDED_PDF_ROOTS = [
+    Path("backend/data/pdfs"),
+    Path("/app/backend/data/pdfs"),
+    Path("/mnt/data/step3_zip/pdfs"),
+    Path("/mnt/data/pdfs"),
+    Path("/mnt/data/pdfs(1)"),
+]
 
 BROWSER_FALLBACK_HOSTS = {
     "www.michigan.gov",
@@ -85,8 +93,15 @@ def _iter_local_pdf_roots() -> list[Path]:
             path = Path(raw).expanduser().resolve()
         except Exception:
             continue
-        if path.exists() and path.is_dir():
+        if path.exists() and path.is_dir() and path not in roots:
             roots.append(path)
+    for path in DEFAULT_EMBEDDED_PDF_ROOTS:
+        try:
+            resolved = path.expanduser().resolve()
+        except Exception:
+            continue
+        if resolved.exists() and resolved.is_dir() and resolved not in roots:
+            roots.append(resolved)
     return roots
 
 
@@ -99,6 +114,10 @@ def _safe_filename(value: str | None) -> str:
 
 def _candidate_pdf_names(candidate: dict[str, Any]) -> list[str]:
     names: list[str] = []
+    for existing in candidate.get("pdf_lookup_names") or []:
+        cleaned_existing = _safe_filename(str(existing or ""))
+        if cleaned_existing:
+            names.append(cleaned_existing)
     for value in [
         candidate.get("document_name"),
         candidate.get("pdf_filename"),
@@ -171,17 +190,23 @@ def _find_local_pdf_for_candidate(candidate: dict[str, Any]) -> dict[str, Any] |
     roots = _iter_local_pdf_roots()
     if not roots:
         return None
+    desired_names = [name.lower() for name in _candidate_pdf_names(candidate)]
+    best_match: Path | None = None
+    title = str(candidate.get("title") or candidate.get("source_label") or "").strip().lower()
+    category = str(candidate.get("category") or "").strip().lower()
+    title_tokens = [tok for tok in re.split(r"[^a-z0-9]+", title) if tok]
+    category_tokens = [tok for tok in re.split(r"[^a-z0-9]+", category) if tok]
     for root in roots:
-        for name in _candidate_pdf_names(candidate):
-            direct = root / name
-            if direct.exists() and direct.is_file():
-                return _load_local_pdf_bytes(direct)
-        title = str(candidate.get("title") or candidate.get("source_label") or "").strip().lower()
-        if not title:
-            continue
         for match in root.rglob('*.pdf'):
-            if title in match.name.lower():
+            lowered = match.name.lower()
+            if lowered in desired_names:
                 return _load_local_pdf_bytes(match)
+            if title_tokens and all(tok in lowered for tok in title_tokens[: min(len(title_tokens), 3)]):
+                best_match = best_match or match
+            elif category_tokens and any(tok in lowered for tok in category_tokens):
+                best_match = best_match or match
+    if best_match is not None:
+        return _load_local_pdf_bytes(best_match)
     return None
 
 
@@ -535,6 +560,7 @@ def fetch_api_source(*, url: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECON
 def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
     url = str(candidate.get("url") or "").strip()
     fetch_mode = str(candidate.get("fetch_mode") or "").strip().lower()
+    pdf_lookup_names = _candidate_pdf_names(candidate) if fetch_mode == "pdf" else []
     local_pdf_result = None
     if fetch_mode in MANUAL_ONLY_FETCH_MODES:
         return {
@@ -548,8 +574,10 @@ def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds:
             "title": candidate.get("title"),
             "fetch_error": "manual_required",
             "reason": "source family explicitly requires manual handling",
+            "pdf_lookup_names": pdf_lookup_names,
         }
-    if not url and fetch_mode == "pdf":
+
+    if fetch_mode == "pdf":
         local_pdf_result = _find_local_pdf_for_candidate(candidate)
         if local_pdf_result is not None:
             result = local_pdf_result
@@ -561,7 +589,10 @@ def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds:
                 "fetch_mode": detected_mode,
                 "reason": "local pdf fetch succeeded" if result.get("ok") else "local pdf fetch failed",
                 "fetched_at": datetime.utcnow().isoformat(),
+                "pdf_lookup_names": pdf_lookup_names,
+                "local_pdf_path": result.get("local_path"),
             }
+
     if not url:
         return {
             "ok": False,
@@ -574,7 +605,7 @@ def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds:
             "title": candidate.get("title"),
             "fetch_error": "missing_url",
             "reason": "no fetchable source URL is mapped for this source family",
-            "pdf_lookup_names": _candidate_pdf_names(candidate) if fetch_mode == "pdf" else [],
+            "pdf_lookup_names": pdf_lookup_names,
         }
 
     if fetch_mode == "api":
@@ -593,7 +624,8 @@ def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds:
             "fetch_mode": detected_mode,
             "reason": "fetch succeeded",
             "fetched_at": datetime.utcnow().isoformat(),
-            "pdf_lookup_names": _candidate_pdf_names(candidate) if detected_mode == "pdf" else [],
+            "pdf_lookup_names": pdf_lookup_names if detected_mode == "pdf" else [],
+            "local_pdf_path": result.get("local_path"),
         }
 
     resolution, next_step = _summarize_error(result.get("fetch_error"), result.get("http_status"))
@@ -604,5 +636,6 @@ def fetch_policy_source_candidate(candidate: dict[str, Any], *, timeout_seconds:
         "fetch_mode": detected_mode,
         "reason": "fetch blocked" if resolution == "blocked" else ("manual review required" if resolution == "manual_required" else "fetch failed" if resolution == "failed" else "source unresolved"),
         "fetched_at": datetime.utcnow().isoformat(),
-        "pdf_lookup_names": _candidate_pdf_names(candidate) if detected_mode == "pdf" else [],
+        "pdf_lookup_names": pdf_lookup_names if detected_mode == "pdf" or fetch_mode == "pdf" else [],
+        "local_pdf_path": result.get("local_path"),
     }

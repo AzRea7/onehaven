@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable
@@ -464,6 +466,20 @@ def create_proof_gap_tasks_from_projection(db: Session, *, org_id: int, property
 
 
 # --- Step 7 additive failure task + deadlines extensions ---
+
+
+def _step7_pdf_dataset_status() -> dict[str, Any]:
+    roots: list[str] = []
+    raw = os.getenv("POLICY_PDFS_ROOT", "") or os.getenv("POLICY_PDF_ROOTS", "") or os.getenv("POLICY_PDF_ROOT", "") or os.getenv("NSPIRE_PDF_ROOT", "")
+    for piece in str(raw).split(os.pathsep):
+        piece = str(piece).strip()
+        if piece and Path(piece).exists():
+            roots.append(str(Path(piece)))
+    for fallback in (Path("backend/data/pdfs").resolve(), Path("/app/backend/data/pdfs"), Path("/mnt/data/pdfs"), Path("/mnt/data/PDFs"), Path("/mnt/data/pfs"), Path(r"/mnt/data/step67_pdf_zip/pdfs")):
+        if fallback.exists() and str(fallback) not in roots:
+            roots.append(str(fallback))
+    return {"available": bool(roots), "roots": roots}
+
 from datetime import timedelta as _step7_timedelta
 
 _step7_prev_collect_failure_task_blueprints = collect_failure_task_blueprints
@@ -538,7 +554,8 @@ def collect_failure_task_blueprints(
             "deadline_days": _step7_deadline_days(item) if item is not None else None,
             "deadline_reason": "nspire_lt_24h" if (_step7_deadline_days(item) == 1) else ("nspire_or_fail_30d" if (_step7_deadline_days(item) == 30) else None),
             "default_fail_reason": mapped.default_fail_reason if mapped else None,
-            "pdf_context_available": bool(__import__('os').path.isdir('/mnt/data/pdfs') or __import__('os').path.isdir('/mnt/data/pfs')),
+            "pdf_context_available": bool(_step7_pdf_dataset_status().get("available")),
+            "pdf_dataset_status": _step7_pdf_dataset_status(),
         })
         enriched.append(out)
     payload["items"] = enriched
@@ -621,4 +638,5 @@ def build_failure_next_actions(
         "inspection_id": payload.get("inspection_id"),
         "recommended_actions": recommended_actions,
         "count": len(recommended_actions),
+        "pdf_dataset_status": _step7_pdf_dataset_status(),
     }

@@ -299,6 +299,27 @@ export default function PropertyJurisdictionRulesPanel({
   const lockout = operational?.lockout;
   const sourceSummary = operational?.source_summary;
   const reasons = toArray<string>(operational?.reasons);
+  const artifactEvidence =
+    (operational as any)?.artifact_evidence ||
+    (p as any)?.artifact_evidence ||
+    null;
+  const repoPdfCount = Number(
+    (operational as any)?.repo_pdf_count ||
+      artifactEvidence?.repo_pdf_count ||
+      0,
+  );
+  const repoPolicyRawCount = Number(
+    (operational as any)?.repo_policy_raw_count ||
+      artifactEvidence?.repo_policy_raw_count ||
+      0,
+  );
+  const repoPdfNames = toArray<string>(
+    (operational as any)?.repo_pdf_names || artifactEvidence?.repo_pdf_names,
+  );
+  const repoArtifactSupportState =
+    (operational as any)?.repo_artifact_support_state ||
+    artifactEvidence?.artifact_support_state ||
+    null;
 
   return (
     <Surface
@@ -393,6 +414,48 @@ export default function PropertyJurisdictionRulesPanel({
               </div>
             </div>
           ) : null}
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                <FolderTree className="h-4 w-4" />
+                PDF-backed evidence
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span
+                  className={
+                    repoPdfCount > 0
+                      ? "oh-pill oh-pill-good"
+                      : "oh-pill oh-pill-warn"
+                  }
+                >
+                  {repoPdfCount > 0
+                    ? `${repoPdfCount} PDF files available`
+                    : "No PDF catalog loaded"}
+                </span>
+                {repoPolicyRawCount > 0 ? (
+                  <span className="oh-pill">
+                    Policy raw: {repoPolicyRawCount}
+                  </span>
+                ) : null}
+                {repoArtifactSupportState ? (
+                  <span className="oh-pill">
+                    {titleize(repoArtifactSupportState)}
+                  </span>
+                ) : null}
+              </div>
+              {repoPdfNames.length ? (
+                <div className="mt-3 text-sm text-app-3">
+                  Sample standards: {repoPdfNames.slice(0, 4).join(", ")}
+                </div>
+              ) : (
+                <div className="mt-3 text-sm text-app-4">
+                  This view is only as trustworthy as the fetched sources and
+                  loaded PDF dataset.
+                </div>
+              )}
+            </div>
+          </div>
 
           {lockoutCausing.length ||
           validationPending.length ||

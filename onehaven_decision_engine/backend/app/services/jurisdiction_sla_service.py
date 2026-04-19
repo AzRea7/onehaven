@@ -21,6 +21,15 @@ SOURCE_HTTP_BLOCK_STATUSES = {401, 403, 405, 406, 407, 429, 451}
 SOURCE_HTTP_DEAD_STATUSES = {404, 410}
 
 
+ZIP_PDF_ROOT_CANDIDATES = [
+    Path('/mnt/data/step3_zip/pdfs'),
+    Path('/mnt/data/step4_pdf_catalog/pdfs'),
+    Path('/mnt/data/step67_pdf_zip/pdfs'),
+    Path('/mnt/data/step8_pdf_zip/pdfs'),
+    Path('/mnt/data/pdfs'),
+]
+
+
 
 def _utcnow() -> datetime:
     return datetime.utcnow()
@@ -488,6 +497,7 @@ def _repo_candidate_roots() -> list[Path]:
     cwd = Path.cwd()
     candidates.extend([cwd, cwd.parent, cwd.parent.parent])
     candidates.append(Path('/mnt/data'))
+    candidates.extend([p.parent.parent if p.name=='pdfs' else p for p in ZIP_PDF_ROOT_CANDIDATES])
 
     out: list[Path] = []
     seen: set[str] = set()
@@ -529,12 +539,15 @@ def _policy_artifact_snapshot() -> dict[str, Any]:
             break
     for root in roots:
         candidates = [
+            root / 'backend' / 'data' / 'pdfs',
+            root / 'onehaven_decision_engine' / 'backend' / 'data' / 'pdfs',
             root / 'backend' / 'pdfs',
             root / 'onehaven_decision_engine' / 'backend' / 'pdfs',
             root / 'pdfs',
             root / 'backend' / 'pdf',
             root / 'onehaven_decision_engine' / 'backend' / 'pdf',
             root / 'pdf',
+            *ZIP_PDF_ROOT_CANDIDATES,
         ]
         found = _first_existing(candidates)
         if found is not None:
@@ -568,6 +581,7 @@ def _policy_artifact_snapshot() -> dict[str, Any]:
             'count': len(rows),
             'latest_mtime': latest.isoformat() if latest else None,
             'examples': [str(f) for f in sorted(rows)[:5]],
+            'names': [f.name for f in sorted(rows)[:50]],
         }
 
     html = _scan(policy_raw, ('*.html', '*.htm'))

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
+
+
 from .inspection_rules import get_hud_52580a_criteria, normalize_rule_code, normalize_severity
 
 
@@ -32,6 +34,9 @@ class ChecklistTemplateItem:
     affirmative_habitability_requirement: bool = False
     source_name: str | None = None
     source_type: str | None = None
+    source_pdf_name: str | None = None
+    source_pdf_path: str | None = None
+    source_citation: str | None = None
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
@@ -86,6 +91,9 @@ def base_hqs_template() -> list[ChecklistTemplateItem]:
                 ),
                 source_name=getattr(c, "source_name", None),
                 source_type=getattr(c, "source_type", None),
+                source_pdf_name=getattr(c, "source_pdf_name", None),
+                source_pdf_path=getattr(c, "source_pdf_path", None),
+                source_citation=getattr(c, "source_citation", None),
             )
         )
     return ordered_template_items(out)
@@ -125,6 +133,9 @@ def template_items_from_effective_rules(effective_items: Iterable[dict[str, Any]
                 source_name=raw.get("source_name")
                 or (raw.get("source") or {}).get("name") if isinstance(raw.get("source"), dict) else raw.get("source_name"),
                 source_type=(raw.get("source") or {}).get("type") if isinstance(raw.get("source"), dict) else raw.get("source_type"),
+                source_pdf_name=raw.get("source_pdf_name"),
+                source_pdf_path=raw.get("source_pdf_path"),
+                source_citation=raw.get("source_citation") or raw.get("standard_citation"),
             )
         )
     return ordered_template_items(out)
@@ -239,6 +250,9 @@ def build_property_scoped_checklist_items(
                 "affirmative_habitability_requirement": item.affirmative_habitability_requirement,
                 "source_name": item.source_name,
                 "source_type": item.source_type,
+                "source_pdf_name": item.source_pdf_name,
+                "source_pdf_path": item.source_pdf_path,
+                "source_citation": item.source_citation,
             }
         )
     return rows

@@ -163,6 +163,9 @@ def crawl_source_family_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     result["official_domain"] = candidate.get("official_domain")
     result["host"] = candidate.get("host")
     result["pdf_lookup_names"] = candidate.get("pdf_lookup_names") or result.get("pdf_lookup_names") or []
+    result["has_local_pdf"] = bool(candidate.get("has_local_pdf"))
+    result["discovery_origin"] = candidate.get("discovery_origin")
+    result["source_label"] = candidate.get("source_label")
     return result
 
 
@@ -213,4 +216,5 @@ def crawl_discovered_candidates(
         "discovery": discovery,
         "resolution_counts": counts,
         "pdf_result_count": sum(1 for r in results if str(r.get("fetch_mode") or "").strip().lower() == "pdf"),
+        "local_pdf_result_count": sum(1 for r in results if bool(r.get("local_pdf_path"))),
     }

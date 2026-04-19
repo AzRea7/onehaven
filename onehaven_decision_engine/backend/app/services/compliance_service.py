@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from datetime import datetime
 from typing import Any
 
@@ -1637,6 +1639,29 @@ def build_property_document_stack_snapshot(
 from datetime import timedelta as _pc_timedelta
 
 
+def _step6_pdf_dataset_status() -> dict[str, Any]:
+    roots: list[str] = []
+    env_raw = os.getenv("POLICY_PDFS_ROOT", "") or os.getenv("POLICY_PDF_ROOTS", "") or os.getenv("POLICY_PDF_ROOT", "") or os.getenv("NSPIRE_PDF_ROOT", "")
+    for piece in str(env_raw).split(os.pathsep):
+        piece = str(piece).strip()
+        if not piece:
+            continue
+        if Path(piece).exists():
+            roots.append(str(Path(piece)))
+    for fallback in (
+        Path("backend/data/pdfs").resolve(),
+        Path("/app/backend/data/pdfs"),
+        Path("/mnt/data/pdfs"),
+        Path("/mnt/data/PDFs"),
+        Path("/mnt/data/pfs"),
+        Path(r"/mnt/data/step67_pdf_zip/pdfs"),
+    ):
+        if fallback.exists() and str(fallback) not in roots:
+            roots.append(str(fallback))
+    return {"roots": roots, "available": bool(roots)}
+
+
+
 def _safe_property_compliance_resolution(
     db: Session,
     *,
@@ -1689,7 +1714,10 @@ def build_property_compliance_resolution(
             "missing_requirements": [],
             "required_actions": [],
             "deadlines": [],
+            "pdf_dataset_status": _step6_pdf_dataset_status(),
         }
+    if isinstance(payload, dict) and "pdf_dataset_status" not in payload:
+        payload["pdf_dataset_status"] = _step6_pdf_dataset_status()
     return payload
 
 
@@ -1715,6 +1743,7 @@ def answer_property_compliance_question(
             "missing_requirements": resolution.get("missing_requirements") or [],
             "required_actions": resolution.get("required_actions") or [],
             "deadlines": resolution.get("deadlines") or [],
+            "pdf_dataset_status": resolution.get("pdf_dataset_status") or _step6_pdf_dataset_status(),
         },
         "resolution": resolution,
     }

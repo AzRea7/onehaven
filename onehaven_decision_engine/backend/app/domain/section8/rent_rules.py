@@ -428,3 +428,38 @@ def normalize_federal_rule_updates(rows: list[dict[str, object]] | None, *, sour
             )
         )
     return out
+
+
+from pathlib import Path
+import os
+
+
+def _candidate_pdf_roots() -> list[Path]:
+    roots: list[Path] = []
+    for raw in [os.getenv("NSPIRE_PDF_ROOT", ""), os.getenv("POLICY_PDFS_ROOT", ""), os.getenv("POLICY_PDF_ROOTS", ""), "backend/data/pdfs", "/app/backend/data/pdfs", r"/mnt/data/step8_pdf_zip/pdfs"]:
+        if not raw:
+            continue
+        for part in str(raw).split(os.pathsep):
+            part = part.strip()
+            if not part:
+                continue
+            p = Path(part)
+            if p.exists() and p.is_dir() and p not in roots:
+                roots.append(p)
+    return roots
+
+
+def summarize_nspire_pdf_dataset() -> dict[str, object]:
+    roots = _candidate_pdf_roots()
+    files: list[str] = []
+    for root in roots:
+        for p in root.rglob("*.pdf"):
+            files.append(p.name)
+    unique = sorted(set(files))
+    return {
+        "available": bool(unique),
+        "pdf_count": len(unique),
+        "roots": [str(r) for r in roots],
+        "sample_files": unique[:12],
+        "contains_nspire_standards": any("NSPIRE-Standard-" in name for name in unique),
+    }

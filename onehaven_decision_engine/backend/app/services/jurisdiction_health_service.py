@@ -169,6 +169,7 @@ def get_jurisdiction_health(
         'repo_artifact_support_state': artifact_evidence.get('artifact_support_state'),
         'repo_policy_raw_count': int(artifact_evidence.get('repo_policy_raw_count') or 0),
         'repo_pdf_count': int(artifact_evidence.get('repo_pdf_count') or 0),
+        'repo_pdf_names': list(artifact_evidence.get('repo_pdf_names') or []),
         'review_required': bool(override_summary.get('review_required')) or bool(override_summary.get('carrying_critical_override')) or not bool(completeness.get('safe_for_user_reliance')) or bool(sla_summary.get('review_required_categories')) or int(sla_summary.get('rejected_source_count') or 0) > 0,
         'refresh_state': getattr(profile, 'refresh_state', None),
         'last_validation_at': (sla_summary.get('latest_validated_at') if isinstance(sla_summary, dict) else None),
@@ -338,4 +339,5 @@ def _repo_artifact_evidence(health: dict[str, Any], sla_summary: dict[str, Any])
         'repo_pdf_latest_mtime': pdfs.get('latest_mtime'),
         'repo_policy_raw_examples': list(policy_raw.get('examples') or []),
         'repo_pdf_examples': list(pdfs.get('examples') or []),
+        'repo_pdf_names': list(pdfs.get('names') or []),
     }

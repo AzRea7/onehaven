@@ -838,8 +838,39 @@ def _step7_pdf_roots() -> list[str]:
     return roots
 
 
+
+
+def _step7_match_pdf_for_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    names = []
+    for raw in [
+        item.get("source_pdf_name"),
+        item.get("nspire_standard_code"),
+        item.get("nspire_standard_label"),
+        item.get("standard_label"),
+        item.get("code"),
+        item.get("inspection_rule_code"),
+    ]:
+        value = str(raw or "").strip()
+        if value:
+            names.append(value.lower().replace(" ", "-").replace("_", "-"))
+            names.append(value.lower().replace(" ", "_").replace("-", "_"))
+            names.append(value.lower())
+    seen = set()
+    roots = _step7_pdf_roots()
+    for root in roots:
+        rp = _Step7Path(root)
+        if not rp.exists():
+            continue
+        for path in rp.rglob("*.pdf"):
+            lower = path.name.lower()
+            if any(name and name not in seen and name in lower for name in names):
+                return {"name": path.name, "path": str(path)}
+            seen.add(lower)
+    return None
+
 def _step7_pdf_context_for_item(item: dict[str, Any]) -> dict[str, Any]:
     source = item.get("source") or {}
+    match = _step7_match_pdf_for_item(item)
     context = {
         "pdf_roots": _step7_pdf_roots(),
         "has_pdf_roots": bool(_step7_pdf_roots()),
@@ -848,6 +879,8 @@ def _step7_pdf_context_for_item(item: dict[str, Any]) -> dict[str, Any]:
         "nspire_standard_code": item.get("nspire_standard_code") or item.get("standard_code"),
         "nspire_standard_key": item.get("nspire_standard_key"),
         "source_type": source.get("type") if isinstance(source, dict) else None,
+        "matched_pdf_name": match.get("name") if isinstance(match, dict) else item.get("source_pdf_name"),
+        "matched_pdf_path": match.get("path") if isinstance(match, dict) else item.get("source_pdf_path"),
     }
     return context
 
@@ -874,6 +907,9 @@ def _step7_enrich_template_item_dict(item: dict[str, Any], effective_by_code: di
         "affirmative_habitability_requirement": bool(raw.get("affirmative_habitability_requirement", False)),
         "standard_label": raw.get("standard_label") or item.get("description"),
         "standard_citation": raw.get("standard_citation") or item.get("standard_citation"),
+        "source_pdf_name": raw.get("source_pdf_name") or item.get("source_pdf_name"),
+        "source_pdf_path": raw.get("source_pdf_path") or item.get("source_pdf_path"),
+        "source_citation": raw.get("source_citation") or item.get("source_citation") or raw.get("standard_citation"),
         "pdf_context": _step7_pdf_context_for_item(raw or item),
     })
     return enriched

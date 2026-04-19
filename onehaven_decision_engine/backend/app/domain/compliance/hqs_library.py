@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from typing import Any
+import os
+from pathlib import Path
+import zipfile
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +19,91 @@ from .checklist_templates import (
 )
 from .inspection_rules import criteria_as_dicts, normalize_rule_code, normalize_severity
 
+
+
+
+def _normalize_pdf_key(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    raw = raw.replace("nspire-standard-", "")
+    for ch in ["/", ",", ".", "(", ")", "'", '"', ":", ";"]:
+        raw = raw.replace(ch, "")
+    raw = raw.replace("&", "and")
+    raw = raw.replace("-", "_")
+    raw = "_".join(part for part in raw.split("_") if part)
+    return raw
+
+
+def _pdf_roots() -> list[Path]:
+    candidates = [
+        Path("backend/data/pdfs"),
+        Path("/app/backend/data/pdfs"),
+        Path("/mnt/data/step3_zip/pdfs"),
+        Path("/mnt/data/pdfs"),
+    ]
+    env = os.getenv("NSPIRE_PDF_ROOT") or os.getenv("POLICY_PDFS_ROOT") or os.getenv("POLICY_PDF_ROOT")
+    if env:
+        for part in str(env).split(os.pathsep):
+            if part.strip():
+                candidates.append(Path(part.strip()))
+    roots = []
+    seen = set()
+    for c in candidates:
+        try:
+            p = c.expanduser().resolve()
+        except Exception:
+            continue
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        if p.exists() and p.is_dir():
+            roots.append(p)
+    return roots
+
+
+def _pdf_zip_paths() -> list[Path]:
+    return [Path('/mnt/data/pdfs(1).zip')]
+
+
+def _build_pdf_catalog() -> dict[str, dict[str, str]]:
+    catalog: dict[str, dict[str, str]] = {}
+    for root in _pdf_roots():
+        for pdf in root.rglob('*.pdf'):
+            key = _normalize_pdf_key(pdf.stem)
+            if key and key not in catalog:
+                catalog[key] = {"pdf_name": pdf.name, "pdf_path": str(pdf), "pdf_source": "filesystem"}
+    for zpath in _pdf_zip_paths():
+        if not zpath.exists():
+            continue
+        try:
+            with zipfile.ZipFile(zpath) as zf:
+                for name in zf.namelist():
+                    if not name.lower().endswith('.pdf'):
+                        continue
+                    stem = Path(name).stem
+                    key = _normalize_pdf_key(stem)
+                    if key and key not in catalog:
+                        catalog[key] = {"pdf_name": Path(name).name, "pdf_path": f"{zpath}:{name}", "pdf_source": "zip"}
+        except Exception:
+            continue
+    return catalog
+
+
+def _match_pdf_catalog(*values: Any) -> dict[str, str] | None:
+    catalog = _build_pdf_catalog()
+    probes = []
+    for value in values:
+        key = _normalize_pdf_key(value)
+        if key:
+            probes.append(key)
+    for key in probes:
+        if key in catalog:
+            return catalog[key]
+    for key in probes:
+        for cat_key, payload in catalog.items():
+            if key and (key in cat_key or cat_key in key):
+                return payload
+    return None
 
 def _safe_import_nspire_service():
     try:
@@ -119,6 +207,9 @@ def _enrich_item_with_nspire(item: dict[str, Any], nspire_index: dict[str, dict[
             "source_name": item.get("source_name") or _source_name_from_item(item),
             "source_type": item.get("source_type") or _source_type_from_item(item),
             "nspire_matched": False,
+            "source_pdf_name": item.get("source_pdf_name"),
+            "source_pdf_path": item.get("source_pdf_path"),
+            "source_citation": item.get("source_citation") or item.get("standard_citation"),
         }
 
     designation = str(match.get("severity_code") or "").strip().upper() or None
@@ -128,6 +219,7 @@ def _enrich_item_with_nspire(item: dict[str, Any], nspire_index: dict[str, dict[
     except Exception:
         correction_days = None
 
+    pdf_match = _match_pdf_catalog(match.get("standard_label"), match.get("standard_code"), item.get("nspire_standard_label"), item.get("standard_label"), item.get("description"))
     enriched = {
         **item,
         "inspection_rule_code": code or item.get("inspection_rule_code") or item.get("code"),
@@ -150,6 +242,9 @@ def _enrich_item_with_nspire(item: dict[str, Any], nspire_index: dict[str, dict[
         "source_name": item.get("source_name") or match.get("source_name") or _source_name_from_item(item),
         "source_type": item.get("source_type") or "nspire_catalog",
         "nspire_matched": True,
+        "source_pdf_name": item.get("source_pdf_name") or (pdf_match or {}).get("pdf_name"),
+        "source_pdf_path": item.get("source_pdf_path") or (pdf_match or {}).get("pdf_path"),
+        "source_citation": item.get("source_citation") or item.get("standard_citation") or match.get("citation"),
     }
     return enriched
 
@@ -199,6 +294,9 @@ def _normalize_item(item: dict[str, Any], *, nspire_index: dict[str, dict[str, A
         "affirmative_habitability_requirement": bool(item.get("affirmative_habitability_requirement", False)),
         "source_name": item.get("source_name") or _source_name_from_item(item),
         "source_type": item.get("source_type") or _source_type_from_item(item),
+        "source_pdf_name": item.get("source_pdf_name"),
+        "source_pdf_path": item.get("source_pdf_path"),
+        "source_citation": item.get("source_citation") or standard_citation,
     }
     return _enrich_item_with_nspire(row, nspire_index or {})
 
@@ -514,6 +612,7 @@ def get_effective_hqs_items(
             str(row.get("code") or ""),
         ),
     )
+    matched_pdf_names = sorted({str(item.get("source_pdf_name") or "").strip() for item in ordered_items if str(item.get("source_pdf_name") or "").strip()})
     return {
         "items": ordered_items,
         "sources": sources,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -155,6 +156,53 @@ def _category_matrix_from_completeness(db: Session, completeness: dict[str, Any]
     return out
 
 
+
+
+def _pdf_catalog_roots() -> list[Path]:
+    roots = [
+        Path.cwd() / "backend" / "data" / "pdfs",
+        Path.cwd() / "pdfs",
+        Path("/app/backend/data/pdfs"),
+        Path("/mnt/data/pdfs"),
+        Path("/mnt/data/step3_zip/pdfs"),
+        Path("/mnt/data/step4_pdf_catalog/pdfs"),
+        Path("/mnt/data/step67_pdf_zip/pdfs"),
+        Path("/mnt/data/step8_pdf_zip/pdfs"),
+    ]
+    seen: set[str] = set()
+    out: list[Path] = []
+    for root in roots:
+        try:
+            if root.exists():
+                key = str(root.resolve())
+                if key not in seen:
+                    seen.add(key)
+                    out.append(root)
+        except Exception:
+            continue
+    return out
+
+
+def _pdf_catalog_payload(limit: int = 12) -> dict[str, Any]:
+    files: dict[str, Path] = {}
+    for root in _pdf_catalog_roots():
+        try:
+            for path in root.rglob("*.pdf"):
+                files[str(path.resolve())] = path
+        except Exception:
+            continue
+    rows = sorted(files.values(), key=lambda p: p.name.lower())
+    names = [p.name for p in rows]
+    nspire = [name for name in names if "nspire" in name.lower()]
+    return {
+        "available": bool(rows),
+        "support_state": "pdf_catalog_backed" if rows else "no_pdf_catalog_found",
+        "count": len(rows),
+        "nspire_count": len(nspire),
+        "sample_names": names[:limit],
+        "roots": [str(r) for r in _pdf_catalog_roots()],
+    }
+
 def _serialize_row(row: PolicyCatalogEntry) -> dict:
     return {
         "id": row.id,
@@ -245,6 +293,7 @@ def get_market_catalog(
         "covered_categories": list(completeness.get("covered_categories") or []),
         "stale_categories": list(completeness.get("stale_categories") or []),
         "conflicting_categories": list(completeness.get("conflicting_categories") or []),
+        "pdf_catalog": _pdf_catalog_payload(),
     }
 
 
@@ -461,6 +510,7 @@ def get_market_catalog_summary(
         "covered_categories": list(completeness.get("covered_categories") or []),
         "stale_categories": list(completeness.get("stale_categories") or []),
         "conflicting_categories": list(completeness.get("conflicting_categories") or []),
+        "pdf_catalog": _pdf_catalog_payload(),
     }
 
 

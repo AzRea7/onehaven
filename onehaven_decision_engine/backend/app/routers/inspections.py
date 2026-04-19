@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -126,6 +128,20 @@ def _must_get_property_for_inspection(
 ) -> Property:
     return must_get_property(db, org_id=org_id, property_id=property_id)
 
+
+
+
+def _step7_pdf_dataset_status() -> dict[str, Any]:
+    roots: list[str] = []
+    raw = os.getenv("POLICY_PDFS_ROOT", "") or os.getenv("POLICY_PDF_ROOTS", "") or os.getenv("POLICY_PDF_ROOT", "") or os.getenv("NSPIRE_PDF_ROOT", "")
+    for piece in str(raw).split(os.pathsep):
+        piece = str(piece).strip()
+        if piece and Path(piece).exists():
+            roots.append(str(Path(piece)))
+    for fallback in (Path("backend/data/pdfs").resolve(), Path("/app/backend/data/pdfs"), Path("/mnt/data/pdfs"), Path("/mnt/data/PDFs"), Path("/mnt/data/pfs"), Path(r"/mnt/data/step67_pdf_zip/pdfs")):
+        if fallback.exists() and str(fallback) not in roots:
+            roots.append(str(fallback))
+    return {"available": bool(roots), "roots": roots}
 
 def _require_inspection_preview_stage(
     db: Session,
@@ -1061,7 +1077,10 @@ def inspection_template_preview(
     _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
     _require_inspection_preview_stage(db, org_id=p.org_id, property_id=property_id, action="preview inspection template")
     from ..services.inspection_template_service import build_inspection_template
-    return build_inspection_template(db, org_id=p.org_id, property_id=property_id)
+    payload = build_inspection_template(db, org_id=p.org_id, property_id=property_id)
+    if isinstance(payload, dict):
+        payload.setdefault("pdf_dataset_status", _step7_pdf_dataset_status())
+    return payload
 
 
 @router.get("/property/{property_id}/task-preview", response_model=dict)
@@ -1074,7 +1093,10 @@ def inspection_task_preview(
     _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
     _require_inspection_preview_stage(db, org_id=p.org_id, property_id=property_id, action="preview inspection tasks")
     from ..services.inspection_failure_task_service import collect_failure_task_blueprints
-    return collect_failure_task_blueprints(db, org_id=p.org_id, property_id=property_id, inspection_id=inspection_id)
+    payload = collect_failure_task_blueprints(db, org_id=p.org_id, property_id=property_id, inspection_id=inspection_id)
+    if isinstance(payload, dict):
+        payload.setdefault("pdf_dataset_status", _step7_pdf_dataset_status())
+    return payload
 
 
 @router.get("/property/{property_id}/operational-readiness", response_model=dict)
@@ -1085,4 +1107,7 @@ def inspection_operational_readiness(
 ):
     _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
     _require_inspection_preview_stage(db, org_id=p.org_id, property_id=property_id, action="view operational readiness")
-    return build_property_readiness_summary(db, org_id=p.org_id, property_id=property_id)
+    payload = build_property_readiness_summary(db, org_id=p.org_id, property_id=property_id)
+    if isinstance(payload, dict):
+        payload.setdefault("pdf_dataset_status", _step7_pdf_dataset_status())
+    return payload
