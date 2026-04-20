@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -24,6 +23,35 @@ def _norm_text(v: Optional[str]) -> Optional[str]:
         return None
     out = str(v).strip()
     return out or None
+
+
+def _dataset_category_hints(item: Any) -> list[str]:
+    text = " ".join(
+        [
+            str(getattr(item, "title", "") or ""),
+            str(getattr(item, "notes", "") or ""),
+            str(getattr(item, "url", "") or ""),
+            str(getattr(item, "source_kind", "") or ""),
+        ]
+    ).lower()
+    out: list[str] = []
+    checks = {
+        "lead": ["lead", "lbp"],
+        "source_of_income": ["source of income", "voucher discrimination"],
+        "permits": ["permit"],
+        "documents": ["document", "application", "packet", "submit"],
+        "contacts": ["contact", "office", "department", "division"],
+        "rental_license": ["license", "registration certificate", "rental certificate"],
+        "fees": ["fee", "payment"],
+        "program_overlay": ["voucher", "hcv", "nspire", "overlay", "hap"],
+        "inspection": ["inspection"],
+        "occupancy": ["occupancy", "certificate of occupancy", "re-occupancy"],
+        "registration": ["registration"],
+    }
+    for category, patterns in checks.items():
+        if any(p in text for p in patterns):
+            out.append(category)
+    return sorted(set(out))
 
 
 def dataset_family_for_item(item: Any) -> str:
@@ -89,6 +117,7 @@ def policy_catalog_dataset_for_market(
                 "priority": int(getattr(item, "priority", 100) or 100),
                 "dataset_family": dataset_family_for_item(item),
                 "dataset_priority": dataset_priority_for_item(item),
+                "category_hints": _dataset_category_hints(item),
             }
         )
     rows.sort(key=lambda r: (int(r["dataset_priority"]), 0 if r["is_authoritative"] else 1, r["title"] or "", r["url"] or ""))
@@ -116,9 +145,12 @@ def dataset_snapshot_for_market(
         focus=focus,
     )
     counts: dict[str, int] = {}
+    hinted: dict[str, int] = {}
     for row in rows:
         family = str(row.get("dataset_family") or "unknown")
         counts[family] = counts.get(family, 0) + 1
+        for category in list(row.get("category_hints") or []):
+            hinted[category] = hinted.get(category, 0) + 1
     return {
         "ok": True,
         "market": {
@@ -131,6 +163,7 @@ def dataset_snapshot_for_market(
         "summary": {
             "dataset_count": len(rows),
             "dataset_family_counts": counts,
+            "category_hint_counts": hinted,
             "service_role": "dataset_registry_for_curated_and_imported_evidence",
             "truth_model": "dataset_first",
         },

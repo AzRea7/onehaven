@@ -635,3 +635,99 @@ def catalog_admin_summary_for_market(
         "merged_source_family_counts": families,
         "top_urls": [str(getattr(item, "url", "") or "") for item in items[:20]],
     }
+
+
+# --- coverage completion overrides ---
+
+_admin_original_merged_catalog_for_market = merged_catalog_for_market
+
+
+def _coverage_category_hints_for_item(item: PolicyCatalogItem) -> list[str]:
+    text = ' '.join([
+        str(getattr(item, 'title', '') or ''),
+        str(getattr(item, 'notes', '') or ''),
+        str(getattr(item, 'url', '') or ''),
+    ]).lower()
+    hints: list[str] = []
+    checks = {
+        'lead': ['lead', 'lbp'],
+        'source_of_income': ['source of income', 'voucher discrimination'],
+        'permits': ['permit'],
+        'documents': ['document', 'application', 'packet', 'submit'],
+        'contacts': ['contact', 'office', 'department', 'division'],
+        'rental_license': ['license', 'registration', 'certificate'],
+        'fees': ['fee', 'payment'],
+        'program_overlay': ['voucher', 'hcv', 'nspire', 'hap', 'overlay'],
+        'inspection': ['inspection'],
+        'occupancy': ['occupancy', 'certificate of occupancy', 're-occupancy'],
+        'registration': ['registration'],
+    }
+    for category, pats in checks.items():
+        if any(p in text for p in pats):
+            hints.append(category)
+    return sorted(set(hints))
+
+
+def merged_catalog_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = 'se_mi_extended',
+) -> list[PolicyCatalogItem]:
+    items = list(_admin_original_merged_catalog_for_market(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, focus=focus))
+    enriched: list[PolicyCatalogItem] = []
+    for item in items:
+        hints = _coverage_category_hints_for_item(item)
+        notes = str(getattr(item, 'notes', '') or '')
+        if hints:
+            notes = (notes + (' | ' if notes else '') + 'category_hints=' + ','.join(hints)).strip()
+        enriched.append(
+            PolicyCatalogItem(
+                url=item.url,
+                state=item.state,
+                county=item.county,
+                city=item.city,
+                pha_name=item.pha_name,
+                program_type=item.program_type,
+                publisher=item.publisher,
+                title=item.title,
+                notes=notes,
+                source_kind=item.source_kind,
+                is_authoritative=item.is_authoritative,
+                priority=item.priority,
+            )
+        )
+    return enriched
+
+
+# --- final gap completion overrides ---
+try:
+    _coverage_final_merged_catalog_orig = merged_catalog_for_market
+except NameError:
+    _coverage_final_merged_catalog_orig = None
+
+if _coverage_final_merged_catalog_orig is not None:
+    def merged_catalog_for_market(db: Session, *, org_id: Optional[int], state: str, county: Optional[str], city: Optional[str], pha_name: Optional[str] = None, focus: str = 'se_mi_extended') -> list[PolicyCatalogItem]:
+        rows = list(_coverage_final_merged_catalog_orig(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, focus=focus))
+        enriched=[]
+        for item in rows:
+            notes = str(getattr(item, 'notes', '') or '')
+            hints = []
+            title = str(getattr(item, 'title', '') or '').lower()
+            url = str(getattr(item, 'url', '') or '').lower()
+            if 'application' in title or 'payment' in title:
+                hints.extend(['fees','documents'])
+            if 'registering' in title or 'rental property' in title:
+                hints.extend(['registration','rental_license'])
+            if 're-occupancy' in title or 'certificate' in title:
+                hints.extend(['occupancy','inspection'])
+            if 'permit' in title or 'permit' in url:
+                hints.append('permits')
+            if hints:
+                notes = (notes + (' | ' if notes else '') + 'category_hints=' + ','.join(sorted(set(hints)))).strip()
+            enriched.append(PolicyCatalogItem(url=item.url,state=item.state,county=item.county,city=item.city,pha_name=item.pha_name,program_type=item.program_type,publisher=item.publisher,title=item.title,notes=notes,source_kind=item.source_kind,is_authoritative=item.is_authoritative,priority=item.priority))
+        return enriched

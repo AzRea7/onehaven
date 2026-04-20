@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16
@@ -40,13 +38,21 @@ services:
       # External APIs
       HUD_USER_TOKEN: ${HUD_USER_TOKEN}
       RENTCAST_API_KEY: ${RENTCAST_API_KEY}
+      GOVINFO_API_KEY: ${GOVINFO_API_KEY}
+      GOVINFO_BASE_URL: ${GOVINFO_BASE_URL:-https://api.govinfo.gov}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
 
-      # ✅ Auth mode + dev provisioning (THIS FIXES your current 401/dev provision issue)
+      # PDF dataset roots
+      POLICY_PDFS_ROOT: /app/data/pdfs
+      POLICY_PDF_ROOT: /app/data/pdfs
+      NSPIRE_PDF_ROOT: /app/data/pdfs
+
+      # Auth / dev provisioning
       AUTH_MODE: ${AUTH_MODE:-dev}
       DEV_AUTO_PROVISION: ${DEV_AUTO_PROVISION:-1}
       DEV_AUTO_VERIFY_EMAIL: ${DEV_AUTO_VERIFY_EMAIL:-1}
 
-      # ✅ API key system (safe defaults; enable only if you want)
+      # API keys
       ENABLE_API_KEYS: ${ENABLE_API_KEYS:-0}
       API_KEY_PEPPER: ${API_KEY_PEPPER:-dev-pepper-change-me}
       API_KEY_PREFIX_LEN: ${API_KEY_PREFIX_LEN:-10}
@@ -63,15 +69,37 @@ services:
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
       CELERY_QUEUE: ${CELERY_QUEUE:-celery}
+
+      # Jurisdiction / policy automation
       JURISDICTION_CRITICAL_STALE_LOCKOUT_ENABLED: ${JURISDICTION_CRITICAL_STALE_LOCKOUT_ENABLED:-1}
       JURISDICTION_NOTIFICATION_ENABLED: ${JURISDICTION_NOTIFICATION_ENABLED:-1}
       JURISDICTION_AUTOMATION_ENABLED: ${JURISDICTION_AUTOMATION_ENABLED:-0}
+      JURISDICTION_DISCOVERY_RETRY_SCHEDULE_MINUTES: ${JURISDICTION_DISCOVERY_RETRY_SCHEDULE_MINUTES:-1440}
+      JURISDICTION_HEALTH_SCHEDULE_MINUTES: ${JURISDICTION_HEALTH_SCHEDULE_MINUTES:-360}
+      JURISDICTION_RECOMPUTE_SCHEDULE_MINUTES: ${JURISDICTION_RECOMPUTE_SCHEDULE_MINUTES:-720}
+      JURISDICTION_REFRESH_SCHEDULE_MINUTES: ${JURISDICTION_REFRESH_SCHEDULE_MINUTES:-720}
+      JURISDICTION_VALIDATION_RETRY_SCHEDULE_MINUTES: ${JURISDICTION_VALIDATION_RETRY_SCHEDULE_MINUTES:-360}
+
+      JURISDICTION_SLA_AUTHORITATIVE_HOURS: ${JURISDICTION_SLA_AUTHORITATIVE_HOURS:-504}
+      JURISDICTION_SLA_CRITICAL_AUTHORITATIVE_HOURS: ${JURISDICTION_SLA_CRITICAL_AUTHORITATIVE_HOURS:-336}
+      JURISDICTION_SLA_DEFAULT_HOURS: ${JURISDICTION_SLA_DEFAULT_HOURS:-720}
+      JURISDICTION_SLA_DISCOVERY_RETRY_HOURS: ${JURISDICTION_SLA_DISCOVERY_RETRY_HOURS:-24}
+      JURISDICTION_SLA_PROGRAM_OVERLAY_HOURS: ${JURISDICTION_SLA_PROGRAM_OVERLAY_HOURS:-336}
+      JURISDICTION_SLA_VALIDATION_RETRY_HOURS: ${JURISDICTION_SLA_VALIDATION_RETRY_HOURS:-12}
+
+      # Market sync
+      MARKET_CATALOG_BACKEND: ${MARKET_CATALOG_BACKEND:-static}
+      MARKET_SYNC_DAILY_MARKET_LIMIT: ${MARKET_SYNC_DAILY_MARKET_LIMIT:-6}
+      MARKET_SYNC_DAILY_TIER_FILTER: ${MARKET_SYNC_DAILY_TIER_FILTER:-all}
+      MARKET_SYNC_DEFAULT_LIMIT_PER_MARKET: ${MARKET_SYNC_DEFAULT_LIMIT_PER_MARKET:-250}
+      MARKET_SYNC_ENABLE_STATEWIDE_EXPANSION: ${MARKET_SYNC_ENABLE_STATEWIDE_EXPANSION:-0}
 
       # Agents
       AGENTS_MAX_RUNS_PER_PROPERTY_PER_HOUR: ${AGENTS_MAX_RUNS_PER_PROPERTY_PER_HOUR:-3}
       AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
       AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
       TRACE_MIRROR_TO_MESSAGES: ${TRACE_MIRROR_TO_MESSAGES:-0}
+
     command: bash -lc "alembic -c /app/app/alembic.ini upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     depends_on:
       postgres:
@@ -94,7 +122,12 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       APP_ENV: ${APP_ENV:-dev}
 
-      # ✅ keep auth mode consistent (workers sometimes call app code paths)
+      # PDF dataset roots
+      POLICY_PDFS_ROOT: /app/data/pdfs
+      POLICY_PDF_ROOT: /app/data/pdfs
+      NSPIRE_PDF_ROOT: /app/data/pdfs
+
+      # Auth consistency
       AUTH_MODE: ${AUTH_MODE:-dev}
       DEV_AUTO_PROVISION: ${DEV_AUTO_PROVISION:-1}
       DEV_AUTO_VERIFY_EMAIL: ${DEV_AUTO_VERIFY_EMAIL:-1}
@@ -107,6 +140,7 @@ services:
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
       CELERY_QUEUE: ${CELERY_QUEUE:-celery}
+
       JURISDICTION_CRITICAL_STALE_LOCKOUT_ENABLED: ${JURISDICTION_CRITICAL_STALE_LOCKOUT_ENABLED:-1}
       JURISDICTION_NOTIFICATION_ENABLED: ${JURISDICTION_NOTIFICATION_ENABLED:-1}
       JURISDICTION_AUTOMATION_ENABLED: ${JURISDICTION_AUTOMATION_ENABLED:-0}
@@ -114,6 +148,7 @@ services:
       AGENTS_MAX_RETRIES: ${AGENTS_MAX_RETRIES:-3}
       AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
       TRACE_MIRROR_TO_MESSAGES: ${TRACE_MIRROR_TO_MESSAGES:-0}
+
     command: bash -lc "celery -A app.workers.celery_app:celery_app worker -l INFO -Q ${CELERY_QUEUE:-celery}"
     depends_on:
       postgres:
@@ -121,35 +156,6 @@ services:
       redis:
         condition: service_started
     restart: unless-stopped
-
-  # celery-beat:  # keep disabled in manual jurisdiction operating mode
-  #   build: ./backend
-  #   working_dir: /app
-  #   user: "1000:1000"
-  #   env_file:
-  #     - .env
-  #   volumes:
-  #     - ./backend:/app
-  #   environment:
-  #     DATABASE_URL: ${DATABASE_URL}
-  #     APP_ENV: ${APP_ENV:-dev}
-
-  #     AUTH_MODE: ${AUTH_MODE:-dev}
-  #     DEV_AUTO_PROVISION: ${DEV_AUTO_PROVISION:-1}
-  #     DEV_AUTO_VERIFY_EMAIL: ${DEV_AUTO_VERIFY_EMAIL:-1}
-
-  #     CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-  #     CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
-  #     CELERY_QUEUE: ${CELERY_QUEUE:-celery}
-
-  #     AGENTS_RUN_TIMEOUT_SECONDS: ${AGENTS_RUN_TIMEOUT_SECONDS:-120}
-  #   command: bash -lc "celery -A app.workers.celery_app:celery_app beat -l INFO"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_started
-  #   restart: unless-stopped
 
   frontend:
     build:

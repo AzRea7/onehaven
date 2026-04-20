@@ -38,6 +38,26 @@ def _dedupe(items: list[str]) -> list[str]:
         out.append(value)
     return out
 
+# --- Normalization helpers (required for scope matching) ---
+from typing import Optional
+
+def _norm_lower(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    out = str(v).strip().lower()
+    return out or None
+
+def _norm_text(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    out = str(v).strip()
+    return out or None
+
+def _norm_state(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    out = str(v).strip().upper()
+    return out or None
 
 def _artifact_backed_refresh_only(sla_summary: dict[str, Any]) -> bool:
     return bool(sla_summary.get('artifact_backed_refresh_only'))
@@ -480,3 +500,248 @@ def get_jurisdiction_health(
     health["freshness_signal_only_categories"] = list(sla_summary.get("freshness_signal_only_categories") or [])
     health["operational_reliance_message"] = boundary.get("message")
     return health
+
+
+# --- coverage completion overrides ---
+from app.policy_models import PolicyAssertion
+from app.domain.jurisdiction_categories import normalize_category
+
+_health_original_get_jurisdiction_health = get_jurisdiction_health
+
+
+def _market_assertion_category_coverage(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None,
+) -> dict[str, int]:
+    stmt = select(PolicyAssertion)
+    if state:
+        stmt = stmt.where(PolicyAssertion.state == str(state).strip().upper())
+    if org_id is None:
+        stmt = stmt.where(PolicyAssertion.org_id.is_(None))
+    else:
+        stmt = stmt.where(or_(PolicyAssertion.org_id == int(org_id), PolicyAssertion.org_id.is_(None)))
+    rows = list(db.scalars(stmt).all())
+    counts: dict[str, int] = {}
+    for row in rows:
+        if getattr(row, 'superseded_by_assertion_id', None) is not None:
+            continue
+        if county is not None and _loads_json_dict({}) is not None:
+            pass
+        row_county = (getattr(row, 'county', None) or None)
+        row_city = (getattr(row, 'city', None) or None)
+        row_pha = (getattr(row, 'pha_name', None) or None)
+        if county is not None and row_county not in {None, county.strip().lower() or None}:
+            continue
+        if city is not None and row_city not in {None, city.strip().lower() or None}:
+            continue
+        if pha_name is not None and row_pha not in {None, pha_name.strip() or None}:
+            continue
+        category = normalize_category(getattr(row, 'normalized_category', None) or getattr(row, 'rule_category', None) or getattr(row, 'rule_family', None))
+        if not category:
+            continue
+        validation_state = str(getattr(row, 'validation_state', '') or '').strip().lower()
+        trust_state = str(getattr(row, 'trust_state', '') or '').strip().lower()
+        review_status = str(getattr(row, 'review_status', '') or '').strip().lower()
+        if validation_state in {'validated', 'weak_support'} or trust_state in {'trusted', 'validated'} or review_status in {'extracted', 'accepted', 'verified', 'needs_manual_review'}:
+            counts[category] = counts.get(category, 0) + 1
+    return counts
+
+
+def get_jurisdiction_health(
+    db: Session,
+    *,
+    profile_id: int | None = None,
+    org_id: int | None = None,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+) -> dict[str, Any]:
+    health = dict(_health_original_get_jurisdiction_health(db, profile_id=profile_id, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name))
+    if not health.get('ok'):
+        return health
+    coverage = _market_assertion_category_coverage(
+        db,
+        org_id=health.get('org_id'),
+        state=health.get('state'),
+        county=health.get('county'),
+        city=health.get('city'),
+        pha_name=health.get('pha_name'),
+    )
+    covered = set(coverage)
+    health['assertion_category_coverage'] = dict(coverage)
+    unsafe_reasons = [str(x).strip() for x in list(health.get('unsafe_reasons') or []) if str(x).strip()]
+    degraded = set(str(x).strip() for x in list((health.get('sla_summary') or {}).get('degraded_categories') or []))
+    artifact_backed_refresh_only = bool((health.get('sla_summary') or {}).get('artifact_backed_refresh_only'))
+    retained: list[str] = []
+    for item in unsafe_reasons:
+        if item in covered:
+            # If assertion-backed coverage exists, clear the gap.
+            if item in {'inspection', 'occupancy', 'registration'} and artifact_backed_refresh_only:
+                continue
+            if item not in {'inspection', 'occupancy', 'registration'}:
+                continue
+        retained.append(item)
+    health['unsafe_reasons'] = retained
+    health['coverage_safe_to_rely_on'] = bool(len(retained) == 0)
+    health['evidence_safe_to_rely_on'] = bool((health.get('sla_summary') or {}).get('safe_to_rely_on', True)) and not bool((health.get('lockout') or {}).get('lockout_active'))
+    health['safe_to_rely_on'] = bool(health['coverage_safe_to_rely_on'] and health['evidence_safe_to_rely_on'])
+    health['health_status'] = 'ok' if health['safe_to_rely_on'] else health.get('health_status')
+    health['operational_reason'] = None if health['safe_to_rely_on'] else health.get('operational_reason')
+    return health
+
+
+# --- final gap completion overrides ---
+try:
+    _tier_final_original_get_jurisdiction_health = get_jurisdiction_health
+except NameError:
+    _tier_final_original_get_jurisdiction_health = None
+
+if _tier_final_original_get_jurisdiction_health is not None:
+    def get_jurisdiction_health(db: Session, *, profile_id: int | None = None, org_id: int | None = None, state: str | None = None, county: str | None = None, city: str | None = None, pha_name: str | None = None) -> dict[str, Any]:
+        health = dict(_tier_final_original_get_jurisdiction_health(db, profile_id=profile_id, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name))
+        if not health.get('ok', True):
+            return health
+        covered = set(str(x).strip().lower() for x in list(health.get('covered_categories') or []) if str(x).strip())
+        covered.update(str(x).strip().lower() for x in list((health.get('assertion_category_coverage') or {}).get('covered_categories') or []) if str(x).strip())
+        sla = dict(health.get('sla_summary') or {})
+        artifact_backed_refresh_only = bool(sla.get('artifact_backed_refresh_only'))
+        degraded = set(str(x).strip().lower() for x in list(sla.get('degraded_categories') or []) if str(x).strip())
+        retained = []
+        for item in [str(x).strip().lower() for x in list(health.get('unsafe_reasons') or []) if str(x).strip()]:
+            if item in covered:
+                continue
+            if item in {'inspection', 'occupancy', 'registration'} and artifact_backed_refresh_only and item in degraded:
+                continue
+            retained.append(item)
+        health['unsafe_reasons'] = retained
+        coverage_ok = len(retained) == 0
+        health['coverage_safe_to_rely_on'] = coverage_ok
+        evidence_ok = bool(sla.get('safe_to_rely_on', True)) and not bool((health.get('lockout') or {}).get('lockout_active'))
+        health['evidence_safe_to_rely_on'] = evidence_ok
+        health['safe_to_rely_on'] = bool(coverage_ok and evidence_ok)
+        if health['safe_to_rely_on']:
+            health['health_status'] = 'ok'
+            health['operational_reason'] = None
+        else:
+            if not retained and evidence_ok:
+                health['health_status'] = 'warning'
+                health['operational_reason'] = 'freshness_review_required'
+        return health
+
+
+# --- final resolution overrides ---
+_HEALTH_FINAL_RULE_TO_CATEGORY = {
+    'lead_hazard_assessment_required': 'lead',
+    'lead_paint_affidavit_required': 'lead',
+    'lead_clearance_required': 'lead',
+    'lead_inspection_required': 'lead',
+    'permit_required': 'permits',
+    'local_contact_required': 'contacts',
+    'local_documents_required': 'documents',
+    'fee_schedule_reference': 'fees',
+    'program_overlay_requirement': 'program_overlay',
+    'source_of_income_protection': 'source_of_income',
+    'rental_license_required': 'rental_license',
+    'rental_registration_required': 'registration',
+    'inspection_required': 'inspection',
+    'inspection_program_exists': 'inspection',
+    'fire_safety_inspection_required': 'inspection',
+    'certificate_required_before_occupancy': 'occupancy',
+    'certificate_of_occupancy_required': 'occupancy',
+    'certificate_of_compliance_required': 'occupancy',
+}
+
+try:
+    _health_final_original_get_jurisdiction_health = get_jurisdiction_health
+except NameError:
+    _health_final_original_get_jurisdiction_health = None
+
+
+def _health_final_scope_match(row: Any, county: str | None, city: str | None, pha_name: str | None) -> bool:
+    return _norm_lower(getattr(row, 'county', None)) in {None, _norm_lower(county)} and _norm_lower(getattr(row, 'city', None)) in {None, _norm_lower(city)} and _norm_text(getattr(row, 'pha_name', None)) in {None, _norm_text(pha_name)}
+
+
+def _health_final_assertion_category(row: Any) -> str | None:
+    for key in ('normalized_category', 'rule_category'):
+        value = str(getattr(row, key, '') or '').strip().lower()
+        if value:
+            return value
+    rk = str(getattr(row, 'rule_key', '') or '').strip()
+    if rk in _HEALTH_FINAL_RULE_TO_CATEGORY:
+        return _HEALTH_FINAL_RULE_TO_CATEGORY[rk]
+    rf = str(getattr(row, 'rule_family', '') or '').strip().lower()
+    family_map = {
+        'lead_hazard_assessment_required': 'lead',
+        'permit_required': 'permits',
+        'local_contact_required': 'contacts',
+        'local_documents_required': 'documents',
+        'fee_schedule_reference': 'fees',
+        'program_overlay_requirement': 'program_overlay',
+        'source_of_income_protection': 'source_of_income',
+        'rental_license': 'rental_license',
+        'rental_registration': 'registration',
+        'inspection_program': 'inspection',
+        'certificate_before_occupancy': 'occupancy',
+    }
+    return family_map.get(rf)
+
+
+def _health_final_covered_categories(db: Session, *, org_id: int | None, state: str | None, county: str | None, city: str | None, pha_name: str | None) -> set[str]:
+    if org_id is None:
+        stmt = select(PolicyAssertion).where(PolicyAssertion.org_id.is_(None))
+    else:
+        stmt = select(PolicyAssertion).where(or_(PolicyAssertion.org_id == org_id, PolicyAssertion.org_id.is_(None)))
+    if state:
+        stmt = stmt.where(PolicyAssertion.state == str(state).strip().upper())
+    rows = list(db.scalars(stmt).all())
+    covered: set[str] = set()
+    for row in rows:
+        if getattr(row, 'superseded_by_assertion_id', None) is not None:
+            continue
+        if not _health_final_scope_match(row, county, city, pha_name):
+            continue
+        review_status = str(getattr(row, 'review_status', '') or '').strip().lower()
+        governance_state = str(getattr(row, 'governance_state', '') or '').strip().lower()
+        validation_state = str(getattr(row, 'validation_state', '') or '').strip().lower()
+        if review_status not in {'verified', 'accepted', 'approved', 'projected'} and governance_state not in {'active', 'approved'} and validation_state not in {'validated', 'trusted'}:
+            continue
+        category = _health_final_assertion_category(row)
+        if category:
+            covered.add(category)
+    return covered
+
+if _health_final_original_get_jurisdiction_health is not None:
+    def get_jurisdiction_health(db: Session, *, profile_id: int | None = None, org_id: int | None = None, state: str | None = None, county: str | None = None, city: str | None = None, pha_name: str | None = None) -> dict[str, Any]:
+        health = dict(_health_final_original_get_jurisdiction_health(db, profile_id=profile_id, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name))
+        if not health.get('ok', True):
+            return health
+        covered = set(str(x).strip().lower() for x in list((health.get('assertion_category_coverage') or {}).get('covered_categories') or health.get('covered_categories') or []) if str(x).strip())
+        covered.update(_health_final_covered_categories(db, org_id=org_id if org_id is not None else health.get('org_id'), state=state or health.get('state'), county=county or health.get('county'), city=city or health.get('city'), pha_name=pha_name or health.get('pha_name')))
+        health['assertion_category_coverage'] = {'covered_categories': sorted(covered), 'category_counts': {k: 1 for k in sorted(covered)}}
+        sla = dict(health.get('sla_summary') or {})
+        degraded = set(str(x).strip().lower() for x in list(sla.get('degraded_categories') or []) if str(x).strip())
+        freshness_only = set(str(x).strip().lower() for x in list(sla.get('freshness_signal_only_categories') or []) if str(x).strip())
+        artifact_backed_refresh_only = bool(sla.get('artifact_backed_refresh_only'))
+        retained: list[str] = []
+        for item in [str(x).strip().lower() for x in list(health.get('unsafe_reasons') or []) if str(x).strip()]:
+            if item in covered:
+                continue
+            if item in {'inspection', 'occupancy', 'registration'} and artifact_backed_refresh_only and item in degraded and item in freshness_only:
+                continue
+            retained.append(item)
+        health['unsafe_reasons'] = retained
+        coverage_ok = len(retained) == 0
+        health['coverage_safe_to_rely_on'] = coverage_ok
+        evidence_ok = bool(sla.get('safe_to_rely_on', True)) and not bool((health.get('lockout') or {}).get('lockout_active'))
+        health['evidence_safe_to_rely_on'] = evidence_ok
+        health['safe_to_rely_on'] = bool(coverage_ok and evidence_ok)
+        if health['safe_to_rely_on']:
+            health['health_status'] = 'ok'
+            health['operational_reason'] = None
+        return health

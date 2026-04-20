@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -293,6 +294,20 @@ def _iter_scoped_sources(db: Session, *, profile: JurisdictionProfile) -> list[P
 
 def _repo_candidate_roots() -> list[Path]:
     candidates: list[Path] = []
+
+    env_keys = [
+        "POLICY_PDFS_ROOT",
+        "POLICY_PDF_ROOT",
+        "NSPIRE_PDF_ROOT",
+    ]
+    for key in env_keys:
+        value = os.getenv(key)
+        if value:
+            try:
+                candidates.append(Path(str(value)).expanduser())
+            except Exception:
+                pass
+
     raw_values = [
         getattr(settings, "policy_repo_root", None),
         getattr(settings, "repo_root", None),
@@ -308,6 +323,8 @@ def _repo_candidate_roots() -> list[Path]:
     cwd = Path.cwd()
     candidates.extend([cwd, cwd.parent, cwd.parent.parent])
     candidates.append(Path("/mnt/data"))
+    candidates.append(Path("/app/data/pdfs"))
+    candidates.append(Path("/app/backend/data/pdfs"))
     candidates.extend([p.parent.parent if p.name == "pdfs" else p for p in ZIP_PDF_ROOT_CANDIDATES])
 
     out: list[Path] = []
@@ -338,18 +355,32 @@ def _policy_artifact_snapshot() -> dict[str, Any]:
     roots = _repo_candidate_roots()
     policy_raw = None
     pdf_root = None
+
     for root in roots:
         candidates = [
             root / "backend" / "policy_raw",
             root / "onehaven_decision_engine" / "backend" / "policy_raw",
             root / "policy_raw",
+            root if root.name == "policy_raw" else root / "policy_raw",
         ]
         found = _first_existing(candidates)
         if found is not None:
             policy_raw = found
             break
-    for root in roots:
+
+    explicit_pdf_candidates: list[Path] = []
+    for key in ("POLICY_PDFS_ROOT", "POLICY_PDF_ROOT", "NSPIRE_PDF_ROOT"):
+        value = os.getenv(key)
+        if value:
+            try:
+                explicit_pdf_candidates.append(Path(str(value)).expanduser())
+            except Exception:
+                pass
+
+    pdf_search_roots = explicit_pdf_candidates + roots
+    for root in pdf_search_roots:
         candidates = [
+            root,
             root / "backend" / "data" / "pdfs",
             root / "onehaven_decision_engine" / "backend" / "data" / "pdfs",
             root / "backend" / "pdfs",
@@ -358,6 +389,8 @@ def _policy_artifact_snapshot() -> dict[str, Any]:
             root / "backend" / "pdf",
             root / "onehaven_decision_engine" / "backend" / "pdf",
             root / "pdf",
+            Path("/app/data/pdfs"),
+            Path("/app/backend/data/pdfs"),
             *ZIP_PDF_ROOT_CANDIDATES,
         ]
         found = _first_existing(candidates)

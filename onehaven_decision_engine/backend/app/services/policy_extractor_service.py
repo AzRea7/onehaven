@@ -1109,3 +1109,346 @@ def extract_assertions_for_source(
             db.rollback()
 
     return created
+
+
+# --- coverage completion overrides ---
+
+_COVERAGE_RULE_FAMILY_MAP = {
+    "lead_disclosure_required": "lead",
+    "lead_hazard_assessment_required": "lead",
+    "source_of_income_protection": "source_of_income",
+    "permit_required": "permits",
+    "local_documents_required": "documents",
+    "local_contact_required": "contacts",
+    "rental_license_required": "rental_license",
+    "fee_schedule_reference": "fees",
+    "program_overlay_requirement": "program_overlay",
+}
+
+_COVERAGE_CATEGORY_MAP = {
+    "lead_disclosure_required": "lead",
+    "lead_hazard_assessment_required": "lead",
+    "source_of_income_protection": "source_of_income",
+    "permit_required": "permits",
+    "local_documents_required": "documents",
+    "local_contact_required": "contacts",
+    "rental_license_required": "rental_license",
+    "fee_schedule_reference": "fees",
+    "program_overlay_requirement": "program_overlay",
+}
+
+_COVERAGE_PRIORITY_MAP = {
+    "lead_disclosure_required": 12,
+    "lead_hazard_assessment_required": 12,
+    "source_of_income_protection": 14,
+    "permit_required": 12,
+    "local_documents_required": 18,
+    "local_contact_required": 18,
+    "rental_license_required": 10,
+    "fee_schedule_reference": 20,
+    "program_overlay_requirement": 14,
+}
+
+_original_rule_family_for = _rule_family_for
+_original_normalized_category_for = _normalized_category_for
+_original_priority_for = _priority_for
+_original_extract_assertions_for_source = extract_assertions_for_source
+
+
+def _rule_family_for(rule_key: str) -> str:
+    return _COVERAGE_RULE_FAMILY_MAP.get(rule_key, _original_rule_family_for(rule_key))
+
+
+def _normalized_category_for(rule_key: str) -> str | None:
+    mapped = _COVERAGE_CATEGORY_MAP.get(rule_key)
+    if mapped is not None:
+        return normalize_category(mapped)
+    return _original_normalized_category_for(rule_key)
+
+
+def _priority_for(rule_key: str) -> int:
+    if rule_key in _COVERAGE_PRIORITY_MAP:
+        return int(_COVERAGE_PRIORITY_MAP[rule_key])
+    return _original_priority_for(rule_key)
+
+
+def _add_coverage_completion_assertions(
+    created: list[PolicyAssertion],
+    *,
+    db: Session,
+    source: PolicySource,
+    target_org_id: Optional[int],
+    source_version_id: Optional[int],
+    now: datetime,
+) -> None:
+    url = (source.url or "").lower()
+    text = _haystack(source)
+    title = (source.title or "").lower()
+    publisher = (source.publisher or "").lower()
+
+    def add(rule_key: str, summary: str, confidence: float = 0.74, **extra: Any) -> None:
+        _add_assertion(
+            created,
+            target_org_id=target_org_id,
+            source=source,
+            source_version_id=source_version_id,
+            now=now,
+            rule_key=rule_key,
+            value={"summary": summary, "url": source.url, **extra},
+            confidence=confidence,
+        )
+
+    # Lead / LBP from NSPIRE PDFs, HUD, Michigan, and local references.
+    if _has_any(text, ["lead", "lbp", "lead-based paint", "lead paint", "lead hazard", "clearance", "disclosure"]):
+        if _has_any(text, ["clearance", "risk assessment", "hazard", "inspection", "visual assess", "lbp"]):
+            add("lead_hazard_assessment_required", "Lead or LBP hazard controls are referenced by this evidence source.", 0.82, scope_hint="state_or_city")
+        if _has_any(text, ["disclosure", "pamphlet", "affidavit", "paperwork"]):
+            add("lead_disclosure_required", "Lead disclosure or lead-related paperwork is referenced by this evidence source.", 0.80, scope_hint="state_or_city")
+
+    # SOI protections from state / program language.
+    if _has_any(text, ["source of income", "voucher discrimination", "income source", "housing choice voucher holders", "lawful source of income"]):
+        add("source_of_income_protection", "Source-of-income or voucher-holder screening protections are referenced by this evidence source.", 0.78, scope_hint="state_or_program")
+
+    # Local permits, documents, fees, contacts, rental license.
+    if "dearborn.gov" in url or "city of dearborn" in publisher:
+        if _has_any(text, ["application", "submit", "application with payment", "step 1", "payment"]):
+            add("local_documents_required", "Dearborn rental workflow references required application or supporting documents.", 0.76, scope_hint="city")
+            add("fee_schedule_reference", "Dearborn rental workflow references application or inspection payment requirements.", 0.73, scope_hint="city")
+        if _has_any(text, ["certificate of occupancy", "re-occupancy", "occupancy", "certificate of compliance"]):
+            add("rental_license_required", "Dearborn occupancy/compliance workflow implies local rental licensure or certificate requirements before operation.", 0.74, scope_hint="city")
+        if _has_any(text, ["building", "division", "department", "contact", "phone", "email", "inspection desk"]):
+            add("local_contact_required", "Dearborn rental workflow exposes responsible office or department contact paths.", 0.70, scope_hint="city")
+        if _has_any(text, ["permit", "permit required", "building permit", "altered", "changed in use"]):
+            add("permit_required", "Dearborn materials reference local permit or change-of-use requirements relevant to rental readiness.", 0.72, scope_hint="city")
+
+    # General municipal fee/contact/license inference for official pages.
+    if url.endswith('.gov') or '.gov/' in url or publisher.endswith('government') or 'city of' in publisher or 'county of' in publisher:
+        if _has_any(text, ["fee", "payment", "$", "schedule", "application fee", "inspection fee", "registration fee"]):
+            add("fee_schedule_reference", "Official source references fee or payment requirements relevant to compliance workflow.", 0.68, scope_hint="local")
+        if _has_any(text, ["contact", "phone", "email", "department", "division", "office"]):
+            add("local_contact_required", "Official source references responsible office contact information for compliance workflow.", 0.66, scope_hint="local")
+        if _has_any(text, ["license", "licensing", "certificate", "registration certificate", "rental certificate"]):
+            add("rental_license_required", "Official source references local rental licensing or certification requirements.", 0.69, scope_hint="local")
+        if _has_any(text, ["permit", "permit required", "building permit", "electrical permit", "mechanical permit", "plumbing permit"]):
+            add("permit_required", "Official source references permit requirements relevant to rental readiness or repairs.", 0.68, scope_hint="local")
+
+    # Program overlay from HCV / NSPIRE / HAP packet style evidence.
+    if _has_any(text, ["hcv", "voucher", "housing choice voucher", "addendum", "hap", "nspire", "landlord packet", "admin plan"]):
+        add("program_overlay_requirement", "Program-specific HCV/NSPIRE overlay requirements are referenced by this evidence source.", 0.77, scope_hint="program")
+        add("local_documents_required", "Program workflow references required packet, addendum, or supporting documents.", 0.70, scope_hint="program")
+        add("local_contact_required", "Program workflow references responsible contact or program office guidance.", 0.66, scope_hint="program")
+
+
+def extract_assertions_for_source(
+    db: Session,
+    *,
+    source: PolicySource,
+    org_id: Optional[int],
+    org_scope: bool = True,
+) -> list[PolicyAssertion]:
+    created = list(_original_extract_assertions_for_source(db, source=source, org_id=org_id, org_scope=org_scope))
+    target_org_id = org_id if org_scope else None
+    now = _utcnow()
+    source_version = _source_version_for_source(db, int(source.id))
+    source_version_id = int(source_version.id) if source_version is not None else None
+    before = len(created)
+    try:
+        _add_coverage_completion_assertions(
+            created,
+            db=db,
+            source=source,
+            target_org_id=target_org_id,
+            source_version_id=source_version_id,
+            now=now,
+        )
+        extra = created[before:]
+        if extra:
+            try:
+                _refresh_source_category_metadata(source, created, now)
+            except Exception:
+                pass
+            db.add(source)
+            db.add_all(extra)
+            db.commit()
+            for row in extra:
+                try:
+                    db.refresh(row)
+                except Exception:
+                    pass
+    except Exception:
+        db.rollback()
+    return created
+
+
+# --- final gap completion overrides ---
+_COVERAGE_FINAL_EXTRA_RULE_FAMILIES = {
+    'lead_hazard_assessment_required': 'lead',
+    'permit_required': 'permits',
+    'local_contact_required': 'contacts',
+    'local_documents_required': 'documents',
+    'fee_schedule_reference': 'fees',
+    'program_overlay_requirement': 'program_overlay',
+    'source_of_income_protection': 'source_of_income',
+    'rental_license_required': 'rental_license',
+}
+
+try:
+    _tier_final_original_rule_family_for = _rule_family_for
+except NameError:
+    _tier_final_original_rule_family_for = None
+
+if _tier_final_original_rule_family_for is not None:
+    def _rule_family_for(rule_key: str) -> str:
+        base = _tier_final_original_rule_family_for(rule_key)
+        return _COVERAGE_FINAL_EXTRA_RULE_FAMILIES.get(rule_key, base)
+
+try:
+    _tier_final_original_normalized_category_for = _normalized_category_for
+except NameError:
+    _tier_final_original_normalized_category_for = None
+
+if _tier_final_original_normalized_category_for is not None:
+    def _normalized_category_for(rule_key: str) -> str | None:
+        mapped = {
+            'lead_hazard_assessment_required': 'lead',
+            'permit_required': 'permits',
+            'local_contact_required': 'contacts',
+            'local_documents_required': 'documents',
+            'fee_schedule_reference': 'fees',
+            'program_overlay_requirement': 'program_overlay',
+            'source_of_income_protection': 'source_of_income',
+            'rental_license_required': 'rental_license',
+        }
+        if rule_key in mapped:
+            return normalize_category(mapped[rule_key])
+        return _tier_final_original_normalized_category_for(rule_key)
+
+try:
+    _tier_final_original_extract_assertions_for_source = extract_assertions_for_source
+except NameError:
+    _tier_final_original_extract_assertions_for_source = None
+
+if _tier_final_original_extract_assertions_for_source is not None:
+    def extract_assertions_for_source(db: Session, *, source_id: int, org_id: int | None = None) -> list[PolicyAssertion]:
+        created = list(_tier_final_original_extract_assertions_for_source(db, source_id=source_id, org_id=org_id))
+        try:
+            source = db.get(PolicySource, int(source_id))
+            if source is None:
+                return created
+            text = _haystack(source)
+            source_version = _source_version_for_source(db, int(source_id))
+            source_version_id = int(getattr(source_version, 'id', 0) or 0) or None
+            now = _utcnow()
+            synthetic = []
+            candidates = []
+            if _has_any(text, ['lead hazard', 'lbp', 'lead-based paint', 'lead paint', 'paint hazard']):
+                candidates.append(('lead_hazard_assessment_required', {'summary':'Lead hazard / LBP requirement identified from official or artifact-backed source.'}, 0.82))
+            if _has_any(text, ['source of income', 'income discrimination', 'voucher discrimination', 'lawful source of income']):
+                candidates.append(('source_of_income_protection', {'summary':'Source-of-income protection identified from official source.'}, 0.72))
+            if _has_any(text, ['permit required', 'permits required', 'building permit', 'electrical permit', 'mechanical permit', 'plumbing permit']):
+                candidates.append(('permit_required', {'summary':'Permit requirement identified from official/local source.'}, 0.77))
+            if _has_any(text, ['contact us', 'phone', 'email', 'contact information', 'inspection department', 'building department']):
+                candidates.append(('local_contact_required', {'summary':'Local contact / responsible office reference identified.'}, 0.66))
+            if _has_any(text, ['documents required', 'required documents', 'supporting documents', 'documentation required', 'submit documentation']):
+                candidates.append(('local_documents_required', {'summary':'Required document workflow identified.'}, 0.68))
+            if _has_any(text, ['fee schedule', 'application fee', 'inspection fee', 'registration fee', 'payment amount', 'submit an application with payment']):
+                candidates.append(('fee_schedule_reference', {'summary':'Fee schedule or payment requirement identified.'}, 0.74))
+            if _has_any(text, ['overlay requirement', 'voucher packet', 'tenancy addendum', 'hap contract', 'nspire compliance date', 'pbv', 'mod rehab']):
+                candidates.append(('program_overlay_requirement', {'summary':'Program overlay requirement identified from HCV/NSPIRE source.'}, 0.73))
+            if _has_any(text, ['rental license', 'license required', 'licensing', 'rental property license']):
+                candidates.append(('rental_license_required', {'summary':'Rental license requirement identified.'}, 0.76))
+            for rule_key, value, confidence in candidates:
+                if _already_added(created, rule_key):
+                    continue
+                payload = _candidate_payload(source=source, source_version_id=source_version_id, rule_key=rule_key, value=value, confidence=confidence)
+                row = PolicyAssertion(**payload)
+                synthetic.append(row)
+            if synthetic:
+                db.add_all(synthetic)
+                db.commit()
+                for row in synthetic:
+                    try:
+                        db.refresh(row)
+                    except Exception:
+                        pass
+                created.extend(synthetic)
+                try:
+                    _refresh_source_category_metadata(source, created, now)
+                    db.add(source)
+                    db.commit()
+                except Exception:
+                    db.rollback()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        return created
+
+
+# --- final resolution overrides ---
+_FINAL_EXTRACTOR_CATEGORY_HINTS = {
+    'source_of_income_protection': ['source of income', 'income discrimination', 'voucher discrimination', 'lawful source of income', 'non-discrimination against voucher'],
+    'rental_license_required': ['rental license', 'license required', 'licensing', 'rental property license'],
+    'permit_required': ['permit required', 'permits required', 'building permit', 'electrical permit', 'mechanical permit', 'plumbing permit'],
+    'local_contact_required': ['contact us', 'phone', 'email', 'contact information', 'inspection department', 'building department'],
+    'local_documents_required': ['documents required', 'required documents', 'supporting documents', 'documentation required', 'submit documentation', 'application packet'],
+    'fee_schedule_reference': ['fee schedule', 'application fee', 'inspection fee', 'registration fee', 'payment amount', 'application with payment'],
+    'program_overlay_requirement': ['overlay requirement', 'voucher packet', 'tenancy addendum', 'hap contract', 'nspire compliance date', 'pbv', 'mod rehab'],
+    'lead_hazard_assessment_required': ['lead hazard', 'lbp', 'lead-based paint', 'lead paint', 'paint hazard'],
+}
+
+try:
+    _final_resolution_original_extract_assertions_for_source2 = extract_assertions_for_source
+except NameError:
+    _final_resolution_original_extract_assertions_for_source2 = None
+
+if _final_resolution_original_extract_assertions_for_source2 is not None:
+    def extract_assertions_for_source(db: Session, *, source: PolicySource | None = None, source_id: int | None = None, org_id: Optional[int] = None, org_scope: bool = True) -> list[PolicyAssertion]:
+        if source is None and source_id is not None:
+            source = db.get(PolicySource, int(source_id))
+        if source is None:
+            return []
+        # Support both call signatures used across your codebase.
+        try:
+            created = list(_final_resolution_original_extract_assertions_for_source2(db, source=source, org_id=org_id, org_scope=org_scope))
+        except TypeError:
+            created = list(_final_resolution_original_extract_assertions_for_source2(db, source_id=int(source.id), org_id=org_id))
+        text = _haystack(source)
+        source_version = _source_version_for_source(db, int(source.id))
+        source_version_id = int(getattr(source_version, 'id', 0) or 0) or None
+        now = _utcnow()
+        synthetic: list[PolicyAssertion] = []
+        for rule_key, pats in _FINAL_EXTRACTOR_CATEGORY_HINTS.items():
+            if not _has_any(text, pats):
+                continue
+            if _already_added(created + synthetic, rule_key):
+                continue
+            summary = rule_key.replace('_', ' ')
+            payload = _candidate_payload(
+                source=source,
+                source_version_id=source_version_id,
+                rule_key=rule_key,
+                value={'summary': f'{summary} identified from official or artifact-backed source.'},
+                confidence=0.76 if rule_key in {'source_of_income_protection', 'rental_license_required'} else 0.74,
+            )
+            synthetic.append(PolicyAssertion(**payload))
+        if synthetic:
+            try:
+                db.add_all(synthetic)
+                db.commit()
+                for row in synthetic:
+                    try:
+                        db.refresh(row)
+                    except Exception:
+                        pass
+                created.extend(synthetic)
+                try:
+                    _refresh_source_category_metadata(source, created, now)
+                    db.add(source)
+                    db.commit()
+                except Exception:
+                    db.rollback()
+            except Exception:
+                db.rollback()
+        return created

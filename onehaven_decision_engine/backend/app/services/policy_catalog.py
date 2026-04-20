@@ -1277,3 +1277,132 @@ def policy_catalog_summary(
         "source_kind_counts": kind_counts,
         "items": rows,
     }
+
+
+# --- coverage completion overrides ---
+
+_COVERAGE_COMPLETION_DEARBORN_ITEMS = [
+    PolicyCatalogItem(
+        url="https://dearborn.gov/residents/home-property/rental-property-information/registering-rental-property",
+        state="MI",
+        county="wayne",
+        city="dearborn",
+        publisher="City of Dearborn",
+        title="Registering a Rental Property",
+        notes="Registration, rental license/certificate workflow, contacts, documents, and inspection context for Dearborn rental compliance.",
+        source_kind="municipal_registration",
+        priority=14,
+    ),
+    PolicyCatalogItem(
+        url="https://www.dearborn.gov/index.php/step-1-submit-application-payment-0",
+        state="MI",
+        county="wayne",
+        city="dearborn",
+        publisher="City of Dearborn",
+        title="Step 1: Submit an application with payment",
+        notes="Application, documents, fee/payment, and submission requirements for Dearborn rental workflow.",
+        source_kind="municipal_registration",
+        priority=15,
+    ),
+    PolicyCatalogItem(
+        url="https://dearborn.gov/residents/home-property/rental-property-information",
+        state="MI",
+        county="wayne",
+        city="dearborn",
+        publisher="City of Dearborn",
+        title="Rental Property Information",
+        notes="High-level rental workflow and responsible office context for Dearborn rental properties.",
+        source_kind="municipal_program_page",
+        priority=16,
+    ),
+    PolicyCatalogItem(
+        url="https://www.dearborn.gov/index.php/step-6-certificate-occupancy-0",
+        state="MI",
+        county="wayne",
+        city="dearborn",
+        publisher="City of Dearborn",
+        title="Step 6: Certificate of Occupancy",
+        notes="Certificate of occupancy, permits, inspections, and occupancy readiness for Dearborn.",
+        source_kind="municipal_inspection",
+        priority=17,
+    ),
+    PolicyCatalogItem(
+        url="https://dearborn.gov/how-submit-re-occupancy",
+        state="MI",
+        county="wayne",
+        city="dearborn",
+        publisher="City of Dearborn",
+        title="How to Submit for Re-Occupancy",
+        notes="Re-occupancy workflow, documents, contacts, and occupancy/inspection steps for Dearborn.",
+        source_kind="municipal_inspection",
+        priority=18,
+    ),
+]
+
+_catalog_original_catalog_for_market = catalog_for_market
+
+
+def catalog_for_market(
+    *,
+    state: str = 'MI',
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    focus: str = 'se_mi_extended',
+) -> list[PolicyCatalogItem]:
+    items = list(_catalog_original_catalog_for_market(state=state, county=county, city=city, focus=focus))
+    st = _norm_state(state) or 'MI'
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    for item in _COVERAGE_COMPLETION_DEARBORN_ITEMS:
+        if (item.state or 'MI') != st:
+            continue
+        if cnty and item.county not in {None, cnty}:
+            continue
+        if cty and item.city not in {None, cty}:
+            continue
+        items.append(item)
+    return _sorted_then_deduped(filter_official_catalog_items(items))
+
+
+# --- final gap completion overrides ---
+_COVERAGE_FINAL_DEARBORN_ITEMS = [
+    PolicyCatalogItem(
+        url='https://dearborn.gov/residents/home-property/rental-property-information',
+        state='MI', county='wayne', city='dearborn', publisher='City of Dearborn',
+        title='Rental Property Information', source_kind='municipal_registration', priority=25,
+        notes='category_hints=registration,rental_license,documents,contacts'
+    ),
+    PolicyCatalogItem(
+        url='https://dearborn.gov/residents/home-property/rental-property-information/registering-rental-property',
+        state='MI', county='wayne', city='dearborn', publisher='City of Dearborn',
+        title='Registering a Rental Property', source_kind='municipal_registration', priority=20,
+        notes='category_hints=registration,rental_license,documents,fees'
+    ),
+    PolicyCatalogItem(
+        url='https://www.dearborn.gov/index.php/step-1-submit-application-payment-0',
+        state='MI', county='wayne', city='dearborn', publisher='City of Dearborn',
+        title='Step 1: Submit an application with payment', source_kind='municipal_registration', priority=20,
+        notes='category_hints=fees,documents,permits,registration'
+    ),
+]
+
+try:
+    _coverage_final_catalog_orig = catalog_for_market
+except NameError:
+    _coverage_final_catalog_orig = None
+
+if _coverage_final_catalog_orig is not None:
+    def catalog_for_market(*, state: str = 'MI', county: Optional[str] = None, city: Optional[str] = None, focus: str = 'se_mi_extended') -> list[PolicyCatalogItem]:
+        items = list(_coverage_final_catalog_orig(state=state, county=county, city=city, focus=focus))
+        st = _norm_state(state) or 'MI'
+        cnty = _norm_lower(county)
+        cty = _norm_lower(city)
+        for item in _COVERAGE_FINAL_DEARBORN_ITEMS:
+            if (item.state or 'MI') != st:
+                continue
+            if cnty and item.county not in {None, cnty}:
+                continue
+            if cty and item.city not in {None, cty}:
+                continue
+            items.append(item)
+        return _sorted_then_deduped(filter_official_catalog_items(items))
