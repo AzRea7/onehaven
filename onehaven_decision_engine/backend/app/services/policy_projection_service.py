@@ -3330,3 +3330,216 @@ if _final_resolution_original_build_property_compliance_brief is not None:
             brief['assertion_category_coverage'] = dict(snapshot.get('assertion_category_coverage') or {})
             brief['unsafe_reasons'] = list(snapshot.get('unsafe_reasons') or brief.get('unsafe_reasons') or [])
         return brief
+
+# --- append-only final resolution overrides ---
+RULE_KEY_TO_CATEGORY.update({
+    'lead_hazard_assessment_required': 'lead',
+    'permit_required': 'permits',
+    'local_contact_required': 'contacts',
+    'local_documents_required': 'documents',
+    'fee_schedule_reference': 'fees',
+    'program_overlay_requirement': 'program_overlay',
+    'source_of_income_protection': 'source_of_income',
+    'rental_license_required': 'rental_license',
+    'hap_contract_and_tenancy_addendum_required': 'program_overlay',
+    'pha_landlord_packet_required': 'program_overlay',
+})
+
+PROPERTY_PROOF_RULE_MAP.update({
+    'lead_hazard_assessment_required': {'proof_key': 'lead_docs', 'label': 'Lead documentation', 'document_categories': ['lead_based_paint_paperwork', 'lead_clearance_doc'], 'required_status': 'verified', 'category': 'lead'},
+    'permit_required': {'proof_key': 'permit_docs', 'label': 'Permit documentation', 'document_categories': ['permit_document', 'local_jurisdiction_document'], 'required_status': 'verified', 'category': 'permits'},
+    'local_contact_required': {'proof_key': 'local_contact_proof', 'label': 'Local contact proof', 'document_categories': ['local_contact_proof', 'local_jurisdiction_document'], 'required_status': 'verified', 'category': 'contacts'},
+    'local_documents_required': {'proof_key': 'required_documents', 'label': 'Required documents', 'document_categories': ['local_jurisdiction_document', 'approval_letter'], 'required_status': 'verified', 'category': 'documents'},
+    'fee_schedule_reference': {'proof_key': 'fee_schedule', 'label': 'Fee schedule', 'document_categories': ['fee_schedule', 'local_jurisdiction_document'], 'required_status': 'verified', 'category': 'fees'},
+    'program_overlay_requirement': {'proof_key': 'voucher_packet', 'label': 'Program overlay proof', 'document_categories': ['voucher_packet', 'approval_letter'], 'required_status': 'verified', 'category': 'program_overlay'},
+    'source_of_income_protection': {'proof_key': 'source_of_income_policy', 'label': 'Source of income policy', 'document_categories': ['local_jurisdiction_document', 'approval_letter', 'other_evidence'], 'required_status': 'verified', 'category': 'source_of_income'},
+    'rental_license_required': {'proof_key': 'rental_license', 'label': 'Rental license', 'document_categories': ['registration_certificate', 'local_jurisdiction_document', 'certificate_of_occupancy', 'certificate_of_compliance'], 'required_status': 'verified', 'category': 'rental_license'},
+})
+
+_FINAL_RULE_TO_CATEGORY = {
+    'lead_hazard_assessment_required': 'lead',
+    'lead_paint_affidavit_required': 'lead',
+    'lead_clearance_required': 'lead',
+    'lead_inspection_required': 'lead',
+    'permit_required': 'permits',
+    'local_contact_required': 'contacts',
+    'local_documents_required': 'documents',
+    'fee_schedule_reference': 'fees',
+    'program_overlay_requirement': 'program_overlay',
+    'source_of_income_protection': 'source_of_income',
+    'rental_license_required': 'rental_license',
+    'rental_registration_required': 'registration',
+    'inspection_required': 'inspection',
+    'inspection_program_exists': 'inspection',
+    'fire_safety_inspection_required': 'inspection',
+    'certificate_required_before_occupancy': 'occupancy',
+    'certificate_of_occupancy_required': 'occupancy',
+    'certificate_of_compliance_required': 'occupancy',
+    'hap_contract_and_tenancy_addendum_required': 'program_overlay',
+    'pha_landlord_packet_required': 'program_overlay',
+}
+
+try:
+    _final_resolution_original_build_property_projection_snapshot = build_property_projection_snapshot
+except NameError:
+    _final_resolution_original_build_property_projection_snapshot = None
+
+try:
+    _final_resolution_original_build_property_compliance_brief = build_property_compliance_brief
+except NameError:
+    _final_resolution_original_build_property_compliance_brief = None
+
+
+def _final_resolution_assertion_category(assertion: Any) -> str | None:
+    for key in ('normalized_category', 'rule_category'):
+        value = str(getattr(assertion, key, '') or '').strip().lower()
+        if value:
+            return value
+    rk = str(getattr(assertion, 'rule_key', '') or '').strip()
+    if rk in _FINAL_RULE_TO_CATEGORY:
+        return _FINAL_RULE_TO_CATEGORY[rk]
+    rf = str(getattr(assertion, 'rule_family', '') or '').strip().lower()
+    family_map = {
+        'lead_hazard_assessment_required': 'lead',
+        'permit_required': 'permits',
+        'local_contact_required': 'contacts',
+        'local_documents_required': 'documents',
+        'fee_schedule_reference': 'fees',
+        'program_overlay_requirement': 'program_overlay',
+        'source_of_income_protection': 'source_of_income',
+        'rental_license': 'rental_license',
+        'rental_registration': 'registration',
+        'inspection_program': 'inspection',
+        'certificate_before_occupancy': 'occupancy',
+    }
+    return family_map.get(rf)
+
+
+def _final_resolution_scope_match(row: Any, county: str | None, city: str | None, pha_name: str | None) -> bool:
+    row_county = _norm_lower(getattr(row, 'county', None))
+    row_city = _norm_lower(getattr(row, 'city', None))
+    row_pha = _norm_text(getattr(row, 'pha_name', None))
+    return row_county in {None, _norm_lower(county)} and row_city in {None, _norm_lower(city)} and row_pha in {None, _norm_text(pha_name)}
+
+
+def _final_resolution_coverage_summary(db: Session, *, org_id: int | None, state: str | None, county: str | None, city: str | None, pha_name: str | None) -> dict[str, Any]:
+    if org_id is None:
+        stmt = select(PolicyAssertion).where(PolicyAssertion.org_id.is_(None))
+    else:
+        stmt = select(PolicyAssertion).where(or_(PolicyAssertion.org_id == org_id, PolicyAssertion.org_id.is_(None)))
+    if state:
+        stmt = stmt.where(PolicyAssertion.state == _norm_state(state))
+
+    rows = list(db.scalars(stmt).all())
+    covered: dict[str, int] = {}
+    for row in rows:
+        if getattr(row, 'superseded_by_assertion_id', None) is not None:
+            continue
+        if not _final_resolution_scope_match(row, county, city, pha_name):
+            continue
+        category = _final_resolution_assertion_category(row)
+        if not category:
+            continue
+        validation_state = str(getattr(row, 'validation_state', '') or '').strip().lower()
+        trust_state = str(getattr(row, 'trust_state', '') or '').strip().lower()
+        review_status = str(getattr(row, 'review_status', '') or '').strip().lower()
+        governance_state = str(getattr(row, 'governance_state', '') or '').strip().lower()
+        if (
+            validation_state in {'validated', 'weak_support', 'trusted'}
+            or trust_state in {'trusted', 'validated'}
+            or review_status in {'extracted', 'accepted', 'verified', 'needs_manual_review', 'projected', 'approved'}
+            or governance_state in {'active', 'approved'}
+        ):
+            covered[category] = covered.get(category, 0) + 1
+
+    return {'covered_categories': sorted(covered), 'category_counts': covered}
+
+
+if _final_resolution_original_build_property_projection_snapshot is not None:
+    def build_property_projection_snapshot(
+        db: Session,
+        *,
+        org_id: int,
+        property_id: int,
+        property: Any | None = None,
+        projection: PropertyComplianceProjection | None = None,
+        item_rows: list[PropertyComplianceProjectionItem] | None = None,
+    ) -> dict[str, Any]:
+        snapshot = dict(
+            _final_resolution_original_build_property_projection_snapshot(
+                db,
+                org_id=org_id,
+                property_id=property_id,
+                property=property,
+                projection=projection,
+                item_rows=item_rows,
+            )
+        )
+        if not snapshot.get('ok', True):
+            return snapshot
+
+        scope = snapshot.get('scope') or {}
+        coverage = _final_resolution_coverage_summary(
+            db,
+            org_id=org_id,
+            state=scope.get('state'),
+            county=scope.get('county'),
+            city=scope.get('city'),
+            pha_name=scope.get('pha_name'),
+        )
+        snapshot['normalized_category_coverage'] = coverage
+        snapshot['covered_categories'] = list(coverage.get('covered_categories') or [])
+
+        rows = list(item_rows or [])
+        covered = set(str(x).strip().lower() for x in list(snapshot.get('covered_categories') or []) if str(x).strip())
+        for row in rows:
+            cat = _final_resolution_assertion_category(row)
+            if cat:
+                covered.add(cat)
+        snapshot['covered_categories'] = sorted(covered)
+        snapshot['normalized_category_coverage'] = {
+            'covered_categories': sorted(covered),
+            'category_counts': {k: coverage.get('category_counts', {}).get(k, 1) for k in sorted(covered)},
+        }
+        return snapshot
+
+
+if _final_resolution_original_build_property_compliance_brief is not None:
+    def build_property_compliance_brief(
+        db: Session,
+        *,
+        org_id: int,
+        property_id: int,
+        property: Any | None = None,
+        projection: PropertyComplianceProjection | None = None,
+        item_rows: list[PropertyComplianceProjectionItem] | None = None,
+    ) -> dict[str, Any]:
+        brief = dict(
+            _final_resolution_original_build_property_compliance_brief(
+                db,
+                org_id=org_id,
+                property_id=property_id,
+                property=property,
+                projection=projection,
+                item_rows=item_rows,
+            )
+        )
+        snapshot = dict(brief.get('snapshot') or {})
+        coverage = dict(snapshot.get('normalized_category_coverage') or {})
+        covered = set(str(x).strip().lower() for x in list(brief.get('covered_categories') or snapshot.get('covered_categories') or coverage.get('covered_categories') or []) if str(x).strip())
+
+        rows = list(item_rows or [])
+        for row in rows:
+            cat = _final_resolution_assertion_category(row)
+            if cat:
+                covered.add(cat)
+
+        snapshot['covered_categories'] = sorted(covered)
+        snapshot['normalized_category_coverage'] = {
+            'covered_categories': sorted(covered),
+            'category_counts': dict(coverage.get('category_counts') or {k: 1 for k in sorted(covered)}),
+        }
+        brief['snapshot'] = snapshot
+        brief['covered_categories'] = sorted(covered)
+        brief['coverage_category_counts'] = dict(snapshot.get('normalized_category_coverage', {}).get('category_counts') or {})
+        return brief

@@ -1595,3 +1595,47 @@ if _runtime_original_validate_assertion is not None:
             if (authoritative or authority_tier == 'authoritative_official' or pdf_backed) and (official_ok or pdf_backed) and confidence >= 0.58 and citation_quality >= 0.18:
                 result.update({'validation_state': VALIDATION_STATE_VALIDATED, 'validation_quality': max(float(result.get('validation_quality') or 0.0), 0.83), 'validation_reason': 'binding_category_accepted', 'trust_state': TRUST_STATE_TRUSTED if (authoritative or authority_tier == 'authoritative_official') else TRUST_STATE_VALIDATED, 'blocking_issue': False, 'binding_authority_missing': False})
         return result
+
+# --- append-only final gap completion overrides ---
+_COVERAGE_SUPPORTING_CATEGORIES = {'documents', 'contacts', 'fees', 'program_overlay', 'source_of_income'}
+_COVERAGE_BINDING_CATEGORIES = {'lead', 'permits', 'rental_license'}
+
+try:
+    _tier_final_original_validate_assertion = validate_assertion
+except NameError:
+    _tier_final_original_validate_assertion = None
+
+if _tier_final_original_validate_assertion is not None:
+    def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+        result = dict(_tier_final_original_validate_assertion(assertion=assertion, source=source))
+        category = str(getattr(assertion, 'normalized_category', None) or getattr(assertion, 'rule_category', None) or '').strip().lower()
+        citation_json = _loads_dict(getattr(assertion, 'citation_json', None))
+        confidence = float(getattr(assertion, 'confidence', 0.0) or 0.0)
+        citation_quality = _citation_quality_from_assertion(assertion)
+        publication_type = str(getattr(source, 'publication_type', '') or '').strip().lower() if source is not None else ''
+        authority_tier = str(getattr(source, 'authority_tier', '') or '').strip().lower() if source is not None else ''
+        official_ok = bool((_source_url_validation_summary(source) or {}).get('trust_for_extraction')) if source is not None else False
+        authoritative = bool(getattr(source, 'is_authoritative', False)) if source is not None else False
+        pdf_backed = publication_type in {'pdf', 'official_document'} or str(citation_json.get('url') or '').lower().endswith('.pdf')
+
+        if category in _COVERAGE_SUPPORTING_CATEGORIES:
+            if (official_ok or pdf_backed) and confidence >= 0.55 and citation_quality >= 0.20:
+                result.update({
+                    'validation_state': VALIDATION_STATE_VALIDATED,
+                    'validation_quality': max(float(result.get('validation_quality') or 0.0), 0.76),
+                    'validation_reason': 'supporting_category_accepted',
+                    'trust_state': TRUST_STATE_VALIDATED,
+                    'blocking_issue': False,
+                    'binding_authority_missing': False,
+                })
+        elif category in _COVERAGE_BINDING_CATEGORIES:
+            if (authoritative or authority_tier == 'authoritative_official' or pdf_backed) and (official_ok or pdf_backed) and confidence >= 0.60 and citation_quality >= 0.20:
+                result.update({
+                    'validation_state': VALIDATION_STATE_VALIDATED,
+                    'validation_quality': max(float(result.get('validation_quality') or 0.0), 0.82),
+                    'validation_reason': 'binding_category_accepted',
+                    'trust_state': TRUST_STATE_TRUSTED if (authoritative or authority_tier == 'authoritative_official') else TRUST_STATE_VALIDATED,
+                    'blocking_issue': False,
+                    'binding_authority_missing': False,
+                })
+        return result

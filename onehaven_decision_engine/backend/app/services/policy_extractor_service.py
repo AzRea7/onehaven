@@ -1452,3 +1452,163 @@ if _final_resolution_original_extract_assertions_for_source2 is not None:
             except Exception:
                 db.rollback()
         return created
+
+# --- append-only final resolution overrides ---
+_FINAL_EXTRACTOR_RULE_FAMILIES = {
+    'lead_hazard_assessment_required': 'lead',
+    'permit_required': 'permits',
+    'local_contact_required': 'contacts',
+    'local_documents_required': 'documents',
+    'fee_schedule_reference': 'fees',
+    'program_overlay_requirement': 'program_overlay',
+    'source_of_income_protection': 'source_of_income',
+    'rental_license_required': 'rental_license',
+}
+
+try:
+    _final_extractor_original_rule_family_for = _rule_family_for
+except NameError:
+    _final_extractor_original_rule_family_for = None
+
+if _final_extractor_original_rule_family_for is not None:
+    def _rule_family_for(rule_key: str) -> str:
+        return _FINAL_EXTRACTOR_RULE_FAMILIES.get(rule_key, _final_extractor_original_rule_family_for(rule_key))
+
+try:
+    _final_extractor_original_normalized_category_for = _normalized_category_for
+except NameError:
+    _final_extractor_original_normalized_category_for = None
+
+if _final_extractor_original_normalized_category_for is not None:
+    def _normalized_category_for(rule_key: str) -> str | None:
+        mapped = {
+            'lead_hazard_assessment_required': 'lead',
+            'permit_required': 'permits',
+            'local_contact_required': 'contacts',
+            'local_documents_required': 'documents',
+            'fee_schedule_reference': 'fees',
+            'program_overlay_requirement': 'program_overlay',
+            'source_of_income_protection': 'source_of_income',
+            'rental_license_required': 'rental_license',
+        }
+        if rule_key in mapped:
+            return normalize_category(mapped[rule_key])
+        return _final_extractor_original_normalized_category_for(rule_key)
+
+
+_FINAL_EXTRACTOR_CATEGORY_HINTS = {
+    'source_of_income_protection': ['source of income', 'income discrimination', 'voucher discrimination', 'lawful source of income', 'non-discrimination against voucher'],
+    'rental_license_required': ['rental license', 'license required', 'licensing', 'rental property license', 'registration certificate', 'rental certificate'],
+    'permit_required': ['permit required', 'permits required', 'building permit', 'electrical permit', 'mechanical permit', 'plumbing permit'],
+    'local_contact_required': ['contact us', 'phone', 'email', 'contact information', 'inspection department', 'building department', 'division', 'office'],
+    'local_documents_required': ['documents required', 'required documents', 'supporting documents', 'documentation required', 'submit documentation', 'packet', 'addendum'],
+    'fee_schedule_reference': ['fee schedule', 'application fee', 'inspection fee', 'registration fee', 'payment amount', 'submit an application with payment'],
+    'program_overlay_requirement': ['overlay requirement', 'voucher packet', 'tenancy addendum', 'hap contract', 'nspire compliance date', 'pbv', 'mod rehab', 'hcv', 'admin plan'],
+    'lead_hazard_assessment_required': ['lead hazard', 'lbp', 'lead-based paint', 'lead paint', 'paint hazard'],
+}
+
+
+def _final_extractor_additive_extract(
+    db: Session,
+    *,
+    created: list[PolicyAssertion],
+    source: PolicySource,
+    org_id: Optional[int],
+    org_scope: bool,
+) -> list[PolicyAssertion]:
+    source_id = int(getattr(source, 'id', 0) or 0)
+    if not source_id:
+        return created
+
+    text = _haystack(source)
+    source_version = _source_version_for_source(db, source_id)
+    source_version_id = int(getattr(source_version, 'id', 0) or 0) or None
+    now = _utcnow()
+
+    candidates = [
+        ('lead_hazard_assessment_required', {'summary': 'Lead hazard / LBP requirement identified from official or artifact-backed source.'}, 0.82),
+        ('source_of_income_protection', {'summary': 'Source-of-income protection identified from current source text.'}, 0.72),
+        ('permit_required', {'summary': 'Permit requirement identified from current source text.'}, 0.77),
+        ('local_contact_required', {'summary': 'Local contact / responsible office reference identified.'}, 0.66),
+        ('local_documents_required', {'summary': 'Required document workflow identified.'}, 0.68),
+        ('fee_schedule_reference', {'summary': 'Fee schedule or payment requirement identified.'}, 0.74),
+        ('program_overlay_requirement', {'summary': 'Program overlay requirement identified from HCV/NSPIRE/HAP source.'}, 0.73),
+        ('rental_license_required', {'summary': 'Rental license requirement identified from current source text.'}, 0.76),
+    ]
+
+    synthetic: list[PolicyAssertion] = []
+    for rule_key, value, confidence in candidates:
+        hints = _FINAL_EXTRACTOR_CATEGORY_HINTS.get(rule_key, [])
+        if hints and not _has_any(text, hints):
+            continue
+        if _already_added(created, rule_key):
+            continue
+        payload = _candidate_payload(
+            source=source,
+            source_version_id=source_version_id,
+            rule_key=rule_key,
+            value=value,
+            confidence=confidence,
+        )
+        synthetic.append(PolicyAssertion(**payload))
+
+    if synthetic:
+        db.add_all(synthetic)
+        db.commit()
+        for row in synthetic:
+            try:
+                db.refresh(row)
+            except Exception:
+                pass
+        created.extend(synthetic)
+        try:
+            _refresh_source_category_metadata(source, created, now)
+            db.add(source)
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    return created
+
+
+try:
+    _final_extractor_original_extract_assertions_for_source = extract_assertions_for_source
+except NameError:
+    _final_extractor_original_extract_assertions_for_source = None
+
+if _final_extractor_original_extract_assertions_for_source is not None:
+    def extract_assertions_for_source(db: Session, *args, **kwargs) -> list[PolicyAssertion]:
+        created = list(_final_extractor_original_extract_assertions_for_source(db, *args, **kwargs))
+
+        source = kwargs.get('source')
+        if source is None and 'source_id' in kwargs:
+            try:
+                source = db.get(PolicySource, int(kwargs['source_id']))
+            except Exception:
+                source = None
+        if source is None and args:
+            for arg in args:
+                if isinstance(arg, PolicySource):
+                    source = arg
+                    break
+
+        org_id = kwargs.get('org_id')
+        org_scope = bool(kwargs.get('org_scope', True))
+
+        if source is None:
+            return created
+
+        try:
+            return _final_extractor_additive_extract(
+                db,
+                created=created,
+                source=source,
+                org_id=org_id,
+                org_scope=org_scope,
+            )
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return created
