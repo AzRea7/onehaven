@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import json
 import re
 from datetime import datetime
+
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -58,8 +60,6 @@ OFFICIAL_HOST_ALLOWLIST = {
     "courts.michigan.gov",
     "www.courts.michigan.gov",
 }
-
-
 
 def _source_requires_revalidation(source: PolicySource | None) -> bool:
     return bool(getattr(source, "revalidation_required", False)) if source is not None else False
@@ -709,31 +709,53 @@ def _source_is_curated_official_fetched(source: PolicySource | None) -> bool:
     url = str(getattr(source, "url", "") or "").strip()
     if not _is_official_host(url):
         return False
+
     authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
     if authority_tier != "authoritative_official":
         return False
-    if str(getattr(source, "freshness_status", "") or "").strip().lower() in SOURCE_HTTP_DEAD_STATUSES:
+
+    http_status = _source_http_status(source)
+    if http_status in SOURCE_HTTP_DEAD_STATUSES:
         return False
+
+    freshness_status = str(getattr(source, "freshness_status", "") or "").strip().lower()
+    if freshness_status in {"not_found"}:
+        return False
+
     notes = str(getattr(source, "notes", "") or "").lower()
-    return ("[curated]" in notes) or bool(getattr(source, "is_authoritative", False)) or bool(getattr(source, "domain_name", None))
+    return (
+        ("[curated]" in notes)
+        or bool(getattr(source, "is_authoritative", False))
+        or bool(getattr(source, "domain_name", None))
+    )
 
 
-_validation_orig_source_url = _source_url_validation_summary
+_BASE_SOURCE_URL_VALIDATION_SUMMARY = _source_url_validation_summary
+_BASE_APPLY_VALIDATION_STATE_TO_SOURCE = _apply_validation_state_to_source
+_BASE_VALIDATE_ASSERTION = validate_assertion
+_BASE_VALIDATE_MARKET_ASSERTIONS = validate_market_assertions
+
 
 def _source_url_validation_summary(source: PolicySource | None) -> dict[str, object]:
-    summary = dict(_validation_orig_source_url(source))
+    summary = dict(_BASE_SOURCE_URL_VALIDATION_SUMMARY(source))
     if source is None:
         return summary
     if not _source_is_curated_official_fetched(source):
         return summary
 
     http_status = _source_http_status(source)
-    refresh_state = str(getattr(source, "refresh_state", "") or "").strip().lower()
-    refresh_reason = str(getattr(source, "refresh_status_reason", "") or "").strip().lower()
+    refresh_reason = str(
+        getattr(source, "refresh_status_reason", "") or ""
+    ).strip().lower()
     rejection_reasons = list(summary.get("rejection_reasons") or [])
 
     dead = http_status in SOURCE_HTTP_DEAD_STATUSES
-    blocked = http_status in SOURCE_HTTP_BLOCK_STATUSES or "anti-bot" in refresh_reason or "antibot" in refresh_reason or "captcha" in refresh_reason
+    blocked = (
+        http_status in SOURCE_HTTP_BLOCK_STATUSES
+        or "anti-bot" in refresh_reason
+        or "antibot" in refresh_reason
+        or "captcha" in refresh_reason
+    )
 
     if dead:
         return summary
@@ -746,43 +768,71 @@ def _source_url_validation_summary(source: PolicySource | None) -> dict[str, obj
     if blocked:
         summary["fetch_usable"] = True
         summary["fetch_reason"] = "blocked_but_official"
-        rejection_reasons = [r for r in rejection_reasons if r not in {"blocked_or_antibot", "refresh_blocked", "repeated_fetch_failed"} and not str(r).startswith("http_status_")]
+        rejection_reasons = [
+            r for r in rejection_reasons
+            if r not in {"blocked_or_antibot", "refresh_blocked", "repeated_fetch_failed"}
+            and not str(r).startswith("http_status_")
+        ]
         rejection_reasons.append("blocked_but_official")
     else:
         summary["fetch_usable"] = True
         summary["fetch_reason"] = "official_fetched"
-        rejection_reasons = [r for r in rejection_reasons if r not in {"refresh_blocked", "repeated_fetch_failed"} and not str(r).startswith("http_status_")]
+        rejection_reasons = [
+            r for r in rejection_reasons
+            if r not in {"refresh_blocked", "repeated_fetch_failed"}
+            and not str(r).startswith("http_status_")
+        ]
 
     summary["rejection_reasons"] = sorted(set(rejection_reasons))
     return summary
 
 
-_validation_orig_validate_assertion = validate_assertion
-
-def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-    payload = dict(_validation_orig_validate_assertion(assertion=assertion, source=source))
+def _apply_validation_softening(
+    *,
+    payload: dict[str, object],
+    assertion: PolicyAssertion,
+    source: PolicySource | None,
+) -> dict[str, object]:
+    out = dict(payload)
     if source is None:
-        return payload
+        return out
 
-    url_validation = dict((payload.get("validation_support") or {}).get("url_validation") or _source_url_validation_summary(source))
-    category = normalize_category(getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None))
+    validation_support = dict(out.get("validation_support") or {})
+    url_validation = dict(
+        validation_support.get("url_validation") or _source_url_validation_summary(source)
+    )
+    validation_support["url_validation"] = url_validation
+    out["validation_support"] = validation_support
+    out["url_validation"] = url_validation
+
+    category = normalize_category(
+        getattr(assertion, "normalized_category", None)
+        or getattr(assertion, "rule_category", None)
+    )
     critical_binding_required = bool(category in CRITICAL_BINDING_CATEGORIES)
     review_status = str(getattr(assertion, "review_status", "") or "").strip().lower()
 
     if _source_is_curated_official_fetched(source) and bool(url_validation.get("trust_for_extraction")):
-        if payload.get("validation_state") in {VALIDATION_STATE_UNSUPPORTED, VALIDATION_STATE_CONFLICTING, VALIDATION_STATE_AMBIGUOUS}:
-            payload["validation_state"] = VALIDATION_STATE_VALIDATED if review_status == "verified" else VALIDATION_STATE_WEAK
-            payload["validation_quality"] = max(float(payload.get("validation_quality") or 0.0), 0.72 if review_status == "verified" else 0.58)
-            payload["validation_reason"] = "curated_official_source_requires_review_not_block"
-            payload["validated"] = bool(review_status == "verified")
-            payload["trust_state"] = TRUST_STATE_TRUSTED if review_status == "verified" else TRUST_STATE_VALIDATED
-            payload["blocking_issue"] = False if not critical_binding_required else False
-    payload["validation_support"] = dict(payload.get("validation_support") or {})
-    payload["validation_support"]["url_validation"] = url_validation
-    return payload
+        if out.get("validation_state") in {
+            VALIDATION_STATE_UNSUPPORTED,
+            VALIDATION_STATE_CONFLICTING,
+            VALIDATION_STATE_AMBIGUOUS,
+        }:
+            verified = review_status == "verified"
+            out["validation_state"] = (
+                VALIDATION_STATE_VALIDATED if verified else VALIDATION_STATE_WEAK
+            )
+            out["validation_quality"] = max(
+                float(out.get("validation_quality") or 0.0),
+                0.72 if verified else 0.58,
+            )
+            out["validation_reason"] = "curated_official_source_requires_review_not_block"
+            out["validated"] = bool(verified)
+            out["trust_state"] = TRUST_STATE_TRUSTED if verified else TRUST_STATE_VALIDATED
+            out["blocking_issue"] = False if not critical_binding_required else False
 
+    return out
 
-_validation_orig_apply_state = _apply_validation_state_to_source
 
 def _apply_validation_state_to_source(
     db: Session,
@@ -792,25 +842,27 @@ def _apply_validation_state_to_source(
     counts: dict[str, int],
     blocking_issue_count: int,
 ) -> dict[str, object]:
-    summary = dict(_validation_orig_apply_state(
-        db,
-        source=source,
-        assertions=assertions,
-        counts=counts,
-        blocking_issue_count=blocking_issue_count,
-    ))
+    summary = dict(
+        _BASE_APPLY_VALIDATION_STATE_TO_SOURCE(
+            db,
+            source=source,
+            assertions=assertions,
+            counts=counts,
+            blocking_issue_count=blocking_issue_count,
+        )
+    )
 
     if _source_is_curated_official_fetched(source):
         source.authority_use_type = "binding"
-        if str(getattr(source, "refresh_state", "") or "").strip().lower() in {"blocked", "degraded"}:
+        current_state = str(getattr(source, "refresh_state", "") or "").strip().lower()
+        if current_state in {"blocked", "degraded"}:
             source.refresh_state = "review_required"
             source.refresh_status_reason = "validation_conflict_needs_review"
             source.registry_status = "active"
             source.refresh_blocked_reason = None
             source.revalidation_required = True
             db.add(source)
-            db.commit()
-            db.refresh(source)
+            db.flush()
 
         summary["refresh_state"] = getattr(source, "refresh_state", None)
         summary["status_reason"] = getattr(source, "refresh_status_reason", None)
@@ -843,7 +895,11 @@ def _loads_list(value):
 def _source_last_verified_iso(source: PolicySource | None) -> str | None:
     if source is None:
         return None
-    dt = getattr(source, "last_verified_at", None) or getattr(source, "freshness_checked_at", None) or getattr(source, "retrieved_at", None)
+    dt = (
+        getattr(source, "last_verified_at", None)
+        or getattr(source, "freshness_checked_at", None)
+        or getattr(source, "retrieved_at", None)
+    )
     return dt.isoformat() if dt else None
 
 
@@ -856,19 +912,33 @@ def _source_currentness_summary(source: PolicySource | None) -> dict[str, object
             "current_reason": "missing_source",
             "last_verified_at": None,
         }
+
     freshness_status = str(getattr(source, "freshness_status", "") or "").strip().lower()
     refresh_state = str(getattr(source, "refresh_state", "") or "").strip().lower()
     http_status = _source_http_status(source)
     url_validation = _source_url_validation_summary(source)
-    is_real_source = bool(url_validation.get("url_allowed")) and bool(str(getattr(source, "url", "") or "").strip())
-    is_verified = bool(getattr(source, "is_authoritative", False)) or str(getattr(source, "authority_tier", "") or "").strip().lower() in {"authoritative_official", "approved_official_supporting"}
-    is_current = bool(url_validation.get("fetch_usable")) and freshness_status not in {"stale", "not_found", "blocked", "fetch_failed", "error"} and refresh_state not in {"blocked", "failed"} and (http_status is None or 200 <= int(http_status) < 400)
+
+    is_real_source = bool(url_validation.get("url_allowed")) and bool(
+        str(getattr(source, "url", "") or "").strip()
+    )
+    is_verified = bool(getattr(source, "is_authoritative", False)) or (
+        str(getattr(source, "authority_tier", "") or "").strip().lower()
+        in {"authoritative_official", "approved_official_supporting"}
+    )
+    is_current = (
+        bool(url_validation.get("fetch_usable"))
+        and freshness_status not in {"stale", "not_found", "blocked", "fetch_failed", "error"}
+        and refresh_state not in {"blocked", "failed"}
+        and (http_status is None or 200 <= int(http_status) < 400)
+    )
+
     if not is_real_source:
         reason = "not_real_source"
     elif not is_current:
         reason = freshness_status or refresh_state or "not_current"
     else:
         reason = "current"
+
     return {
         "is_current": is_current,
         "is_verified": is_verified,
@@ -878,30 +948,63 @@ def _source_currentness_summary(source: PolicySource | None) -> dict[str, object
     }
 
 
-def _assertion_normalization_payload(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+def _assertion_normalization_payload_base(
+    assertion: PolicyAssertion,
+    source: PolicySource | None,
+) -> dict[str, object]:
     citation_json = _loads_dict(getattr(assertion, "citation_json", None))
     url_validation = _source_url_validation_summary(source)
     currentness = _source_currentness_summary(source)
-    normalized_category = normalize_category(getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None))
+    normalized_category = normalize_category(
+        getattr(assertion, "normalized_category", None)
+        or getattr(assertion, "rule_category", None)
+    )
+
     return {
         "rule_key": getattr(assertion, "rule_key", None),
         "normalized_category": normalized_category,
         "display_category": normalized_category,
-        "value_text": str(getattr(assertion, "raw_excerpt", None) or citation_json.get("raw_excerpt") or getattr(assertion, "value_text", None) or "").strip() or None,
+        "value_text": (
+            str(
+                getattr(assertion, "raw_excerpt", None)
+                or citation_json.get("raw_excerpt")
+                or getattr(assertion, "value_text", None)
+                or ""
+            ).strip()
+            or None
+        ),
         "citation": {
             "text": str(getattr(assertion, "source_citation", None) or "").strip() or None,
             "url": citation_json.get("url") or getattr(source, "url", None),
             "title": citation_json.get("title") or getattr(source, "title", None),
             "publisher": citation_json.get("publisher") or getattr(source, "publisher", None),
-            "raw_excerpt": citation_json.get("raw_excerpt") or str(getattr(assertion, "raw_excerpt", None) or "").strip() or None,
+            "raw_excerpt": citation_json.get("raw_excerpt")
+            or str(getattr(assertion, "raw_excerpt", None) or "").strip()
+            or None,
         },
         "confidence": round(_safe_float(getattr(assertion, "confidence", 0.0)), 6),
         "citation_quality": round(_citation_quality_from_assertion(assertion), 6),
-        "authority_level": str(getattr(source, "authority_tier", None) or getattr(assertion, "authority_tier", None) or "derived_or_inferred"),
-        "authority_rank": int(getattr(source, "authority_rank", 0) or getattr(assertion, "authority_rank", 0) or 0),
-        "authority_score": round(_safe_float(getattr(source, "authority_score", 0.0) or getattr(assertion, "authority_score", 0.0)), 6),
-        "is_real": bool(currentness.get("is_real_source")) and bool(url_validation.get("trust_for_extraction")),
-        "is_verified": bool(currentness.get("is_verified")) and str(getattr(assertion, "validation_state", "") or "").strip().lower() == "validated",
+        "authority_level": str(
+            getattr(source, "authority_tier", None)
+            or getattr(assertion, "authority_tier", None)
+            or "derived_or_inferred"
+        ),
+        "authority_rank": int(
+            getattr(source, "authority_rank", 0)
+            or getattr(assertion, "authority_rank", 0)
+            or 0
+        ),
+        "authority_score": round(
+            _safe_float(
+                getattr(source, "authority_score", 0.0)
+                or getattr(assertion, "authority_score", 0.0)
+            ),
+            6,
+        ),
+        "is_real": bool(currentness.get("is_real_source"))
+        and bool(url_validation.get("trust_for_extraction")),
+        "is_verified": bool(currentness.get("is_verified"))
+        and str(getattr(assertion, "validation_state", "") or "").strip().lower() == "validated",
         "is_current": bool(currentness.get("is_current")),
         "current_reason": currentness.get("current_reason"),
         "last_verified_at": currentness.get("last_verified_at"),
@@ -909,10 +1012,334 @@ def _assertion_normalization_payload(assertion: PolicyAssertion, source: PolicyS
     }
 
 
-_validation_orig_validate_assertion = validate_assertion
+# --- Step 4 additive patch v2: stronger citation/currentness normalization with PDF-aware context ---
+def _citation_pages_from_payload(value):
+    payload = _loads_dict(value)
+    pages = payload.get("pages")
+    if isinstance(pages, list):
+        out = []
+        for page in pages:
+            try:
+                out.append(int(page))
+            except Exception:
+                continue
+        return out
+    page = payload.get("page")
+    try:
+        return [int(page)] if page is not None else []
+    except Exception:
+        return []
+
+
+def _citation_locator_text(payload: dict) -> str | None:
+    raw = str(
+        payload.get("locator")
+        or payload.get("section")
+        or payload.get("heading")
+        or payload.get("anchor")
+        or ""
+    ).strip()
+    return raw or None
+
+
+def _citation_source_kind(source: PolicySource | None, citation_payload: dict) -> str:
+    publication_type = str(
+        getattr(source, "publication_type", None)
+        or citation_payload.get("publication_type")
+        or ""
+    ).strip().lower()
+    url = str(
+        getattr(source, "url", None) or citation_payload.get("url") or ""
+    ).strip().lower()
+
+    if publication_type == "pdf" or url.endswith(".pdf"):
+        return "pdf"
+    if publication_type in {"api", "json", "json_api"}:
+        return "api"
+    return "html"
+
+
+def _normalized_citation_with_pdf_context(
+    assertion: PolicyAssertion,
+    source: PolicySource | None,
+) -> dict[str, object]:
+    citation = _loads_dict(getattr(assertion, "citation_json", None))
+    raw_excerpt = str(
+        getattr(assertion, "raw_excerpt", None) or citation.get("raw_excerpt") or ""
+    ).strip() or None
+    pages = _citation_pages_from_payload(citation)
+    source_kind = _citation_source_kind(source, citation)
+    locator = _citation_locator_text(citation)
+    url = str(citation.get("url") or getattr(source, "url", None) or "").strip() or None
+    title = str(citation.get("title") or getattr(source, "title", None) or "").strip() or None
+    publisher = (
+        str(citation.get("publisher") or getattr(source, "publisher", None) or "").strip()
+        or None
+    )
+    quality = _citation_quality_from_assertion(assertion)
+    has_pinpoint = bool(locator or pages)
+
+    return {
+        "url": url,
+        "title": title,
+        "publisher": publisher,
+        "publication_type": str(
+            getattr(source, "publication_type", None)
+            or citation.get("publication_type")
+            or source_kind
+        ),
+        "source_kind": source_kind,
+        "raw_excerpt": raw_excerpt,
+        "pages": pages,
+        "page_count": len(pages),
+        "locator": locator,
+        "pinpoint_citation": has_pinpoint,
+        "citation_quality": round(float(quality), 6),
+        "is_pdf_backed": source_kind == "pdf",
+        "is_api_backed": source_kind == "api",
+        "is_html_backed": source_kind == "html",
+    }
+
+
+def _confidence_with_currentness(
+    assertion: PolicyAssertion,
+    source: PolicySource | None,
+) -> dict[str, object]:
+    currentness = _source_currentness_summary(source)
+    citation = _normalized_citation_with_pdf_context(assertion, source)
+    confidence = _safe_float(getattr(assertion, "confidence", 0.0))
+    validation_state = str(getattr(assertion, "validation_state", None) or "").strip().lower()
+
+    effective = confidence
+    if currentness.get("is_current"):
+        effective += 0.05
+    if citation.get("pinpoint_citation"):
+        effective += 0.05
+    if citation.get("is_pdf_backed") and citation.get("page_count"):
+        effective += 0.03
+    if validation_state == "validated":
+        effective += 0.07
+
+    return {
+        "base_confidence": round(confidence, 6),
+        "effective_confidence": round(min(effective, 1.0), 6),
+        "is_current": bool(currentness.get("is_current")),
+        "pinpoint_citation": bool(citation.get("pinpoint_citation")),
+        "is_pdf_backed": bool(citation.get("is_pdf_backed")),
+    }
+
+
+# --- Step 4 additive patch v3: use uploaded NSPIRE PDF zip catalog as real evidence context ---
+from pathlib import Path
+import zipfile
+import re as _step4_re
+
+_STEP4_DEFAULT_ZIP_PATHS = [
+    Path(os.getenv("NSPIRE_PDF_ZIP_PATH", "")).expanduser()
+    if os.getenv("NSPIRE_PDF_ZIP_PATH")
+    else None,
+    Path("/mnt/data/pdfs(1).zip"),
+]
+_STEP4_DEFAULT_PDF_DIRS = [
+    Path(os.getenv("NSPIRE_PDF_ROOT", "")).expanduser()
+    if os.getenv("NSPIRE_PDF_ROOT")
+    else None,
+    Path("backend/data/pdfs"),
+    Path("/app/backend/data/pdfs"),
+    Path("/mnt/data/step4_pdf_catalog/pdfs"),
+]
+
+
+def _step4_iter_pdf_catalog_names() -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+
+    for maybe_dir in _STEP4_DEFAULT_PDF_DIRS:
+        if not maybe_dir:
+            continue
+        try:
+            path = maybe_dir.resolve()
+        except Exception:
+            path = maybe_dir
+        if path.exists() and path.is_dir():
+            for pdf in path.rglob("*.pdf"):
+                key = pdf.name.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                names.append(pdf.name)
+
+    if names:
+        return sorted(names)
+
+    for maybe_zip in _STEP4_DEFAULT_ZIP_PATHS:
+        if not maybe_zip:
+            continue
+        if maybe_zip.exists() and maybe_zip.is_file():
+            try:
+                with zipfile.ZipFile(maybe_zip) as zf:
+                    for name in zf.namelist():
+                        if name.lower().endswith(".pdf"):
+                            base = Path(name).name
+                            key = base.lower()
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            names.append(base)
+            except Exception:
+                continue
+
+    return sorted(names)
+
+
+def _step4_pdf_catalog_summary() -> dict[str, object]:
+    names = _step4_iter_pdf_catalog_names()
+    return {
+        "pdf_count": len(names),
+        "pdf_names": names,
+    }
+
+
+def _step4_tokenize(value: object) -> list[str]:
+    text = str(value or "").strip().lower()
+    text = text.replace("&", " and ")
+    tokens = [
+        tok
+        for tok in _step4_re.split(r"[^a-z0-9]+", text)
+        if tok and tok not in {"nspire", "standard", "pdf", "and", "the", "of"}
+    ]
+    return tokens
+
+
+def _step4_match_pdf_catalog(
+    *,
+    assertion: PolicyAssertion,
+    source: PolicySource | None,
+    citation: dict[str, object] | None = None,
+) -> dict[str, object]:
+    catalog = _step4_iter_pdf_catalog_names()
+    if not catalog:
+        return {
+            "matched": False,
+            "matched_pdf_name": None,
+            "matched_pdf_path": None,
+            "catalog_size": 0,
+            "match_score": 0.0,
+        }
+
+    fields = [
+        getattr(assertion, "rule_key", None),
+        getattr(assertion, "normalized_category", None),
+        getattr(assertion, "rule_category", None),
+        getattr(assertion, "source_citation", None),
+        getattr(assertion, "raw_excerpt", None),
+        getattr(source, "title", None) if source is not None else None,
+        getattr(source, "publisher", None) if source is not None else None,
+        (citation or {}).get("title") if isinstance(citation, dict) else None,
+        (citation or {}).get("locator") if isinstance(citation, dict) else None,
+    ]
+
+    wanted = []
+    for field in fields:
+        wanted.extend(_step4_tokenize(field))
+    wanted = sorted(set(tok for tok in wanted if len(tok) >= 3))
+
+    best_name = None
+    best_score = 0.0
+    for name in catalog:
+        low = name.lower()
+        score = 0.0
+        for tok in wanted:
+            if tok in low:
+                score += 1.0
+        if score > best_score:
+            best_score = score
+            best_name = name
+
+    matched = best_name is not None and best_score >= 1.0
+    matched_path = None
+    if matched:
+        for maybe_dir in _STEP4_DEFAULT_PDF_DIRS:
+            if not maybe_dir:
+                continue
+            try:
+                path = maybe_dir.resolve()
+            except Exception:
+                path = maybe_dir
+            candidate = path / str(best_name)
+            if candidate.exists():
+                matched_path = str(candidate)
+                break
+
+    return {
+        "matched": matched,
+        "matched_pdf_name": best_name,
+        "matched_pdf_path": matched_path,
+        "catalog_size": len(catalog),
+        "match_score": round(float(best_score), 6),
+    }
+
+
+def _assertion_normalization_payload(
+    assertion: PolicyAssertion,
+    source: PolicySource | None,
+) -> dict[str, object]:
+    payload = dict(_assertion_normalization_payload_base(assertion, source))
+
+    citation = _normalized_citation_with_pdf_context(assertion, source)
+    confidence_summary = _confidence_with_currentness(assertion, source)
+    pdf_match = _step4_match_pdf_catalog(assertion=assertion, source=source, citation=citation)
+
+    payload["citation"] = citation
+    payload["citation_pages"] = citation.get("pages")
+    payload["citation_locator"] = citation.get("locator")
+    payload["citation_has_pinpoint"] = citation.get("pinpoint_citation")
+    payload["source_kind"] = citation.get("source_kind")
+    payload["publication_type"] = citation.get("publication_type")
+    payload["is_pdf_backed"] = bool(citation.get("is_pdf_backed") or pdf_match.get("matched"))
+    payload["is_api_backed"] = citation.get("is_api_backed")
+    payload["is_html_backed"] = citation.get("is_html_backed")
+    payload["effective_confidence"] = confidence_summary.get("effective_confidence")
+    payload["base_confidence"] = confidence_summary.get("base_confidence")
+
+    payload["evidence_strength"] = (
+        "strong"
+        if (
+            payload.get("is_verified")
+            and payload.get("is_current")
+            and citation.get("pinpoint_citation")
+        )
+        else "moderate"
+        if (payload.get("is_real") and citation.get("citation_quality", 0.0) >= 0.6)
+        else "weak"
+    )
+
+    payload["pdf_catalog_match"] = pdf_match
+    payload["matched_pdf_name"] = pdf_match.get("matched_pdf_name")
+    payload["matched_pdf_path"] = pdf_match.get("matched_pdf_path")
+    payload["pdf_catalog_match_score"] = pdf_match.get("match_score")
+    payload["pdf_catalog_size"] = pdf_match.get("catalog_size")
+
+    citation["matched_pdf_name"] = pdf_match.get("matched_pdf_name")
+    citation["matched_pdf_path"] = pdf_match.get("matched_pdf_path")
+    citation["pdf_catalog_match_score"] = pdf_match.get("match_score")
+    citation["pdf_catalog_size"] = pdf_match.get("catalog_size")
+    citation["is_pdf_backed"] = bool(citation.get("is_pdf_backed") or pdf_match.get("matched"))
+    if pdf_match.get("matched") and not citation.get("pages"):
+        citation["catalog_backed"] = True
+
+    payload["citation"] = citation
+
+    if pdf_match.get("matched") and payload.get("evidence_strength") == "weak" and payload.get("is_real"):
+        payload["evidence_strength"] = "moderate"
+
+    return payload
+
 
 def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-    payload = dict(_validation_orig_validate_assertion(assertion=assertion, source=source))
+    payload = dict(_BASE_VALIDATE_ASSERTION(assertion=assertion, source=source))
+    payload = _apply_validation_softening(payload=payload, assertion=assertion, source=source)
+
     normalized = _assertion_normalization_payload(assertion, source)
     payload["normalized_rule"] = normalized
     payload["citation_payload"] = normalized.get("citation")
@@ -924,10 +1351,16 @@ def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | Non
     payload["is_current"] = normalized.get("is_current")
     payload["current_reason"] = normalized.get("current_reason")
     payload["last_verified_at"] = normalized.get("last_verified_at")
+    payload["citation_pages"] = normalized.get("citation_pages")
+    payload["citation_locator"] = normalized.get("citation_locator")
+    payload["citation_has_pinpoint"] = normalized.get("citation_has_pinpoint")
+    payload["source_kind"] = normalized.get("source_kind")
+    payload["publication_type"] = normalized.get("publication_type")
+    payload["is_pdf_backed"] = normalized.get("is_pdf_backed")
+    payload["effective_confidence"] = normalized.get("effective_confidence")
+    payload["evidence_strength"] = normalized.get("evidence_strength")
     return payload
 
-
-_validation_orig_validate_market_assertions = validate_market_assertions
 
 def validate_market_assertions(
     db: Session,
@@ -939,15 +1372,17 @@ def validate_market_assertions(
     pha_name: str | None = None,
     source_id: int | None = None,
 ) -> dict[str, object]:
-    result = dict(_validation_orig_validate_market_assertions(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-        source_id=source_id,
-    ))
+    result = dict(
+        _BASE_VALIDATE_MARKET_ASSERTIONS(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            source_id=source_id,
+        )
+    )
 
     st = _norm_state(state)
     cnty = _norm_lower(county)
@@ -975,10 +1410,14 @@ def validate_market_assertions(
             stmt = stmt.where(PolicyAssertion.pha_name == pha)
     if source_id is not None:
         stmt = stmt.where(PolicyAssertion.source_id == int(source_id))
+
     rows = list(db.scalars(stmt).all())
 
     normalized_rules = []
-    real_count = verified_count = current_count = 0
+    real_count = 0
+    verified_count = 0
+    current_count = 0
+
     for row in rows:
         source = db.get(PolicySource, int(row.source_id)) if getattr(row, "source_id", None) is not None else None
         normalized = _assertion_normalization_payload(row, source)
@@ -991,166 +1430,18 @@ def validate_market_assertions(
 
     result["normalized_rules"] = normalized_rules
     result["real_rule_count"] = real_count
-    result["verified_current_rule_count"] = sum(1 for row in normalized_rules if row.get("is_verified") and row.get("is_current"))
+    result["verified_current_rule_count"] = sum(
+        1 for row in normalized_rules if row.get("is_verified") and row.get("is_current")
+    )
     result["verified_rule_count_step4"] = verified_count
     result["current_rule_count"] = current_count
-    return result
-
-
-# --- Step 4 additive patch v2: stronger citation/currentness normalization with PDF-aware context ---
-def _citation_pages_from_payload(value):
-    payload = _loads_dict(value)
-    pages = payload.get("pages")
-    if isinstance(pages, list):
-        out = []
-        for page in pages:
-            try:
-                out.append(int(page))
-            except Exception:
-                continue
-        return out
-    page = payload.get("page")
-    try:
-        return [int(page)] if page is not None else []
-    except Exception:
-        return []
-
-
-def _citation_locator_text(payload: dict) -> str | None:
-    raw = str(payload.get("locator") or payload.get("section") or payload.get("heading") or payload.get("anchor") or "").strip()
-    return raw or None
-
-
-def _citation_source_kind(source: PolicySource | None, citation_payload: dict) -> str:
-    publication_type = str(getattr(source, "publication_type", None) or citation_payload.get("publication_type") or "").strip().lower()
-    url = str(getattr(source, "url", None) or citation_payload.get("url") or "").strip().lower()
-    if publication_type == "pdf" or url.endswith('.pdf'):
-        return "pdf"
-    if publication_type in {"api", "json", "json_api"}:
-        return "api"
-    return "html"
-
-
-def _normalized_citation_with_pdf_context(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-    citation = _loads_dict(getattr(assertion, "citation_json", None))
-    raw_excerpt = str(getattr(assertion, "raw_excerpt", None) or citation.get("raw_excerpt") or "").strip() or None
-    pages = _citation_pages_from_payload(citation)
-    source_kind = _citation_source_kind(source, citation)
-    locator = _citation_locator_text(citation)
-    url = str(citation.get("url") or getattr(source, "url", None) or "").strip() or None
-    title = str(citation.get("title") or getattr(source, "title", None) or "").strip() or None
-    publisher = str(citation.get("publisher") or getattr(source, "publisher", None) or "").strip() or None
-    quality = _citation_quality_from_assertion(assertion)
-    has_pinpoint = bool(locator or pages)
-    return {
-        "url": url,
-        "title": title,
-        "publisher": publisher,
-        "publication_type": str(getattr(source, "publication_type", None) or citation.get("publication_type") or source_kind),
-        "source_kind": source_kind,
-        "raw_excerpt": raw_excerpt,
-        "pages": pages,
-        "page_count": len(pages),
-        "locator": locator,
-        "pinpoint_citation": has_pinpoint,
-        "citation_quality": round(float(quality), 6),
-        "is_pdf_backed": source_kind == "pdf",
-        "is_api_backed": source_kind == "api",
-        "is_html_backed": source_kind == "html",
-    }
-
-
-def _confidence_with_currentness(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-    currentness = _source_currentness_summary(source)
-    citation = _normalized_citation_with_pdf_context(assertion, source)
-    confidence = _safe_float(getattr(assertion, "confidence", 0.0))
-    validation_state = str(getattr(assertion, "validation_state", None) or "").strip().lower()
-    effective = confidence
-    if currentness.get("is_current"):
-        effective += 0.05
-    if citation.get("pinpoint_citation"):
-        effective += 0.05
-    if citation.get("is_pdf_backed") and citation.get("page_count"):
-        effective += 0.03
-    if validation_state == "validated":
-        effective += 0.07
-    return {
-        "base_confidence": round(confidence, 6),
-        "effective_confidence": round(min(effective, 1.0), 6),
-        "is_current": bool(currentness.get("is_current")),
-        "pinpoint_citation": bool(citation.get("pinpoint_citation")),
-        "is_pdf_backed": bool(citation.get("is_pdf_backed")),
-    }
-
-
-_validation_v2_orig_assertion_normalization_payload = _assertion_normalization_payload
-
-def _assertion_normalization_payload(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-    payload = dict(_validation_v2_orig_assertion_normalization_payload(assertion, source))
-    citation = _normalized_citation_with_pdf_context(assertion, source)
-    confidence_summary = _confidence_with_currentness(assertion, source)
-    payload["citation"] = citation
-    payload["citation_pages"] = citation.get("pages")
-    payload["citation_locator"] = citation.get("locator")
-    payload["citation_has_pinpoint"] = citation.get("pinpoint_citation")
-    payload["source_kind"] = citation.get("source_kind")
-    payload["publication_type"] = citation.get("publication_type")
-    payload["is_pdf_backed"] = citation.get("is_pdf_backed")
-    payload["is_api_backed"] = citation.get("is_api_backed")
-    payload["is_html_backed"] = citation.get("is_html_backed")
-    payload["effective_confidence"] = confidence_summary.get("effective_confidence")
-    payload["base_confidence"] = confidence_summary.get("base_confidence")
-    payload["evidence_strength"] = (
-        "strong" if (payload.get("is_verified") and payload.get("is_current") and citation.get("pinpoint_citation")) else
-        "moderate" if (payload.get("is_real") and citation.get("citation_quality", 0.0) >= 0.6) else
-        "weak"
-    )
-    return payload
-
-
-_validation_v2_orig_validate_assertion = validate_assertion
-
-def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-    payload = dict(_validation_v2_orig_validate_assertion(assertion=assertion, source=source))
-    normalized = _assertion_normalization_payload(assertion, source)
-    payload["normalized_rule"] = normalized
-    payload["citation_payload"] = normalized.get("citation")
-    payload["citation_pages"] = normalized.get("citation_pages")
-    payload["citation_locator"] = normalized.get("citation_locator")
-    payload["citation_has_pinpoint"] = normalized.get("citation_has_pinpoint")
-    payload["source_kind"] = normalized.get("source_kind")
-    payload["publication_type"] = normalized.get("publication_type")
-    payload["is_pdf_backed"] = normalized.get("is_pdf_backed")
-    payload["effective_confidence"] = normalized.get("effective_confidence")
-    payload["evidence_strength"] = normalized.get("evidence_strength")
-    return payload
-
-
-_validation_v2_orig_validate_market_assertions = validate_market_assertions
-
-def validate_market_assertions(
-    db: Session,
-    *,
-    org_id: int | None,
-    state: str,
-    county: str | None,
-    city: str | None,
-    pha_name: str | None = None,
-    source_id: int | None = None,
-) -> dict[str, object]:
-    result = dict(_validation_v2_orig_validate_market_assertions(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-        source_id=source_id,
-    ))
-    normalized_rules = list(result.get("normalized_rules") or [])
     result["pdf_backed_rule_count"] = sum(1 for row in normalized_rules if row.get("is_pdf_backed"))
-    result["pinpoint_citation_rule_count"] = sum(1 for row in normalized_rules if row.get("citation_has_pinpoint"))
-    result["strong_evidence_rule_count"] = sum(1 for row in normalized_rules if row.get("evidence_strength") == "strong")
+    result["pinpoint_citation_rule_count"] = sum(
+        1 for row in normalized_rules if row.get("citation_has_pinpoint")
+    )
+    result["strong_evidence_rule_count"] = sum(
+        1 for row in normalized_rules if row.get("evidence_strength") == "strong"
+    )
     result["normalization_summary"] = {
         "real": int(result.get("real_rule_count") or 0),
         "verified": int(result.get("verified_rule_count_step4") or 0),
@@ -1160,184 +1451,189 @@ def validate_market_assertions(
         "pinpoint_citation": int(result.get("pinpoint_citation_rule_count") or 0),
         "strong_evidence": int(result.get("strong_evidence_rule_count") or 0),
     }
+
+    matched_names = sorted(
+        {str(row.get("matched_pdf_name")) for row in normalized_rules if row.get("matched_pdf_name")}
+    )
+    result["pdf_catalog_summary"] = {
+        **_step4_pdf_catalog_summary(),
+        "matched_pdf_count": len(matched_names),
+        "matched_pdf_names": matched_names,
+    }
+    result["pdf_catalog_matched_rule_count"] = sum(
+        1 for row in normalized_rules if row.get("matched_pdf_name")
+    )
+
     return result
 
 
-# --- Step 4 additive patch v3: use uploaded NSPIRE PDF zip catalog as real evidence context ---
-from pathlib import Path
-import zipfile
-import re as _step4_re
-
-_STEP4_DEFAULT_ZIP_PATHS = [
-    Path(os.getenv("NSPIRE_PDF_ZIP_PATH", "")).expanduser() if os.getenv("NSPIRE_PDF_ZIP_PATH") else None,
-    Path("/mnt/data/pdfs(1).zip"),
-]
-_STEP4_DEFAULT_PDF_DIRS = [
-    Path(os.getenv("NSPIRE_PDF_ROOT", "")).expanduser() if os.getenv("NSPIRE_PDF_ROOT") else None,
-    Path("backend/data/pdfs"),
-    Path("/app/backend/data/pdfs"),
-    Path("/mnt/data/step4_pdf_catalog/pdfs"),
-]
+# --- tier-two evidence-first final overrides ---
 
 
-def _step4_iter_pdf_catalog_names() -> list[str]:
-    names: list[str] = []
-    seen: set[str] = set()
-    for maybe_dir in _STEP4_DEFAULT_PDF_DIRS:
-        if not maybe_dir:
-            continue
-        try:
-            path = maybe_dir.resolve()
-        except Exception:
-            path = maybe_dir
-        if path.exists() and path.is_dir():
-            for pdf in path.rglob("*.pdf"):
-                key = pdf.name.lower()
-                if key in seen:
-                    continue
-                seen.add(key)
-                names.append(pdf.name)
-    if names:
-        return sorted(names)
-    for maybe_zip in _STEP4_DEFAULT_ZIP_PATHS:
-        if not maybe_zip:
-            continue
-        if maybe_zip.exists() and maybe_zip.is_file():
-            try:
-                with zipfile.ZipFile(maybe_zip) as zf:
-                    for name in zf.namelist():
-                        if name.lower().endswith('.pdf'):
-                            base = Path(name).name
-                            key = base.lower()
-                            if key in seen:
-                                continue
-                            seen.add(key)
-                            names.append(base)
-            except Exception:
-                continue
-    return sorted(names)
+def _tier2_evidence_family_for_source(source: PolicySource | None) -> dict[str, object]:
+    if source is None:
+        return {
+            "family": "unknown",
+            "is_primary_evidence": False,
+            "freshness_role": "unknown",
+            "truth_role": "unknown",
+        }
 
+    source_type = str(getattr(source, "source_type", "") or "").strip().lower()
+    publication_type = str(getattr(source, "publication_type", "") or "").strip().lower()
+    authority_use_type = str(getattr(source, "authority_use_type", "") or "").strip().lower()
+    authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
 
-def _step4_pdf_catalog_summary() -> dict[str, object]:
-    names = _step4_iter_pdf_catalog_names()
+    family = "crawl"
+    if source_type in {"dataset", "artifact", "manual", "catalog", "program", "feed", "registry", "repo_artifact", "api"}:
+        family = source_type
+    elif publication_type in {"pdf", "json", "json_api", "dataset"}:
+        family = publication_type
+    elif authority_use_type in {"binding", "supporting"} and authority_tier in {"authoritative_official", "approved_official_supporting"}:
+        family = "official_publication"
+
+    primary = family in {
+        "dataset",
+        "artifact",
+        "manual",
+        "catalog",
+        "program",
+        "feed",
+        "registry",
+        "repo_artifact",
+        "api",
+        "pdf",
+        "json",
+        "json_api",
+        "official_publication",
+    }
+    freshness_role = "support_only" if family == "crawl" else "primary_and_refreshable"
+    truth_role = "primary_evidence" if primary else "supporting_signal"
+
     return {
-        "pdf_count": len(names),
-        "pdf_names": names,
+        "family": family,
+        "is_primary_evidence": primary,
+        "freshness_role": freshness_role,
+        "truth_role": truth_role,
+        "authority_use_type": authority_use_type or None,
+        "authority_tier": authority_tier or None,
     }
 
 
-def _step4_tokenize(value: object) -> list[str]:
-    text = str(value or "").strip().lower()
-    text = text.replace("&", " and ")
-    tokens = [tok for tok in _step4_re.split(r"[^a-z0-9]+", text) if tok and tok not in {"nspire", "standard", "pdf", "and", "the", "of"}]
-    return tokens
+_tier2_original_validate_assertion = validate_assertion
+_tier2_original_validate_market_assertions = validate_market_assertions
 
 
-def _step4_match_pdf_catalog(*, assertion: PolicyAssertion, source: PolicySource | None, citation: dict[str, object] | None = None) -> dict[str, object]:
-    catalog = _step4_iter_pdf_catalog_names()
-    if not catalog:
-        return {"matched": False, "matched_pdf_name": None, "matched_pdf_path": None, "catalog_size": 0, "match_score": 0.0}
-    fields = [
-        getattr(assertion, "rule_key", None),
-        getattr(assertion, "normalized_category", None),
-        getattr(assertion, "rule_category", None),
-        getattr(assertion, "source_citation", None),
-        getattr(assertion, "raw_excerpt", None),
-        getattr(source, "title", None) if source is not None else None,
-        getattr(source, "publisher", None) if source is not None else None,
-        (citation or {}).get("title") if isinstance(citation, dict) else None,
-        (citation or {}).get("locator") if isinstance(citation, dict) else None,
-    ]
-    wanted = []
-    for field in fields:
-        wanted.extend(_step4_tokenize(field))
-    wanted = sorted(set(tok for tok in wanted if len(tok) >= 3))
-    best_name = None
-    best_score = 0.0
-    for name in catalog:
-        low = name.lower()
-        score = 0.0
-        for tok in wanted:
-            if tok in low:
-                score += 1.0
-        if score > best_score:
-            best_score = score
-            best_name = name
-    matched = best_name is not None and best_score >= 1.0
-    matched_path = None
-    if matched:
-        for maybe_dir in _STEP4_DEFAULT_PDF_DIRS:
-            if not maybe_dir:
-                continue
-            try:
-                path = maybe_dir.resolve()
-            except Exception:
-                path = maybe_dir
-            candidate = path / str(best_name)
-            if candidate.exists():
-                matched_path = str(candidate)
-                break
-    return {
-        "matched": matched,
-        "matched_pdf_name": best_name,
-        "matched_pdf_path": matched_path,
-        "catalog_size": len(catalog),
-        "match_score": round(float(best_score), 6),
+def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    result = dict(_tier2_original_validate_assertion(assertion=assertion, source=source))
+    evidence_family = _tier2_evidence_family_for_source(source)
+
+    validation_state = str(result.get("validation_state") or "").strip().lower()
+    source_support = dict(result.get("source_support") or {})
+    url_validation = dict(source_support.get("url_validation") or {})
+    rejection_reasons = list(url_validation.get("rejection_reasons") or [])
+
+    freshness_only_failure = (
+        bool(evidence_family.get("is_primary_evidence"))
+        and any(str(reason).strip() in {"fetch_failed", "error", "blocked", "refresh_blocked", "blocked_or_antibot"} or str(reason).startswith("http_status_")
+                for reason in rejection_reasons)
+    )
+    blocking_evidence_gap = bool(
+        result.get("critical_binding_required")
+        and not bool(result.get("binding_sufficient"))
+        and validation_state in {
+            VALIDATION_STATE_UNSUPPORTED,
+            VALIDATION_STATE_AMBIGUOUS,
+            VALIDATION_STATE_CONFLICTING,
+        }
+    )
+    degraded_review_required = bool(
+        freshness_only_failure
+        or validation_state in {
+            VALIDATION_STATE_WEAK,
+            VALIDATION_STATE_AMBIGUOUS,
+            VALIDATION_STATE_CONFLICTING,
+        }
+    )
+
+    result["evidence_family"] = evidence_family
+    result["freshness_is_support_only"] = bool(evidence_family.get("is_primary_evidence"))
+    result["freshness_only_failure"] = freshness_only_failure
+    result["blocking_evidence_gap"] = blocking_evidence_gap
+    result["degraded_review_required"] = degraded_review_required
+    result["truth_model"] = {
+        "mode": "evidence_first",
+        "freshness_role": "support_only" if bool(evidence_family.get("is_primary_evidence")) else "mixed",
+        "crawler_role": "discovery_and_refresh_only",
     }
 
+    if freshness_only_failure and not blocking_evidence_gap:
+        result["reliance_state"] = TRUST_STATE_NEEDS_REVIEW
+        result["reliance_reason"] = "primary_evidence_present_but_live_refresh_failed"
+    elif blocking_evidence_gap:
+        result["reliance_state"] = TRUST_STATE_DOWNGRADED
+        result["reliance_reason"] = "binding_or_authority_gap"
+    elif degraded_review_required:
+        result["reliance_state"] = TRUST_STATE_NEEDS_REVIEW
+        result["reliance_reason"] = "review_required_before_reliance"
+    else:
+        result["reliance_state"] = TRUST_STATE_TRUSTED
+        result["reliance_reason"] = "validated_evidence_ready"
 
-_step4_v3_orig_assertion_normalization_payload = _assertion_normalization_payload
+    return result
 
-def _assertion_normalization_payload(assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-    payload = dict(_step4_v3_orig_assertion_normalization_payload(assertion, source))
-    citation = dict(payload.get("citation") or {})
-    pdf_match = _step4_match_pdf_catalog(assertion=assertion, source=source, citation=citation)
-    payload["pdf_catalog_match"] = pdf_match
-    payload["matched_pdf_name"] = pdf_match.get("matched_pdf_name")
-    payload["matched_pdf_path"] = pdf_match.get("matched_pdf_path")
-    payload["pdf_catalog_match_score"] = pdf_match.get("match_score")
-    payload["pdf_catalog_size"] = pdf_match.get("catalog_size")
-    payload["is_pdf_backed"] = bool(payload.get("is_pdf_backed") or pdf_match.get("matched"))
-    citation["matched_pdf_name"] = pdf_match.get("matched_pdf_name")
-    citation["matched_pdf_path"] = pdf_match.get("matched_pdf_path")
-    citation["pdf_catalog_match_score"] = pdf_match.get("match_score")
-    citation["pdf_catalog_size"] = pdf_match.get("catalog_size")
-    citation["is_pdf_backed"] = bool(citation.get("is_pdf_backed") or pdf_match.get("matched"))
-    if pdf_match.get("matched") and not citation.get("pages"):
-        citation["catalog_backed"] = True
-    payload["citation"] = citation
-    if pdf_match.get("matched") and payload.get("evidence_strength") == "weak" and payload.get("is_real"):
-        payload["evidence_strength"] = "moderate"
-    return payload
-
-
-_step4_v3_orig_validate_market_assertions = validate_market_assertions
 
 def validate_market_assertions(
     db: Session,
     *,
     org_id: int | None,
     state: str,
-    county: str | None,
-    city: str | None,
+    county: str | None = None,
+    city: str | None = None,
     pha_name: str | None = None,
     source_id: int | None = None,
 ) -> dict[str, object]:
-    result = dict(_step4_v3_orig_validate_market_assertions(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-        source_id=source_id,
-    ))
-    normalized_rules = list(result.get("normalized_rules") or [])
-    matched_names = sorted({str(row.get("matched_pdf_name")) for row in normalized_rules if row.get("matched_pdf_name")})
-    result["pdf_catalog_summary"] = {
-        **_step4_pdf_catalog_summary(),
-        "matched_pdf_count": len(matched_names),
-        "matched_pdf_names": matched_names,
+    payload = dict(
+        _tier2_original_validate_market_assertions(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            source_id=source_id,
+        )
+    )
+
+    validations = list(payload.get("validations") or payload.get("rows") or [])
+    blocking_categories: set[str] = set()
+    degraded_categories: set[str] = set()
+    freshness_only_categories: set[str] = set()
+    evidence_families: dict[str, int] = {}
+
+    for row in validations:
+        if not isinstance(row, dict):
+            continue
+        category = str(row.get("normalized_category") or row.get("rule_category") or "").strip().lower()
+        family_payload = dict(row.get("evidence_family") or {})
+        family = str(family_payload.get("family") or "unknown").strip().lower()
+        evidence_families[family] = int(evidence_families.get(family, 0)) + 1
+        if row.get("blocking_evidence_gap") and category:
+            blocking_categories.add(category)
+        if row.get("degraded_review_required") and category:
+            degraded_categories.add(category)
+        if row.get("freshness_only_failure") and category:
+            freshness_only_categories.add(category)
+
+    payload["truth_model"] = {
+        "mode": "evidence_first",
+        "crawler_role": "discovery_and_refresh_only",
+        "freshness_role": "support_only",
     }
-    result["pdf_catalog_matched_rule_count"] = sum(1 for row in normalized_rules if row.get("matched_pdf_name"))
-    return result
+    payload["evidence_family_counts"] = dict(sorted(evidence_families.items()))
+    payload["blocking_categories"] = sorted(blocking_categories)
+    payload["degraded_categories"] = sorted(degraded_categories)
+    payload["freshness_signal_only_categories"] = sorted(freshness_only_categories)
+    payload["review_required"] = bool(payload.get("review_required")) or bool(degraded_categories)
+    payload["safe_to_rely_on"] = bool(payload.get("safe_to_rely_on", True)) and not bool(blocking_categories)
+    return payload

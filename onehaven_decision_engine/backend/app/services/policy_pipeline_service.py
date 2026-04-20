@@ -628,7 +628,10 @@ def _recompute_profile_for_market(
         legal_overdue_categories=list(sla_summary.get("legal_overdue_categories") or []),
         informational_overdue_categories=list(sla_summary.get("informational_overdue_categories") or []),
         stale_authoritative_categories=list(sla_summary.get("stale_authoritative_categories") or []),
-        inventory_summary=inventory_summary,
+        inventory_summary={
+            **dict(sla_summary),
+            "inventory_summary": inventory_summary,
+        },
     )
 
     if hasattr(refreshed_profile, "refresh_requirements_json"):
@@ -2467,5 +2470,164 @@ def refresh_market_policy_pipeline(
             recompute = dict(pipeline_result.get("recompute") or {})
             recompute["jurisdiction_profile_id"] = profile_id
             pipeline_result["recompute"] = recompute
+    result["pipeline_result"] = pipeline_result
+    return result
+
+# --- tier-one evidence-first final overrides ---
+
+
+def _pipeline_refresh_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in list((result or {}).get("source_runs") or []):
+        if not isinstance(row, dict):
+            continue
+        refresh = row.get("refresh") if isinstance(row.get("refresh"), dict) else None
+        if refresh is not None:
+            rows.append(dict(refresh))
+        else:
+            compact = {k: v for k, v in row.items() if k in {"source_id", "ok", "changed", "reason", "change_detected"}}
+            rows.append(compact)
+    return rows
+
+
+def _finalize_pipeline_market_state(
+    db: Session,
+    *,
+    result: dict[str, Any],
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> dict[str, Any]:
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+    profile = _refetch_profile_by_scope(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    if profile is None:
+        profile = _create_empty_market_profile(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            notes="Bootstrapped during evidence-first pipeline finalization.",
+        )
+    if profile is None:
+        return result
+
+    finalized = _chunk3_finalize_jurisdiction_profile_lifecycle(
+        db,
+        profile=profile,
+        refresh_results=_pipeline_refresh_rows(result),
+        discovery_result=result.get("discovery_result") if isinstance(result.get("discovery_result"), dict) else None,
+        governance_result=result.get("lifecycle_result") if isinstance(result.get("lifecycle_result"), dict) else None,
+    )
+    recompute = dict(result.get("recompute") or {})
+    recompute["jurisdiction_profile_id"] = (finalized.get("profile") or {}).get("id") or (recompute.get("jurisdiction_profile_id"))
+    recompute["profile"] = finalized.get("completeness")
+    recompute["coverage"] = finalized.get("coverage")
+    result["recompute"] = recompute
+    result["health"] = finalized.get("health")
+    result["lockout"] = finalized.get("lockout")
+    result["sla_summary"] = finalized.get("sla_summary")
+    result["requirements"] = finalized.get("requirements")
+    result["evidence_state"] = (finalized.get("requirements") or {}).get("evidence_state")
+    return result
+
+
+_tier1_pipeline_base_run_market_policy_pipeline = run_market_policy_pipeline
+_tier1_pipeline_base_refresh_market_policy_pipeline = refresh_market_policy_pipeline
+
+
+def run_market_policy_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    result = _tier1_pipeline_base_run_market_policy_pipeline(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )
+    if not result.get("ok"):
+        return result
+    try:
+        return _finalize_pipeline_market_state(
+            db,
+            result=dict(result),
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+    except Exception as exc:
+        db.rollback()
+        result = dict(result)
+        result["pipeline_finalization_error"] = str(exc)
+        return result
+
+
+def refresh_market_policy_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    result = _tier1_pipeline_base_refresh_market_policy_pipeline(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )
+    pipeline_result = dict(result.get("pipeline_result") or {})
+    if pipeline_result.get("ok"):
+        try:
+            pipeline_result = _finalize_pipeline_market_state(
+                db,
+                result=pipeline_result,
+                org_id=org_id,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+            )
+        except Exception as exc:
+            db.rollback()
+            pipeline_result["pipeline_finalization_error"] = str(exc)
     result["pipeline_result"] = pipeline_result
     return result

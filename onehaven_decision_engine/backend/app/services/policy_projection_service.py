@@ -2896,3 +2896,173 @@ def build_property_compliance_brief(
         "stale_status": summary.get("stale_status"),
         "jurisdiction_trust": dict(summary.get("jurisdiction_trust") or {}),
     }
+
+
+
+# --- tier-two evidence-first final overrides ---
+
+
+def _tier2_projection_reliance_boundary(*, safe_to_rely_on: bool, legally_unsafe: bool, informationally_incomplete: bool) -> dict[str, Any]:
+    if safe_to_rely_on and not legally_unsafe:
+        return {
+            "status": "operationally_reliable",
+            "message": "Property compliance can rely on the current jurisdiction evidence for operational decisions.",
+        }
+    if legally_unsafe:
+        return {
+            "status": "not_safe_to_rely_on",
+            "message": "Critical jurisdiction or proof blockers still prevent safe reliance.",
+        }
+    if informationally_incomplete:
+        return {
+            "status": "degraded_review_required",
+            "message": "No hard blocker is present, but missing or stale evidence still requires review.",
+        }
+    return {
+        "status": "review_required",
+        "message": "Compliance evidence should be reviewed before relying on the projection.",
+    }
+
+
+_tier2_original_build_property_projection_snapshot = build_property_projection_snapshot
+_tier2_original_build_property_compliance_brief = build_property_compliance_brief
+
+
+def build_property_projection_snapshot(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+    projection: PropertyComplianceProjection | None = None,
+) -> dict[str, Any]:
+    payload = dict(
+        _tier2_original_build_property_projection_snapshot(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            projection=projection,
+        )
+    )
+    if not payload.get("ok"):
+        return payload
+
+    projection_payload = dict(payload.get("projection") or {})
+    jurisdiction_trust = dict(payload.get("jurisdiction") or projection_payload.get("projection_reason", {}).get("jurisdiction_trust", {}) or {})
+    proof_obligations = list(payload.get("proof_obligations") or [])
+    proof_blockers = [
+        row for row in proof_obligations
+        if bool(row.get("blocking")) and str(row.get("proof_status") or "").strip().lower() in {"missing", "expired", "mismatched"}
+    ]
+    info_gaps = [
+        row for row in proof_obligations
+        if (not bool(row.get("blocking"))) and str(row.get("proof_status") or "").strip().lower() in {"missing", "expired", "mismatched"}
+    ]
+
+    critical_missing_categories = list(jurisdiction_trust.get("critical_missing_categories") or jurisdiction_trust.get("missing_critical_categories") or [])
+    critical_stale_categories = list(jurisdiction_trust.get("critical_stale_categories") or [])
+    critical_inferred_categories = list(jurisdiction_trust.get("critical_inferred_categories") or [])
+    critical_conflicting_categories = list(jurisdiction_trust.get("critical_conflicting_categories") or [])
+    blocker_reasons = [str(x) for x in (jurisdiction_trust.get("blocker_reasons") or []) if str(x).strip()]
+    manual_review_reasons = [str(x) for x in (jurisdiction_trust.get("manual_review_reasons") or []) if str(x).strip()]
+
+    unsafe_reasons = list(payload.get("unsafe_reasons") or [])
+    informational_reasons = list(payload.get("informational_reasons") or [])
+    for row in proof_blockers:
+        unsafe_reasons.append(str(row.get("evidence_gap") or f"{row.get('proof_label') or row.get('rule_key') or 'Required proof'} is {row.get('proof_status') or 'missing'}."))
+
+    for row in info_gaps:
+        informational_reasons.append(str(row.get("evidence_gap") or f"{row.get('proof_label') or row.get('rule_key') or 'Required proof'} is {row.get('proof_status') or 'missing'}."))
+
+    unsafe_reasons.extend(blocker_reasons)
+    informational_reasons.extend(manual_review_reasons)
+
+    def _dedupe(values: list[str]) -> list[str]:
+        seen = set()
+        out = []
+        for item in values:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            out.append(text)
+        return out
+
+    legally_unsafe = bool(
+        payload.get("legally_unsafe")
+        or proof_blockers
+        or critical_missing_categories
+        or critical_conflicting_categories
+        or bool(jurisdiction_trust.get("lockout_active"))
+        or (not bool(jurisdiction_trust.get("safe_for_projection", True)))
+    )
+    informationally_incomplete = bool(
+        payload.get("informationally_incomplete")
+        or ((not legally_unsafe) and (info_gaps or critical_stale_categories or critical_inferred_categories or manual_review_reasons))
+    )
+    safe_to_rely_on = bool(
+        (not legally_unsafe)
+        and bool(jurisdiction_trust.get("safe_for_user_reliance", payload.get("safe_to_rely_on", False)))
+        and not proof_blockers
+    )
+
+    boundary = _tier2_projection_reliance_boundary(
+        safe_to_rely_on=safe_to_rely_on,
+        legally_unsafe=legally_unsafe,
+        informationally_incomplete=informationally_incomplete,
+    )
+
+    product_truth = {
+        "mode": "evidence_first",
+        "crawler_role": "discovery_and_refresh_only",
+        "freshness_role": "support_only",
+        "jurisdiction_truth_source": "market_health_and_projection",
+        "property_truth_source": "projection_plus_uploaded_evidence",
+    }
+
+    payload["jurisdiction_trust"] = jurisdiction_trust
+    payload["truth_model"] = product_truth
+    payload["reliance_boundary"] = boundary
+    payload["critical_missing_categories"] = critical_missing_categories
+    payload["critical_stale_categories"] = critical_stale_categories
+    payload["critical_inferred_categories"] = critical_inferred_categories
+    payload["critical_conflicting_categories"] = critical_conflicting_categories
+    payload["safe_to_rely_on"] = safe_to_rely_on
+    payload["legally_unsafe"] = legally_unsafe
+    payload["informationally_incomplete"] = informationally_incomplete
+    payload["unsafe_reasons"] = _dedupe(unsafe_reasons)
+    payload["informational_reasons"] = _dedupe(informational_reasons)
+
+    if isinstance(payload.get("projection"), dict):
+        payload["projection"]["reliance_boundary"] = boundary
+        payload["projection"]["truth_model"] = product_truth
+        payload["projection"]["safe_to_rely_on"] = safe_to_rely_on
+        payload["projection"]["legally_unsafe"] = legally_unsafe
+        payload["projection"]["informationally_incomplete"] = informationally_incomplete
+
+    return payload
+
+
+def build_property_compliance_brief(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    brief = dict(
+        _tier2_original_build_property_compliance_brief(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+    )
+    snapshot = build_property_projection_snapshot(db, org_id=org_id, property_id=property_id)
+    if snapshot.get("ok"):
+        brief["safe_to_rely_on"] = bool(snapshot.get("safe_to_rely_on"))
+        brief["legally_unsafe"] = bool(snapshot.get("legally_unsafe"))
+        brief["informationally_incomplete"] = bool(snapshot.get("informationally_incomplete"))
+        brief["unsafe_reasons"] = list(snapshot.get("unsafe_reasons") or [])
+        brief["informational_reasons"] = list(snapshot.get("informational_reasons") or [])
+        brief["reliance_boundary"] = dict(snapshot.get("reliance_boundary") or {})
+        brief["truth_model"] = dict(snapshot.get("truth_model") or {})
+        brief["jurisdiction_trust"] = dict(snapshot.get("jurisdiction_trust") or {})
+    return brief

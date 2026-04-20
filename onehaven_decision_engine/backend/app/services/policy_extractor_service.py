@@ -1003,3 +1003,109 @@ def mark_assertions_stale_for_source(
         "stale_ids": ids,
         "reason": reason,
     }
+
+
+# --- tier-two evidence-first final overrides ---
+
+
+def _tier2_source_evidence_metadata(source: PolicySource, source_version_id: Optional[int]) -> dict[str, Any]:
+    source_type = str(getattr(source, "source_type", "") or "").strip().lower()
+    publication_type = str(getattr(source, "publication_type", "") or "").strip().lower()
+    authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
+    authority_use_type = str(getattr(source, "authority_use_type", "") or "").strip().lower()
+
+    family = "crawl"
+    if source_type in {"dataset", "artifact", "manual", "catalog", "program", "feed", "registry", "repo_artifact", "api"}:
+        family = source_type
+    elif publication_type in {"pdf", "json", "json_api", "dataset"}:
+        family = publication_type
+    elif authority_tier in {"authoritative_official", "approved_official_supporting"} and authority_use_type in {"binding", "supporting"}:
+        family = "official_publication"
+
+    is_primary_evidence = family != "crawl"
+    return {
+        "evidence_family": family,
+        "is_primary_evidence": is_primary_evidence,
+        "truth_model": {
+            "mode": "evidence_first",
+            "crawler_role": "discovery_and_refresh_only",
+            "freshness_role": "support_only" if is_primary_evidence else "primary",
+        },
+        "source_metadata": {
+            "source_type": source_type or None,
+            "publication_type": publication_type or None,
+            "authority_tier": authority_tier or None,
+            "authority_use_type": authority_use_type or None,
+            "source_version_id": source_version_id,
+        },
+    }
+
+
+_tier2_original_extract_assertions_for_source = extract_assertions_for_source
+
+
+def extract_assertions_for_source(
+    db: Session,
+    *,
+    source: PolicySource,
+    org_id: int | None = None,
+    org_scope: bool = False,
+) -> list[PolicyAssertion]:
+    created = list(
+        _tier2_original_extract_assertions_for_source(
+            db,
+            source=source,
+            org_id=org_id,
+            org_scope=org_scope,
+        )
+    )
+    if not created:
+        return created
+
+    source_version_id = None
+    try:
+        latest_version = _source_version_for_source(db, int(getattr(source, "id", 0) or 0))
+        source_version_id = int(latest_version.id) if latest_version is not None else None
+    except Exception:
+        source_version_id = None
+
+    evidence_metadata = _tier2_source_evidence_metadata(source, source_version_id)
+    now = _utcnow()
+
+    touched = False
+    for row in created:
+        value_json = _json_loads_dict(getattr(row, "value_json", None))
+        provenance_json = _json_loads_dict(getattr(row, "rule_provenance_json", None))
+        citation_json = _json_loads_dict(getattr(row, "citation_json", None))
+
+        value_json.setdefault("evidence_metadata", evidence_metadata)
+        value_json.setdefault("extraction_strategy", "document_or_dataset_first")
+        value_json.setdefault("freshness_role", evidence_metadata["truth_model"]["freshness_role"])
+
+        provenance_json.setdefault("evidence_family", evidence_metadata.get("evidence_family"))
+        provenance_json.setdefault("is_primary_evidence", evidence_metadata.get("is_primary_evidence"))
+        provenance_json.setdefault("extraction_version", "tier2_evidence_first")
+        provenance_json.setdefault("extracted_at", now.isoformat())
+        provenance_json.setdefault("source_version_id", source_version_id)
+
+        citation_json.setdefault("source_kind", evidence_metadata.get("evidence_family"))
+        citation_json.setdefault("is_primary_evidence", evidence_metadata.get("is_primary_evidence"))
+
+        try:
+            row.value_json = _dumps(value_json)
+            row.rule_provenance_json = _dumps(provenance_json)
+            row.citation_json = _dumps(citation_json)
+            touched = True
+        except Exception:
+            continue
+
+    if touched:
+        try:
+            db.add_all(created)
+            db.commit()
+            for row in created:
+                db.refresh(row)
+        except Exception:
+            db.rollback()
+
+    return created

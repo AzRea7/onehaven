@@ -509,3 +509,47 @@ def _profile_admin_payload(db: Session, r: JurisdictionProfile) -> dict[str, Any
     payload['source_family_matrix'] = registry.get('source_family_matrix') or []
     payload['registry_enabled'] = bool(registry)
     return payload
+
+
+# ===== Evidence-first refactor additions =====
+
+@router.get("/{profile_id}/evidence", response_model=dict)
+def get_profile_evidence(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_evidence_service import evidence_for_market
+    row = db.get(JurisdictionProfile, int(profile_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+    return evidence_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=getattr(row, "state", None),
+        county=getattr(row, "county", None),
+        city=getattr(row, "city", None),
+        pha_name=getattr(row, "pha_name", None),
+        include_global=True,
+    )
+
+
+@router.get("/{profile_id}/datasets", response_model=dict)
+def get_profile_datasets(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_dataset_service import dataset_snapshot_for_market
+    row = db.get(JurisdictionProfile, int(profile_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
+    return dataset_snapshot_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=getattr(row, "state", None),
+        county=getattr(row, "county", None),
+        city=getattr(row, "city", None),
+        pha_name=getattr(row, "pha_name", None),
+        include_global=True,
+    )

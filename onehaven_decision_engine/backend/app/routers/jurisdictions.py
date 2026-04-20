@@ -1362,3 +1362,47 @@ def post_manual_profile_health_recompute(
         raise HTTPException(status_code=404, detail="Jurisdiction profile not found")
     health = get_jurisdiction_health(db, profile_id=int(profile.id), org_id=getattr(principal, "org_id", None))
     return {"ok": True, "action": "manual_health_recompute", "jurisdiction_profile_id": int(profile.id), "health": health}
+
+
+# ===== Evidence-first refactor additions =====
+
+@router.get("/evidence", response_model=dict)
+def jurisdiction_evidence_market(
+    state: str = Query("MI"),
+    county: str | None = Query(None),
+    city: str | None = Query(None),
+    pha_name: str | None = Query(None),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_evidence_service import evidence_for_market
+    return evidence_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_global=True,
+    )
+
+
+@router.get("/datasets", response_model=dict)
+def jurisdiction_dataset_market(
+    state: str = Query("MI"),
+    county: str | None = Query(None),
+    city: str | None = Query(None),
+    pha_name: str | None = Query(None),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_dataset_service import dataset_snapshot_for_market
+    return dataset_snapshot_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_global=True,
+    )

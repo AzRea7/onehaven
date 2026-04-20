@@ -1111,3 +1111,25 @@ def inspection_operational_readiness(
     if isinstance(payload, dict):
         payload.setdefault("pdf_dataset_status", _step7_pdf_dataset_status())
     return payload
+
+
+# ===== Evidence-first refactor additions =====
+
+@router.get("/property/{property_id}/jurisdiction-evidence", response_model=dict)
+def inspection_property_jurisdiction_evidence(
+    property_id: int,
+    db: Session = Depends(get_db),
+    p=Depends(get_principal),
+):
+    from app.services.policy_evidence_service import evidence_summary_for_market
+    prop = _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
+    _require_inspection_preview_stage(db, org_id=p.org_id, property_id=property_id, action="view jurisdiction evidence")
+    return evidence_summary_for_market(
+        db,
+        org_id=p.org_id,
+        state=getattr(prop, "state", None) or "MI",
+        county=getattr(prop, "county", None),
+        city=getattr(prop, "city", None),
+        pha_name=getattr(prop, "pha_name", None),
+        include_global=True,
+    )

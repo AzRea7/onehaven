@@ -1159,3 +1159,121 @@ def catalog_mi_authoritative(focus: str = "se_mi_extended") -> list[PolicyCatalo
         items.extend(pack_builder())
 
     return _sorted_then_deduped(items)
+
+
+# === Tier 3 evidence-first catalog overrides ===
+from typing import Any as _Tier3Any
+
+_SOURCE_KIND_TO_FAMILY: dict[str, str] = {
+    "federal_anchor": "legal_primary",
+    "state_anchor": "legal_primary",
+    "municipal_code": "legal_primary",
+    "municipal_registration": "municipal_operations",
+    "municipal_inspection": "municipal_operations",
+    "municipal_certificate": "municipal_operations",
+    "municipal_enforcement": "municipal_operations",
+    "municipal_guidance": "municipal_operations",
+    "city_program_page": "municipal_operations",
+    "county_program_page": "municipal_operations",
+    "state_program_page": "state_program",
+    "state_hcv_anchor": "state_program",
+    "housing_authority": "program_admin",
+    "pha_plan": "program_admin",
+    "pha_guidance": "program_admin",
+}
+
+_SOURCE_FAMILY_PRIORITY: dict[str, int] = {
+    "legal_primary": 10,
+    "state_program": 20,
+    "municipal_operations": 30,
+    "program_admin": 40,
+    "supporting_guidance": 50,
+    "unknown": 90,
+}
+
+
+def policy_catalog_source_family(item: PolicyCatalogItem) -> str:
+    source_kind = str(getattr(item, "source_kind", None) or "").strip().lower()
+    if source_kind in _SOURCE_KIND_TO_FAMILY:
+        return _SOURCE_KIND_TO_FAMILY[source_kind]
+    if getattr(item, "is_authoritative", False):
+        return "legal_primary"
+    if "guide" in str(getattr(item, "title", None) or "").lower() or "faq" in str(getattr(item, "title", None) or "").lower():
+        return "supporting_guidance"
+    return "unknown"
+
+
+def policy_catalog_truth_priority(item: PolicyCatalogItem) -> int:
+    family = policy_catalog_source_family(item)
+    item_priority = int(getattr(item, "priority", 100) or 100)
+    return (_SOURCE_FAMILY_PRIORITY.get(family, 90) * 1000) + item_priority
+
+
+def policy_catalog_truth_row(item: PolicyCatalogItem) -> dict[str, _Tier3Any]:
+    family = policy_catalog_source_family(item)
+    host = _host_from_url(getattr(item, "url", "") or "")
+    return {
+        "url": item.url,
+        "state": _norm_state(item.state) or "MI",
+        "county": _norm_lower(item.county),
+        "city": _norm_lower(item.city),
+        "pha_name": _norm_text(item.pha_name),
+        "program_type": _norm_text(item.program_type),
+        "publisher": _norm_text(item.publisher),
+        "title": _norm_text(item.title),
+        "notes": _norm_text(item.notes),
+        "source_kind": _norm_text(item.source_kind),
+        "source_family": family,
+        "truth_priority": policy_catalog_truth_priority(item),
+        "is_authoritative": bool(item.is_authoritative),
+        "official_host": _is_official_catalog_host(item.url),
+        "host": host,
+        "truth_model": "dataset_first_catalog",
+        "service_role": "coverage_scaffold",
+    }
+
+
+def policy_catalog_dataset_for_market(
+    *,
+    state: str = "MI",
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> list[dict[str, _Tier3Any]]:
+    items = catalog_for_market(state=state, county=county, city=city, focus=focus)
+    rows = [policy_catalog_truth_row(item) for item in items]
+    rows.sort(key=lambda row: (int(row.get("truth_priority") or 0), str(row.get("title") or ""), str(row.get("url") or "")))
+    return rows
+
+
+def policy_catalog_summary(
+    *,
+    state: str = "MI",
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> dict[str, _Tier3Any]:
+    rows = policy_catalog_dataset_for_market(state=state, county=county, city=city, focus=focus)
+    family_counts: dict[str, int] = {}
+    kind_counts: dict[str, int] = {}
+    authoritative_count = 0
+    for row in rows:
+        family = str(row.get("source_family") or "unknown")
+        kind = str(row.get("source_kind") or "unknown")
+        family_counts[family] = family_counts.get(family, 0) + 1
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+        if bool(row.get("is_authoritative")):
+            authoritative_count += 1
+    return {
+        "truth_model": "dataset_first_catalog",
+        "service_role": "coverage_scaffold",
+        "state": _norm_state(state) or "MI",
+        "county": _norm_lower(county),
+        "city": _norm_lower(city),
+        "focus": focus,
+        "item_count": len(rows),
+        "authoritative_count": authoritative_count,
+        "source_family_counts": family_counts,
+        "source_kind_counts": kind_counts,
+        "items": rows,
+    }

@@ -2529,3 +2529,73 @@ def run_market_pipeline_route(
             "requirements": result.get("requirements"),
         },
     }
+
+
+# ===== Evidence-first refactor additions =====
+
+@router.get("/evidence/market")
+def get_policy_evidence_market(
+    state: str = Query("MI"),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    include_global: bool = Query(True),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_evidence_service import evidence_for_market
+    return evidence_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_global=include_global,
+    )
+
+
+@router.get("/datasets/market")
+def get_policy_dataset_market(
+    state: str = Query("MI"),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    focus: str = Query("se_mi_extended"),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_dataset_service import dataset_snapshot_for_market
+    return dataset_snapshot_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_global=True,
+        focus=focus,
+    )
+
+
+@router.get("/evidence/versions/market")
+def get_policy_evidence_versions_market(
+    state: str = Query("MI"),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_evidence_version_service import evidence_versions_for_market
+    return evidence_versions_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_global=True,
+        limit=limit,
+    )

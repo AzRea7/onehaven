@@ -2742,3 +2742,139 @@ def inventory_summary_for_market(
         payload["categories"] = categories
         payload["authority_use_counts"] = authority_use_counts
     return payload
+
+
+# === Tier 3 support-role overrides ===
+
+def policy_source_service_role() -> dict[str, Any]:
+    return {
+        "truth_model": "support_role_only",
+        "service_role": "source_discovery_refresh_inventory",
+        "product_truth_owner": "jurisdiction_health_service",
+        "notes": [
+            "This service manages source discovery, refresh, crawl health, and inventory snapshots.",
+            "It does not decide final compliance truth or safe-to-rely-on status.",
+        ],
+    }
+
+
+def policy_source_evidence_family(source: PolicySource) -> str:
+    source_type = str(getattr(source, "source_type", None) or "").strip().lower()
+    publication_type = str(getattr(source, "publication_type", None) or "").strip().lower()
+    notes = str(getattr(source, "notes", None) or "").strip().lower()
+    authority_tier = str(getattr(source, "authority_tier", None) or "").strip().lower()
+    if "[curated]" in notes or publication_type in {"official_document", "legal_code", "official_form"}:
+        return "catalog_or_artifact"
+    if source_type in {"federal", "state", "county", "city", "program"} and authority_tier in {"authoritative_official", "approved_official_supporting"}:
+        return "official_source"
+    if source_type in {"program", "city", "county", "state", "federal"}:
+        return "supporting_source"
+    return "crawl_discovery"
+
+
+def policy_source_truth_boundary(source: PolicySource) -> dict[str, Any]:
+    family = policy_source_evidence_family(source)
+    return {
+        "source_id": int(getattr(source, "id", 0) or 0),
+        "url": getattr(source, "url", None),
+        "source_family": family,
+        "truth_model": "support_role_only",
+        "service_role": "source_discovery_refresh_inventory",
+        "may_inform_freshness": True,
+        "may_decide_product_truth": False,
+        "requires_validation_elsewhere": True,
+    }
+
+
+_tier3_original_get_policy_source_refresh_snapshot = get_policy_source_refresh_snapshot
+
+def get_policy_source_refresh_snapshot(source: PolicySource) -> dict[str, Any]:
+    snapshot = _tier3_original_get_policy_source_refresh_snapshot(source)
+    if not isinstance(snapshot, dict):
+        snapshot = {"ok": False, "source_id": int(getattr(source, "id", 0) or 0)}
+    snapshot["service_role"] = "source_discovery_refresh_inventory"
+    snapshot["truth_model"] = "support_role_only"
+    snapshot["evidence_family"] = policy_source_evidence_family(source)
+    snapshot["truth_boundary"] = policy_source_truth_boundary(source)
+    return snapshot
+
+
+_tier3_original_inventory_summary_for_market = inventory_summary_for_market
+
+def inventory_summary_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    program_type: Optional[str] = None,
+) -> dict[str, Any]:
+    summary = _tier3_original_inventory_summary_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        program_type=program_type,
+    )
+    if not isinstance(summary, dict):
+        summary = {"ok": False}
+    summary["service_role"] = "source_discovery_refresh_inventory"
+    summary["truth_model"] = "support_role_only"
+    summary["product_truth_owner"] = "jurisdiction_health_service"
+    return summary
+
+
+def source_support_snapshot_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+) -> dict[str, Any]:
+    rows = list_sources_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    family_counts: dict[str, int] = {}
+    refresh_states: dict[str, int] = {}
+    for row in rows:
+        family = policy_source_evidence_family(row)
+        family_counts[family] = family_counts.get(family, 0) + 1
+        refresh_state = str(getattr(row, "refresh_state", None) or "unknown").strip().lower()
+        refresh_states[refresh_state] = refresh_states.get(refresh_state, 0) + 1
+    return {
+        "ok": True,
+        "truth_model": "support_role_only",
+        "service_role": "source_discovery_refresh_inventory",
+        "product_truth_owner": "jurisdiction_health_service",
+        "state": _norm_state(state),
+        "county": _norm_lower(county),
+        "city": _norm_lower(city),
+        "pha_name": _norm_text(pha_name),
+        "source_count": len(rows),
+        "source_family_counts": family_counts,
+        "refresh_state_counts": refresh_states,
+        "sources": [
+            {
+                "source_id": int(getattr(row, "id", 0) or 0),
+                "url": getattr(row, "url", None),
+                "source_type": getattr(row, "source_type", None),
+                "authority_tier": getattr(row, "authority_tier", None),
+                "refresh_state": getattr(row, "refresh_state", None),
+                "freshness_status": getattr(row, "freshness_status", None),
+                "evidence_family": policy_source_evidence_family(row),
+                "truth_boundary": policy_source_truth_boundary(row),
+            }
+            for row in rows
+        ],
+    }

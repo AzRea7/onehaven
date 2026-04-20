@@ -631,3 +631,24 @@ def escalate_jurisdiction_review_queue_entry(
         "ok": True,
         **result,
     }
+
+# ===== Evidence-first refactor additions =====
+
+@router.post("/market/dataset-summary")
+def market_dataset_summary(
+    payload: MarketIn,
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_dataset_service import dataset_snapshot_for_market
+    target_org_id = principal.org_id if payload.org_scope else None
+    return dataset_snapshot_for_market(
+        db,
+        org_id=target_org_id,
+        state=payload.state,
+        county=payload.county,
+        city=payload.city,
+        pha_name=payload.pha_name,
+        include_global=True,
+        focus=payload.focus,
+    )

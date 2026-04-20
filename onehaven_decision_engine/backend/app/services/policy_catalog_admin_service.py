@@ -486,3 +486,152 @@ def source_kind_coverage_for_market(
             "excluded_from_full_coverage": ["draft", "replaced", "superseded", "conflicting"],
         },
     }
+
+# === Tier 3 control-plane overrides ===
+from typing import Any as _Tier3Any
+
+_DEFAULT_EVIDENCE_PRIORITY = [
+    "legal_primary",
+    "state_program",
+    "municipal_operations",
+    "program_admin",
+    "supporting_guidance",
+    "unknown",
+]
+
+
+def _catalog_item_source_family(item: PolicyCatalogItem) -> str:
+    try:
+        from app.services.policy_catalog import policy_catalog_source_family
+        return str(policy_catalog_source_family(item))
+    except Exception:
+        source_kind = str(getattr(item, "source_kind", None) or "").strip().lower()
+        if "anchor" in source_kind or "code" in source_kind:
+            return "legal_primary"
+        if "state" in source_kind:
+            return "state_program"
+        if "pha" in source_kind or "housing_authority" in source_kind:
+            return "program_admin"
+        if "municipal" in source_kind or "city_" in source_kind or "county_" in source_kind:
+            return "municipal_operations"
+        return "unknown"
+
+
+def catalog_control_plane_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+) -> dict[str, _Tier3Any]:
+    rows = list_catalog_entries_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    disabled_urls: list[str] = []
+    override_urls: list[str] = []
+    source_family_counts: dict[str, int] = {}
+    for row in rows:
+        item = _row_to_item(row)
+        family = _catalog_item_source_family(item)
+        source_family_counts[family] = source_family_counts.get(family, 0) + 1
+        if not bool(getattr(row, "is_active", True)):
+            if getattr(row, "url", None):
+                disabled_urls.append(str(row.url).strip())
+            if getattr(row, "baseline_url", None):
+                disabled_urls.append(str(row.baseline_url).strip())
+        else:
+            override_urls.append(str(getattr(row, "url", "") or "").strip())
+    return {
+        "truth_model": "catalog_control_plane",
+        "service_role": "operational_control_plane",
+        "state": _norm_state(state),
+        "county": _norm_lower(county),
+        "city": _norm_lower(city),
+        "pha_name": _norm_text(pha_name),
+        "evidence_priority": list(_DEFAULT_EVIDENCE_PRIORITY),
+        "disabled_urls": sorted({u for u in disabled_urls if u}),
+        "override_urls": sorted({u for u in override_urls if u}),
+        "source_family_counts": source_family_counts,
+        "db_entry_count": len(rows),
+    }
+
+
+_tier3_original_merged_catalog_for_market = merged_catalog_for_market
+
+
+def merged_catalog_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> list[PolicyCatalogItem]:
+    items = _tier3_original_merged_catalog_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+    items = list(items or [])
+    items.sort(
+        key=lambda item: (
+            _DEFAULT_EVIDENCE_PRIORITY.index(_catalog_item_source_family(item)) if _catalog_item_source_family(item) in _DEFAULT_EVIDENCE_PRIORITY else len(_DEFAULT_EVIDENCE_PRIORITY),
+            0 if bool(getattr(item, "is_authoritative", False)) else 1,
+            int(getattr(item, "priority", 100) or 100),
+            str(getattr(item, "title", "") or ""),
+            str(getattr(item, "url", "") or ""),
+        )
+    )
+    return items
+
+
+def catalog_admin_summary_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+) -> dict[str, _Tier3Any]:
+    items = merged_catalog_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+    )
+    families: dict[str, int] = {}
+    for item in items:
+        family = _catalog_item_source_family(item)
+        families[family] = families.get(family, 0) + 1
+    control = catalog_control_plane_for_market(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    return {
+        **control,
+        "merged_item_count": len(items),
+        "merged_source_family_counts": families,
+        "top_urls": [str(getattr(item, "url", "") or "") for item in items[:20]],
+    }

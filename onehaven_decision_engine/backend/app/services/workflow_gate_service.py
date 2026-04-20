@@ -813,3 +813,91 @@ def build_workflow_summary(db, *, org_id: int, property_id: int, principal: Any 
         "jurisdiction_trust": compliance_gate.get("jurisdiction_trust") or {},
         "post_close_recheck": post_close_recheck,
     }
+
+
+# --- tier-two evidence-first final overrides ---
+
+
+def _tier2_boundary_message(status: str) -> str:
+    mapping = {
+        "blocked": "Critical evidence or jurisdiction blockers must be resolved before the workflow can safely proceed.",
+        "warning": "The workflow can continue only with review; evidence is incomplete or stale.",
+        "ready": "The workflow can proceed with current evidence.",
+        "info": "Compliance gate information is available but not decisive.",
+    }
+    return mapping.get(str(status or "info").strip().lower(), mapping["info"])
+
+
+_tier2_original_build_property_jurisdiction_blocker = build_property_jurisdiction_blocker
+_tier2_original_build_workflow_summary = build_workflow_summary
+
+
+def build_property_jurisdiction_blocker(db, *, org_id: int, property_id: int) -> dict[str, Any]:
+    blocker = dict(
+        _tier2_original_build_property_jurisdiction_blocker(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+    )
+    if not blocker.get("ok"):
+        return blocker
+
+    trust = dict(blocker.get("jurisdiction_trust") or {})
+    blocker["truth_model"] = {
+        "mode": "evidence_first",
+        "crawler_role": "discovery_and_refresh_only",
+        "freshness_role": "support_only",
+    }
+    blocker["reliance_boundary"] = {
+        "status": "not_safe_to_rely_on" if bool(blocker.get("legally_unsafe")) else (
+            "degraded_review_required" if bool(blocker.get("informationally_incomplete")) else "operationally_reliable"
+        ),
+        "message": "Property workflow gating is based on evidence-first jurisdiction truth plus property proof obligations.",
+    }
+    blocker["blocking_categories"] = list(
+        trust.get("critical_missing_categories")
+        or trust.get("missing_critical_categories")
+        or []
+    )
+    blocker["degraded_categories"] = list(
+        trust.get("critical_stale_categories")
+        or trust.get("critical_inferred_categories")
+        or []
+    )
+    blocker["freshness_signal_only_categories"] = list(trust.get("freshness_signal_only_categories") or [])
+    return blocker
+
+
+def build_workflow_summary(db, *, org_id: int, property_id: int) -> dict[str, Any]:
+    summary = dict(
+        _tier2_original_build_workflow_summary(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
+    )
+    compliance_gate = dict(summary.get("compliance_gate") or {})
+    gate_status = str(compliance_gate.get("status") or "info").strip().lower()
+
+    compliance_gate["truth_model"] = {
+        "mode": "evidence_first",
+        "crawler_role": "discovery_and_refresh_only",
+        "freshness_role": "support_only",
+    }
+    compliance_gate["reliance_boundary"] = {
+        "status": "not_safe_to_rely_on" if gate_status == "blocked" else (
+            "degraded_review_required" if gate_status == "warning" else "operationally_reliable"
+        ),
+        "message": _tier2_boundary_message(gate_status),
+    }
+    compliance_gate["workflow_truth_source"] = "jurisdiction_trust_plus_property_proof"
+    compliance_gate["final_gatekeeper"] = "workflow_gate_service"
+
+    summary["compliance_gate"] = compliance_gate
+    summary["safe_to_rely_on"] = bool(compliance_gate.get("safe_to_rely_on", summary.get("safe_to_rely_on")))
+    summary["legally_unsafe"] = bool(compliance_gate.get("legally_unsafe", summary.get("legally_unsafe")))
+    summary["informationally_incomplete"] = bool(compliance_gate.get("informationally_incomplete", summary.get("informationally_incomplete")))
+    summary["truth_model"] = dict(compliance_gate.get("truth_model") or {})
+    summary["reliance_boundary"] = dict(compliance_gate.get("reliance_boundary") or {})
+    return summary

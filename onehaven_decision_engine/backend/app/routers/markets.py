@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -76,38 +77,29 @@ def sync_supported_market_route(
     }
 
 
-# @router.post("/sync-city", response_model=dict)
-# def sync_supported_city_route(
-#     city: str = Query(...),
-#     state: str = Query("MI"),
-#     p=Depends(get_principal),
-#     _op=Depends(require_operator),
-# ):
-#     market = find_market_by_city(city=city, state=state)
-#     if market is None:
-#         raise HTTPException(status_code=404, detail="Supported market not found")
+@router.get("/coverage/evidence", response_model=dict)
+def get_market_coverage_with_evidence(
+    city: str = Query(...),
+    state: str = Query("MI"),
+    p=Depends(get_principal),
+):
+    from app.services.policy_evidence_service import evidence_summary_for_market
 
-#     plan = build_supported_market_sync_plan(
-#         org_id=int(p.org_id),
-#         market_slug=str(market["slug"]),
-#     )
-
-#     task_ids: list[str] = []
-#     for dispatch in plan["dispatches"]:
-#         job = sync_source_task.delay(
-#             int(p.org_id),
-#             int(dispatch["source_id"]),
-#             str(dispatch["trigger_type"]),
-#             dict(dispatch["runtime_config"]),
-#         )
-#         task_ids.append(str(job.id))
-
-#     return {
-#         "ok": True,
-#         "queued": True,
-#         "city": city,
-#         "state": state,
-#         "market": market,
-#         "task_ids": task_ids,
-#         "queued_count": len(task_ids),
-#     }
+    market = find_market_by_city(city=city, state=state)
+    evidence = evidence_summary_for_market(
+        None,
+        org_id=int(getattr(p, "org_id", 0) or 0) or None,
+        state=state,
+        county=(market or {}).get("county"),
+        city=city,
+        pha_name=None,
+        include_global=True,
+    )
+    return {
+        "ok": True,
+        "covered": market is not None,
+        "city": city,
+        "state": state,
+        "market": market,
+        "evidence": evidence,
+    }

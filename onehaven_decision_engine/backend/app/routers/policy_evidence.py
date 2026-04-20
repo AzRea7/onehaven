@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from typing import Optional
@@ -49,107 +50,110 @@ def evidence_for_market(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
+    from app.services.policy_evidence_service import evidence_for_market as _svc_evidence_for_market
+    from app.services.policy_dataset_service import dataset_snapshot_for_market as _svc_dataset_snapshot_for_market
+    from app.services.policy_evidence_version_service import evidence_versions_for_market as _svc_versions_for_market
+
     st = _norm_state(state) or "MI"
     cnty = _norm_lower(county)
     cty = _norm_lower(city)
     pha = _norm_text(pha_name)
+    org_id = getattr(principal, "org_id", None)
 
-    src_q = db.query(PolicySource)
-    asr_q = db.query(PolicyAssertion)
+    payload = _svc_evidence_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        include_global=include_global,
+    )
+    payload["datasets"] = _svc_dataset_snapshot_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        include_global=include_global,
+    )
+    payload["versions"] = _svc_versions_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        include_global=include_global,
+        limit=100,
+    )
+    return payload
 
-    if include_global:
-        src_q = src_q.filter(
-            (PolicySource.org_id == principal.org_id) | (PolicySource.org_id.is_(None))
-        )
-        asr_q = asr_q.filter(
-            (PolicyAssertion.org_id == principal.org_id)
-            | (PolicyAssertion.org_id.is_(None))
-        )
-    else:
-        src_q = src_q.filter(PolicySource.org_id == principal.org_id)
-        asr_q = asr_q.filter(PolicyAssertion.org_id == principal.org_id)
 
-    src_rows = src_q.filter(PolicySource.state == st).all()
-    asr_rows = asr_q.filter(PolicyAssertion.state == st).all()
+@router.get("/market/summary")
+def evidence_summary_for_market_route(
+    state: str = Query("MI"),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    include_global: bool = Query(True),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_evidence_service import evidence_summary_for_market
+    return evidence_summary_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=_norm_state(state) or "MI",
+        county=_norm_lower(county),
+        city=_norm_lower(city),
+        pha_name=_norm_text(pha_name),
+        include_global=include_global,
+    )
 
-    source_items = []
-    for s in src_rows:
-        if s.county is not None and s.county != cnty:
-            continue
-        if s.city is not None and s.city != cty:
-            continue
-        if s.pha_name is not None and s.pha_name != pha:
-            continue
-        if _is_archived_source(s):
-            continue
 
-        source_items.append(
-            {
-                "id": s.id,
-                "org_id": s.org_id,
-                "state": s.state,
-                "county": s.county,
-                "city": s.city,
-                "pha_name": s.pha_name,
-                "program_type": s.program_type,
-                "publisher": s.publisher,
-                "title": s.title,
-                "url": s.url,
-                "content_type": s.content_type,
-                "http_status": s.http_status,
-                "retrieved_at": s.retrieved_at.isoformat() if s.retrieved_at else None,
-                "content_sha256": s.content_sha256,
-                "raw_path": s.raw_path,
-                "notes": s.notes,
-            }
-        )
+@router.get("/market/datasets")
+def dataset_summary_for_market_route(
+    state: str = Query("MI"),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    include_global: bool = Query(True),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_dataset_service import dataset_snapshot_for_market
+    return dataset_snapshot_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=_norm_state(state) or "MI",
+        county=_norm_lower(county),
+        city=_norm_lower(city),
+        pha_name=_norm_text(pha_name),
+        include_global=include_global,
+    )
 
-    assertion_items = []
-    for a in asr_rows:
-        if a.county is not None and a.county != cnty:
-            continue
-        if a.city is not None and a.city != cty:
-            continue
-        if a.pha_name is not None and a.pha_name != pha:
-            continue
 
-        assertion_items.append(
-            {
-                "id": a.id,
-                "org_id": a.org_id,
-                "source_id": a.source_id,
-                "state": a.state,
-                "county": a.county,
-                "city": a.city,
-                "pha_name": a.pha_name,
-                "program_type": a.program_type,
-                "rule_key": a.rule_key,
-                "rule_family": a.rule_family,
-                "assertion_type": a.assertion_type,
-                "value": a.value_json,
-                "confidence": float(a.confidence or 0.0),
-                "priority": a.priority,
-                "source_rank": a.source_rank,
-                "review_status": a.review_status,
-                "review_notes": a.review_notes,
-                "reviewed_by_user_id": a.reviewed_by_user_id,
-                "verification_reason": a.verification_reason,
-                "stale_after": a.stale_after.isoformat() if a.stale_after else None,
-                "superseded_by_assertion_id": a.superseded_by_assertion_id,
-            }
-        )
-
-    source_items.sort(key=lambda x: ((x.get("title") or ""), (x.get("url") or "")))
-    assertion_items.sort(key=lambda x: ((x.get("rule_key") or ""), x.get("id") or 0))
-
-    return {
-        "ok": True,
-        "market": {
-            "state": st,
-            "county": cnty,
-            "city": cty,
-            "pha_name": pha,
-        },
-        "sources": source_items,
-        "assertions": assertion_items,
-    }
+@router.get("/market/versions")
+def evidence_versions_for_market_route(
+    state: str = Query("MI"),
+    county: Optional[str] = Query(None),
+    city: Optional[str] = Query(None),
+    pha_name: Optional[str] = Query(None),
+    include_global: bool = Query(True),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    principal=Depends(get_principal),
+):
+    from app.services.policy_evidence_version_service import evidence_versions_for_market
+    return evidence_versions_for_market(
+        db,
+        org_id=getattr(principal, "org_id", None),
+        state=_norm_state(state) or "MI",
+        county=_norm_lower(county),
+        city=_norm_lower(city),
+        pha_name=_norm_text(pha_name),
+        include_global=include_global,
+        limit=limit,
+    )
