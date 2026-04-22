@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.policy_models import PolicySource
+from app.domain.jurisdiction_categories import normalize_categories
+from app.policy_models import PolicySource, PolicySourceInventory
 from app.services.policy_discovery_service import (
     sync_policy_source_into_inventory,
     update_inventory_after_fetch,
@@ -19,6 +21,50 @@ AUTHORITY_TIER_RANKS: dict[str, int] = {
     "approved_official_supporting": 85,
     "authoritative_official": 100,
 }
+
+CATEGORY_ALIASES: dict[str, str] = {
+    "registration": "registration",
+    "rental_registration": "registration",
+    "rental_license": "rental_license",
+    "inspection": "inspection",
+    "rental_inspection": "inspection",
+    "occupancy": "occupancy",
+    "certificate_of_occupancy": "occupancy",
+    "certificate_of_compliance": "occupancy",
+    "lead": "lead",
+    "safety": "safety",
+    "permits": "permits",
+    "permits_building": "permits",
+    "fees": "fees",
+    "fees_forms": "fees",
+    "documents": "documents",
+    "program_overlay": "program_overlay",
+    "section8": "section8",
+    "contacts": "contacts",
+    "contact": "contacts",
+}
+
+
+def _normalize_category(value: Any) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    raw = raw.replace("-", "_").replace(" ", "_").replace("/", "_")
+    while "__" in raw:
+        raw = raw.replace("__", "_")
+    return CATEGORY_ALIASES.get(raw, raw)
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        norm = _normalize_category(value)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        out.append(norm)
+    return out
 
 
 def _authority_policy_payload(*, authority_tier: str, authority_rank: int | None = None) -> dict[str, Any]:
@@ -91,7 +137,185 @@ def _apply_inventory_authority_from_source(inventory: Any, source: PolicySource)
             inventory.authority_policy_json = "{}"
 
 
-def _inventory_result_shape(inventory: Any, change_summary: dict[str, Any]) -> dict[str, Any]:
+def _source_category_hints(source: PolicySource, inventory: Any | None = None) -> list[str]:
+    values: list[Any] = []
+    for attr in ("normalized_categories_json", "category_hints_json", "expected_categories_json"):
+        if hasattr(source, attr):
+            values.append(getattr(source, attr))
+        if inventory is not None and hasattr(inventory, attr):
+            values.append(getattr(inventory, attr))
+    out: list[str] = []
+    for value in values:
+        if isinstance(value, list):
+            out.extend(value)
+        elif isinstance(value, tuple):
+            out.extend(list(value))
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                import json
+                try:
+                    parsed = json.loads(stripped)
+                    if isinstance(parsed, list):
+                        out.extend(parsed)
+                except Exception:
+                    pass
+            elif stripped:
+                out.append(stripped)
+    return normalize_categories(out)
+
+
+def _inventory_row_scope_match(
+    row: PolicySourceInventory,
+    *,
+    org_id: int | None,
+    state: str | None,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    program_type: str | None = None,
+) -> bool:
+    if org_id is None:
+        if getattr(row, "org_id", None) is not None:
+            return False
+    elif getattr(row, "org_id", None) not in {None, org_id}:
+        return False
+    if state and str(getattr(row, "state", "") or "").strip().upper() != str(state).strip().upper():
+        return False
+    if county and str(getattr(row, "county", "") or "").strip().lower() not in {"", str(county).strip().lower()}:
+        return False
+    if city and str(getattr(row, "city", "") or "").strip().lower() not in {"", str(city).strip().lower()}:
+        return False
+    if pha_name and str(getattr(row, "pha_name", "") or "").strip() not in {"", str(pha_name).strip()}:
+        return False
+    if program_type and str(getattr(row, "program_type", "") or "").strip() not in {"", str(program_type).strip()}:
+        return False
+    return True
+
+
+def _inventory_category_entry(row: PolicySourceInventory) -> dict[str, Any]:
+    authority_tier = str(getattr(row, "authority_tier", None) or "").strip() or "derived_or_inferred"
+    authority_rank = int(getattr(row, "authority_rank", 0) or AUTHORITY_TIER_RANKS.get(authority_tier, 25))
+    authority_use_type = str(getattr(row, "authority_use_type", None) or "").strip().lower() or _authority_policy_payload(authority_tier=authority_tier, authority_rank=authority_rank)["use_type"]
+    lifecycle_state = str(getattr(row, "lifecycle_state", None) or "").strip().lower()
+    crawl_status = str(getattr(row, "crawl_status", None) or "").strip().lower()
+    refresh_state = str(getattr(row, "refresh_state", None) or "").strip().lower()
+    is_curated = bool(getattr(row, "is_curated", False))
+    is_official_candidate = bool(getattr(row, "is_official_candidate", False))
+
+    usable_for_coverage = (
+        lifecycle_state in {"accepted", "discovered", "pending_crawl", "active"}
+        and crawl_status not in {"failed", "not_found"}
+        and refresh_state not in {"failed", "blocked"}
+        and authority_use_type in {"binding", "supporting"}
+        and is_official_candidate
+    )
+    binding_sufficient = authority_use_type == "binding" and authority_tier == "authoritative_official"
+
+    return {
+        "inventory_id": int(getattr(row, "id", 0) or 0),
+        "canonical_url": getattr(row, "canonical_url", None),
+        "title": getattr(row, "title", None),
+        "publisher": getattr(row, "publisher", None),
+        "source_type": getattr(row, "source_type", None),
+        "publication_type": getattr(row, "publication_type", None),
+        "inventory_origin": getattr(row, "inventory_origin", None),
+        "lifecycle_state": lifecycle_state,
+        "crawl_status": crawl_status,
+        "refresh_state": refresh_state,
+        "next_refresh_step": getattr(row, "next_refresh_step", None),
+        "authority_tier": authority_tier,
+        "authority_rank": authority_rank,
+        "authority_use_type": authority_use_type,
+        "is_curated": is_curated,
+        "is_official_candidate": is_official_candidate,
+        "usable_for_coverage": usable_for_coverage,
+        "binding_sufficient": binding_sufficient,
+        "validation_due_at": _iso_or_none(getattr(row, "validation_due_at", None)),
+        "updated_at": _iso_or_none(getattr(row, "updated_at", None)),
+    }
+
+
+def summarize_inventory_category_coverage(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    program_type: str | None = None,
+    required_categories: list[str] | None = None,
+) -> dict[str, Any]:
+    stmt = select(PolicySourceInventory)
+    rows = list(db.scalars(stmt).all())
+
+    category_map: dict[str, list[dict[str, Any]]] = {}
+    covered: list[str] = []
+    binding: list[str] = []
+    supporting_only: list[str] = []
+
+    for row in rows:
+        if not _inventory_row_scope_match(
+            row,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            program_type=program_type,
+        ):
+            continue
+        hints = _source_category_hints(source=row, inventory=row)
+        if not hints:
+            continue
+        entry = _inventory_category_entry(row)
+        for category in hints:
+            category_map.setdefault(category, []).append(entry)
+            if entry["usable_for_coverage"]:
+                covered.append(category)
+            if entry["binding_sufficient"]:
+                binding.append(category)
+            elif entry["usable_for_coverage"]:
+                supporting_only.append(category)
+
+    for items in category_map.values():
+        items.sort(
+            key=lambda x: (
+                -int(x["usable_for_coverage"]),
+                -int(x["binding_sufficient"]),
+                -int(x["is_curated"]),
+                -int(x["authority_rank"]),
+                str(x.get("canonical_url") or ""),
+            )
+        )
+
+    required = _dedupe(list(required_categories or []))
+    covered_norm = _dedupe(covered)
+    binding_norm = _dedupe(binding)
+    supporting_only_norm = [c for c in _dedupe(supporting_only) if c not in set(binding_norm)]
+    missing = [c for c in required if c not in set(covered_norm)]
+
+    return {
+        "scope": {
+            "org_id": org_id,
+            "state": state,
+            "county": county,
+            "city": city,
+            "pha_name": pha_name,
+            "program_type": program_type,
+        },
+        "required_categories": required,
+        "covered_categories": covered_norm,
+        "binding_categories": binding_norm,
+        "supporting_only_categories": supporting_only_norm,
+        "missing_categories": _dedupe(missing),
+        "category_map": category_map,
+        "inventory_count": sum(len(v) for v in category_map.values()),
+    }
+
+
+def _inventory_result_shape(inventory: Any, change_summary: dict[str, Any], category_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "ok": inventory is not None,
         "inventory_id": int(inventory.id) if inventory is not None else None,
@@ -109,6 +333,7 @@ def _inventory_result_shape(inventory: Any, change_summary: dict[str, Any]) -> d
         "current_source_version_id": getattr(inventory, "current_source_version_id", None) if inventory is not None else None,
         "last_change_summary": change_summary,
         "authority_use_type": getattr(inventory, "authority_use_type", None) if inventory is not None else None,
+        "category_coverage": dict(category_coverage or {}),
     }
 
 
@@ -236,9 +461,21 @@ def sync_crawl_result_to_inventory(
         db.add(inventory)
         db.flush()
 
-    return _inventory_result_shape(inventory, change_summary)
+    category_coverage = {}
+    if inventory is not None:
+        category_coverage = summarize_inventory_category_coverage(
+            db,
+            org_id=getattr(inventory, "org_id", None),
+            state=getattr(inventory, "state", None) or getattr(source, "state", None) or "MI",
+            county=getattr(inventory, "county", None) or getattr(source, "county", None),
+            city=getattr(inventory, "city", None) or getattr(source, "city", None),
+            pha_name=getattr(inventory, "pha_name", None) or getattr(source, "pha_name", None),
+            program_type=getattr(inventory, "program_type", None),
+            required_categories=_source_category_hints(source, inventory),
+        )
 
-# === FINAL INVENTORY DE-PRIORITIZATION OVERRIDE ===
+    return _inventory_result_shape(inventory, change_summary, category_coverage=category_coverage)
+
 
 def _inventory_nonblocking_failed_with_artifacts(source: PolicySource) -> bool:
     authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
@@ -300,4 +537,24 @@ def sync_crawl_result_to_inventory(
             "revalidation_required": False,
             "authority_use_type": getattr(inventory, "authority_use_type", None),
         })
+
+    inv = inventory
+    if inv is None:
+        try:
+            stmt = select(PolicySourceInventory).where(PolicySourceInventory.policy_source_id == int(getattr(source, "id", 0) or 0))
+            inv = db.scalars(stmt.order_by(PolicySourceInventory.id.desc())).first()
+        except Exception:
+            inv = None
+
+    if inv is not None:
+        result["category_coverage"] = summarize_inventory_category_coverage(
+            db,
+            org_id=getattr(inv, "org_id", None),
+            state=getattr(inv, "state", None) or getattr(source, "state", None) or "MI",
+            county=getattr(inv, "county", None) or getattr(source, "county", None),
+            city=getattr(inv, "city", None) or getattr(source, "city", None),
+            pha_name=getattr(inv, "pha_name", None) or getattr(source, "pha_name", None),
+            program_type=getattr(inv, "program_type", None),
+            required_categories=_source_category_hints(source, inv),
+        )
     return result

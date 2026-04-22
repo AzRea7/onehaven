@@ -1896,3 +1896,98 @@ if _final_extract_base is not None:
                 except Exception:
                     pass
         return created
+
+
+# --- evidence-backed PDF / dataset truth boundary (integrated final layer) ---
+
+PDF_EVIDENCE_SOURCE_TYPES = {"artifact", "dataset", "manual", "catalog"}
+PDF_EVIDENCE_PUBLICATION_TYPES = {"pdf", "official_document"}
+
+
+def _source_truth_policy(source: PolicySource) -> dict[str, Any]:
+    source_type = str(getattr(source, "source_type", "") or "").strip().lower()
+    publication_type = str(getattr(source, "publication_type", "") or "").strip().lower()
+    notes = str(getattr(source, "notes", "") or "").strip().lower()
+    raw_path = str(getattr(source, "raw_path", "") or "").strip().lower()
+    url = str(getattr(source, "url", "") or "").strip().lower()
+    authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
+    authority_use_type = str(getattr(source, "authority_use_type", "") or "").strip().lower()
+
+    is_pdf_like = bool(
+        publication_type in PDF_EVIDENCE_PUBLICATION_TYPES
+        or raw_path.endswith(".pdf")
+        or url.endswith(".pdf")
+        or "pdf" in notes
+    )
+    evidence_backed = is_pdf_like or source_type in PDF_EVIDENCE_SOURCE_TYPES
+    projectable_truth = authority_tier == "authoritative_official" and authority_use_type == "binding" and not evidence_backed
+    return {
+        "evidence_backed": bool(evidence_backed),
+        "publication_type": publication_type or ("pdf" if is_pdf_like else "web_page"),
+        "truth_role": "evidence_backed_assertion" if evidence_backed else "candidate_truth",
+        "projectable_truth": bool(projectable_truth),
+        "requires_validation": True,
+        "requires_binding_authority": True,
+    }
+
+
+def _tag_assertion_with_truth_boundary(row: PolicyAssertion, source: PolicySource) -> None:
+    policy = _source_truth_policy(source)
+    citation_json = _json_loads_dict(getattr(row, "citation_json", None))
+    provenance_json = _json_loads_dict(getattr(row, "rule_provenance_json", None))
+    citation_json["evidence_role"] = policy["truth_role"]
+    citation_json["projectable_truth"] = policy["projectable_truth"]
+    citation_json["requires_binding_authority"] = policy["requires_binding_authority"]
+    citation_json["publication_type"] = policy["publication_type"]
+    provenance_json["evidence_role"] = policy["truth_role"]
+    provenance_json["projectable_truth"] = policy["projectable_truth"]
+    provenance_json["publication_type"] = policy["publication_type"]
+    row.citation_json = _dumps(citation_json)
+    row.rule_provenance_json = _dumps(provenance_json)
+
+    if policy["evidence_backed"] and str(getattr(row, "coverage_status", "") or "").strip().lower() not in {"conflicting", "stale"}:
+        row.coverage_status = "partial"
+        row.rule_status = "candidate"
+        row.governance_state = "draft"
+        row.validation_reason = str(getattr(row, "validation_reason", "") or "evidence_backed_source_requires_authority_validation")
+
+
+_extractor_pdf_boundary_base = extract_assertions_for_source
+
+def extract_assertions_for_source(
+    db: Session,
+    *,
+    source: PolicySource | None = None,
+    source_id: int | None = None,
+    org_id: Optional[int] = None,
+    org_scope: bool = False,
+):
+    created = list(
+        _extractor_pdf_boundary_base(
+            db,
+            source=source,
+            source_id=source_id,
+            org_id=org_id,
+            org_scope=org_scope,
+        )
+        or []
+    )
+    if source is None and source_id is not None:
+        source = db.get(PolicySource, int(source_id))
+    if source is None:
+        return created
+
+    for row in created:
+        try:
+            _tag_assertion_with_truth_boundary(row, source)
+            db.add(row)
+        except Exception:
+            pass
+    try:
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return created

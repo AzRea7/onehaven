@@ -546,23 +546,66 @@ def _authority_rank_for_tier(tier: str) -> int:
     return int(AUTHORITY_TIER_RANKS.get(str(tier or "derived_or_inferred"), 25))
 
 
-def _classify_authority_tier(*, url: str, publisher: Optional[str] = None, title: Optional[str] = None, source_type: Optional[str] = None, source_kind: Optional[str] = None) -> dict[str, Any]:
-    host = urlparse(url).netloc.strip().lower()
+
+def validate_official_source_candidate(
+    *,
+    url: str,
+    title: str | None = None,
+    publisher: str | None = None,
+    probe_result: dict[str, Any] | None = None,
+    authority_score: float | None = None,
+) -> dict[str, Any]:
+    host = _host_from_url(url)
+    reasons: list[str] = []
+    if not host:
+        reasons.append("missing_host")
+    if _host_looks_guessed(host):
+        reasons.append("guessed_domain")
+    if not _is_official_host(url):
+        reasons.append("non_official_host")
+    if _looks_like_placeholder_or_access_page(
+        title=title,
+        publisher=publisher,
+        url=url,
+        http_status=(probe_result or {}).get("http_status"),
+    ):
+        reasons.append("placeholder_or_access_page")
+    score = float(authority_score or 0.0)
+    if score and score < 0.60:
+        reasons.append("low_authority_score")
+    return {
+        "accepted": not reasons,
+        "reasons": sorted(set(reasons)),
+        "host": host,
+    }
+
+
+def _classify_authority_tier(
+    *,
+    url: str,
+    publisher: Optional[str] = None,
+    title: Optional[str] = None,
+    source_type: Optional[str] = None,
+    source_kind: Optional[str] = None,
+) -> dict[str, Any]:
+    host = _host_from_url(url)
     publisher_text = (publisher or "").strip().lower()
     title_text = (title or "").strip().lower()
     source_type_text = (source_type or "").strip().lower()
     source_kind_text = (source_kind or "").strip().lower()
     publication_type = _publication_type_from_url(url)
+
     authority_tier = "derived_or_inferred"
     authority_class = "private_site"
     authority_kind = "private_site"
     authority_reason = "No government or approved official signal detected."
     authority_score = 0.35
-    if host.endswith(".gov") or ".gov." in host or host.endswith(".mi.us") or host.endswith(".us"):
+
+    if _is_official_host(url):
         authority_tier = "authoritative_official"
-        authority_class = "official_government"
+        authority_class = "government"
         authority_kind = "official_government"
-        authority_reason = "Official government domain."
+        authority_reason = "Strict host validation passed."
         authority_score = 0.99
     elif any(token in source_kind_text for token in ("federal_anchor", "state_anchor", "municipal_code")):
         authority_tier = "authoritative_official"
@@ -570,18 +613,48 @@ def _classify_authority_tier(*, url: str, publisher: Optional[str] = None, title
         authority_kind = "catalog_primary"
         authority_reason = "Catalog source kind indicates primary official/legal source."
         authority_score = 0.96
-    elif any(token in source_kind_text for token in ("city_program_page", "county_program_page", "state_program_page", "housing_authority", "pha_plan", "pha_guidance")) or "housing authority" in publisher_text or "housing commission" in publisher_text or "housing authority" in title_text:
+    elif any(
+        token in source_kind_text
+        for token in (
+            "city_program_page",
+            "county_program_page",
+            "state_program_page",
+            "housing_authority",
+            "pha_plan",
+            "pha_guidance",
+            "official_form",
+            "municipal_registration",
+            "municipal_inspection",
+            "municipal_program_page",
+            "municipal_certificate",
+            "municipal_guidance",
+        )
+    ) or "housing authority" in publisher_text or "housing commission" in publisher_text or "housing authority" in title_text:
         authority_tier = "approved_official_supporting"
         authority_class = "official_supporting"
         authority_kind = "official_supporting"
         authority_reason = "Approved supporting official/program source."
         authority_score = 0.86
-    elif any(token in source_type_text for token in ("program", "city", "county", "state", "federal")) or host.endswith(".org"):
+    elif any(token in source_type_text for token in ("program", "city", "county", "state", "federal")):
         authority_tier = "semi_authoritative_operational"
-        authority_class = "operational_program" if source_type_text else "organizational"
-        authority_kind = authority_class
-        authority_reason = "Operational or organizational source, useful but not primary legal authority."
+        authority_class = "operational_program"
+        authority_kind = "operational_program"
+        authority_reason = "Operational source type with some authority signal."
         authority_score = 0.65
+
+    verdict = validate_official_source_candidate(
+        url=url,
+        title=title,
+        publisher=publisher,
+        authority_score=authority_score,
+    )
+    if not verdict["accepted"]:
+        authority_tier = "derived_or_inferred"
+        authority_class = "private_site"
+        authority_kind = "rejected_candidate"
+        authority_reason = ",".join(verdict["reasons"]) or "rejected_candidate"
+        authority_score = min(float(authority_score or 0.0), 0.35)
+
     authority_rank = _authority_rank_for_tier(authority_tier)
     return {
         "authority_kind": authority_kind,
@@ -912,6 +985,7 @@ def collect_url(
         inventory_origin="manual_collect_prevalidated_host",
         is_curated=True,
     )
+    _suppress_shadowed_sources_for_scope(db, canonical_source=row)
     db.commit()
 
     return PolicyCollectResult(source=row, changed=True, fetch_ok=True, fetch_error=None)
@@ -1512,6 +1586,129 @@ def merged_catalog_for_market(
     )
 
 
+
+def _source_category_set(source: PolicySource) -> set[str]:
+    return {
+        str(x).strip().lower()
+        for x in _json_loads_list(getattr(source, "normalized_categories_json", None))
+        if str(x).strip()
+    }
+
+
+def _source_scope_key(source: PolicySource) -> tuple[Any, ...]:
+    return (
+        getattr(source, "org_id", None),
+        _norm_state(getattr(source, "state", None)),
+        _norm_lower(getattr(source, "county", None)),
+        _norm_lower(getattr(source, "city", None)),
+        _norm_text(getattr(source, "pha_name", None)),
+        _norm_text(getattr(source, "program_type", None)),
+    )
+
+
+def _source_is_weak_empty_duplicate(source: PolicySource) -> bool:
+    return (
+        str(getattr(source, "authority_tier", "") or "").strip().lower() == "derived_or_inferred"
+        and str(getattr(source, "authority_use_type", "") or "").strip().lower() == "weak"
+        and not _source_category_set(source)
+    )
+
+
+def _source_has_live_failure(source: PolicySource) -> bool:
+    freshness_status = str(getattr(source, "freshness_status", "") or "").strip().lower()
+    refresh_state = str(getattr(source, "refresh_state", "") or "").strip().lower()
+    try:
+        http_status = int(getattr(source, "http_status", None) or 0)
+    except Exception:
+        http_status = 0
+    return (
+        freshness_status in {"fetch_failed", "error", "blocked"}
+        or refresh_state in {"failed", "blocked"}
+        or http_status in {404, 410}
+    )
+
+
+def _source_has_alternative_backing(source: PolicySource, peers: list[PolicySource]) -> bool:
+    source_cats = _source_category_set(source)
+    for peer in peers:
+        if getattr(peer, "id", None) == getattr(source, "id", None):
+            continue
+        if _source_scope_key(peer) != _source_scope_key(source):
+            continue
+        if not _source_is_validated_official(peer):
+            continue
+        peer_cats = _source_category_set(peer)
+        if not source_cats:
+            return True
+        if source_cats.intersection(peer_cats):
+            return True
+    return False
+
+
+def _archive_source_as_ignored(
+    db: Session,
+    *,
+    source: PolicySource,
+    reason: str,
+) -> None:
+    source.registry_status = "ignored"
+    source.refresh_state = "ignored"
+    source.refresh_status_reason = reason
+    if getattr(source, "freshness_status", None) in {None, "", "unknown"}:
+        source.freshness_status = "ignored"
+    source.revalidation_required = False
+    db.add(source)
+
+
+def _suppress_shadowed_sources_for_scope(
+    db: Session,
+    *,
+    canonical_source: PolicySource,
+) -> None:
+    rows = list(
+        db.scalars(
+            select(PolicySource).where(PolicySource.state == _norm_state(getattr(canonical_source, "state", None)))
+        ).all()
+    )
+    scope_rows = [row for row in rows if _source_scope_key(row) == _source_scope_key(canonical_source)]
+    canonical_host = _host_from_url(getattr(canonical_source, "url", "") or "")
+    canonical_cats = _source_category_set(canonical_source)
+
+    for row in scope_rows:
+        if getattr(row, "id", None) == getattr(canonical_source, "id", None):
+            continue
+        row_host = _host_from_url(getattr(row, "url", "") or "")
+        row_cats = _source_category_set(row)
+
+        if _source_is_weak_empty_duplicate(row) and row_host == canonical_host:
+            _archive_source_as_ignored(
+                db,
+                source=row,
+                reason="shadowed_duplicate_weak_source",
+            )
+            continue
+
+        if _source_has_live_failure(row) and _source_is_validated_official(row):
+            if _source_has_alternative_backing(row, scope_rows):
+                _archive_source_as_ignored(
+                    db,
+                    source=row,
+                    reason="failed_official_source_has_alternative_backing",
+                )
+                continue
+
+        if (
+            _source_is_weak_empty_duplicate(row)
+            and canonical_cats
+            and row_host == canonical_host
+        ):
+            _archive_source_as_ignored(
+                db,
+                source=row,
+                reason="empty_duplicate_shadowed_by_canonical_source",
+            )
+
+
 def ensure_policy_source_from_catalog_entry(
     db: Session,
     *,
@@ -1672,6 +1869,7 @@ def ensure_policy_source_from_catalog_entry(
             probe_result={"ok": True, "source": "catalog"},
             metadata={"focus": focus, "catalog_entry_key": _catalog_entry_key(entry)},
         )
+        _suppress_shadowed_sources_for_scope(db, canonical_source=source)
         return source
 
     existing.state = state
@@ -1769,6 +1967,7 @@ def ensure_policy_source_from_catalog_entry(
         probe_result={"ok": True, "source": "catalog"},
         metadata={"focus": focus, "catalog_entry_key": _catalog_entry_key(entry)},
     )
+    _suppress_shadowed_sources_for_scope(db, canonical_source=existing)
     return existing
 
 
@@ -3093,3 +3292,4 @@ def inventory_summary_for_market(
     payload['truth_eligible_source_ids'] = sorted(set(truth_eligible_source_ids))
     payload['truth_eligible_source_count'] = len(payload['truth_eligible_source_ids'])
     return payload
+

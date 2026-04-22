@@ -98,6 +98,20 @@ def _stable_rule_key(
     return raw[:240]
 
 
+def _nspire_truth_metadata(item: dict[str, Any]) -> dict[str, Any]:
+    source_url = _norm_text(item.get("source_url"))
+    is_pdf = bool(source_url and source_url.lower().endswith(".pdf"))
+    return {
+        "evidence_role": "evidence_backed_assertion",
+        "truth_role": "supporting_evidence_not_primary_truth",
+        "projectable_truth": False,
+        "requires_validation": True,
+        "requires_binding_authority": True,
+        "source_authority_score": 0.80 if source_url else 0.65,
+        "publication_type": "pdf" if is_pdf else "official_document",
+    }
+
+
 def import_nspire_rules(
     db: Session,
     *,
@@ -111,6 +125,7 @@ def import_nspire_rules(
     inserted = 0
     updated = 0
     seen_keys: list[str] = []
+    truth_rows: list[dict[str, Any]] = []
 
     for raw in rules:
         item = raw if isinstance(raw, dict) else raw.__dict__
@@ -133,6 +148,7 @@ def import_nspire_rules(
             else _default_correction_days(severity)
         )
         pass_fail = _norm_lower(item.get("pass_fail")) or ("pass" if severity == SEVERITY_L else "fail")
+        truth_meta = _nspire_truth_metadata(item)
 
         payload = {
             "rule_key": rule_key,
@@ -181,6 +197,14 @@ def import_nspire_rules(
             updated += 1
 
         seen_keys.append(rule_key)
+        truth_rows.append(
+            {
+                "rule_key": rule_key,
+                "standard_code": standard_code,
+                "severity_label": severity,
+                **truth_meta,
+            }
+        )
 
     db.flush()
     return {
@@ -189,51 +213,7 @@ def import_nspire_rules(
         "updated": updated,
         "total_processed": inserted + updated,
         "rule_keys": seen_keys,
-        "template_key": _norm_lower(template_key) or DEFAULT_TEMPLATE_KEY,
-        "template_version": _norm_text(template_version) or DEFAULT_TEMPLATE_VERSION,
+        "truth_rows": truth_rows,
+        "truth_model": "evidence_first",
+        "projectable_truth_from_nspire_import": False,
     }
-
-
-def list_active_nspire_rules(
-    db: Session,
-    *,
-    template_key: str = DEFAULT_TEMPLATE_KEY,
-    template_version: str | None = None,
-) -> list[dict[str, Any]]:
-    table = _nspire_table(db)
-
-    conditions = [
-        table.c.template_key == (_norm_lower(template_key) or DEFAULT_TEMPLATE_KEY),
-        table.c.is_active.is_(True),
-    ]
-    if template_version:
-        conditions.append(table.c.template_version == template_version)
-
-    rows = db.execute(
-        select(table)
-        .where(and_(*conditions))
-        .order_by(table.c.standard_label, table.c.rule_key)
-    ).all()
-
-    return [dict(row._mapping) for row in rows]
-
-
-def deactivate_nspire_template_version(
-    db: Session,
-    *,
-    template_key: str,
-    template_version: str,
-) -> int:
-    table = _nspire_table(db)
-    result = db.execute(
-        update(table)
-        .where(
-            and_(
-                table.c.template_key == (_norm_lower(template_key) or DEFAULT_TEMPLATE_KEY),
-                table.c.template_version == template_version,
-            )
-        )
-        .values(is_active=False, updated_at=datetime.utcnow())
-    )
-    db.flush()
-    return int(result.rowcount or 0)

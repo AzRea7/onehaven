@@ -34,6 +34,8 @@ type EvidenceRow = {
   excerpt?: string | null;
   fetched_at?: string | null;
   is_authoritative?: boolean | null;
+  authority_tier?: string | null;
+  authority_use_type?: string | null;
 };
 
 type SourceSummaryLike = {
@@ -44,6 +46,8 @@ type SourceSummaryLike = {
   validation_state_counts?: Record<string, number> | null;
   next_refresh_due_at?: string | null;
   next_validation_due_at?: string | null;
+  source_authority_score?: number | null;
+  authority_use_counts?: Record<string, number> | null;
 };
 
 type LockoutLike = {
@@ -103,6 +107,7 @@ type ResolvedProfile = {
   missing_categories?: string[] | null;
   stale_categories?: string[] | null;
   conflicting_categories?: string[] | null;
+  source_authority_score?: number | null;
   source_evidence?: EvidenceRow[] | null;
   evidence?: EvidenceRow[] | null;
   evidence_rows?: EvidenceRow[] | null;
@@ -155,6 +160,7 @@ function rowTone(v: any) {
       "high",
       "verified",
       "healthy",
+      "binding",
     ].includes(s)
   ) {
     return "oh-pill oh-pill-good";
@@ -167,40 +173,26 @@ function rowTone(v: any) {
       "review",
       "degraded",
       "validating",
+      "supporting",
     ].includes(s)
   ) {
     return "oh-pill oh-pill-warn";
   }
-  if (["missing", "low", "false", "stale", "blocked", "failed"].includes(s)) {
+  if (
+    [
+      "missing",
+      "low",
+      "false",
+      "stale",
+      "blocked",
+      "failed",
+      "weak",
+      "conflicting",
+    ].includes(s)
+  ) {
     return "oh-pill oh-pill-bad";
   }
   return "oh-pill";
-}
-
-function renderCountChips(
-  counts?: Record<string, number> | null,
-  tone: "good" | "warn" | "bad" | "neutral" = "neutral",
-) {
-  const items = Object.entries(counts || {}).filter(
-    ([, value]) => Number(value || 0) > 0,
-  );
-  if (!items.length) return <span className="text-sm text-app-4">None</span>;
-  return items.map(([key, value]) => (
-    <span
-      key={key}
-      className={
-        tone === "good"
-          ? "oh-pill oh-pill-good"
-          : tone === "warn"
-            ? "oh-pill oh-pill-warn"
-            : tone === "bad"
-              ? "oh-pill oh-pill-bad"
-              : "oh-pill"
-      }
-    >
-      {titleize(key)} · {value}
-    </span>
-  ));
 }
 
 function BoundaryCallout({
@@ -259,6 +251,44 @@ function LayerCard({ row }: { row: RuleLayer }) {
   );
 }
 
+function EvidenceCard({ row }: { row: EvidenceRow }) {
+  const authorityLabel =
+    row.authority_tier ||
+    row.authority_use_type ||
+    (row.is_authoritative ? "authoritative" : "supporting");
+  return (
+    <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-app-0">
+          {row.title || row.label || "Evidence"}
+        </div>
+        <span className={rowTone(authorityLabel)}>
+          {titleize(authorityLabel)}
+        </span>
+      </div>
+      <div className="mt-2 text-sm text-app-2">
+        {row.source_name || row.source || "Unknown source"}
+      </div>
+      {row.excerpt ? (
+        <div className="mt-2 text-sm text-app-3">{row.excerpt}</div>
+      ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-app-4">
+        <span>Fetched: {formatDate(row.fetched_at)}</span>
+        {row.url ? (
+          <a
+            href={row.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-app-1 hover:underline"
+          >
+            Open source <Link2 className="h-3.5 w-3.5" />
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function PropertyJurisdictionRulesPanel({
   profile,
 }: {
@@ -279,6 +309,9 @@ export default function PropertyJurisdictionRulesPanel({
   const stale = toArray<string>(
     p.stale_categories || p.completeness?.stale_categories,
   );
+  const conflicting = toArray<string>(
+    p.conflicting_categories || p.completeness?.conflicting_categories,
+  );
   const lockoutCausing = toArray<string>(
     operational?.lockout_causing_categories,
   );
@@ -289,9 +322,6 @@ export default function PropertyJurisdictionRulesPanel({
     operational?.validation_pending_categories,
   );
   const authorityGaps = toArray<string>(operational?.authority_gap_categories);
-  const conflicting = toArray<string>(
-    p.conflicting_categories || p.completeness?.conflicting_categories,
-  );
   const legallyUnsafe = Boolean(p.legally_unsafe);
   const informationallyIncomplete = Boolean(p.informationally_incomplete);
   const locationBits = [p.city, p.county, p.state].filter(Boolean).join(", ");
@@ -299,32 +329,16 @@ export default function PropertyJurisdictionRulesPanel({
   const lockout = operational?.lockout;
   const sourceSummary = operational?.source_summary;
   const reasons = toArray<string>(operational?.reasons);
-  const artifactEvidence =
-    (operational as any)?.artifact_evidence ||
-    (p as any)?.artifact_evidence ||
-    null;
-  const repoPdfCount = Number(
-    (operational as any)?.repo_pdf_count ||
-      artifactEvidence?.repo_pdf_count ||
-      0,
+  const authoritativeCount = Number(sourceSummary?.authoritative_count || 0);
+  const authorityUseCounts = sourceSummary?.authority_use_counts || {};
+  const sourceAuthorityScore = Number(
+    p.source_authority_score ?? sourceSummary?.source_authority_score ?? 0,
   );
-  const repoPolicyRawCount = Number(
-    (operational as any)?.repo_policy_raw_count ||
-      artifactEvidence?.repo_policy_raw_count ||
-      0,
-  );
-  const repoPdfNames = toArray<string>(
-    (operational as any)?.repo_pdf_names || artifactEvidence?.repo_pdf_names,
-  );
-  const repoArtifactSupportState =
-    (operational as any)?.repo_artifact_support_state ||
-    artifactEvidence?.artifact_support_state ||
-    null;
 
   return (
     <Surface
       title="Jurisdiction trust and rule overlays"
-      subtitle="Resolved local compliance layers, health state, lockout posture, freshness, validation, and source-backed evidence."
+      subtitle="Resolved local compliance layers, missing/conflicting categories, trust posture, freshness, validation, and source-backed authority."
     >
       {!profile ? (
         <EmptyState
@@ -351,8 +365,7 @@ export default function PropertyJurisdictionRulesPanel({
                 legal compliance guarantee.{" "}
                 {!safeToRely
                   ? "A human or legal review is still needed before treating this property as cleared."
-                  : "You should still verify critical requirements with the authoritative jurisdiction source before final external use."}{" "}
-                Any copied or shared summary should carry this same boundary.
+                  : "You should still verify critical requirements with the authoritative jurisdiction source before final external use."}
               </>
             }
           />
@@ -378,90 +391,139 @@ export default function PropertyJurisdictionRulesPanel({
               confidence_label: p.confidence_label,
               production_readiness: p.production_readiness,
               trustworthy_for_projection: p.trustworthy_for_projection,
+              missing_categories: missing,
+              conflicting_categories: conflicting,
+              source_authority_score: sourceAuthorityScore,
+              source_summary: sourceSummary || undefined,
             }}
           />
-
-          {lockout?.lockout_active ||
-          reasons.length ||
-          legallyUnsafe ||
-          informationallyIncomplete ? (
-            <div
-              className={`oh-state-banner ${legallyUnsafe || lockout?.lockout_active ? "oh-state-banner-bad" : informationallyIncomplete ? "oh-state-banner-warn" : safeToRely ? "oh-state-banner-good" : "oh-state-banner-warn"}`}
-            >
-              <div className="flex items-start gap-2 text-sm text-app-1">
-                {safeToRely ? (
-                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                ) : (
-                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                )}
-                <div>
-                  <div className="font-semibold text-app-0">
-                    {safeToRely
-                      ? "Safe to rely on now"
-                      : legallyUnsafe || lockout?.lockout_active
-                        ? "Legally unsafe right now"
-                        : informationallyIncomplete
-                          ? "Informationally incomplete"
-                          : "Review required before reliance"}
-                  </div>
-                  <div className="mt-1 text-app-2">
-                    {lockout?.lockout_reason ||
-                      reasons[0] ||
-                      p.stale_reason ||
-                      "This jurisdiction still needs review."}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <FolderTree className="h-4 w-4" />
-                PDF-backed evidence
+                <MapPin className="h-4 w-4" />
+                Resolved market
+              </div>
+              <div className="mt-3 space-y-2 text-sm text-app-2">
+                <div>
+                  <span className="text-app-4">Location:</span>{" "}
+                  {locationBits || "—"}
+                </div>
+                <div>
+                  <span className="text-app-4">PHA / overlay:</span>{" "}
+                  {p.pha_name || "—"}
+                </div>
+                <div>
+                  <span className="text-app-4">Resolved version:</span>{" "}
+                  {p.resolved_rule_version || p.rule_version || "—"}
+                </div>
+                <div>
+                  <span className="text-app-4">Last refreshed:</span>{" "}
+                  {formatDate(p.last_refreshed || p.last_refreshed_at)}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                <ShieldCheck className="h-4 w-4" />
+                Trust status
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <span
+                  className={rowTone(
+                    operational?.health_state || operational?.refresh_state,
+                  )}
+                >
+                  {titleize(
+                    operational?.health_state ||
+                      operational?.refresh_state ||
+                      "unknown",
+                  )}
+                </span>
+                <span
                   className={
-                    repoPdfCount > 0
-                      ? "oh-pill oh-pill-good"
-                      : "oh-pill oh-pill-warn"
+                    safeToRely ? "oh-pill oh-pill-good" : "oh-pill oh-pill-bad"
                   }
                 >
-                  {repoPdfCount > 0
-                    ? `${repoPdfCount} PDF files available`
-                    : "No PDF catalog loaded"}
+                  {safeToRely ? "Safe to rely on" : "Review required"}
                 </span>
-                {repoPolicyRawCount > 0 ? (
-                  <span className="oh-pill">
-                    Policy raw: {repoPolicyRawCount}
-                  </span>
-                ) : null}
-                {repoArtifactSupportState ? (
-                  <span className="oh-pill">
-                    {titleize(repoArtifactSupportState)}
-                  </span>
-                ) : null}
+                <span className={rowTone(p.production_readiness || "unknown")}>
+                  {titleize(p.production_readiness || "unknown")}
+                </span>
               </div>
-              {repoPdfNames.length ? (
+              {lockout?.lockout_reason || reasons[0] ? (
                 <div className="mt-3 text-sm text-app-3">
-                  Sample standards: {repoPdfNames.slice(0, 4).join(", ")}
+                  {lockout?.lockout_reason || reasons[0]}
                 </div>
-              ) : (
-                <div className="mt-3 text-sm text-app-4">
-                  This view is only as trustworthy as the fetched sources and
-                  loaded PDF dataset.
+              ) : null}
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                <FileSearch className="h-4 w-4" />
+                Coverage gaps
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {missing.length ? (
+                  missing.map((item) => (
+                    <span key={item} className="oh-pill oh-pill-warn">
+                      {titleize(item)}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-sm text-app-4">
+                    No missing categories
+                  </span>
+                )}
+              </div>
+              {stale.length ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {stale.map((item) => (
+                    <span key={item} className="oh-pill oh-pill-warn">
+                      stale: {titleize(item)}
+                    </span>
+                  ))}
                 </div>
-              )}
+              ) : null}
+            </div>
+
+            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
+                <AlertTriangle className="h-4 w-4" />
+                Conflicts and authority
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {conflicting.length ? (
+                  conflicting.map((item) => (
+                    <span key={item} className="oh-pill oh-pill-bad">
+                      {titleize(item)}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-sm text-app-4">
+                    No category conflicts
+                  </span>
+                )}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="oh-pill">
+                  Authoritative: {authoritativeCount}
+                </span>
+                <span className="oh-pill">
+                  Binding: {Number(authorityUseCounts["binding"] || 0)}
+                </span>
+                <span className="oh-pill">
+                  Authority: {Math.round(sourceAuthorityScore * 100)}%
+                </span>
+              </div>
             </div>
           </div>
 
           {lockoutCausing.length ||
           validationPending.length ||
-          authorityGaps.length ||
-          informationalGaps.length ? (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          authorityGaps.length ? (
+            <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
                 <div className="text-sm font-semibold text-app-0">
                   Blocking categories
@@ -510,268 +572,123 @@ export default function PropertyJurisdictionRulesPanel({
                   )}
                 </div>
               </div>
-              <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-                <div className="text-sm font-semibold text-app-0">
-                  What is needed next
-                </div>
-                <div className="mt-3 space-y-2 text-sm text-app-2">
-                  <div>
-                    Next step:{" "}
-                    <span className="text-app-1">
-                      {titleize(
-                        operational?.next_due_step ||
-                          operational?.next_actions?.next_step ||
-                          "monitor",
-                      )}
-                    </span>
-                  </div>
-                  <div>
-                    Informational gaps:{" "}
-                    {informationalGaps.length
-                      ? informationalGaps.map(titleize).join(", ")
-                      : "none listed"}
-                  </div>
-                  <div>
-                    Last validation:{" "}
-                    {formatDate(operational?.last_validation_at)}
-                  </div>
-                </div>
-              </div>
             </div>
           ) : null}
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <MapPin className="h-4 w-4" />
-                Resolved market
+                <Layers3 className="h-4 w-4" />
+                Rule layers
               </div>
-              <div className="mt-3 space-y-2 text-sm text-app-2">
-                <div>
-                  <span className="text-app-4">Location:</span>{" "}
-                  {locationBits || "—"}
-                </div>
-                <div>
-                  <span className="text-app-4">PHA / overlay:</span>{" "}
-                  {p.pha_name || "—"}
-                </div>
-                <div>
-                  <span className="text-app-4">Resolved version:</span>{" "}
-                  {p.resolved_rule_version || p.rule_version || "—"}
-                </div>
-                <div>
-                  <span className="text-app-4">Last refreshed:</span>{" "}
-                  {formatDate(p.last_refreshed || p.last_refreshed_at)}
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <ShieldCheck className="h-4 w-4" />
-                Operational trust
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span
-                  className={rowTone(
-                    operational?.health_state || operational?.refresh_state,
-                  )}
-                >
-                  {titleize(
-                    operational?.health_state ||
-                      operational?.refresh_state ||
-                      "unknown",
-                  )}
-                </span>
-                <span
-                  className={
-                    safeToRely
-                      ? "oh-pill oh-pill-good"
-                      : rowTone(operational?.reliability_state)
-                  }
-                >
-                  {safeToRely
-                    ? "Safe to rely on"
-                    : titleize(
-                        operational?.reliability_state || "review_required",
-                      )}
-                </span>
-                {lockout?.lockout_active ? (
-                  <span className="oh-pill oh-pill-bad">Lockout active</span>
-                ) : null}
-              </div>
-              <div className="mt-3 text-sm text-app-3">
-                {operational?.refresh_status_reason ||
-                  p.stale_reason ||
-                  "No operational status reason returned."}
+              <div className="mt-3 grid gap-3">
+                {layers.length ? (
+                  layers.map((row, idx) => (
+                    <LayerCard
+                      key={`${row.layer || row.label || "layer"}-${idx}`}
+                      row={row}
+                    />
+                  ))
+                ) : (
+                  <span className="text-sm text-app-4">
+                    No resolved layers available.
+                  </span>
+                )}
               </div>
             </div>
 
             <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
                 <FolderTree className="h-4 w-4" />
-                Source freshness
+                Source authority and evidence
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {renderCountChips(sourceSummary?.freshness_counts, "warn")}
-              </div>
-              <div className="mt-3 text-sm text-app-3">
-                Next refresh: {formatDate(sourceSummary?.next_refresh_due_at)}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-                <FileSearch className="h-4 w-4" />
-                Validation and next step
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {renderCountChips(
-                  sourceSummary?.validation_state_counts,
-                  "warn",
+              <div className="mt-3 grid gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <span className="oh-pill">
+                    Authoritative sources · {authoritativeCount}
+                  </span>
+                  <span className="oh-pill">
+                    Binding · {Number(authorityUseCounts["binding"] || 0)}
+                  </span>
+                  <span className="oh-pill">
+                    Supporting · {Number(authorityUseCounts["supporting"] || 0)}
+                  </span>
+                  <span className="oh-pill">
+                    Authority score · {Math.round(sourceAuthorityScore * 100)}%
+                  </span>
+                </div>
+                {evidence.length ? (
+                  evidence
+                    .slice(0, 8)
+                    .map((row, idx) => (
+                      <EvidenceCard
+                        key={`${row.url || row.title || row.label || "evidence"}-${idx}`}
+                        row={row}
+                      />
+                    ))
+                ) : (
+                  <span className="text-sm text-app-4">
+                    No source evidence rows available.
+                  </span>
                 )}
               </div>
-              <div className="mt-3 text-sm text-app-3">
-                Next step:{" "}
-                {titleize(operational?.next_actions?.next_step || "monitor")}
-              </div>
-              {operational?.next_actions?.next_search_retry_due_at ? (
-                <div className="mt-1 text-xs text-app-4">
-                  Retry/search due{" "}
-                  {formatDate(
-                    operational.next_actions.next_search_retry_due_at,
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
+            <div className="text-sm font-semibold text-app-0">
+              Category coverage summary
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <div>
+                <div className="text-xs uppercase tracking-[0.14em] text-app-4">
+                  Covered
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {covered.length ? (
+                    covered.map((item) => (
+                      <span key={item} className="oh-pill oh-pill-good">
+                        {titleize(item)}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-app-4">None</span>
                   )}
                 </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                Covered categories
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {covered.length ? (
-                  covered.map((item) => (
-                    <span key={item} className="oh-pill oh-pill-good">
-                      {titleize(item)}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-sm text-app-4">None yet</span>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-                Missing / stale / conflicting
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {missing.map((item) => (
-                  <span key={`m-${item}`} className="oh-pill oh-pill-warn">
-                    Missing: {titleize(item)}
-                  </span>
-                ))}
-                {stale.map((item) => (
-                  <span key={`s-${item}`} className="oh-pill oh-pill-warn">
-                    Stale: {titleize(item)}
-                  </span>
-                ))}
-                {conflicting.map((item) => (
-                  <span key={`c-${item}`} className="oh-pill oh-pill-bad">
-                    Conflict: {titleize(item)}
-                  </span>
-                ))}
-                {!missing.length && !stale.length && !conflicting.length ? (
-                  <span className="oh-pill oh-pill-good">
-                    No known risk categories
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-              <Layers3 className="h-4 w-4" />
-              Resolved layers
-            </div>
-            {!layers.length ? (
-              <div className="mt-3 text-sm text-app-4">
-                No explicit layer rows returned for this profile.
-              </div>
-            ) : (
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                {layers.map((row, idx) => (
-                  <LayerCard
-                    key={`${row.layer || row.scope || row.label || "layer"}-${idx}`}
-                    row={row}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-app bg-app-muted px-4 py-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-app-0">
-              <Link2 className="h-4 w-4" />
-              Source evidence
-            </div>
-            {!evidence.length ? (
-              <div className="mt-3 text-sm text-app-4">
-                No evidence rows returned.
-              </div>
-            ) : (
-              <div className="mt-3 grid gap-3">
-                {evidence.map((row, idx) => (
-                  <div
-                    key={`${row.title || row.label || row.url || "evidence"}-${idx}`}
-                    className="rounded-2xl border border-app bg-app-panel px-4 py-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm font-semibold text-app-0">
-                        {row.title ||
-                          row.label ||
-                          row.source_name ||
-                          "Evidence"}
-                      </div>
-                      <span
-                        className={
-                          row.is_authoritative
-                            ? "oh-pill oh-pill-good"
-                            : "oh-pill"
-                        }
-                      >
-                        {row.is_authoritative ? "Authoritative" : "Supporting"}
+              <div>
+                <div className="text-xs uppercase tracking-[0.14em] text-app-4">
+                  Missing
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {missing.length ? (
+                    missing.map((item) => (
+                      <span key={item} className="oh-pill oh-pill-warn">
+                        {titleize(item)}
                       </span>
-                    </div>
-                    <div className="mt-2 text-sm text-app-3">
-                      {row.source_name || row.source || "Unknown source"}
-                    </div>
-                    {row.excerpt ? (
-                      <div className="mt-3 rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-2">
-                        {row.excerpt}
-                      </div>
-                    ) : null}
-                    <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-app-4">
-                      <span>Fetched: {formatDate(row.fetched_at)}</span>
-                      {row.url ? (
-                        <a
-                          href={row.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-cyan-300 hover:text-cyan-200"
-                        >
-                          Open source
-                        </a>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
+                    ))
+                  ) : (
+                    <span className="text-sm text-app-4">None</span>
+                  )}
+                </div>
               </div>
-            )}
+              <div>
+                <div className="text-xs uppercase tracking-[0.14em] text-app-4">
+                  Conflicting
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {conflicting.length ? (
+                    conflicting.map((item) => (
+                      <span key={item} className="oh-pill oh-pill-bad">
+                        {titleize(item)}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-app-4">None</span>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

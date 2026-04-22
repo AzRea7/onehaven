@@ -228,3 +228,53 @@ if _surgical_lockout_original_profile_lockout_payload is not None:
         payload["current_truth_basis"] = _lockout_truth_basis(payload)
         payload["safe_to_rely_on"] = bool(payload["current_truth_basis"].get("safe_to_rely_on"))
         return payload
+
+
+# --- surgical final stale-authoritative + conflict lockout overlay ---
+
+try:
+    _final_lockout_original_profile_lockout_payload = profile_lockout_payload
+except NameError:
+    _final_lockout_original_profile_lockout_payload = None
+
+if _final_lockout_original_profile_lockout_payload is not None:
+    def profile_lockout_payload(profile: JurisdictionProfile, completeness: dict) -> dict:
+        payload = dict(_final_lockout_original_profile_lockout_payload(profile, completeness))
+        conflicting_categories = _dedupe(list(completeness.get("conflicting_categories") or []))
+        stale_authoritative_categories = _dedupe(list(completeness.get("stale_authoritative_categories") or []))
+        critical_missing_binding = _dedupe(
+            list(payload.get("critical_missing_binding_categories") or [])
+            + _critical_missing_binding_categories(completeness)
+        )
+        authority_gap_categories = _dedupe(
+            list(payload.get("authority_gap_categories") or [])
+            + list(critical_missing_binding)
+        )
+
+        lockout_causing_categories = _dedupe(
+            list(payload.get("lockout_causing_categories") or [])
+            + [c for c in conflicting_categories if c in LEGAL_BLOCKING_CATEGORIES]
+            + [c for c in stale_authoritative_categories if c in LEGAL_BLOCKING_CATEGORIES]
+            + [c for c in authority_gap_categories if c in LEGAL_BLOCKING_CATEGORIES]
+        )
+
+        hard_lock = bool(payload.get("lockout_active")) or bool(lockout_causing_categories)
+        lockout_reason = payload.get("lockout_reason")
+        if conflicting_categories:
+            lockout_reason = "unresolved_conflicting_categories"
+        elif stale_authoritative_categories:
+            lockout_reason = "critical_authoritative_data_stale"
+        elif authority_gap_categories and not lockout_reason:
+            lockout_reason = "critical_categories_missing_binding_authority"
+
+        payload["conflicting_categories"] = conflicting_categories
+        payload["stale_authoritative_categories"] = stale_authoritative_categories
+        payload["critical_missing_binding_categories"] = critical_missing_binding
+        payload["authority_gap_categories"] = authority_gap_categories
+        payload["lockout_causing_categories"] = lockout_causing_categories
+        payload["lockout_active"] = hard_lock
+        payload["blocking_state"] = bool(payload.get("blocking_state")) or hard_lock
+        payload["lockout_reason"] = lockout_reason
+        payload["current_truth_basis"] = _lockout_truth_basis(payload)
+        payload["safe_to_rely_on"] = bool(payload["current_truth_basis"].get("safe_to_rely_on"))
+        return payload

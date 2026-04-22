@@ -14,6 +14,43 @@ from app.services.jurisdiction_sla_service import collect_profile_source_sla_sum
 from app.services.policy_review_service import summarize_policy_overrides
 
 
+_RULE_TO_CATEGORY = {
+    "lead_hazard_assessment_required": "lead",
+    "lead_paint_affidavit_required": "lead",
+    "lead_clearance_required": "lead",
+    "lead_inspection_required": "lead",
+    "permit_required": "permits",
+    "local_contact_required": "contacts",
+    "local_documents_required": "documents",
+    "fee_schedule_reference": "fees",
+    "program_overlay_requirement": "program_overlay",
+    "source_of_income_protection": "source_of_income",
+    "rental_license_required": "rental_license",
+    "rental_registration_required": "registration",
+    "inspection_required": "inspection",
+    "inspection_program_exists": "inspection",
+    "fire_safety_inspection_required": "inspection",
+    "certificate_required_before_occupancy": "occupancy",
+    "certificate_of_occupancy_required": "occupancy",
+    "certificate_of_compliance_required": "occupancy",
+    "hap_contract_and_tenancy_addendum_required": "program_overlay",
+    "pha_landlord_packet_required": "program_overlay",
+}
+
+_BINDING_CATEGORIES = {
+    "registration",
+    "inspection",
+    "occupancy",
+    "lead",
+    "section8",
+    "program_overlay",
+    "safety",
+    "source_of_income",
+    "permits",
+    "rental_license",
+}
+
+
 def _loads_json_dict(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -39,6 +76,7 @@ def _dedupe(items: list[str]) -> list[str]:
         out.append(value)
     return out
 
+
 def _norm_state(value: Optional[str]) -> str:
     return (value or "MI").strip().upper()
 
@@ -54,20 +92,6 @@ def _norm_text(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     out = str(value).strip()
-    return out or None
-
-
-def _norm_lower(v: Optional[str]) -> Optional[str]:
-    if v is None:
-        return None
-    out = str(v).strip().lower()
-    return out or None
-
-
-def _norm_text(v: Optional[str]) -> Optional[str]:
-    if v is None:
-        return None
-    out = str(v).strip()
     return out or None
 
 
@@ -127,28 +151,6 @@ def _reliance_boundary(health_status: str, safe_to_rely_on: bool, artifact_backe
     }
 
 
-_RULE_TO_CATEGORY = {
-    "lead_hazard_assessment_required": "lead",
-    "lead_paint_affidavit_required": "lead",
-    "lead_clearance_required": "lead",
-    "lead_inspection_required": "lead",
-    "permit_required": "permits",
-    "local_contact_required": "contacts",
-    "local_documents_required": "documents",
-    "fee_schedule_reference": "fees",
-    "program_overlay_requirement": "program_overlay",
-    "source_of_income_protection": "source_of_income",
-    "rental_license_required": "rental_license",
-    "rental_registration_required": "registration",
-    "inspection_required": "inspection",
-    "inspection_program_exists": "inspection",
-    "fire_safety_inspection_required": "inspection",
-    "certificate_required_before_occupancy": "occupancy",
-    "certificate_of_occupancy_required": "occupancy",
-    "certificate_of_compliance_required": "occupancy",
-}
-
-
 def _assertion_scope_match(row: Any, county: str | None, city: str | None, pha_name: str | None) -> bool:
     return (
         _norm_lower(getattr(row, "county", None)) in {None, _norm_lower(county)}
@@ -181,7 +183,25 @@ def _assertion_category(row: Any) -> str | None:
     }.get(rf)
 
 
-def _covered_categories(
+def _assertion_is_strictly_covered(row: Any) -> bool:
+    validation_state = str(getattr(row, "validation_state", "") or "").strip().lower()
+    trust_state = str(getattr(row, "trust_state", "") or "").strip().lower()
+    governance_state = str(getattr(row, "governance_state", "") or "").strip().lower()
+    review_status = str(getattr(row, "review_status", "") or "").strip().lower()
+    coverage_status = str(getattr(row, "coverage_status", "") or "").strip().lower()
+
+    if getattr(row, "superseded_by_assertion_id", None) is not None:
+        return False
+    if validation_state not in {"validated"} and trust_state not in {"validated", "trusted"}:
+        return False
+    if governance_state not in {"active", "approved"} and review_status not in {"verified", "approved", "projected"}:
+        return False
+    if coverage_status and coverage_status not in {"covered", "verified", "active", "approved"}:
+        return False
+    return True
+
+
+def _strict_covered_categories(
     db: Session,
     *,
     org_id: int | None,
@@ -196,22 +216,17 @@ def _covered_categories(
         stmt = select(PolicyAssertion).where(or_(PolicyAssertion.org_id == org_id, PolicyAssertion.org_id.is_(None)))
     if state:
         stmt = stmt.where(PolicyAssertion.state == str(state).strip().upper())
+    stmt = stmt.where(PolicyAssertion.county.is_(None) if _norm_lower(county) is None else PolicyAssertion.county == _norm_lower(county))
+    stmt = stmt.where(PolicyAssertion.city.is_(None) if _norm_lower(city) is None else PolicyAssertion.city == _norm_lower(city))
+    if hasattr(PolicyAssertion, "pha_name"):
+        pha = _norm_text(pha_name)
+        stmt = stmt.where(or_(PolicyAssertion.pha_name.is_(None), PolicyAssertion.pha_name == "") if pha is None else PolicyAssertion.pha_name == pha)
 
-    rows = list(db.scalars(stmt).all())
     covered: set[str] = set()
-    for row in rows:
-        if getattr(row, "superseded_by_assertion_id", None) is not None:
-            continue
+    for row in list(db.scalars(stmt).all()):
         if not _assertion_scope_match(row, county, city, pha_name):
             continue
-        review_status = str(getattr(row, "review_status", "") or "").strip().lower()
-        governance_state = str(getattr(row, "governance_state", "") or "").strip().lower()
-        validation_state = str(getattr(row, "validation_state", "") or "").strip().lower()
-        if review_status not in {"verified", "approved", "projected"}:
-            continue
-        if governance_state not in {"active", "approved"}:
-            continue
-        if validation_state not in {"validated", "trusted"}:
+        if not _assertion_is_strictly_covered(row):
             continue
         category = _assertion_category(row)
         if category:
@@ -251,7 +266,6 @@ def _resolve_profile(
 
 
 def _evidence_safe_to_rely_on(sla_summary: dict[str, Any]) -> bool:
-    # Evidence safety should only be about evidence truth basis, not downstream category coverage.
     if list(sla_summary.get("legal_lockout_categories") or []):
         return False
     if list(sla_summary.get("critical_fetch_failure_categories") or []):
@@ -268,6 +282,73 @@ def _evidence_safe_to_rely_on(sla_summary: dict[str, Any]) -> bool:
         return True
 
     return bool(sla_summary.get("safe_to_rely_on", True))
+
+
+def _health_filtered_unsafe_reasons(
+    *,
+    raw_unsafe: list[str],
+    covered: set[str],
+    freshness_only: set[str],
+    degraded: set[str],
+    artifact_backed: bool,
+) -> list[str]:
+    filtered: list[str] = []
+    for item in [str(x).strip().lower() for x in list(raw_unsafe or []) if str(x).strip()]:
+        if item in covered:
+            continue
+        if artifact_backed and item in freshness_only and item not in _BINDING_CATEGORIES:
+            continue
+        if artifact_backed and item in degraded and item not in _BINDING_CATEGORIES:
+            continue
+        filtered.append(item)
+    return _dedupe(filtered)
+
+
+def _final_health_block_reasons(*, completeness: dict[str, Any], lockout: dict[str, Any], sla_summary: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    out.extend(list(completeness.get("conflicting_categories") or []))
+    out.extend(list(completeness.get("stale_authoritative_categories") or sla_summary.get("stale_authoritative_categories") or []))
+    out.extend(list(lockout.get("critical_missing_binding_categories") or []))
+    out.extend(list(lockout.get("authority_gap_categories") or []))
+    return _dedupe(out)
+
+
+def _due_now_reasons(health: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if list(health.get("lockout_causing_categories") or []):
+        reasons.append("blocking legal categories need manual action")
+    if list(health.get("stale_authoritative_categories") or []):
+        reasons.append("authoritative categories are stale")
+    if list(health.get("blocking_validation_pending_categories") or []):
+        reasons.append("blocking validation is still pending")
+    conflicting = list(((health.get("completeness") or {}).get("conflicting_categories") or []))
+    if conflicting:
+        reasons.append("conflicts need reviewer resolution")
+    if list(health.get("authority_gap_categories") or []):
+        reasons.append("binding authority gaps remain")
+    if not reasons and bool(health.get("artifact_backed_refresh_only")) and int(health.get("artifact_backed_failed_source_count") or 0) > 0:
+        reasons.append("artifact-backed evidence is usable but source freshness needs review")
+    if not reasons and bool(health.get("review_required")):
+        reasons.append("manual review is still required")
+    if not reasons and bool((health.get("completeness") or {}).get("missing_categories")):
+        reasons.append("jurisdiction coverage is incomplete")
+    return _dedupe(reasons)
+
+
+def _dashboard_tags(health: dict[str, Any]) -> list[str]:
+    tags: list[str] = []
+    health_state = str(health.get("health_status") or health.get("operational_state") or "").strip().lower()
+    if health_state in {"blocked", "degraded", "warning", "ok"}:
+        tags.append(health_state)
+    if bool(health.get("review_required")):
+        tags.append("review-required")
+    if bool(health.get("stale_authoritative_categories")) or bool(health.get("legal_stale_categories")) or bool(health.get("informational_stale_categories")):
+        tags.append("stale")
+    if bool(((health.get("completeness") or {}).get("missing_categories") or [])) or bool(health.get("authority_gap_categories")) or bool(health.get("lockout_causing_categories")):
+        tags.append("missing-proof")
+    if bool(health.get("artifact_backed_refresh_only")):
+        tags.append("artifact-backed")
+    return _dedupe(tags)
 
 
 def get_jurisdiction_health(
@@ -335,9 +416,9 @@ def get_jurisdiction_health(
         lockout_causing_categories=lockout_causing_categories,
         artifact_backed_refresh_only=artifact_backed,
     )
-
     artifact_evidence = _repo_artifact_evidence(sla_summary)
-    covered = _covered_categories(
+
+    covered = _strict_covered_categories(
         db,
         org_id=getattr(profile, "org_id", None),
         state=getattr(profile, "state", None),
@@ -361,33 +442,67 @@ def get_jurisdiction_health(
         )
     )
 
-    filtered_unsafe: list[str] = []
-    for item in raw_unsafe:
-        if item in covered:
-            continue
-        if item in {"registration", "inspection", "occupancy"}:
-            if item in freshness_only or (artifact_backed and item in degraded):
-                continue
-        filtered_unsafe.append(item)
+    filtered_unsafe = _health_filtered_unsafe_reasons(
+        raw_unsafe=raw_unsafe,
+        covered=set(str(x).strip().lower() for x in covered),
+        freshness_only=freshness_only,
+        degraded=degraded,
+        artifact_backed=artifact_backed,
+    )
 
     evidence_safe_to_rely_on = _evidence_safe_to_rely_on(sla_summary)
     coverage_safe_to_rely_on = len(filtered_unsafe) == 0
-    safe_to_rely_on = bool(evidence_safe_to_rely_on and coverage_safe_to_rely_on)
 
-    if safe_to_rely_on:
+    final_blockers = _final_health_block_reasons(
+        completeness=completeness,
+        lockout=lockout,
+        sla_summary=sla_summary,
+    )
+    if final_blockers:
+        coverage_safe_to_rely_on = False
+
+    safe_to_rely_on = bool(evidence_safe_to_rely_on and coverage_safe_to_rely_on and not final_blockers)
+
+    conflicting = _dedupe(list(completeness.get("conflicting_categories") or []))
+    stale_authoritative = _dedupe(list(completeness.get("stale_authoritative_categories") or sla_summary.get("stale_authoritative_categories") or []))
+    critical_missing_binding = _dedupe(list(lockout.get("critical_missing_binding_categories") or []))
+
+    if conflicting:
+        health_status = "blocked"
+        operational_reason = "unresolved_conflicting_categories"
+    elif stale_authoritative:
+        health_status = "blocked"
+        operational_reason = "critical_authoritative_data_stale"
+    elif critical_missing_binding or authority_gap_categories:
+        health_status = "blocked"
+        operational_reason = "critical_categories_missing_binding_authority"
+    elif safe_to_rely_on:
         health_status = "ok"
         operational_reason = None
-    elif evidence_safe_to_rely_on and not coverage_safe_to_rely_on:
-        health_status = "blocked"
-        operational_reason = "critical_categories_missing_binding_authority"
-    elif not evidence_safe_to_rely_on and coverage_safe_to_rely_on:
+    else:
         health_status = "warning" if artifact_backed else "degraded"
         operational_reason = "freshness_review_required" if artifact_backed else "evidence_not_safe_to_rely_on"
-    else:
-        health_status = "blocked"
-        operational_reason = "critical_categories_missing_binding_authority"
 
     reliance_boundary = _reliance_boundary(health_status, safe_to_rely_on, artifact_backed)
+
+    suppressed_source_ids = list(sla_summary.get("suppressed_source_ids") or [])
+    auto_ignored_failed_source_ids = list(sla_summary.get("auto_ignored_failed_source_ids") or [])
+
+    current_truth_basis = {
+        **dict((sla_summary.get("current_truth_basis") or {})),
+        "evidence_safe_to_rely_on": bool(evidence_safe_to_rely_on),
+        "coverage_safe_to_rely_on": bool(coverage_safe_to_rely_on),
+        "safe_to_rely_on": bool(safe_to_rely_on),
+        "unsafe_reasons": _dedupe(filtered_unsafe + final_blockers),
+        "authority_gap_categories": list(authority_gap_categories),
+        "stale_authoritative_categories": list(stale_authoritative),
+        "conflicting_categories": list(conflicting),
+        "critical_missing_binding_categories": list(critical_missing_binding),
+        "suppressed_source_ids": list(suppressed_source_ids),
+        "auto_ignored_failed_source_ids": list(auto_ignored_failed_source_ids),
+        "mode": "evidence_plus_coverage",
+    }
+    sla_summary["current_truth_basis"] = current_truth_basis
 
     return {
         "ok": True,
@@ -402,10 +517,10 @@ def get_jurisdiction_health(
         "operational_reason": operational_reason,
         "evidence_safe_to_rely_on": evidence_safe_to_rely_on,
         "coverage_safe_to_rely_on": coverage_safe_to_rely_on,
-        "safe_for_user_reliance": coverage_safe_to_rely_on,
-        "safe_for_projection": bool(completeness.get("safe_for_projection")),
+        "safe_for_user_reliance": safe_to_rely_on,
+        "safe_for_projection": bool(completeness.get("safe_for_projection")) and not final_blockers,
         "safe_to_rely_on": safe_to_rely_on,
-        "unsafe_reasons": filtered_unsafe,
+        "unsafe_reasons": _dedupe(filtered_unsafe + final_blockers),
         "covered_categories": sorted(covered),
         "assertion_category_coverage": {
             "covered_categories": sorted(covered),
@@ -415,22 +530,28 @@ def get_jurisdiction_health(
         "lockout": lockout,
         "next_actions": next_actions,
         "sla_summary": sla_summary,
+        "current_truth_basis": current_truth_basis,
         "critical_stale_categories": list(completeness.get("critical_stale_categories") or []),
-        "lockout_causing_categories": lockout_causing_categories,
+        "lockout_causing_categories": _dedupe(lockout_causing_categories + critical_missing_binding + stale_authoritative + conflicting),
         "critical_fetch_failure_categories": list(sla_summary.get("critical_fetch_failure_categories") or []),
         "legal_lockout_categories": list(sla_summary.get("legal_lockout_categories") or []),
         "rejected_source_count": int(sla_summary.get("rejected_source_count") or 0),
         "guessed_source_count": int(sla_summary.get("guessed_source_count") or 0),
         "failed_binding_source_count": int(sla_summary.get("failed_binding_source_count") or 0),
         "artifact_backed_failed_source_count": int(sla_summary.get("artifact_backed_failed_source_count") or 0),
+        "suppressed_source_count": int(sla_summary.get("suppressed_source_count") or len(suppressed_source_ids)),
+        "suppressed_source_ids": suppressed_source_ids,
+        "auto_ignored_failed_source_count": int(sla_summary.get("auto_ignored_failed_source_count") or len(auto_ignored_failed_source_ids)),
+        "auto_ignored_failed_source_ids": auto_ignored_failed_source_ids,
         "artifact_backed_refresh_only": artifact_backed,
         "informational_gap_categories": informational_gap_categories,
         "validation_pending_categories": validation_pending_categories,
         "blocking_validation_pending_categories": blocking_validation_pending,
         "authority_gap_categories": authority_gap_categories,
+        "critical_missing_binding_categories": critical_missing_binding,
         "legal_stale_categories": list(completeness.get("legal_stale_categories") or sla_summary.get("legal_overdue_categories") or []),
         "informational_stale_categories": list(completeness.get("informational_stale_categories") or sla_summary.get("informational_overdue_categories") or []),
-        "stale_authoritative_categories": list(completeness.get("stale_authoritative_categories") or sla_summary.get("stale_authoritative_categories") or []),
+        "stale_authoritative_categories": stale_authoritative,
         "override_summary": override_summary,
         "artifact_evidence": artifact_evidence,
         "repo_artifact_support_state": artifact_evidence.get("artifact_support_state"),
@@ -443,6 +564,8 @@ def get_jurisdiction_health(
             or not bool(completeness.get("safe_for_user_reliance"))
             or bool(sla_summary.get("review_required_categories"))
             or int(sla_summary.get("rejected_source_count") or 0) > 0
+            or bool(conflicting)
+            or bool(critical_missing_binding)
         ),
         "refresh_state": getattr(profile, "refresh_state", None),
         "last_validation_at": sla_summary.get("latest_validated_at") if isinstance(sla_summary, dict) else None,
@@ -473,44 +596,6 @@ def get_jurisdiction_health(
         "freshness_signal_only_categories": list(sla_summary.get("freshness_signal_only_categories") or []),
         "operational_reliance_message": reliance_boundary.get("message"),
     }
-
-
-def _due_now_reasons(health: dict[str, Any]) -> list[str]:
-    reasons: list[str] = []
-    if list(health.get("lockout_causing_categories") or []):
-        reasons.append("blocking legal categories need manual action")
-    if list(health.get("stale_authoritative_categories") or []):
-        reasons.append("authoritative categories are stale")
-    if list(health.get("blocking_validation_pending_categories") or []):
-        reasons.append("blocking validation is still pending")
-    conflicting = list(((health.get("completeness") or {}).get("conflicting_categories") or []))
-    if conflicting:
-        reasons.append("conflicts need reviewer resolution")
-    if list(health.get("authority_gap_categories") or []):
-        reasons.append("binding authority gaps remain")
-    if not reasons and bool(health.get("artifact_backed_refresh_only")) and int(health.get("artifact_backed_failed_source_count") or 0) > 0:
-        reasons.append("artifact-backed evidence is usable but source freshness needs review")
-    if not reasons and bool(health.get("review_required")):
-        reasons.append("manual review is still required")
-    if not reasons and bool((health.get("completeness") or {}).get("missing_categories")):
-        reasons.append("jurisdiction coverage is incomplete")
-    return _dedupe(reasons)
-
-
-def _dashboard_tags(health: dict[str, Any]) -> list[str]:
-    tags: list[str] = []
-    health_state = str(health.get("health_status") or health.get("operational_state") or "").strip().lower()
-    if health_state in {"blocked", "degraded", "warning", "ok"}:
-        tags.append(health_state)
-    if bool(health.get("review_required")):
-        tags.append("review-required")
-    if bool(health.get("stale_authoritative_categories")) or bool(health.get("legal_stale_categories")) or bool(health.get("informational_stale_categories")):
-        tags.append("stale")
-    if bool(((health.get("completeness") or {}).get("missing_categories") or [])) or bool(health.get("authority_gap_categories")) or bool(health.get("lockout_causing_categories")):
-        tags.append("missing-proof")
-    if bool(health.get("artifact_backed_refresh_only")):
-        tags.append("artifact-backed")
-    return _dedupe(tags)
 
 
 def get_manual_stale_review_dashboard(
@@ -600,6 +685,8 @@ def get_manual_stale_review_dashboard(
                 "informational_gap_categories": list(health.get("informational_gap_categories") or []),
                 "conflicting_categories": list(completeness.get("conflicting_categories") or []),
                 "missing_categories": list(completeness.get("missing_categories") or []),
+                "suppressed_source_ids": list(health.get("suppressed_source_ids") or []),
+                "auto_ignored_failed_source_ids": list(health.get("auto_ignored_failed_source_ids") or []),
                 "completeness_status": completeness.get("completeness_status"),
                 "completeness_score": completeness.get("completeness_score"),
             }
@@ -623,293 +710,3 @@ def get_manual_stale_review_dashboard(
         "summary": counts,
         "rows": items[:limit],
     }
-
-
-# --- industry source-of-truth final overlay ---
-_FINAL_SOT_HEALTH_RULE_CATEGORY_MAP = {
-    'source_of_income_protection': 'source_of_income',
-    'rental_license_required': 'rental_license',
-    'lead_hazard_assessment_required': 'lead',
-    'permit_required': 'permits',
-    'local_contact_required': 'contacts',
-    'local_documents_required': 'documents',
-    'fee_schedule_reference': 'fees',
-    'program_overlay_requirement': 'program_overlay',
-    'rental_registration_required': 'registration',
-    'inspection_required': 'inspection',
-    'inspection_program_exists': 'inspection',
-    'fire_safety_inspection_required': 'inspection',
-    'certificate_required_before_occupancy': 'occupancy',
-    'certificate_of_occupancy_required': 'occupancy',
-    'certificate_of_compliance_required': 'occupancy',
-    'hap_contract_and_tenancy_addendum_required': 'program_overlay',
-    'pha_landlord_packet_required': 'program_overlay',
-}
-
-
-def _final_sot_health_scope_rows(db: Session, *, org_id: int | None, state: str | None, county: str | None, city: str | None, pha_name: str | None) -> list[PolicyAssertion]:
-    stmt = select(PolicyAssertion).where(PolicyAssertion.state == _norm_state(state))
-    if hasattr(PolicyAssertion, 'org_id'):
-        stmt = stmt.where(PolicyAssertion.org_id.is_(None) if org_id is None else or_(PolicyAssertion.org_id == org_id, PolicyAssertion.org_id.is_(None)))
-    stmt = stmt.where(PolicyAssertion.county.is_(None) if _norm_lower(county) is None else PolicyAssertion.county == _norm_lower(county))
-    stmt = stmt.where(PolicyAssertion.city.is_(None) if _norm_lower(city) is None else PolicyAssertion.city == _norm_lower(city))
-    if hasattr(PolicyAssertion, 'pha_name'):
-        pha = _norm_text(pha_name)
-        stmt = stmt.where(or_(PolicyAssertion.pha_name.is_(None), PolicyAssertion.pha_name == '') if pha is None else PolicyAssertion.pha_name == pha)
-    return list(db.scalars(stmt).all())
-
-
-def _final_sot_health_covered(rows: list[PolicyAssertion]) -> set[str]:
-    covered = set()
-    for row in rows:
-        category = _assertion_category(row) or normalize_category(_FINAL_SOT_HEALTH_RULE_CATEGORY_MAP.get(str(getattr(row, 'rule_key', '') or '').strip()))
-        if not category:
-            continue
-        validation_state = str(getattr(row, 'validation_state', '') or '').strip().lower()
-        trust_state = str(getattr(row, 'trust_state', '') or '').strip().lower()
-        if validation_state == 'validated' or trust_state in {'validated', 'trusted'}:
-            covered.add(category)
-    return covered
-
-
-try:
-    _industry_sot_original_get_jurisdiction_health = get_jurisdiction_health
-except NameError:
-    _industry_sot_original_get_jurisdiction_health = None
-
-if _industry_sot_original_get_jurisdiction_health is not None:
-    def get_jurisdiction_health(
-        db: Session,
-        *,
-        profile_id: int | None = None,
-        org_id: int | None = None,
-        state: str | None = None,
-        county: str | None = None,
-        city: str | None = None,
-        pha_name: str | None = None,
-    ) -> dict[str, Any]:
-        health = dict(_industry_sot_original_get_jurisdiction_health(db, profile_id=profile_id, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name))
-        if not health.get('ok'):
-            return health
-
-        rows = _final_sot_health_scope_rows(
-            db,
-            org_id=health.get('org_id'),
-            state=health.get('state'),
-            county=health.get('county'),
-            city=health.get('city'),
-            pha_name=health.get('pha_name'),
-        )
-        covered = set(health.get('covered_categories') or []) | _final_sot_health_covered(rows)
-        unsafe = [str(x).strip().lower() for x in list(health.get('unsafe_reasons') or []) if str(x).strip()]
-        freshness_only = set(str(x).strip().lower() for x in list(health.get('freshness_signal_only_categories') or []))
-        degraded = set(str(x).strip().lower() for x in list(health.get('degraded_categories') or []))
-        artifact_backed = bool(health.get('artifact_backed_refresh_only'))
-
-        filtered = []
-        for item in unsafe:
-            if item in covered:
-                continue
-            if artifact_backed and (item in freshness_only or item in degraded):
-                continue
-            filtered.append(item)
-
-        health['covered_categories'] = sorted(covered)
-        health['unsafe_reasons'] = filtered
-        health['coverage_safe_to_rely_on'] = len(filtered) == 0
-        health['safe_to_rely_on'] = bool(health.get('evidence_safe_to_rely_on')) and bool(health.get('coverage_safe_to_rely_on'))
-
-        if health['safe_to_rely_on']:
-            health['health_status'] = 'ok'
-            health['operational_state'] = 'ok'
-            health['operational_reason'] = None
-        elif health.get('evidence_safe_to_rely_on') and not filtered:
-            health['health_status'] = 'ok'
-            health['operational_state'] = 'ok'
-            health['operational_reason'] = None
-        elif health.get('evidence_safe_to_rely_on'):
-            health['health_status'] = 'blocked'
-            health['operational_state'] = 'blocked'
-            health['operational_reason'] = 'critical_categories_missing_binding_authority'
-        else:
-            health['health_status'] = 'degraded'
-            health['operational_state'] = 'degraded'
-            health['operational_reason'] = health.get('operational_reason') or 'evidence_not_safe_to_rely_on'
-        return health
-
-
-
-# --- surgical final trust-boundary override ---
-
-_HEALTH_BINDING_CATEGORIES = {
-    "registration", "inspection", "occupancy", "lead", "section8", "program_overlay",
-    "safety", "source_of_income", "permits", "rental_license",
-}
-
-def _health_is_binding_category(category: str) -> bool:
-    return str(category or "").strip().lower() in _HEALTH_BINDING_CATEGORIES
-
-def _health_assertion_is_strictly_covered(row: Any) -> bool:
-    validation_state = str(getattr(row, "validation_state", "") or "").strip().lower()
-    trust_state = str(getattr(row, "trust_state", "") or "").strip().lower()
-    governance_state = str(getattr(row, "governance_state", "") or "").strip().lower()
-    review_status = str(getattr(row, "review_status", "") or "").strip().lower()
-    coverage_status = str(getattr(row, "coverage_status", "") or "").strip().lower()
-    if getattr(row, "superseded_by_assertion_id", None) is not None:
-        return False
-    if validation_state not in {"validated"} and trust_state not in {"validated", "trusted"}:
-        return False
-    if governance_state not in {"active", "approved"} and review_status not in {"verified", "approved", "projected"}:
-        return False
-    if coverage_status and coverage_status not in {"covered", "verified", "active", "approved"}:
-        return False
-    return True
-
-def _strict_covered_categories(
-    db: Session,
-    *,
-    org_id: int | None,
-    state: str | None,
-    county: str | None,
-    city: str | None,
-    pha_name: str | None,
-) -> set[str]:
-    if org_id is None:
-        stmt = select(PolicyAssertion).where(PolicyAssertion.org_id.is_(None))
-    else:
-        stmt = select(PolicyAssertion).where(or_(PolicyAssertion.org_id == org_id, PolicyAssertion.org_id.is_(None)))
-    if state:
-        stmt = stmt.where(PolicyAssertion.state == str(state).strip().upper())
-    stmt = stmt.where(PolicyAssertion.county.is_(None) if _norm_lower(county) is None else PolicyAssertion.county == _norm_lower(county))
-    stmt = stmt.where(PolicyAssertion.city.is_(None) if _norm_lower(city) is None else PolicyAssertion.city == _norm_lower(city))
-    if hasattr(PolicyAssertion, "pha_name"):
-        pha = _norm_text(pha_name)
-        stmt = stmt.where(or_(PolicyAssertion.pha_name.is_(None), PolicyAssertion.pha_name == "") if pha is None else PolicyAssertion.pha_name == pha)
-
-    covered: set[str] = set()
-    for row in list(db.scalars(stmt).all()):
-        if not _health_assertion_is_strictly_covered(row):
-            continue
-        category = _assertion_category(row)
-        if category:
-            covered.add(category)
-    return covered
-
-def _health_filtered_unsafe_reasons(
-    *,
-    raw_unsafe: list[str],
-    covered: set[str],
-    freshness_only: set[str],
-    degraded: set[str],
-    artifact_backed: bool,
-) -> list[str]:
-    filtered: list[str] = []
-    for item in [str(x).strip().lower() for x in list(raw_unsafe or []) if str(x).strip()]:
-        if item in covered:
-            continue
-        if artifact_backed and item in freshness_only and not _health_is_binding_category(item):
-            continue
-        if artifact_backed and item in degraded and not _health_is_binding_category(item):
-            continue
-        filtered.append(item)
-    return _dedupe(filtered)
-
-try:
-    _surgical_health_original_get_jurisdiction_health = get_jurisdiction_health
-except NameError:
-    _surgical_health_original_get_jurisdiction_health = None
-
-if _surgical_health_original_get_jurisdiction_health is not None:
-    def get_jurisdiction_health(
-        db: Session,
-        *,
-        profile_id: int | None = None,
-        org_id: int | None = None,
-        state: str | None = None,
-        county: str | None = None,
-        city: str | None = None,
-        pha_name: str | None = None,
-    ) -> dict[str, Any]:
-        health = dict(
-            _surgical_health_original_get_jurisdiction_health(
-                db,
-                profile_id=profile_id,
-                org_id=org_id,
-                state=state,
-                county=county,
-                city=city,
-                pha_name=pha_name,
-            )
-        )
-        if not health.get("ok"):
-            return health
-
-        strict_covered = _strict_covered_categories(
-            db,
-            org_id=health.get("org_id"),
-            state=health.get("state"),
-            county=health.get("county"),
-            city=health.get("city"),
-            pha_name=health.get("pha_name"),
-        )
-        freshness_only = set(str(x).strip().lower() for x in list(health.get("freshness_signal_only_categories") or []))
-        degraded = set(str(x).strip().lower() for x in list(health.get("degraded_categories") or []))
-        artifact_backed = bool(health.get("artifact_backed_refresh_only"))
-        raw_unsafe = []
-        raw_unsafe.extend(list(health.get("authority_gap_categories") or []))
-        raw_unsafe.extend(list(health.get("lockout_causing_categories") or []))
-        raw_unsafe.extend(list(health.get("blocking_validation_pending_categories") or []))
-        raw_unsafe.extend(list(((health.get("completeness") or {}).get("missing_categories") or [])))
-
-        filtered = _health_filtered_unsafe_reasons(
-            raw_unsafe=raw_unsafe,
-            covered=set(str(x).strip().lower() for x in strict_covered),
-            freshness_only=freshness_only,
-            degraded=degraded,
-            artifact_backed=artifact_backed,
-        )
-        evidence_safe_to_rely_on = bool(health.get("evidence_safe_to_rely_on"))
-        coverage_safe_to_rely_on = len(filtered) == 0
-        safe_to_rely_on = bool(evidence_safe_to_rely_on and coverage_safe_to_rely_on)
-
-        evidence_family = dict(health.get("evidence_family") or {})
-        truth_bucket_counts = dict(evidence_family.get("truth_bucket_counts") or {})
-        if truth_bucket_counts.get("binding"):
-            health["evidence_safe_to_rely_on"] = bool(health.get("evidence_safe_to_rely_on", True))
-
-        health["covered_categories"] = sorted(strict_covered)
-        health["assertion_category_coverage"] = {
-            "covered_categories": sorted(strict_covered),
-            "category_counts": {k: 1 for k in sorted(strict_covered)},
-        }
-        health["unsafe_reasons"] = filtered
-        health["coverage_safe_to_rely_on"] = coverage_safe_to_rely_on
-        health["safe_to_rely_on"] = safe_to_rely_on
-        health["safe_for_user_reliance"] = safe_to_rely_on
-
-        sla_summary = dict(health.get("sla_summary") or {})
-        current_truth_basis = dict(sla_summary.get("current_truth_basis") or {})
-        current_truth_basis["evidence_safe_to_rely_on"] = bool(evidence_safe_to_rely_on)
-        current_truth_basis["coverage_safe_to_rely_on"] = bool(coverage_safe_to_rely_on)
-        current_truth_basis["safe_to_rely_on"] = bool(safe_to_rely_on)
-        current_truth_basis["unsafe_reasons"] = list(filtered)
-        current_truth_basis["lockout_causing_categories"] = list(health.get("lockout_causing_categories") or [])
-        current_truth_basis["authority_gap_categories"] = list(health.get("authority_gap_categories") or [])
-        current_truth_basis["mode"] = "evidence_plus_coverage"
-        sla_summary["current_truth_basis"] = current_truth_basis
-        health["sla_summary"] = sla_summary
-        health["current_truth_basis"] = current_truth_basis
-
-        if safe_to_rely_on:
-            health["health_status"] = "ok"
-            health["operational_state"] = "ok"
-            health["operational_reason"] = None
-        elif evidence_safe_to_rely_on:
-            health["health_status"] = "blocked"
-            health["operational_state"] = "blocked"
-            health["operational_reason"] = "critical_categories_missing_binding_authority"
-        else:
-            health["health_status"] = "degraded" if artifact_backed else "blocked"
-            health["operational_state"] = health["health_status"]
-            health["operational_reason"] = "freshness_review_required" if artifact_backed else "evidence_not_safe_to_rely_on"
-        return health

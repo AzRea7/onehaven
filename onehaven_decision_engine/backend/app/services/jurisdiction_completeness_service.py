@@ -286,6 +286,37 @@ def _coalesce_required_categories(profile: JurisdictionProfile) -> list[str]:
     )
 
 
+
+
+def _expected_universe_metadata(universe: JurisdictionExpectedRuleUniverse | None) -> dict[str, Any]:
+    if universe is None:
+        return {
+            "expected_rule_universe": {},
+            "required_categories_by_tier": {},
+            "expected_rules_by_category": {},
+            "rule_family_inventory": {},
+            "legally_binding_categories": [],
+            "operational_heuristic_categories": [],
+            "property_proof_required_categories": [],
+            "authority_expectations": {},
+            "authority_scope_by_category": {},
+            "required_source_families_by_category": {},
+            "critical_source_families": [],
+        }
+    return {
+        "expected_rule_universe": universe.to_dict(),
+        "required_categories_by_tier": dict(universe.required_categories_by_tier or {}),
+        "expected_rules_by_category": dict(universe.expected_rules_by_category or {}),
+        "rule_family_inventory": dict(universe.rule_family_inventory or {}),
+        "legally_binding_categories": list(universe.legally_binding_categories or []),
+        "operational_heuristic_categories": list(universe.operational_heuristic_categories or []),
+        "property_proof_required_categories": list(universe.property_proof_required_categories or []),
+        "authority_expectations": dict(universe.authority_expectations or {}),
+        "authority_scope_by_category": dict(universe.authority_scope_by_category or {}),
+        "required_source_families_by_category": dict(universe.required_source_families_by_category or {}),
+        "critical_source_families": list(universe.critical_source_families or []),
+    }
+
 def _collect_covered_categories_from_profile(profile: JurisdictionProfile) -> list[str]:
     return normalize_categories(_loads_json_list(getattr(profile, "covered_categories_json", None)))
 
@@ -1479,12 +1510,7 @@ def compute_jurisdiction_completeness(
         scoring_defaults={
             "weights": completeness_score_weights(),
             "thresholds": completeness_scoring_thresholds(),
-            "expected_rule_universe": expected_universe.to_dict(),
-            "rule_family_inventory": dict(expected_universe.rule_family_inventory or {}),
-            "legally_binding_categories": list(expected_universe.legally_binding_categories or []),
-            "operational_heuristic_categories": list(expected_universe.operational_heuristic_categories or []),
-            "property_proof_required_categories": list(expected_universe.property_proof_required_categories or []),
-            "authority_expectations": dict(expected_universe.authority_expectations or {}),
+            **_expected_universe_metadata(expected_universe),
         },
     )
 
@@ -2134,6 +2160,8 @@ def profile_completeness_payload(db: Session, profile: JurisdictionProfile, *, s
         'safe_for_projection': trust.safe_for_projection,
         'safe_for_user_reliance': trust.safe_for_user_reliance,
         'expected_rule_universe': expected_universe,
+        'required_categories_by_tier': dict((breakdown.scoring_defaults or {}).get('required_categories_by_tier', {}) or {}),
+        'expected_rules_by_category': dict((breakdown.scoring_defaults or {}).get('expected_rules_by_category', {}) or {}),
         'rule_family_inventory': dict((breakdown.scoring_defaults or {}).get('rule_family_inventory', {}) or {}),
         'legally_binding_categories': list((breakdown.scoring_defaults or {}).get('legally_binding_categories', []) or []),
         'operational_heuristic_categories': list((breakdown.scoring_defaults or {}).get('operational_heuristic_categories', []) or []),
@@ -2158,3 +2186,253 @@ def recompute_profile_and_coverage(
     else:
         db.flush()
     return profile, coverage
+
+
+# --- surgical final coverage enforcement + trust gate overlay ---
+
+try:
+    _coverage_enforcement_original_compute_profile_score_breakdown = compute_profile_score_breakdown
+except NameError:
+    _coverage_enforcement_original_compute_profile_score_breakdown = None
+
+def _breakdown_with_enforced_missing_required_optional(
+    breakdown: JurisdictionScoreBreakdown,
+) -> JurisdictionScoreBreakdown:
+    scoring_defaults = dict(getattr(breakdown, "scoring_defaults", {}) or {})
+    expected_universe = dict(scoring_defaults.get("expected_rule_universe") or {})
+    required_by_tier = dict(scoring_defaults.get("required_categories_by_tier") or expected_universe.get("required_categories_by_tier") or {})
+    optional_by_tier = dict(expected_universe.get("optional_categories_by_tier") or {})
+    required_categories = normalize_categories(
+        list(getattr(breakdown, "category_statuses", {}).keys())
+        or list(expected_universe.get("required_categories") or [])
+    )
+    optional_categories = normalize_categories(expected_universe.get("optional_categories") or [])
+    category_statuses = dict(getattr(breakdown, "category_statuses", {}) or {})
+    category_details = dict(getattr(breakdown, "category_details", {}) or {})
+
+    enforced_missing = set(normalize_categories(getattr(breakdown, "missing_categories", []) or []))
+    for category in required_categories:
+        status = str(category_statuses.get(category) or "").strip().lower()
+        detail = dict(category_details.get(category) or {})
+        if status in {"", "missing"} or bool(detail.get("missing")) or bool(detail.get("undiscovered")):
+            enforced_missing.add(category)
+
+    stale_authoritative = normalize_categories(getattr(breakdown, "stale_authoritative_categories", []) or [])
+    conflicting_categories = normalize_categories(getattr(breakdown, "conflicting_categories", []) or [])
+
+    scoring_defaults["required_categories_by_tier"] = required_by_tier
+    scoring_defaults["optional_categories_by_tier"] = optional_by_tier
+    scoring_defaults["required_categories"] = required_categories
+    scoring_defaults["optional_categories"] = optional_categories
+
+    completeness_status = str(getattr(breakdown, "completeness_status", "missing") or "missing").strip().lower()
+    if conflicting_categories:
+        completeness_status = "conflicting"
+    elif enforced_missing:
+        completeness_status = "partial"
+
+    return JurisdictionScoreBreakdown(
+        **{
+            **breakdown.__dict__,
+            "missing_categories": normalize_categories(sorted(enforced_missing)),
+            "stale_authoritative_categories": stale_authoritative,
+            "conflicting_categories": conflicting_categories,
+            "completeness_status": completeness_status,
+            "scoring_defaults": scoring_defaults,
+        }
+    )
+
+if _coverage_enforcement_original_compute_profile_score_breakdown is not None:
+    def compute_profile_score_breakdown(
+        db: Session, profile: JurisdictionProfile, *, stale_days: int = DEFAULT_STALE_DAYS
+    ) -> JurisdictionScoreBreakdown:
+        original = _coverage_enforcement_original_compute_profile_score_breakdown(
+            db, profile, stale_days=stale_days
+        )
+        return _breakdown_with_enforced_missing_required_optional(original)
+
+try:
+    _coverage_enforcement_original_evaluate_jurisdiction_trust_decision = evaluate_jurisdiction_trust_decision
+except NameError:
+    _coverage_enforcement_original_evaluate_jurisdiction_trust_decision = None
+
+def _critical_missing_binding_categories_from_breakdown(
+    *, breakdown: JurisdictionScoreBreakdown, critical_categories: list[str]
+) -> list[str]:
+    out: list[str] = []
+    details = dict(getattr(breakdown, "category_details", {}) or {})
+    for category in critical_categories:
+        detail = dict(details.get(category) or {})
+        if category in set(getattr(breakdown, "missing_categories", []) or []):
+            out.append(category)
+            continue
+        if bool(detail.get("binding_authority_unmet")) or bool(detail.get("authority_unmet")):
+            out.append(category)
+            continue
+        if bool(detail.get("legally_binding")) and not bool(detail.get("source_backed_covered")):
+            if bool(detail.get("missing")) or bool(detail.get("weak_support")) or bool(detail.get("inferred")):
+                out.append(category)
+    return normalize_categories(out)
+
+if _coverage_enforcement_original_evaluate_jurisdiction_trust_decision is not None:
+    def evaluate_jurisdiction_trust_decision(
+        *,
+        breakdown: JurisdictionScoreBreakdown,
+        state: str | None = None,
+        county: str | None = None,
+        city: str | None = None,
+        pha_name: str | None = None,
+        include_section8: bool = True,
+        tenant_waitlist_depth: str | None = None,
+        trust_defaults: dict[str, Any] | None = None,
+    ) -> JurisdictionTrustDecision:
+        original = _coverage_enforcement_original_evaluate_jurisdiction_trust_decision(
+            breakdown=breakdown,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            include_section8=include_section8,
+            tenant_waitlist_depth=tenant_waitlist_depth,
+            trust_defaults=trust_defaults,
+        )
+        critical_categories = list(getattr(original, "critical_categories", []) or [])
+        conflicting_categories = normalize_categories(getattr(original, "conflicting_categories", []) or [])
+        stale_authoritative_categories = normalize_categories(getattr(original, "stale_authoritative_categories", []) or [])
+        critical_missing_binding = _critical_missing_binding_categories_from_breakdown(
+            breakdown=breakdown,
+            critical_categories=critical_categories,
+        )
+        blocker_reasons = list(getattr(original, "blocker_reasons", []) or [])
+        manual_review_reasons = list(getattr(original, "manual_review_reasons", []) or [])
+
+        if conflicting_categories and "conflicting_categories_present" not in blocker_reasons:
+            blocker_reasons.append("conflicting_categories_present")
+        if stale_authoritative_categories and "stale_authoritative_sources_present" not in blocker_reasons:
+            blocker_reasons.append("stale_authoritative_sources_present")
+        if critical_missing_binding and "critical_categories_missing_binding_authority" not in blocker_reasons:
+            blocker_reasons.append("critical_categories_missing_binding_authority")
+
+        blocked = bool(getattr(original, "blocked", False) or conflicting_categories or stale_authoritative_categories or critical_missing_binding)
+        safe_for_projection = bool(getattr(original, "safe_for_projection", False)) and not blocked
+        safe_for_user_reliance = bool(getattr(original, "safe_for_user_reliance", False)) and not blocked
+
+        if blocked and not manual_review_reasons and conflicting_categories:
+            manual_review_reasons.append("resolve_conflicting_categories")
+
+        missing_critical = normalize_categories(
+            list(getattr(original, "missing_critical_categories", []) or []) + critical_missing_binding
+        )
+        missing_required = normalize_categories(
+            list(getattr(original, "missing_required_categories", []) or []) + critical_missing_binding
+        )
+
+        decision_code = str(getattr(original, "decision_code", "") or "").strip() or "manual_review_required"
+        if conflicting_categories:
+            decision_code = "blocked_due_to_unresolved_conflicts"
+        elif stale_authoritative_categories:
+            decision_code = "blocked_due_to_stale_authoritative_sources"
+        elif critical_missing_binding:
+            decision_code = "blocked_due_to_missing_critical_coverage"
+        elif blocked and not decision_code:
+            decision_code = "manual_review_required"
+
+        return JurisdictionTrustDecision(
+            decision_code=decision_code,
+            safe_for_projection=safe_for_projection,
+            safe_for_user_reliance=safe_for_user_reliance,
+            blocked=blocked,
+            blocker_reasons=sorted(set(blocker_reasons)),
+            manual_review_reasons=sorted(set(manual_review_reasons)),
+            missing_critical_categories=missing_critical,
+            missing_required_categories=missing_required,
+            stale_categories=list(getattr(original, "stale_categories", []) or []),
+            stale_authoritative_categories=stale_authoritative_categories,
+            legal_stale_categories=list(getattr(original, "legal_stale_categories", []) or []),
+            critical_legal_stale_categories=list(getattr(original, "critical_legal_stale_categories", []) or []),
+            informational_stale_categories=list(getattr(original, "informational_stale_categories", []) or []),
+            conflicting_categories=conflicting_categories,
+            inferred_categories=list(getattr(original, "inferred_categories", []) or []),
+            inferred_critical_categories=list(getattr(original, "inferred_critical_categories", []) or []),
+            incomplete_required_tiers=list(getattr(original, "incomplete_required_tiers", []) or []),
+            tier_coverage=list(getattr(original, "tier_coverage", []) or []),
+            required_categories=list(getattr(original, "required_categories", []) or []),
+            critical_categories=critical_categories,
+            overall_completeness=float(getattr(original, "overall_completeness", 0.0) or 0.0),
+            confidence_label=str(getattr(original, "confidence_label", "low") or "low"),
+            authority_subscore=float(getattr(original, "authority_subscore", 0.0) or 0.0),
+            freshness_subscore=float(getattr(original, "freshness_subscore", 0.0) or 0.0),
+            governance_subscore=float(getattr(original, "governance_subscore", 0.0) or 0.0),
+            conflict_penalty=float(getattr(original, "conflict_penalty", 0.0) or 0.0),
+        )
+
+try:
+    _coverage_enforcement_original_production_readiness = _production_readiness
+except NameError:
+    _coverage_enforcement_original_production_readiness = None
+
+if _coverage_enforcement_original_production_readiness is not None:
+    def _production_readiness(
+        *,
+        trust_decision: JurisdictionTrustDecision,
+    ) -> str:
+        if list(getattr(trust_decision, "conflicting_categories", []) or []):
+            return "not_ready"
+        if list(getattr(trust_decision, "stale_authoritative_categories", []) or []):
+            return "not_ready"
+        if list(getattr(trust_decision, "missing_critical_categories", []) or []):
+            return "not_ready"
+        if bool(getattr(trust_decision, "blocked", False)):
+            return "not_ready"
+        return _coverage_enforcement_original_production_readiness(trust_decision=trust_decision)
+
+try:
+    _coverage_enforcement_original_profile_completeness_payload = profile_completeness_payload
+except NameError:
+    _coverage_enforcement_original_profile_completeness_payload = None
+
+if _coverage_enforcement_original_profile_completeness_payload is not None:
+    def profile_completeness_payload(db: Session, profile: JurisdictionProfile, *, stale_days: int = DEFAULT_STALE_DAYS) -> dict[str, Any]:
+        payload = dict(_coverage_enforcement_original_profile_completeness_payload(db, profile, stale_days=stale_days))
+        expected_universe = dict(payload.get("expected_rule_universe") or ((payload.get("scoring_defaults") or {}).get("expected_rule_universe") or {}))
+        required_categories = normalize_categories(
+            payload.get("required_categories")
+            or expected_universe.get("required_categories")
+            or []
+        )
+        optional_categories = normalize_categories(
+            payload.get("optional_categories")
+            or expected_universe.get("optional_categories")
+            or []
+        )
+        category_statuses = dict(payload.get("category_statuses") or {})
+        missing_categories = normalize_categories(
+            payload.get("missing_categories")
+            or [c for c in required_categories if str(category_statuses.get(c) or "").strip().lower() in {"", "missing"}]
+        )
+        conflicting_categories = normalize_categories(payload.get("conflicting_categories") or [])
+        stale_authoritative_categories = normalize_categories(payload.get("stale_authoritative_categories") or [])
+        critical_categories = normalize_categories(payload.get("critical_categories") or [])
+        binding_unmet = normalize_categories(payload.get("binding_unmet_categories") or [])
+        if not binding_unmet:
+            details = dict(payload.get("category_details") or {})
+            binding_unmet = normalize_categories(
+                [c for c, detail in details.items() if bool((detail or {}).get("binding_authority_unmet"))]
+            )
+
+        production_readiness = str(payload.get("production_readiness") or "").strip().lower()
+        if conflicting_categories or stale_authoritative_categories or any(c in set(missing_categories) for c in critical_categories) or binding_unmet:
+            production_readiness = "not_ready"
+
+        payload["required_categories"] = required_categories
+        payload["optional_categories"] = optional_categories
+        payload["missing_categories"] = missing_categories
+        payload["conflicting_categories"] = conflicting_categories
+        payload["stale_authoritative_categories"] = stale_authoritative_categories
+        payload["binding_unmet_categories"] = binding_unmet
+        payload["required_categories_by_tier"] = dict(payload.get("required_categories_by_tier") or expected_universe.get("required_categories_by_tier") or {})
+        payload["optional_categories_by_tier"] = dict(payload.get("optional_categories_by_tier") or expected_universe.get("optional_categories_by_tier") or {})
+        payload["production_readiness"] = production_readiness
+        payload["safe_for_projection"] = bool(payload.get("safe_for_projection")) and production_readiness != "not_ready"
+        payload["safe_for_user_reliance"] = bool(payload.get("safe_for_user_reliance")) and production_readiness != "not_ready"
+        return payload

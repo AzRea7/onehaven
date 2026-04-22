@@ -545,3 +545,163 @@ def resolve_layered_rules(
         },
         "governed_assertions": governed,
     }
+
+
+
+
+# === approved-only governance overlay (surgical) ===
+
+try:
+    _APPROVED_ONLY_ASSERTION_GOVERNANCE_SUMMARY = assertion_governance_summary
+except NameError:
+    _APPROVED_ONLY_ASSERTION_GOVERNANCE_SUMMARY = None
+
+try:
+    _APPROVED_ONLY_GOVERNED_ASSERTIONS_FOR_SCOPE = governed_assertions_for_scope
+except NameError:
+    _APPROVED_ONLY_GOVERNED_ASSERTIONS_FOR_SCOPE = None
+
+
+def _assertion_lifecycle_value(assertion: PolicyAssertion) -> str:
+    for value in [
+        getattr(assertion, "lifecycle", None),
+        getattr(assertion, "lifecycle_state", None),
+        (_loads_json_dict(getattr(assertion, "change_summary", None)) or {}).get("lifecycle"),
+        (_loads_json_dict(getattr(assertion, "change_summary", None)) or {}).get("lifecycle_state"),
+    ]:
+        raw = str(value or "").strip().lower()
+        if raw:
+            return raw
+    governance_state = (getattr(assertion, "governance_state", None) or "").strip().lower()
+    if governance_state in {"approved", "active", "draft", "replaced"}:
+        return governance_state
+    return "draft"
+
+
+def assertion_governance_summary(assertion: PolicyAssertion) -> dict[str, Any]:
+    summary = dict(_APPROVED_ONLY_ASSERTION_GOVERNANCE_SUMMARY(assertion) or {}) if _APPROVED_ONLY_ASSERTION_GOVERNANCE_SUMMARY else {}
+    lifecycle = _assertion_lifecycle_value(assertion)
+    governance_state = (getattr(assertion, "governance_state", None) or "").strip().lower()
+    review_status = (getattr(assertion, "review_status", None) or "").strip().lower()
+    validation_state = (getattr(assertion, "validation_state", None) or "").strip().lower()
+    trust_state = (getattr(assertion, "trust_state", None) or "").strip().lower()
+    coverage_status = (getattr(assertion, "coverage_status", None) or "").strip().lower()
+    conflict_hints = _conflict_hints_for_assertion(assertion)
+    approved_only = lifecycle in {"approved", "active"} and governance_state in {"approved", "active"}
+    safe_for_projection = bool(
+        approved_only
+        and review_status == "verified"
+        and validation_state == "validated"
+        and trust_state in {"validated", "trusted"}
+        and coverage_status not in NON_PROJECTABLE_COVERAGE_STATUSES
+        and not conflict_hints
+        and bool(getattr(assertion, "is_current", False))
+        and getattr(assertion, "superseded_by_assertion_id", None) is None
+        and getattr(assertion, "replaced_by_assertion_id", None) is None
+    )
+    partial_projectable = bool(
+        not safe_for_projection
+        and approved_only
+        and review_status == "verified"
+        and validation_state == "validated"
+        and trust_state in {"validated", "trusted"}
+        and coverage_status not in {"candidate", "conflicting", "stale", "superseded", "inferred", "partial"}
+        and not conflict_hints
+        and getattr(assertion, "superseded_by_assertion_id", None) is None
+        and getattr(assertion, "replaced_by_assertion_id", None) is None
+    )
+    blockers = list(summary.get("lifecycle_blockers") or [])
+    if lifecycle not in {"approved", "active"}:
+        blockers.append(f"lifecycle={lifecycle}")
+    if governance_state not in {"approved", "active"}:
+        blockers.append(f"governance_state={governance_state or 'unknown'}")
+    if review_status != "verified":
+        blockers.append(f"review_status={review_status or 'unknown'}")
+    if validation_state != "validated":
+        blockers.append(f"validation_state={validation_state or 'unknown'}")
+    if trust_state not in {"validated", "trusted"}:
+        blockers.append(f"trust_state={trust_state or 'unknown'}")
+    if coverage_status in NON_PROJECTABLE_COVERAGE_STATUSES:
+        blockers.append(f"coverage_status={coverage_status}")
+    summary.update({
+        "lifecycle": lifecycle,
+        "safe_for_projection": safe_for_projection,
+        "partial_projectable": partial_projectable,
+        "lifecycle_blockers": sorted(set(str(x) for x in blockers if str(x).strip())),
+        "approved_only_mode": True,
+    })
+    return summary
+
+
+def governed_assertions_for_scope(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: Optional[str] = None,
+    city: Optional[str] = None,
+    pha_name: Optional[str] = None,
+) -> dict[str, Any]:
+    payload = dict(_APPROVED_ONLY_GOVERNED_ASSERTIONS_FOR_SCOPE(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )) if _APPROVED_ONLY_GOVERNED_ASSERTIONS_FOR_SCOPE else {}
+
+    summaries = list(payload.get("summaries") or [])
+    if not summaries:
+        # rebuild from currently scoped assertions to ensure approved-only buckets are authoritative
+        st = _norm_state(state)
+        cnty = _norm_rule_scope_value(county)
+        cty = _norm_rule_scope_value(city)
+        pha = (pha_name or "").strip() or None
+        assertions_q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
+        if org_id is None:
+            assertions_q = assertions_q.filter(PolicyAssertion.org_id.is_(None))
+        else:
+            assertions_q = assertions_q.filter(or_(PolicyAssertion.org_id == int(org_id), PolicyAssertion.org_id.is_(None)))
+        scoped = []
+        for a in assertions_q.all():
+            if getattr(a, "county", None) is not None and _norm_rule_scope_value(a.county) != cnty:
+                continue
+            if getattr(a, "city", None) is not None and _norm_rule_scope_value(a.city) != cty:
+                continue
+            if getattr(a, "pha_name", None) is not None and (a.pha_name or "").strip() != (pha or ""):
+                continue
+            scoped.append(a)
+        summaries = [assertion_governance_summary(a) for a in scoped]
+
+    safe_ids = [int(s.get("assertion_id") or 0) for s in summaries if s.get("safe_for_projection")]
+    partial_ids = [int(s.get("assertion_id") or 0) for s in summaries if s.get("partial_projectable") and not s.get("safe_for_projection")]
+    manual_ids = [int(s.get("assertion_id") or 0) for s in summaries if s.get("manual_review_required")]
+    excluded_ids = [int(s.get("assertion_id") or 0) for s in summaries if int(s.get("assertion_id") or 0) not in set(safe_ids + partial_ids + manual_ids)]
+
+    category_counts: dict[str, dict[str, int]] = {}
+    for summary in summaries:
+        category = str(summary.get("normalized_category") or "uncategorized")
+        bucket = "excluded"
+        if int(summary.get("assertion_id") or 0) in set(safe_ids):
+            bucket = "safe"
+        elif int(summary.get("assertion_id") or 0) in set(partial_ids):
+            bucket = "partial"
+        elif int(summary.get("assertion_id") or 0) in set(manual_ids):
+            bucket = "manual_review"
+        category_counts.setdefault(category, {"safe": 0, "partial": 0, "excluded": 0, "manual_review": 0})[bucket] += 1
+
+    payload.update({
+        "safe_assertion_ids": safe_ids,
+        "partial_assertion_ids": partial_ids,
+        "excluded_assertion_ids": excluded_ids,
+        "manual_review_assertion_ids": manual_ids,
+        "safe_count": len(safe_ids),
+        "partial_count": len(partial_ids),
+        "excluded_count": len(excluded_ids),
+        "manual_review_count": len(manual_ids),
+        "category_counts": category_counts,
+        "approved_only_mode": True,
+        "summaries": summaries,
+    })
+    return payload

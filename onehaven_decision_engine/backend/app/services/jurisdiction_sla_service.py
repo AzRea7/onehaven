@@ -835,131 +835,332 @@ def profile_next_actions(profile: JurisdictionProfile) -> dict[str, Any]:
     }
 
 
-# --- tier-one evidence-first overrides ---
-
-_tier1_original_collect_profile_source_sla_summary = collect_profile_source_sla_summary
-_tier1_original_build_refresh_requirements = build_refresh_requirements
 
 
-def _dedupe_sorted_categories(values: list[str] | None) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for raw in list(values or []):
-        value = str(raw or "").strip().lower()
-        if not value or value in seen:
+# Unified operational-summary cleanup and refresh requirements logic.
+# This replaces the prior layered tail-end overrides with one deterministic implementation.
+
+def _source_type(source: PolicySource) -> str:
+    return str(getattr(source, "source_type", "") or "").strip().lower()
+
+
+def _publication_type(source: PolicySource) -> str:
+    return str(getattr(source, "publication_type", "") or "").strip().lower()
+
+
+def _operational_categories(source: PolicySource) -> list[str]:
+    categories = sorted(source_categories(source))
+    if categories:
+        return categories
+    # Empty-category weak sources are operational noise and should not appear.
+    if _source_use_type(source) == "weak":
+        return []
+    return categories
+
+
+def _source_scope_key(source: PolicySource) -> tuple[Any, ...]:
+    return (
+        getattr(source, "org_id", None),
+        str(getattr(source, "state", None) or "").strip().upper(),
+        str(getattr(source, "county", None) or "").strip().lower() or None,
+        str(getattr(source, "city", None) or "").strip().lower() or None,
+        str(getattr(source, "pha_name", None) or "").strip() or None,
+        str(getattr(source, "program_type", None) or "").strip() or None,
+    )
+
+
+def _source_deduplication_key(source: PolicySource) -> tuple[Any, ...]:
+    return (
+        _source_scope_key(source),
+        _host_from_url(getattr(source, "url", None) or ""),
+        _source_type(source),
+        _publication_type(source),
+        tuple(sorted(_operational_categories(source))),
+    )
+
+
+def _source_is_weak_empty_duplicate(source: PolicySource) -> bool:
+    return _source_use_type(source) == "weak" and not _operational_categories(source)
+
+
+def _source_rank_for_summary(source: PolicySource) -> tuple[int, int, int, int]:
+    authority_rank = int(getattr(source, "authority_rank", 0) or 0)
+    use_type = _source_use_type(source)
+    refresh_state = str(getattr(source, "refresh_state", "") or "").strip().lower()
+    freshness_status = str(getattr(source, "freshness_status", "") or "").strip().lower()
+    is_healthy = int(refresh_state == "healthy" and freshness_status == "fresh")
+    is_binding = int(use_type == "binding")
+    has_categories = int(bool(_operational_categories(source)))
+    return (is_healthy, is_binding, has_categories, authority_rank)
+
+
+def _dedupe_sources_for_operational_summary(sources: list[PolicySource]) -> tuple[list[PolicySource], list[int]]:
+    chosen: dict[tuple[Any, ...], PolicySource] = {}
+    suppressed_ids: list[int] = []
+
+    for source in sources:
+        if _source_is_weak_empty_duplicate(source):
+            suppressed_ids.append(int(getattr(source, "id", 0) or 0))
             continue
-        seen.add(value)
-        out.append(value)
-    return sorted(out)
-
-
-def _evidence_family_summary(sources_payload: list[dict[str, Any]], artifact_snapshot: dict[str, Any]) -> dict[str, Any]:
-    source_types: set[str] = set()
-    publication_types: set[str] = set()
-    live_source_count = 0
-    artifact_hint_count = 0
-    alternative_backed_source_count = 0
-    binding_source_count = 0
-    supporting_source_count = 0
-    weak_source_count = 0
-
-    for row in sources_payload:
-        source_type = str(row.get("source_type") or "").strip().lower()
-        publication_type = str(row.get("publication_type") or "").strip().lower()
-        use_type = str(row.get("authority_use_type") or "").strip().lower()
-        failure = dict(row.get("source_failure") or {})
-
-        if source_type:
-            source_types.add(source_type)
-        if publication_type:
-            publication_types.add(publication_type)
-        if source_type not in {"artifact", "dataset", "manual", "catalog", "repo_artifact"}:
-            live_source_count += 1
-        if failure.get("alternative_backing"):
-            alternative_backed_source_count += 1
-        if failure.get("alternative_backing") or source_type in ALT_EVIDENCE_SOURCE_TYPES or publication_type in ALT_EVIDENCE_PUBLICATION_TYPES:
-            artifact_hint_count += 1
-        if use_type == "binding":
-            binding_source_count += 1
-        elif use_type == "supporting":
-            supporting_source_count += 1
+        key = _source_deduplication_key(source)
+        existing = chosen.get(key)
+        if existing is None:
+            chosen[key] = source
+            continue
+        if _source_rank_for_summary(source) > _source_rank_for_summary(existing):
+            suppressed_ids.append(int(getattr(existing, "id", 0) or 0))
+            chosen[key] = source
         else:
-            weak_source_count += 1
+            suppressed_ids.append(int(getattr(source, "id", 0) or 0))
 
-    return {
-        "source_types": sorted(source_types),
-        "publication_types": sorted(publication_types),
-        "live_source_count": int(live_source_count),
-        "binding_source_count": int(binding_source_count),
-        "supporting_source_count": int(supporting_source_count),
-        "weak_source_count": int(weak_source_count),
-        "artifact_hint_count": int(artifact_hint_count),
-        "alternative_backed_source_count": int(alternative_backed_source_count),
-        "has_repo_artifacts": bool((artifact_snapshot or {}).get("has_repo_artifacts")),
-        "repo_artifact_support_state": (artifact_snapshot or {}).get("artifact_support_state"),
-    }
+    return list(chosen.values()), sorted(set(x for x in suppressed_ids if x))
+
+
+def _source_has_alternative_backing(source: PolicySource, peers: list[PolicySource]) -> bool:
+    source_cats = set(_operational_categories(source))
+    for peer in peers:
+        if getattr(peer, "id", None) == getattr(source, "id", None):
+            continue
+        if _source_scope_key(peer) != _source_scope_key(source):
+            continue
+        if _source_use_type(peer) != "binding":
+            continue
+        peer_cats = set(_operational_categories(peer))
+        if not source_cats:
+            return True
+        if source_cats.intersection(peer_cats):
+            return True
+    return False
+
+
+def _source_effective_failure(
+    source: PolicySource,
+    *,
+    peers: list[PolicySource],
+) -> dict[str, Any]:
+    summary = dict(_source_failure_summary(source))
+    alternative_backing = _source_has_alternative_backing(source, peers)
+    reasons = list(summary.get("reasons") or [])
+    blocking_failure = bool(summary.get("blocking_failure"))
+    http_status = summary.get("http_status")
+
+    hard_dead = http_status in SOURCE_HTTP_DEAD_STATUSES and not alternative_backing
+    effective_blocking_failure = bool(blocking_failure and not alternative_backing) or hard_dead
+    degraded_failure = bool(blocking_failure and alternative_backing)
+
+    summary["alternative_backing"] = alternative_backing
+    summary["effective_blocking_failure"] = effective_blocking_failure
+    summary["degraded_failure"] = degraded_failure
+    summary["freshness_support_only_failure"] = degraded_failure
+    if degraded_failure and "artifact_backed_fallback" not in reasons:
+        reasons.append("artifact_backed_fallback")
+    summary["reasons"] = sorted(set(reasons))
+    return summary
 
 
 def collect_profile_source_sla_summary(db: Session, *, profile: JurisdictionProfile) -> dict[str, Any]:
-    summary = dict(_tier1_original_collect_profile_source_sla_summary(db, profile=profile))
-    sources_payload = list(summary.get("sources") or [])
-    artifact_snapshot = dict(summary.get("repo_artifact_snapshot") or {})
-    evidence_family = _evidence_family_summary(sources_payload, artifact_snapshot)
-    category_freshness = [dict(item) for item in list(summary.get("category_freshness") or [])]
+    now = _utcnow()
+    scoped = _iter_scoped_sources(db, profile=profile)
+    visible_sources, suppressed_source_ids = _dedupe_sources_for_operational_summary(scoped)
 
-    degraded_categories: list[str] = []
-    blocking_categories: list[str] = []
-    freshness_signal_only_categories: list[str] = []
-    for item in category_freshness:
-        category = str(item.get("category") or "").strip().lower()
-        if not category:
-            continue
-        failed_binding = int(item.get("failed_binding_source_count") or 0) > 0
-        artifact_backed_failed = int(item.get("artifact_backed_failed_source_count") or 0) > 0
-        legal_lockout = bool(item.get("legal_lockout"))
-        critical_fetch_failure = bool(item.get("critical_fetch_failure"))
-        review_required = bool(item.get("review_required"))
+    overdue_categories: set[str] = set()
+    critical_overdue_categories: set[str] = set()
+    legal_overdue_categories: set[str] = set()
+    informational_overdue_categories: set[str] = set()
+    stale_authoritative_categories: set[str] = set()
+    due_soon_categories: set[str] = set()
+    critical_fetch_failure_categories: set[str] = set()
+    legal_lockout_categories: set[str] = set()
+    review_required_categories: set[str] = set()
+    category_rollup: dict[str, dict[str, Any]] = {}
+    sources_payload: list[dict[str, Any]] = []
+    rejected_source_count = 0
+    guessed_source_count = 0
+    blocked_source_count = 0
+    fetch_failed_source_count = 0
+    failed_binding_source_count = 0
+    artifact_backed_failed_source_count = 0
+    auto_ignored_failed_source_ids: list[int] = []
 
-        if legal_lockout or critical_fetch_failure or failed_binding:
-            blocking_categories.append(category)
-        elif artifact_backed_failed or review_required:
-            degraded_categories.append(category)
-            freshness_signal_only_categories.append(category)
+    for source in visible_sources:
+        categories = _operational_categories(source)
+        authority_tier = getattr(source, "authority_tier", None)
+        use_type = _source_use_type(source)
+        failure_summary = _source_effective_failure(source, peers=visible_sources)
+        source_due = source_due_at(source)
+        source_overdue = source_due <= now
+        source_due_soon = (not source_overdue) and source_due <= (now + timedelta(hours=24))
 
-        item["evidence_status"] = (
-            "blocking"
-            if category in blocking_categories
-            else "degraded"
-            if category in degraded_categories
-            else "healthy"
+        if failure_summary.get("effective_blocking_failure"):
+            rejected_source_count += 1
+        if failure_summary.get("degraded_failure"):
+            artifact_backed_failed_source_count += 1
+            if str(getattr(source, "refresh_state", "") or "").strip().lower() == "failed":
+                auto_ignored_failed_source_ids.append(int(getattr(source, "id", 0) or 0))
+        if failure_summary.get("looks_guessed"):
+            guessed_source_count += 1
+        if "blocked_or_antibot" in failure_summary.get("reasons", []) or "refresh_blocked" in failure_summary.get("reasons", []):
+            blocked_source_count += 1
+        if any(
+            reason in {"fetch_failed", "error", "blocked", "repeated_fetch_failed", "http_not_found"}
+            or str(reason).startswith("http_status_")
+            for reason in failure_summary.get("reasons", [])
+        ):
+            fetch_failed_source_count += 1
+        if failure_summary.get("effective_blocking_failure") and use_type == "binding":
+            failed_binding_source_count += 1
+
+        per_category: list[dict[str, Any]] = []
+        for category in categories:
+            due_at = _category_due_at(source, category)
+            is_overdue = due_at <= now
+            is_due_soon = (not is_overdue) and due_at <= (now + timedelta(hours=24))
+            is_legal = category in LEGAL_BLOCKING_CATEGORIES
+            entry = category_rollup.setdefault(
+                category,
+                {
+                    "category": category,
+                    "is_legal_lockout_category": is_legal,
+                    "source_ids": [],
+                    "binding_source_ids": [],
+                    "overdue_source_ids": [],
+                    "authoritative_overdue_source_ids": [],
+                    "next_due_at": None,
+                    "failed_source_ids": [],
+                    "failed_binding_source_ids": [],
+                    "artifact_backed_failed_source_ids": [],
+                },
+            )
+            entry["source_ids"].append(int(getattr(source, "id", 0) or 0))
+            if use_type == "binding":
+                entry["binding_source_ids"].append(int(getattr(source, "id", 0) or 0))
+
+            source_failed = bool(failure_summary.get("effective_blocking_failure"))
+            source_degraded = bool(failure_summary.get("degraded_failure"))
+
+            if source_failed or source_degraded:
+                review_required_categories.add(category)
+                entry.setdefault("failed_source_ids", []).append(int(getattr(source, "id", 0) or 0))
+                if source_degraded:
+                    entry.setdefault("artifact_backed_failed_source_ids", []).append(int(getattr(source, "id", 0) or 0))
+
+            if source_failed:
+                overdue_categories.add(category)
+                if use_type == "binding":
+                    stale_authoritative_categories.add(category)
+                    critical_fetch_failure_categories.add(category)
+                    entry.setdefault("failed_binding_source_ids", []).append(int(getattr(source, "id", 0) or 0))
+                if is_legal:
+                    legal_overdue_categories.add(category)
+                    critical_overdue_categories.add(category)
+                    legal_lockout_categories.add(category)
+                else:
+                    informational_overdue_categories.add(category)
+            elif source_degraded:
+                if use_type == "binding":
+                    stale_authoritative_categories.add(category)
+                informational_overdue_categories.add(category)
+            elif is_overdue:
+                overdue_categories.add(category)
+                entry["overdue_source_ids"].append(int(getattr(source, "id", 0) or 0))
+                if use_type == "binding":
+                    stale_authoritative_categories.add(category)
+                    entry["authoritative_overdue_source_ids"].append(int(getattr(source, "id", 0) or 0))
+                if is_legal:
+                    legal_overdue_categories.add(category)
+                    critical_overdue_categories.add(category)
+                else:
+                    informational_overdue_categories.add(category)
+            elif is_due_soon:
+                due_soon_categories.add(category)
+
+            if entry["next_due_at"] is None or (due_at and due_at.isoformat() < entry["next_due_at"]):
+                entry["next_due_at"] = due_at.isoformat() if due_at else None
+
+            per_category.append(
+                {
+                    "category": category,
+                    "due_at": due_at.isoformat() if due_at else None,
+                    "is_overdue": is_overdue,
+                    "is_due_soon": is_due_soon,
+                    "is_legal_lockout_category": is_legal,
+                    "authority_use_type": use_type,
+                    "source_failed": source_failed,
+                    "source_degraded": source_degraded,
+                    "alternative_backing": bool(failure_summary.get("alternative_backing")),
+                    "failure_reasons": list(failure_summary.get("reasons") or []),
+                }
+            )
+
+        sources_payload.append(
+            {
+                "source_id": int(getattr(source, "id", 0) or 0),
+                "source_name": getattr(source, "source_name", None) or getattr(source, "title", None),
+                "authority_tier": authority_tier,
+                "authority_use_type": use_type,
+                "source_type": _source_type(source) or None,
+                "publication_type": _publication_type(source) or None,
+                "categories": categories,
+                "due_at": source_due.isoformat() if source_due else None,
+                "is_overdue": source_overdue,
+                "is_due_soon": source_due_soon,
+                "refresh_state": getattr(source, "refresh_state", None),
+                "freshness_status": getattr(source, "freshness_status", None),
+                "source_failure": failure_summary,
+                "category_freshness": per_category,
+            }
         )
-        item["freshness_signal_only"] = bool(category in freshness_signal_only_categories)
 
-    summary["category_freshness"] = category_freshness
-    summary["blocking_categories"] = _dedupe_sorted_categories(blocking_categories)
-    summary["degraded_categories"] = _dedupe_sorted_categories(degraded_categories)
-    summary["freshness_signal_only_categories"] = _dedupe_sorted_categories(freshness_signal_only_categories)
-    summary["evidence_family"] = evidence_family
-    summary["truth_model"] = {
-        "mode": "evidence_first",
-        "freshness_role": "support_only",
-        "crawler_role": "discovery_and_refresh_only",
-        "primary_truth_sources": ["catalog_admin", "stored_artifacts", "datasets", "validated_extraction"],
+    category_freshness = []
+    for category, payload in sorted(category_rollup.items()):
+        category_freshness.append(
+            {
+                **payload,
+                "source_count": len(set(payload["source_ids"])),
+                "binding_source_count": len(set(payload["binding_source_ids"])),
+                "overdue_source_count": len(set(payload["overdue_source_ids"])),
+                "authoritative_overdue_source_count": len(set(payload["authoritative_overdue_source_ids"])),
+                "failed_source_count": len(set(payload.get("failed_source_ids") or [])),
+                "failed_binding_source_count": len(set(payload.get("failed_binding_source_ids") or [])),
+                "artifact_backed_failed_source_count": len(set(payload.get("artifact_backed_failed_source_ids") or [])),
+                "legal_stale": category in legal_overdue_categories,
+                "informational_stale": category in informational_overdue_categories,
+                "critical_fetch_failure": category in critical_fetch_failure_categories,
+                "legal_lockout": category in legal_lockout_categories,
+                "review_required": category in review_required_categories,
+            }
+        )
+
+    next_due_at = min([item.get("due_at") for item in sources_payload if item.get("due_at")], default=None)
+    safe_to_rely_on = not bool(legal_lockout_categories or critical_fetch_failure_categories)
+
+    return {
+        "source_count": len(visible_sources),
+        "raw_source_count": len(scoped),
+        "suppressed_source_ids": suppressed_source_ids,
+        "suppressed_source_count": len(suppressed_source_ids),
+        "auto_ignored_failed_source_ids": sorted(set(auto_ignored_failed_source_ids)),
+        "sources": sources_payload,
+        "category_freshness": category_freshness,
+        "overdue_categories": sorted(c for c in overdue_categories if c),
+        "critical_overdue_categories": sorted(c for c in critical_overdue_categories if c),
+        "legal_overdue_categories": sorted(c for c in legal_overdue_categories if c),
+        "informational_overdue_categories": sorted(c for c in informational_overdue_categories if c),
+        "stale_authoritative_categories": sorted(c for c in stale_authoritative_categories if c),
+        "due_soon_categories": sorted(c for c in due_soon_categories if c),
+        "critical_fetch_failure_categories": sorted(c for c in critical_fetch_failure_categories if c),
+        "legal_lockout_categories": sorted(c for c in legal_lockout_categories if c),
+        "review_required_categories": sorted(c for c in review_required_categories if c),
+        "next_due_at": next_due_at,
+        "rejected_source_count": rejected_source_count,
+        "guessed_source_count": guessed_source_count,
+        "blocked_source_count": blocked_source_count,
+        "fetch_failed_source_count": fetch_failed_source_count,
+        "failed_binding_source_count": failed_binding_source_count,
+        "artifact_backed_failed_source_count": artifact_backed_failed_source_count,
+        "artifact_backed_refresh_only": bool(artifact_backed_failed_source_count and not legal_lockout_categories and not critical_fetch_failure_categories),
+        "safe_to_rely_on": safe_to_rely_on,
     }
-    summary["current_truth_basis"] = {
-        "artifact_backed_refresh_only": bool(summary.get("artifact_backed_refresh_only")),
-        "safe_to_rely_on": bool(summary.get("safe_to_rely_on")),
-        "evidence_safe_to_rely_on": bool(summary.get("safe_to_rely_on")),
-        "has_repo_artifacts": bool(artifact_snapshot.get("has_repo_artifacts")),
-        "failed_binding_source_count": int(summary.get("failed_binding_source_count") or 0),
-        "artifact_backed_failed_source_count": int(summary.get("artifact_backed_failed_source_count") or 0),
-        "blocking_categories": _dedupe_sorted_categories(summary.get("blocking_categories") or []),
-        "degraded_categories": _dedupe_sorted_categories(summary.get("degraded_categories") or []),
-        "freshness_signal_only_categories": _dedupe_sorted_categories(summary.get("freshness_signal_only_categories") or []),
-        "mode": "evidence_first",
-        "final_reliance_requires_coverage": True,
-    }
-    return summary
 
 
 def build_refresh_requirements(
@@ -974,305 +1175,35 @@ def build_refresh_requirements(
     informational_overdue_categories: list[str] | None = None,
     stale_authoritative_categories: list[str] | None = None,
     inventory_summary: dict[str, Any] | None = None,
-    retry_due_at: datetime | None = None,
 ) -> dict[str, Any]:
-    requirements = dict(
-        _tier1_original_build_refresh_requirements(
-            profile,
-            next_step=next_step,
-            missing_categories=missing_categories,
-            stale_categories=stale_categories,
-            overdue_categories=overdue_categories,
-            critical_overdue_categories=critical_overdue_categories,
-            legal_overdue_categories=legal_overdue_categories,
-            informational_overdue_categories=informational_overdue_categories,
-            stale_authoritative_categories=stale_authoritative_categories,
-            inventory_summary=inventory_summary,
-            retry_due_at=retry_due_at,
-        )
-    )
-    inventory_payload = dict(inventory_summary or {})
-    requirements["missing_categories"] = _dedupe_sorted_categories(requirements.get("missing_categories") or [])
-    requirements["stale_categories"] = _dedupe_sorted_categories(requirements.get("stale_categories") or [])
-    requirements["overdue_categories"] = _dedupe_sorted_categories(requirements.get("overdue_categories") or [])
-    requirements["critical_overdue_categories"] = _dedupe_sorted_categories(requirements.get("critical_overdue_categories") or [])
-    requirements["legal_overdue_categories"] = _dedupe_sorted_categories(requirements.get("legal_overdue_categories") or [])
-    requirements["informational_overdue_categories"] = _dedupe_sorted_categories(requirements.get("informational_overdue_categories") or [])
-    requirements["stale_authoritative_categories"] = _dedupe_sorted_categories(requirements.get("stale_authoritative_categories") or [])
-    requirements["critical_fetch_failure_categories"] = _dedupe_sorted_categories(requirements.get("critical_fetch_failure_categories") or [])
-    requirements["legal_lockout_categories"] = _dedupe_sorted_categories(requirements.get("legal_lockout_categories") or [])
-    requirements["review_required_categories"] = _dedupe_sorted_categories(requirements.get("review_required_categories") or [])
-    requirements["blocking_categories"] = _dedupe_sorted_categories(
-        list(inventory_payload.get("blocking_categories") or [])
-        + list(requirements.get("legal_lockout_categories") or [])
-        + list(requirements.get("critical_fetch_failure_categories") or [])
-    )
-    requirements["degraded_categories"] = _dedupe_sorted_categories(
-        list(inventory_payload.get("degraded_categories") or [])
-        + list(requirements.get("review_required_categories") or [])
-    )
-    requirements["freshness_signal_only_categories"] = _dedupe_sorted_categories(
-        list(inventory_payload.get("freshness_signal_only_categories") or [])
-    )
-    requirements["category_freshness"] = list(inventory_payload.get("category_freshness") or [])
-    requirements["evidence_family"] = dict(inventory_payload.get("evidence_family") or {})
-    requirements["truth_model"] = dict(
-        inventory_payload.get("truth_model")
-        or {
-            "mode": "evidence_first",
-            "freshness_role": "support_only",
-            "crawler_role": "discovery_and_refresh_only",
-        }
-    )
-    requirements["refresh_scope"] = {
-        "needs_manual_review": bool(requirements["blocking_categories"] or requirements["degraded_categories"] or requirements["missing_categories"]),
-        "needs_source_refresh": bool(requirements["overdue_categories"] or requirements["stale_categories"]),
-        "needs_catalog_or_dataset_growth": bool(requirements["missing_categories"]),
+    payload = {
+        "profile_id": int(getattr(profile, "id", 0) or 0),
+        "next_step": str(next_step or "monitor"),
+        "missing_categories": sorted(set(missing_categories or [])),
+        "stale_categories": sorted(set(stale_categories or [])),
+        "overdue_categories": sorted(set(overdue_categories or [])),
+        "critical_overdue_categories": sorted(set(critical_overdue_categories or [])),
+        "legal_overdue_categories": sorted(set(legal_overdue_categories or [])),
+        "informational_overdue_categories": sorted(set(informational_overdue_categories or [])),
+        "stale_authoritative_categories": sorted(set(stale_authoritative_categories or [])),
+        "critical_fetch_failure_categories": sorted(set((inventory_summary or {}).get("critical_fetch_failure_categories") or [])),
+        "legal_lockout_categories": sorted(set((inventory_summary or {}).get("legal_lockout_categories") or [])),
+        "review_required_categories": sorted(set((inventory_summary or {}).get("review_required_categories") or [])),
+        "rejected_source_count": int((inventory_summary or {}).get("rejected_source_count") or 0),
+        "guessed_source_count": int((inventory_summary or {}).get("guessed_source_count") or 0),
+        "blocked_source_count": int((inventory_summary or {}).get("blocked_source_count") or 0),
+        "fetch_failed_source_count": int((inventory_summary or {}).get("fetch_failed_source_count") or 0),
+        "failed_binding_source_count": int((inventory_summary or {}).get("failed_binding_source_count") or 0),
+        "artifact_backed_failed_source_count": int((inventory_summary or {}).get("artifact_backed_failed_source_count") or 0),
+        "artifact_backed_refresh_only": bool((inventory_summary or {}).get("artifact_backed_refresh_only")),
+        "suppressed_source_ids": list((inventory_summary or {}).get("suppressed_source_ids") or []),
+        "suppressed_source_count": int((inventory_summary or {}).get("suppressed_source_count") or 0),
+        "auto_ignored_failed_source_ids": list((inventory_summary or {}).get("auto_ignored_failed_source_ids") or []),
     }
-    requirements["evidence_state"] = (
-        "blocked"
-        if requirements["blocking_categories"]
-        else "degraded"
-        if requirements["degraded_categories"] or requirements["missing_categories"]
-        else "healthy"
-    )
-    return requirements
-
-
-
-# --- surgical final SLA override ---
-
-LEGAL_BLOCKING_CATEGORIES = {
-    "registration", "inspection", "occupancy", "lead", "section8", "program_overlay",
-    "safety", "source_of_income", "permits", "rental_license",
-}
-CRITICAL_CATEGORY_SET = set(LEGAL_BLOCKING_CATEGORIES)
-
-def _sla_normalize_category_name(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-def _sla_clean_category_freshness(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    cleaned: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in list(rows or []):
-        row = dict(item or {})
-        category = _sla_normalize_category_name(row.get("category"))
-        if not category or category == "":
-            continue
-        key = category
-        if key in seen:
-            continue
-        seen.add(key)
-        row["category"] = category
-        row["is_legal_lockout_category"] = bool(category in LEGAL_BLOCKING_CATEGORIES)
-        cleaned.append(row)
-    return cleaned
-
-try:
-    _surgical_sla_original_collect_profile_source_sla_summary = collect_profile_source_sla_summary
-except NameError:
-    _surgical_sla_original_collect_profile_source_sla_summary = None
-
-if _surgical_sla_original_collect_profile_source_sla_summary is not None:
-    def collect_profile_source_sla_summary(db: Session, *, profile: JurisdictionProfile) -> dict[str, Any]:
-        summary = dict(_surgical_sla_original_collect_profile_source_sla_summary(db, profile=profile))
-        category_rows = _sla_clean_category_freshness(list(summary.get("category_freshness") or []))
-        blocking_categories: list[str] = []
-        degraded_categories: list[str] = []
-        freshness_signal_only_categories: list[str] = []
-
-        for item in category_rows:
-            category = _sla_normalize_category_name(item.get("category"))
-            failed_binding = int(item.get("failed_binding_source_count") or 0) > 0
-            artifact_backed_failed = int(item.get("artifact_backed_failed_source_count") or 0) > 0
-            legal_lockout = bool(item.get("legal_lockout"))
-            critical_fetch_failure = bool(item.get("critical_fetch_failure"))
-            review_required = bool(item.get("review_required"))
-
-            if legal_lockout or critical_fetch_failure or failed_binding:
-                blocking_categories.append(category)
-                item["evidence_status"] = "blocking"
-                item["freshness_signal_only"] = False
-            elif artifact_backed_failed or review_required:
-                degraded_categories.append(category)
-                freshness_signal_only_categories.append(category)
-                item["evidence_status"] = "degraded"
-                item["freshness_signal_only"] = True
-            else:
-                item["evidence_status"] = "healthy"
-                item["freshness_signal_only"] = False
-
-        summary["category_freshness"] = category_rows
-        summary["blocking_categories"] = _dedupe_sorted_categories(blocking_categories)
-        summary["degraded_categories"] = _dedupe_sorted_categories(degraded_categories)
-        summary["freshness_signal_only_categories"] = _dedupe_sorted_categories(freshness_signal_only_categories)
-        summary["legal_lockout_categories"] = _dedupe_sorted_categories(list(summary.get("legal_lockout_categories") or []))
-        summary["critical_fetch_failure_categories"] = _dedupe_sorted_categories(list(summary.get("critical_fetch_failure_categories") or []))
-        summary["review_required_categories"] = _dedupe_sorted_categories(list(summary.get("review_required_categories") or []))
-
-        summary["safe_to_rely_on"] = not bool(
-            list(summary.get("legal_lockout_categories") or [])
-            or list(summary.get("critical_fetch_failure_categories") or [])
-            or int(summary.get("failed_binding_source_count") or 0) > 0
-        )
-        return summary
-
-try:
-    _surgical_sla_original_build_refresh_requirements = build_refresh_requirements
-except NameError:
-    _surgical_sla_original_build_refresh_requirements = None
-
-if _surgical_sla_original_build_refresh_requirements is not None:
-    def build_refresh_requirements(
-        profile: JurisdictionProfile,
-        *,
-        next_step: str,
-        missing_categories: list[str] | None = None,
-        stale_categories: list[str] | None = None,
-        overdue_categories: list[str] | None = None,
-        critical_overdue_categories: list[str] | None = None,
-        legal_overdue_categories: list[str] | None = None,
-        informational_overdue_categories: list[str] | None = None,
-        stale_authoritative_categories: list[str] | None = None,
-        inventory_summary: dict[str, Any] | None = None,
-        retry_due_at: datetime | None = None,
-    ) -> dict[str, Any]:
-        payload = dict(
-            _surgical_sla_original_build_refresh_requirements(
-                profile,
-                next_step=next_step,
-                missing_categories=missing_categories,
-                stale_categories=stale_categories,
-                overdue_categories=overdue_categories,
-                critical_overdue_categories=critical_overdue_categories,
-                legal_overdue_categories=legal_overdue_categories,
-                informational_overdue_categories=informational_overdue_categories,
-                stale_authoritative_categories=stale_authoritative_categories,
-                inventory_summary=inventory_summary,
-                retry_due_at=retry_due_at,
-            )
-        )
-        payload["blocking_categories"] = _dedupe_sorted_categories(list((inventory_summary or {}).get("blocking_categories") or payload.get("blocking_categories") or []))
-        payload["degraded_categories"] = _dedupe_sorted_categories(list((inventory_summary or {}).get("degraded_categories") or payload.get("degraded_categories") or []))
-        payload["freshness_signal_only_categories"] = _dedupe_sorted_categories(list((inventory_summary or {}).get("freshness_signal_only_categories") or payload.get("freshness_signal_only_categories") or []))
-        payload["safe_to_rely_on"] = not bool(
-            list(payload.get("legal_lockout_categories") or [])
-            or list(payload.get("critical_fetch_failure_categories") or [])
-            or int(payload.get("failed_binding_source_count") or 0) > 0
-        )
-        return payload
-
-
-# === FINAL HOT-PATH FILTER / NON-BLOCKING FAILURE OVERRIDES ===
-
-def _sla_source_is_ignorable_failure(source: PolicySource, *, artifact_snapshot: dict[str, Any]) -> bool:
-    failure = _source_failure_summary(source)
-    use_type = _source_use_type(source)
-    authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
-    has_alt = _source_has_alternative_evidence_backing(source, artifact_snapshot=artifact_snapshot)
-
-    if not failure.get("blocking_failure"):
-        return False
-    if use_type == "binding" or authority_tier == "authoritative_official":
-        return False
-    if not has_alt:
-        return False
-    if "repeated_fetch_failed" in set(failure.get("reasons") or []) or failure.get("http_status") in {403, 404, 410}:
-        return True
-    return False
-
-
-_final_hotpath_original_collect_profile_source_sla_summary = collect_profile_source_sla_summary
-
-def collect_profile_source_sla_summary(db: Session, *, profile: JurisdictionProfile) -> dict[str, Any]:
-    payload = dict(_final_hotpath_original_collect_profile_source_sla_summary(db, profile=profile) or {})
-    artifact_snapshot = dict(payload.get("repo_artifact_snapshot") or _policy_artifact_snapshot() or {})
-    ignored_ids: set[int] = set()
-
-    for row in _iter_scoped_sources(db, profile=profile):
-        try:
-            sid = int(getattr(row, "id", 0) or 0)
-        except Exception:
-            sid = 0
-        if sid and _sla_source_is_ignorable_failure(row, artifact_snapshot=artifact_snapshot):
-            ignored_ids.add(sid)
-
-    if not ignored_ids:
-        return payload
-
-    # Filter detailed failed-source payloads and recompute counts used by the hot path.
-    source_rows = [row for row in list(payload.get("sources") or []) if int(row.get("source_id") or 0) not in ignored_ids]
-    payload["sources"] = source_rows
-
-    for key in ("blocked_source_count", "fetch_failed_source_count", "artifact_backed_failed_source_count"):
-        if key in payload:
-            payload[key] = 0
-
-    for cat_row in list(payload.get("category_freshness") or []):
-        for key in ("failed_source_ids", "failed_binding_source_ids", "artifact_backed_failed_source_ids"):
-            cat_row[key] = [sid for sid in list(cat_row.get(key) or []) if int(sid or 0) not in ignored_ids]
-        for key in ("failed_source_count", "failed_binding_source_count", "artifact_backed_failed_source_count"):
-            ids_key = key.replace("_count", "_ids")
-            cat_row[key] = len(list(cat_row.get(ids_key) or []))
-        cat_row["critical_fetch_failure"] = False
-        cat_row["legal_lockout"] = False
-        cat_row["review_required"] = False
-
-    payload["critical_fetch_failure_categories"] = []
-    payload["legal_lockout_categories"] = []
-    payload["review_required_categories"] = []
-    payload["degraded_categories"] = []
-    payload["freshness_signal_only_categories"] = []
-    payload["safe_to_rely_on"] = True
-    payload["artifact_backed_refresh_only"] = True
-
-    req = dict(payload.get("requirements") or {})
-    req["blocked_source_count"] = 0
-    req["fetch_failed_source_count"] = 0
-    req["artifact_backed_failed_source_count"] = 0
-    req["critical_fetch_failure_categories"] = []
-    req["legal_lockout_categories"] = []
-    req["review_required_categories"] = []
-    req["degraded_categories"] = []
-    req["freshness_signal_only_categories"] = []
-    req["safe_to_rely_on"] = True
-    req["artifact_backed_refresh_only"] = True
-    payload["requirements"] = req
-    return payload
-
-
-_final_hotpath_original_build_refresh_requirements = build_refresh_requirements
-
-def build_refresh_requirements(
-    profile: JurisdictionProfile,
-    *,
-    next_step: str,
-    missing_categories: list[str],
-    stale_categories: list[str],
-    overdue_categories: list[str],
-    critical_overdue_categories: list[str],
-    legal_overdue_categories: list[str],
-    informational_overdue_categories: list[str],
-    stale_authoritative_categories: list[str],
-    inventory_summary: dict[str, Any],
-) -> dict[str, Any]:
-    payload = dict(_final_hotpath_original_build_refresh_requirements(
-        profile,
-        next_step=next_step,
-        missing_categories=missing_categories,
-        stale_categories=stale_categories,
-        overdue_categories=overdue_categories,
-        critical_overdue_categories=critical_overdue_categories,
-        legal_overdue_categories=legal_overdue_categories,
-        informational_overdue_categories=informational_overdue_categories,
-        stale_authoritative_categories=stale_authoritative_categories,
-        inventory_summary=inventory_summary,
-    ) or {})
-
-    if bool(payload.get("safe_to_rely_on")) and not list(payload.get("missing_categories") or []):
+    payload["safe_to_rely_on"] = not bool(payload["legal_lockout_categories"] or payload["critical_fetch_failure_categories"])
+    if payload["safe_to_rely_on"] and not payload["missing_categories"]:
         payload["next_step"] = "monitor"
         payload["refresh_state"] = "healthy"
-        payload["critical_fetch_failure_categories"] = []
-        payload["legal_lockout_categories"] = []
-        payload["review_required_categories"] = []
+    else:
+        payload["refresh_state"] = "review_required" if payload["review_required_categories"] else "pending"
     return payload

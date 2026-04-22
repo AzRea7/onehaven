@@ -127,3 +127,169 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+from ..services.jurisdiction_registry_service import (
+    JURISDICTION_TYPE_CITY,
+    JURISDICTION_TYPE_COUNTY,
+    JURISDICTION_TYPE_PHA,
+    JURISDICTION_TYPE_STATE,
+    ONBOARDING_SOURCE_MAPPED,
+    get_or_create_jurisdiction_with_sources,
+)
+
+
+def _registry_source_links_from_default(default) -> dict:
+    policy = default.to_profile_policy()
+    coverage = policy.get('coverage') or {}
+    discovery = (policy.get('discovery') or {}).get('search_hints') or {}
+    evidence = list(getattr(default, 'source_evidence', None) or [])
+
+    source_links: dict[str, dict[str, object]] = {}
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        url = item.get('url')
+        label = str(item.get('label') or item.get('kind') or 'official_source').strip().lower().replace(' ', '_')
+        if url:
+            source_links[label] = {
+                'url': url,
+                'label': item.get('label') or label,
+                'kind': item.get('kind') or 'official_source',
+                'publisher': item.get('publisher'),
+                'trusted': True,
+            }
+
+    # deterministic family placeholders are stored only when official URLs already exist
+    for family, url in {
+        'city_code': coverage.get('municipal_code_url'),
+        'rental_license': coverage.get('rental_license_url'),
+        'inspection_program': coverage.get('inspection_url'),
+        'zoning': coverage.get('zoning_url'),
+        'housing_authority': coverage.get('housing_authority_url'),
+    }.items():
+        if isinstance(url, str) and url.strip():
+            source_links[family] = {'url': url.strip(), 'label': family.replace('_', ' ').title(), 'trusted': True}
+
+    if not source_links and default.city:
+        source_links['search_hints'] = {
+            'label': f'{default.city} discovery hints',
+            'preferred_source_kinds': discovery.get('preferred_source_kinds') or [],
+            'base_terms': discovery.get('base_terms') or [],
+            'trusted': False,
+        }
+    return source_links
+
+
+def _registry_source_family_map_from_default(default) -> dict:
+    policy = default.to_profile_policy()
+    universe = policy.get('expected_rule_universe') or {}
+    coverage = policy.get('coverage') or {}
+    return dict(
+        coverage.get('required_source_families_by_category')
+        or universe.get('required_source_families_by_category')
+        or {}
+    )
+
+
+def seed_jurisdiction_registry(db: Session, org_id: int) -> list[dict]:
+    seeded: list[dict] = []
+    state_record = get_or_create_jurisdiction_with_sources(
+        db,
+        org_id=org_id,
+        jurisdiction_type=JURISDICTION_TYPE_STATE,
+        state_code='MI',
+        state_name='Michigan',
+        official_website='https://www.michigan.gov',
+        onboarding_status=ONBOARDING_SOURCE_MAPPED,
+        source_confidence=1.0,
+        source_links={
+            'state_portal': {'url': 'https://www.michigan.gov', 'label': 'Michigan.gov', 'trusted': True},
+            'legislature': {'url': 'https://www.legislature.mi.gov', 'label': 'Michigan Legislature', 'trusted': True},
+            'courts': {'url': 'https://www.courts.michigan.gov', 'label': 'Michigan Courts', 'trusted': True},
+        },
+        validation_metadata={'registry_seed': 'statewide_curated', 'review_state': 'seeded'},
+        notes='Curated statewide registry anchors for Michigan compliance discovery.',
+    )
+    seeded.append({'state': state_record.slug, 'jurisdiction_id': state_record.id})
+
+    counties: dict[str, int] = {}
+    for default in defaults_for_michigan():
+        county = getattr(default, 'county', None)
+        if county and county not in counties:
+            county_record = get_or_create_jurisdiction_with_sources(
+                db,
+                org_id=org_id,
+                jurisdiction_type=JURISDICTION_TYPE_COUNTY,
+                state_code=default.state,
+                county_name=county,
+                parent_jurisdiction_id=state_record.id,
+                onboarding_status=ONBOARDING_SOURCE_MAPPED,
+                source_confidence=0.95,
+                source_links={},
+                validation_metadata={'registry_seed': 'county_scope_from_defaults'},
+                notes=f'County registry record for {county.title()} County, {default.state}.',
+            )
+            counties[county] = county_record.id
+            seeded.append({'county': county_record.slug, 'jurisdiction_id': county_record.id})
+
+        city_record = get_or_create_jurisdiction_with_sources(
+            db,
+            org_id=org_id,
+            jurisdiction_type=JURISDICTION_TYPE_CITY,
+            state_code=default.state,
+            county_name=county,
+            city_name=default.city,
+            parent_jurisdiction_id=counties.get(county) or state_record.id,
+            official_website=(getattr(default, 'source_evidence', [{}])[0] or {}).get('url') if getattr(default, 'source_evidence', None) else None,
+            onboarding_status=ONBOARDING_SOURCE_MAPPED,
+            source_confidence=0.90 if getattr(default, 'coverage_confidence', 'medium') != 'low' else 0.75,
+            source_links=_registry_source_links_from_default(default),
+            source_family_map=_registry_source_family_map_from_default(default),
+            validation_metadata={
+                'registry_seed': 'city_scope_from_defaults',
+                'coverage_confidence': getattr(default, 'coverage_confidence', None),
+                'housing_authority': getattr(default, 'housing_authority', None),
+            },
+            notes=_notes_from_default(default),
+        )
+        seeded.append({'city': city_record.slug, 'jurisdiction_id': city_record.id})
+
+        housing_authority = getattr(default, 'housing_authority', None)
+        if housing_authority:
+            pha_record = get_or_create_jurisdiction_with_sources(
+                db,
+                org_id=org_id,
+                jurisdiction_type=JURISDICTION_TYPE_PHA,
+                state_code=default.state,
+                county_name=county,
+                city_name=default.city,
+                parent_jurisdiction_id=city_record.id,
+                onboarding_status=ONBOARDING_SOURCE_MAPPED,
+                source_confidence=0.85,
+                source_links=_registry_source_links_from_default(default),
+                source_family_map={'program_overlay': ['pha_admin_plan', 'pha_program_page', 'official_form']},
+                validation_metadata={'registry_seed': 'pha_scope_from_defaults'},
+                notes=f'PHA registry record for {housing_authority}.',
+            )
+            seeded.append({'pha': pha_record.slug, 'jurisdiction_id': pha_record.id})
+    return seeded
+
+
+def seed_registry_and_sources(db: Session, org_id: int) -> list[dict]:
+    synced: list[dict] = []
+    synced.extend(seed_jurisdiction_registry(db, org_id))
+    for default in defaults_for_michigan():
+        policy = default.to_profile_policy()
+        synced.append(
+            ensure_registry_source_mapping(
+                db,
+                org_id=org_id,
+                state=default.state,
+                county=getattr(default, 'county', None),
+                city=default.city,
+                pha_name=getattr(default, 'housing_authority', None),
+                policy=policy,
+            )
+        )
+    return synced

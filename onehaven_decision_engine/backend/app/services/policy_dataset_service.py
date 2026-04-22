@@ -44,9 +44,11 @@ def _dataset_category_hints(item: Any) -> list[str]:
         "rental_license": ["license", "registration certificate", "rental certificate"],
         "fees": ["fee", "payment"],
         "program_overlay": ["voucher", "hcv", "nspire", "overlay", "hap"],
-        "inspection": ["inspection"],
+        "inspection": ["inspection", "nspire", "hqs"],
         "occupancy": ["occupancy", "certificate of occupancy", "re-occupancy"],
         "registration": ["registration"],
+        "zoning": ["zoning", "land use"],
+        "safety": ["housing code", "property maintenance", "habitability", "fire safety"],
     }
     for category, patterns in checks.items():
         if any(p in text for p in patterns):
@@ -68,6 +70,55 @@ def dataset_family_for_item(item: Any) -> str:
     return "catalog_dataset"
 
 
+def _dataset_publication_type(item: Any) -> str:
+    url = str(getattr(item, "url", "") or "").strip().lower()
+    source_kind = str(getattr(item, "source_kind", "") or "").strip().lower()
+    title = str(getattr(item, "title", "") or "").strip().lower()
+    if url.endswith(".pdf") or "pdf" in source_kind:
+        return "pdf"
+    if any(token in url for token in ("api", "json", "csv", "xml")):
+        return "api"
+    if "checklist" in title or "packet" in title or "form" in title:
+        return "document"
+    return "web_page"
+
+
+def _dataset_truth_policy(item: Any) -> dict[str, Any]:
+    publication_type = _dataset_publication_type(item)
+    is_authoritative = bool(getattr(item, "is_authoritative", False))
+    dataset_family = dataset_family_for_item(item)
+
+    if publication_type == "pdf":
+        return {
+            "publication_type": publication_type,
+            "dataset_use_role": "evidence_backed_assertions",
+            "truth_role": "evidence_only",
+            "projectable_truth": False,
+            "requires_validation": True,
+            "requires_binding_authority": True,
+            "source_authority_score": 0.80 if is_authoritative else 0.55,
+        }
+    if publication_type == "api":
+        return {
+            "publication_type": publication_type,
+            "dataset_use_role": "structured_truth_input",
+            "truth_role": "primary_or_supporting_truth",
+            "projectable_truth": bool(is_authoritative),
+            "requires_validation": True,
+            "requires_binding_authority": True,
+            "source_authority_score": 0.95 if is_authoritative else 0.70,
+        }
+    return {
+        "publication_type": publication_type,
+        "dataset_use_role": "catalog_reference",
+        "truth_role": "supporting_reference",
+        "projectable_truth": False,
+        "requires_validation": True,
+        "requires_binding_authority": True,
+        "source_authority_score": 0.85 if is_authoritative and dataset_family in {"federal_dataset", "state_dataset", "municipal_dataset"} else 0.60,
+    }
+
+
 def dataset_priority_for_item(item: Any) -> int:
     raw = int(getattr(item, "priority", 100) or 100)
     family = dataset_family_for_item(item)
@@ -78,7 +129,9 @@ def dataset_priority_for_item(item: Any) -> int:
         "program_dataset": 15,
         "catalog_dataset": 20,
     }.get(family, 25)
-    return raw + family_boost
+    truth_policy = _dataset_truth_policy(item)
+    evidence_penalty = 5 if truth_policy["publication_type"] == "pdf" else 0
+    return raw + family_boost + evidence_penalty
 
 
 def policy_catalog_dataset_for_market(
@@ -102,6 +155,7 @@ def policy_catalog_dataset_for_market(
     )
     rows = []
     for item in items:
+        truth_policy = _dataset_truth_policy(item)
         rows.append(
             {
                 "url": getattr(item, "url", None),
@@ -118,9 +172,18 @@ def policy_catalog_dataset_for_market(
                 "dataset_family": dataset_family_for_item(item),
                 "dataset_priority": dataset_priority_for_item(item),
                 "category_hints": _dataset_category_hints(item),
+                **truth_policy,
             }
         )
-    rows.sort(key=lambda r: (int(r["dataset_priority"]), 0 if r["is_authoritative"] else 1, r["title"] or "", r["url"] or ""))
+    rows.sort(
+        key=lambda r: (
+            int(r["dataset_priority"]),
+            0 if r["is_authoritative"] else 1,
+            0 if r["projectable_truth"] else 1,
+            r["title"] or "",
+            r["url"] or "",
+        )
+    )
     return rows
 
 
@@ -146,9 +209,12 @@ def dataset_snapshot_for_market(
     )
     counts: dict[str, int] = {}
     hinted: dict[str, int] = {}
+    role_counts: dict[str, int] = {}
     for row in rows:
         family = str(row.get("dataset_family") or "unknown")
         counts[family] = counts.get(family, 0) + 1
+        role = str(row.get("dataset_use_role") or "unknown")
+        role_counts[role] = role_counts.get(role, 0) + 1
         for category in list(row.get("category_hints") or []):
             hinted[category] = hinted.get(category, 0) + 1
     return {
@@ -163,8 +229,10 @@ def dataset_snapshot_for_market(
         "summary": {
             "dataset_count": len(rows),
             "dataset_family_counts": counts,
+            "dataset_use_role_counts": role_counts,
             "category_hint_counts": hinted,
-            "service_role": "dataset_registry_for_curated_and_imported_evidence",
-            "truth_model": "dataset_first",
+            "service_role": "dataset_registry_with_truth_boundary",
+            "truth_model": "evidence_first",
+            "pdfs_are_primary_truth": False,
         },
     }

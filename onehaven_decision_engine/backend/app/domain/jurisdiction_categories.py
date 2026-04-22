@@ -279,6 +279,8 @@ class JurisdictionExpectedRuleUniverse:
     critical_categories: list[str]
     optional_categories: list[str]
     category_bundles: dict[str, dict[str, list[str]]]
+    required_categories_by_tier: dict[str, list[str]] | None = None
+    expected_rules_by_category: dict[str, dict[str, Any]] | None = None
     tier_order: list[str] | None = None
     rule_family_inventory: dict[str, dict[str, Any]] | None = None
     legally_binding_categories: list[str] | None = None
@@ -293,6 +295,8 @@ class JurisdictionExpectedRuleUniverse:
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["tier_order"] = list(self.tier_order or self.jurisdiction_types)
+        payload.setdefault("required_categories_by_tier", {})
+        payload.setdefault("expected_rules_by_category", {})
         payload.setdefault("rule_family_inventory", {})
         payload.setdefault("legally_binding_categories", [])
         payload.setdefault("operational_heuristic_categories", [])
@@ -755,6 +759,76 @@ def infer_jurisdiction_types(
     return types
 
 
+
+
+def _required_categories_by_tier_from_bundles(
+    category_bundles: Mapping[str, Mapping[str, Iterable[Any]]]
+) -> dict[str, list[str]]:
+    output: dict[str, list[str]] = {}
+    for jurisdiction_type, bundle in (category_bundles or {}).items():
+        if not isinstance(bundle, Mapping):
+            continue
+        output[str(jurisdiction_type)] = normalize_categories(bundle.get("required", []))
+    return output
+
+
+def _expected_rules_by_category_from_bundles(
+    category_bundles: Mapping[str, Mapping[str, Iterable[Any]]]
+) -> dict[str, dict[str, Any]]:
+    output: dict[str, dict[str, Any]] = {}
+    for jurisdiction_type, bundle in (category_bundles or {}).items():
+        if not isinstance(bundle, Mapping):
+            continue
+        required = normalize_categories(bundle.get("required", []))
+        critical = set(normalize_categories(bundle.get("critical", [])))
+        optional = set(normalize_categories(bundle.get("optional", [])))
+        for category in required:
+            row = output.setdefault(
+                category,
+                {
+                    "required_in_tiers": [],
+                    "critical_in_tiers": [],
+                    "optional_in_tiers": [],
+                    "jurisdiction_types": [],
+                },
+            )
+            if jurisdiction_type not in row["required_in_tiers"]:
+                row["required_in_tiers"].append(jurisdiction_type)
+            if jurisdiction_type not in row["jurisdiction_types"]:
+                row["jurisdiction_types"].append(jurisdiction_type)
+            if category in critical and jurisdiction_type not in row["critical_in_tiers"]:
+                row["critical_in_tiers"].append(jurisdiction_type)
+        for category in optional:
+            row = output.setdefault(
+                category,
+                {
+                    "required_in_tiers": [],
+                    "critical_in_tiers": [],
+                    "optional_in_tiers": [],
+                    "jurisdiction_types": [],
+                },
+            )
+            if jurisdiction_type not in row["optional_in_tiers"]:
+                row["optional_in_tiers"].append(jurisdiction_type)
+            if jurisdiction_type not in row["jurisdiction_types"]:
+                row["jurisdiction_types"].append(jurisdiction_type)
+
+    inventory = {k: v for k, v in rule_family_inventory_dict().items() if k in set(output.keys())}
+    for category, row in output.items():
+        inv = dict(inventory.get(category, {}) or {})
+        row["display_name"] = inv.get("display_name", category_label(category))
+        row["binding_type"] = inv.get("binding_type")
+        row["authority_expectation"] = inv.get("authority_expectation")
+        row["authority_scope"] = inv.get("authority_scope")
+        row["required_source_families"] = list(inv.get("required_source_families", []) or [])
+        row["property_proof_expectation"] = inv.get("property_proof_expectation")
+        row["typical_rule_keys"] = list(inv.get("typical_rule_keys", []) or [])
+        row["required_in_tiers"] = list(row.get("required_in_tiers", []))
+        row["critical_in_tiers"] = list(row.get("critical_in_tiers", []))
+        row["optional_in_tiers"] = list(row.get("optional_in_tiers", []))
+        row["jurisdiction_types"] = list(row.get("jurisdiction_types", []))
+    return output
+
 def expected_rule_universe_for_scope(
     *,
     state: str | None = None,
@@ -826,6 +900,8 @@ def expected_rule_universe_for_scope(
         }
         for key, value in category_bundles.items()
     }
+    required_by_tier = _required_categories_by_tier_from_bundles(normalized_bundles)
+    expected_rules_by_category = _expected_rules_by_category_from_bundles(normalized_bundles)
 
     return JurisdictionExpectedRuleUniverse(
         jurisdiction_types=jurisdiction_types,
@@ -833,6 +909,8 @@ def expected_rule_universe_for_scope(
         critical_categories=critical_norm,
         optional_categories=optional_norm,
         category_bundles=normalized_bundles,
+        required_categories_by_tier=required_by_tier,
+        expected_rules_by_category=expected_rules_by_category,
         tier_order=list(jurisdiction_types),
         rule_family_inventory=inventory,
         legally_binding_categories=legally_binding_categories(required_norm + optional_norm),
@@ -958,6 +1036,47 @@ def get_category_bundle_for_scope(
         tenant_waitlist_depth=tenant_waitlist_depth,
     ).category_bundles
 
+
+
+
+def required_categories_by_tier_for_scope(
+    *,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> dict[str, list[str]]:
+    universe = expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
+    return dict(universe.required_categories_by_tier or {})
+
+
+def expected_rules_by_category_for_scope(
+    *,
+    state: str | None = None,
+    county: str | None = None,
+    city: str | None = None,
+    pha_name: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    universe = expected_rule_universe_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
+    return dict(universe.expected_rules_by_category or {})
 
 def required_categories_for_market(
     *,

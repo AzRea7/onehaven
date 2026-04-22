@@ -596,6 +596,88 @@ def _source_is_curated_official_fetched(source: PolicySource | None) -> bool:
     )
 
 
+
+
+def _apply_validation_state_to_source(
+    db: Session,
+    *,
+    source: PolicySource,
+    assertions: list[PolicyAssertion],
+    counts: dict[str, int],
+    blocking_issue_count: int,
+) -> dict[str, object]:
+    """
+    Baseline source-level validation state application.
+
+    This function must exist before any tail-end override snapshots it into
+    _BASE_APPLY_VALIDATION_STATE_TO_SOURCE. Some runtime variants of this file
+    were importing before a prior base implementation existed, which caused an
+    import-time NameError.
+    """
+    validated = int((counts or {}).get("validated", 0) or 0)
+    weak_support = int((counts or {}).get("weak_support", 0) or 0)
+    ambiguous = int((counts or {}).get("ambiguous", 0) or 0)
+    conflicting = int((counts or {}).get("conflicting", 0) or 0)
+    unsupported = int((counts or {}).get("unsupported", 0) or 0)
+    binding_failures = int((counts or {}).get("binding_failures", 0) or 0)
+    total = max(0, len(assertions or []))
+
+    summary = {
+        "source_id": int(getattr(source, "id", 0) or 0),
+        "validated_count": validated,
+        "weak_support_count": weak_support,
+        "ambiguous_count": ambiguous,
+        "conflicting_count": conflicting,
+        "unsupported_count": unsupported,
+        "binding_failure_count": binding_failures,
+        "blocking_issue_count": int(blocking_issue_count or 0),
+        "total_assertions": total,
+        "refresh_state": getattr(source, "refresh_state", None),
+        "status_reason": getattr(source, "refresh_status_reason", None),
+        "next_step": None,
+        "revalidation_required": bool(getattr(source, "revalidation_required", False)),
+        "authority_use_type": getattr(source, "authority_use_type", None),
+    }
+
+    # Conservative state transitions only. Tail-end overrides can soften these.
+    if conflicting > 0:
+        source.refresh_state = "blocked"
+        source.refresh_status_reason = "validation_blocking_conflicts"
+        source.revalidation_required = True
+        summary["next_step"] = "manual_review"
+    elif binding_failures > 0 or int(blocking_issue_count or 0) > 0:
+        source.refresh_state = "blocked"
+        source.refresh_status_reason = "critical_categories_missing_binding_authority"
+        source.revalidation_required = True
+        summary["next_step"] = "manual_review"
+    elif ambiguous > 0 or unsupported > 0:
+        source.refresh_state = "validating"
+        source.refresh_status_reason = "validation_incomplete"
+        source.revalidation_required = True
+        summary["next_step"] = "validate"
+    elif validated > 0:
+        source.refresh_state = "healthy"
+        source.refresh_status_reason = None
+        source.revalidation_required = False
+        if hasattr(source, "validation_state"):
+            source.validation_state = "validated"
+        summary["next_step"] = "monitor"
+    elif weak_support > 0:
+        source.refresh_state = "degraded"
+        source.refresh_status_reason = "weak_support_only"
+        source.revalidation_required = True
+        summary["next_step"] = "validate"
+
+    db.add(source)
+    db.flush()
+
+    summary["refresh_state"] = getattr(source, "refresh_state", None)
+    summary["status_reason"] = getattr(source, "refresh_status_reason", None)
+    summary["revalidation_required"] = bool(getattr(source, "revalidation_required", False))
+    summary["authority_use_type"] = getattr(source, "authority_use_type", None)
+    return summary
+
+
 _BASE_SOURCE_URL_VALIDATION_SUMMARY = _source_url_validation_summary
 _BASE_APPLY_VALIDATION_STATE_TO_SOURCE = _apply_validation_state_to_source
 _BASE_VALIDATE_ASSERTION = validate_assertion
@@ -1752,4 +1834,202 @@ def validate_market_assertions(
         "supporting_only_categories": sorted(SUPPORTING_ONLY_CATEGORIES),
         "mode": "strict_official_evidence",
     }
+    return payload
+
+
+
+
+# === final strict validation / binding-only coverage overlay (surgical) ===
+
+try:
+    _STRICT_ORIGINAL_VALIDATE_ASSERTION = validate_assertion
+except NameError:
+    _STRICT_ORIGINAL_VALIDATE_ASSERTION = None
+
+try:
+    _STRICT_ORIGINAL_VALIDATE_MARKET_ASSERTIONS = validate_market_assertions
+except NameError:
+    _STRICT_ORIGINAL_VALIDATE_MARKET_ASSERTIONS = None
+
+
+def _strict_assertion_category(assertion: PolicyAssertion) -> str | None:
+    return normalize_category(getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None))
+
+
+def _strict_binding_use_type(assertion: PolicyAssertion, source: PolicySource | None) -> str:
+    payloads = [
+        _loads_dict(getattr(assertion, "change_summary", None)),
+        _loads_dict(getattr(assertion, "value_json", None)),
+    ]
+    for payload in payloads:
+        use_type = str(payload.get("authority_use_type") or "").strip().lower()
+        if use_type in {"binding", "supporting", "weak"}:
+            return use_type
+    use_type = str(getattr(assertion, "authority_use_type", None) or getattr(source, "authority_use_type", None) or "").strip().lower()
+    if use_type in {"binding", "supporting", "weak"}:
+        return use_type
+    tier = str(getattr(source, "authority_tier", None) or "").strip().lower() if source is not None else ""
+    if tier == "authoritative_official":
+        return "binding"
+    if tier in {"approved_official_supporting", "semi_authoritative_operational"}:
+        return "supporting"
+    return "weak"
+
+
+def _strict_rule_family(assertion: PolicyAssertion) -> str:
+    for payload in [
+        _loads_dict(getattr(assertion, "rule_provenance_json", None)),
+        _loads_dict(getattr(assertion, "citation_json", None)),
+    ]:
+        fam = str(payload.get("rule_family") or payload.get("rule_family_key") or "").strip().lower()
+        if fam:
+            return fam
+    raw = str(getattr(assertion, "rule_family", None) or getattr(assertion, "rule_family_key", None) or "").strip().lower()
+    if raw:
+        return raw
+    category = _strict_assertion_category(assertion) or "uncategorized"
+    rule_key = str(getattr(assertion, "rule_key", "") or "").strip().lower()
+    return f"{category}:{rule_key}" if rule_key else category
+
+
+def _strict_truth_fingerprint(assertion: PolicyAssertion) -> str:
+    value_json = _loads_dict(getattr(assertion, "value_json", None))
+    for key in ("status", "state", "answer", "value"):
+        raw = value_json.get(key)
+        if raw not in (None, ""):
+            return str(raw).strip().lower()
+    excerpt = str(getattr(assertion, "raw_excerpt", "") or "").strip().lower()
+    if excerpt:
+        return excerpt[:160]
+    return str(getattr(assertion, "rule_key", "") or "").strip().lower()
+
+
+def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    payload = dict(_STRICT_ORIGINAL_VALIDATE_ASSERTION(assertion=assertion, source=source)) if _STRICT_ORIGINAL_VALIDATE_ASSERTION else {}
+    category = _strict_assertion_category(assertion)
+    authority_use_type = _strict_binding_use_type(assertion, source)
+    binding_truth_required = _binding_truth_required(assertion) if '"_binding_truth_required"' else bool(category in CRITICAL_BINDING_CATEGORIES)
+
+    payload["authority_use_type"] = authority_use_type
+    payload.setdefault("coverage_status", "covered" if payload.get("validation_state") == VALIDATION_STATE_VALIDATED else "candidate")
+    payload.setdefault("safe_for_projection", bool(payload.get("validation_state") == VALIDATION_STATE_VALIDATED))
+
+    if authority_use_type != "binding":
+        payload.update({
+            "validation_state": VALIDATION_STATE_UNSUPPORTED if binding_truth_required else VALIDATION_STATE_WEAK,
+            "validation_quality": min(float(payload.get("validation_quality") or 0.40), 0.40 if not binding_truth_required else 0.10),
+            "validation_reason": "non_binding_source_excluded_from_coverage",
+            "trust_state": TRUST_STATE_DOWNGRADED if binding_truth_required else TRUST_STATE_NEEDS_REVIEW,
+            "coverage_status": "weak_support" if not binding_truth_required else "candidate",
+            "safe_for_projection": False,
+            "binding_authority_missing": bool(binding_truth_required),
+            "blocking_issue": bool(binding_truth_required),
+        })
+        return payload
+
+    # binding-only path
+    payload["coverage_status"] = "covered" if payload.get("validation_state") == VALIDATION_STATE_VALIDATED else payload.get("coverage_status")
+    payload["safe_for_projection"] = bool(payload.get("validation_state") == VALIDATION_STATE_VALIDATED)
+    return payload
+
+
+def validate_market_assertions(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    source_id: int | None = None,
+) -> dict[str, object]:
+    payload = dict(_STRICT_ORIGINAL_VALIDATE_MARKET_ASSERTIONS(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        source_id=source_id,
+    )) if _STRICT_ORIGINAL_VALIDATE_MARKET_ASSERTIONS else {}
+
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+    stmt = select(PolicyAssertion).where(PolicyAssertion.state == st)
+    if hasattr(PolicyAssertion, "org_id"):
+        if org_id is None:
+            stmt = stmt.where(PolicyAssertion.org_id.is_(None))
+        else:
+            stmt = stmt.where(or_(PolicyAssertion.org_id == org_id, PolicyAssertion.org_id.is_(None)))
+    if cnty is None:
+        stmt = stmt.where(PolicyAssertion.county.is_(None))
+    else:
+        stmt = stmt.where(PolicyAssertion.county == cnty)
+    if cty is None:
+        stmt = stmt.where(PolicyAssertion.city.is_(None))
+    else:
+        stmt = stmt.where(PolicyAssertion.city == cty)
+    if hasattr(PolicyAssertion, "pha_name"):
+        if pha is None:
+            stmt = stmt.where(or_(PolicyAssertion.pha_name.is_(None), PolicyAssertion.pha_name == ""))
+        else:
+            stmt = stmt.where(PolicyAssertion.pha_name == pha)
+    if source_id is not None:
+        stmt = stmt.where(PolicyAssertion.source_id == int(source_id))
+
+    rows = list(db.scalars(stmt).all())
+    by_group: dict[tuple[str, str], list[PolicyAssertion]] = {}
+    for row in rows:
+        category = _strict_assertion_category(row)
+        if not category:
+            continue
+        if _strict_binding_use_type(row, db.get(PolicySource, int(row.source_id)) if getattr(row, "source_id", None) is not None else None) != "binding":
+            continue
+        if _norm_status(getattr(row, "validation_state", None)) != VALIDATION_STATE_VALIDATED:
+            continue
+        by_group.setdefault((category, _strict_rule_family(row)), []).append(row)
+
+    conflict_groups = []
+    for (category, family), group_rows in by_group.items():
+        fingerprints = sorted({_strict_truth_fingerprint(r) for r in group_rows if _strict_truth_fingerprint(r)})
+        if len(fingerprints) <= 1:
+            continue
+        conflict_groups.append({
+            "category": category,
+            "rule_family": family,
+            "assertion_ids": [int(getattr(r, "id", 0) or 0) for r in group_rows],
+            "fingerprints": fingerprints,
+        })
+        for row in group_rows:
+            row.validation_state = VALIDATION_STATE_CONFLICTING
+            row.validation_score = min(float(getattr(row, "validation_score", 0.15) or 0.15), 0.15)
+            row.validation_reason = "binding_assertions_conflict_within_rule_family"
+            row.trust_state = TRUST_STATE_NEEDS_REVIEW
+            if hasattr(row, "coverage_status"):
+                row.coverage_status = "conflicting"
+            if hasattr(row, "rule_status") and _norm_status(getattr(row, "rule_status", None)) in {"", "active", "approved"}:
+                row.rule_status = "conflicting"
+            row.change_summary = _dumps({
+                **_loads_dict(getattr(row, "change_summary", None)),
+                "validation": {
+                    **(_loads_dict(getattr(row, "change_summary", None)).get("validation") or {}),
+                    "binding_conflict": True,
+                    "rule_family": family,
+                    "category": category,
+                    "fingerprints": fingerprints,
+                },
+            })
+
+    if conflict_groups:
+        db.flush()
+
+    payload["validation_hardening"] = {
+        "critical_binding_categories": sorted(CRITICAL_BINDING_CATEGORIES),
+        "supporting_only_categories": sorted(SUPPORTING_ONLY_CATEGORIES),
+        "mode": "binding_only_coverage_and_conflict_gate",
+        "binding_conflict_group_count": len(conflict_groups),
+    }
+    payload["binding_conflicts"] = conflict_groups
     return payload

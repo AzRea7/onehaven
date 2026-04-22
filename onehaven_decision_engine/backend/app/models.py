@@ -143,6 +143,7 @@ class Property(Base):
     zip: Mapped[str] = mapped_column(String(10), nullable=False)
 
     normalized_address: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    parcel_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
 
     bedrooms: Mapped[int] = mapped_column(Integer, nullable=False)
     bathrooms: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
@@ -426,6 +427,10 @@ class ImportSnapshot(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), index=True, nullable=False)
+    portfolio_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("portfolios.id", ondelete="SET NULL"), nullable=True, index=True)
+    sync_job_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("sync_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    product_surface: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    ingestion_mode: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
     source: Mapped[str] = mapped_column(String(40), nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -1230,12 +1235,18 @@ class Tenant(Base):
 
 class Lease(Base):
     __tablename__ = "leases"
+    __table_args__ = (
+        Index("ix_leases_org_property_unit", "org_id", "property_id", "unit_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     property_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    unit_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("units.id", ondelete="SET NULL"), nullable=True, index=True
     )
     tenant_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
@@ -1655,3 +1666,355 @@ class TaxLookupResult:
 
 from .policy_models import JurisdictionProfile, HqsRule, HqsAddendumRule, HudFmrRecord  # noqa: E402,F401
 
+
+
+# -----------------------------
+# Jurisdiction registry / curated official source mapping
+# -----------------------------
+class JurisdictionRegistry(Base):
+    __tablename__ = "jurisdiction_registry"
+    __table_args__ = (
+        UniqueConstraint("org_id", "slug", name="uq_jurisdiction_registry_org_slug"),
+        Index("ix_jurisdiction_registry_scope", "state_code", "county_name", "city_name"),
+        Index("ix_jurisdiction_registry_type", "jurisdiction_type"),
+        Index("ix_jurisdiction_registry_parent", "parent_jurisdiction_id"),
+        Index("ix_jurisdiction_registry_active", "is_active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    jurisdiction_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    state_code: Mapped[Optional[str]] = mapped_column(String(8), nullable=True, index=True)
+    state_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    county_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    city_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    geoid: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    lsad: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    census_class: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    parent_jurisdiction_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("jurisdiction_registry.id"), nullable=True, index=True)
+    official_website: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    onboarding_status: Mapped[str] = mapped_column(String(64), nullable=False, default="discovered")
+    source_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    source_authority_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    expected_categories_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=False, default=dict)
+    required_categories_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=False, default=dict)
+    source_links_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=False, default=dict)
+    source_family_map_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=False, default=dict)
+    coverage_metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=False, default=dict)
+    validation_metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=False, default=dict)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# -----------------------------
+# Step 1 platform graph freeze
+# -----------------------------
+class Portfolio(Base):
+    __tablename__ = "portfolios"
+    __table_args__ = (
+        UniqueConstraint("org_id", "slug", name="uq_portfolios_org_slug"),
+        Index("ix_portfolios_org_is_default", "org_id", "is_default"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    slug: Mapped[str] = mapped_column(String(80), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    portfolio_type: Mapped[str] = mapped_column(String(40), nullable=False, default="general")
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    organization: Mapped["Organization"] = relationship("Organization")
+    property_links: Mapped[List["PortfolioPropertyLink"]] = relationship(
+        "PortfolioPropertyLink",
+        back_populates="portfolio",
+        cascade="all, delete-orphan",
+    )
+
+
+class PortfolioPropertyLink(Base):
+    __tablename__ = "portfolio_property_links"
+    __table_args__ = (
+        UniqueConstraint("portfolio_id", "property_id", name="uq_portfolio_property_links_portfolio_property"),
+        Index("ix_portfolio_property_links_org_property", "org_id", "property_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    portfolio_id: Mapped[int] = mapped_column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    role: Mapped[str] = mapped_column(String(40), nullable=False, default="tracked")
+    added_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    portfolio: Mapped["Portfolio"] = relationship("Portfolio", back_populates="property_links")
+    property: Mapped["Property"] = relationship("Property")
+
+
+class Unit(Base):
+    __tablename__ = "units"
+    __table_args__ = (
+        UniqueConstraint("org_id", "property_id", "unit_label", name="uq_units_org_property_label"),
+        Index("ix_units_org_property_status", "org_id", "property_id", "occupancy_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    unit_label: Mapped[str] = mapped_column(String(80), nullable=False)
+    unit_type: Mapped[str] = mapped_column(String(40), nullable=False, default="residential")
+    bedrooms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    bathrooms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    square_feet: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    occupancy_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
+    market_rent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    voucher_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship("Property")
+    leases: Mapped[List["Lease"]] = relationship("Lease", back_populates="unit")
+    tasks: Mapped[List["Task"]] = relationship("Task", back_populates="unit")
+
+
+class AcquisitionDeal(Base):
+    __tablename__ = "acquisition_deals"
+    __table_args__ = (
+        UniqueConstraint("org_id", "property_id", name="uq_acquisition_deals_org_property"),
+        Index("ix_acquisition_deals_org_stage", "org_id", "stage"),
+        Index("ix_acquisition_deals_org_status", "org_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    deal_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("deals.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    stage: Mapped[str] = mapped_column(String(40), nullable=False, default="sourcing")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+    assigned_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True, index=True)
+
+    asking_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    contract_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    target_close_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    blocker_summary_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    checklist_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship("Property")
+    deal: Mapped[Optional["Deal"]] = relationship("Deal")
+    tasks: Mapped[List["Task"]] = relationship("Task", back_populates="acquisition_deal")
+
+
+class ComplianceProfile(Base):
+    __tablename__ = "compliance_profiles"
+    __table_args__ = (
+        UniqueConstraint("org_id", "property_id", name="uq_compliance_profiles_org_property"),
+        Index("ix_compliance_profiles_org_status", "org_id", "status"),
+        Index("ix_compliance_profiles_org_safe", "org_id", "safe_to_rent"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
+    safe_to_rent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    inspection_risk_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    compliance_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    money_at_risk_monthly: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    summary_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    fix_plan_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    confidence_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    last_computed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    property: Mapped["Property"] = relationship("Property")
+
+
+class Document(Base):
+    __tablename__ = "documents"
+    __table_args__ = (
+        Index("ix_documents_org_kind", "org_id", "document_kind"),
+        Index("ix_documents_org_property", "org_id", "property_id"),
+        Index("ix_documents_org_acquisition", "org_id", "acquisition_deal_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=True, index=True)
+    acquisition_deal_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("acquisition_deals.id", ondelete="SET NULL"), nullable=True, index=True)
+    inspection_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("inspections.id", ondelete="SET NULL"), nullable=True, index=True)
+    lease_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("leases.id", ondelete="SET NULL"), nullable=True, index=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    document_kind: Mapped[str] = mapped_column(String(60), nullable=False, default="general")
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="upload")
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    storage_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    external_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    parser_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    parsed_summary_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    property: Mapped[Optional["Property"]] = relationship("Property")
+    acquisition_deal: Mapped[Optional["AcquisitionDeal"]] = relationship("AcquisitionDeal")
+    inspection: Mapped[Optional["Inspection"]] = relationship("Inspection")
+    lease: Mapped[Optional["Lease"]] = relationship("Lease")
+    tenant: Mapped[Optional["Tenant"]] = relationship("Tenant")
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+    __table_args__ = (
+        Index("ix_tasks_org_status", "org_id", "status"),
+        Index("ix_tasks_org_due_at", "org_id", "due_at"),
+        Index("ix_tasks_org_product_surface", "org_id", "product_surface"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    product_surface: Mapped[str] = mapped_column(String(40), nullable=False, default="ops")
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="todo")
+    priority: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+
+    property_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("properties.id", ondelete="SET NULL"), nullable=True, index=True)
+    unit_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("units.id", ondelete="SET NULL"), nullable=True, index=True)
+    acquisition_deal_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("acquisition_deals.id", ondelete="SET NULL"), nullable=True, index=True)
+    inspection_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("inspections.id", ondelete="SET NULL"), nullable=True, index=True)
+    lease_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("leases.id", ondelete="SET NULL"), nullable=True, index=True)
+    tenant_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    assigned_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("app_users.id"), nullable=True, index=True)
+    due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    property: Mapped[Optional["Property"]] = relationship("Property")
+    unit: Mapped[Optional["Unit"]] = relationship("Unit", back_populates="tasks")
+    acquisition_deal: Mapped[Optional["AcquisitionDeal"]] = relationship("AcquisitionDeal", back_populates="tasks")
+    inspection: Mapped[Optional["Inspection"]] = relationship("Inspection")
+    lease: Mapped[Optional["Lease"]] = relationship("Lease")
+    tenant: Mapped[Optional["Tenant"]] = relationship("Tenant")
+
+
+class DataSource(Base):
+    __tablename__ = "data_sources"
+    __table_args__ = (
+        UniqueConstraint("org_id", "provider", "slug", name="uq_data_sources_org_provider_slug"),
+        Index("ix_data_sources_org_enabled", "org_id", "is_enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    provider: Mapped[str] = mapped_column(String(60), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+
+    source_kind: Mapped[str] = mapped_column(String(40), nullable=False, default="api")
+    product_surface: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    credentials_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    config_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    state_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_failure_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    runs: Mapped[List["SyncJob"]] = relationship("SyncJob", back_populates="data_source", cascade="all, delete-orphan")
+
+
+class SyncJob(Base):
+    __tablename__ = "sync_jobs"
+    __table_args__ = (
+        Index("ix_sync_jobs_org_status", "org_id", "status"),
+        Index("ix_sync_jobs_org_surface", "org_id", "product_surface"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    data_source_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("data_sources.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    product_surface: Mapped[str] = mapped_column(String(40), nullable=False, default="ops")
+    trigger_type: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued")
+
+    summary_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    data_source: Mapped[Optional["DataSource"]] = relationship("DataSource", back_populates="runs")
+
+
+# Back-populate platform graph relationships onto existing mapped classes without changing current behavior.
+Organization.portfolios = relationship("Portfolio", cascade="all, delete-orphan")
+Organization.data_sources = relationship("DataSource", cascade="all, delete-orphan")
+Organization.sync_jobs = relationship("SyncJob", cascade="all, delete-orphan")
+Organization.tasks = relationship("Task", cascade="all, delete-orphan")
+
+Property.portfolio_links = relationship("PortfolioPropertyLink", cascade="all, delete-orphan")
+Property.units = relationship("Unit", cascade="all, delete-orphan")
+Property.acquisition_deals = relationship("AcquisitionDeal", cascade="all, delete-orphan")
+Property.compliance_profiles = relationship("ComplianceProfile", cascade="all, delete-orphan")
+Property.documents_v2 = relationship("Document", cascade="all, delete-orphan")
+Property.tasks_v2 = relationship("Task", cascade="all, delete-orphan")
+
+Tenant.documents_v2 = relationship("Document")
+Tenant.tasks_v2 = relationship("Task")
+Lease.unit = relationship("Unit", back_populates="leases")
+Lease.documents_v2 = relationship("Document")
+Lease.tasks_v2 = relationship("Task")
+Inspection.documents_v2 = relationship("Document")
+Inspection.tasks_v2 = relationship("Task")
+
+
+# -----------------------------
+# Step 2 shared ingestion core wiring
+# -----------------------------
+Portfolio.import_snapshots = relationship("ImportSnapshot")
+SyncJob.import_snapshots = relationship("ImportSnapshot")
+Unit.property = relationship("Property")
+Lease.unit = relationship("Unit", back_populates="leases")

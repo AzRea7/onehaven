@@ -20,6 +20,13 @@ type NextActionsLike = {
   refresh_state?: string | null;
 };
 
+type SourceAuthoritySummary = {
+  authoritative_count?: number | null;
+  authority_use_counts?: Record<string, number> | null;
+  source_authority_score?: number | null;
+  linked_source_ids?: number[] | null;
+} | null;
+
 type OperationalStatusLike = {
   health_state?: string | null;
   refresh_state?: string | null;
@@ -31,6 +38,13 @@ type OperationalStatusLike = {
   reasons?: string[] | null;
   next_actions?: NextActionsLike | null;
   lockout?: LockoutLike | null;
+  source_summary?: SourceAuthoritySummary;
+  last_validation_at?: string | null;
+  next_due_step?: string | null;
+  lockout_causing_categories?: string[] | null;
+  informational_gap_categories?: string[] | null;
+  validation_pending_categories?: string[] | null;
+  authority_gap_categories?: string[] | null;
 };
 
 type CoverageLike = {
@@ -47,11 +61,17 @@ type CoverageLike = {
   last_refreshed?: string | null;
   last_refreshed_at?: string | null;
   trustworthy_for_projection?: boolean | null;
+  missing_categories?: string[] | null;
+  conflicting_categories?: string[] | null;
+  covered_categories?: string[] | null;
+  required_categories?: string[] | null;
   completeness?: {
     completeness_status?: string | null;
     completeness_score?: number | null;
     is_stale?: boolean | null;
     stale_reason?: string | null;
+    missing_categories?: string[] | null;
+    conflicting_categories?: string[] | null;
   } | null;
   operational_status?: OperationalStatusLike | null;
   health?: OperationalStatusLike | null;
@@ -67,6 +87,8 @@ type CoverageLike = {
   repo_policy_raw_count?: number | null;
   repo_pdf_count?: number | null;
   repo_pdf_names?: string[] | null;
+  source_authority_score?: number | null;
+  source_summary?: SourceAuthoritySummary;
 };
 
 function norm(value: unknown) {
@@ -108,6 +130,7 @@ function toneForValue(value: unknown) {
       "strong",
       "confirmed",
       "healthy",
+      "ok",
       "safe_to_rely_on",
     ].includes(v)
   ) {
@@ -125,6 +148,7 @@ function toneForValue(value: unknown) {
       "review_required",
       "degraded",
       "validating",
+      "warning",
     ].includes(v)
   ) {
     return "oh-pill oh-pill-warn";
@@ -141,6 +165,7 @@ function toneForValue(value: unknown) {
       "weak",
       "failed",
       "unsafe_to_rely_on",
+      "conflicting",
     ].includes(v)
   ) {
     return "oh-pill oh-pill-bad";
@@ -178,12 +203,22 @@ function dueNowSummary(
   informationalGaps: string[],
   validationPending: string[],
   authorityGaps: string[],
+  conflicting: string[],
+  missing: string[],
   isStale: boolean,
 ) {
   const parts: string[] = [];
   if (lockoutCausing.length)
     parts.push(
       `${lockoutCausing.length} blocking categor${lockoutCausing.length === 1 ? "y" : "ies"}`,
+    );
+  if (conflicting.length)
+    parts.push(
+      `${conflicting.length} conflict${conflicting.length === 1 ? "" : "s"}`,
+    );
+  if (missing.length)
+    parts.push(
+      `${missing.length} missing categor${missing.length === 1 ? "y" : "ies"}`,
     );
   if (validationPending.length)
     parts.push(`${validationPending.length} validation pending`);
@@ -225,52 +260,59 @@ export default function JurisdictionCoverageBadge({
     reliabilityState,
     safeToRely,
     reasons,
+    operational,
   } = deriveOperationalStatus(c);
-  const lockoutCausing = Array.isArray((c as any).lockout_causing_categories)
-    ? (c as any).lockout_causing_categories
-    : [];
-  const informationalGaps = Array.isArray(
-    (c as any).informational_gap_categories,
-  )
-    ? (c as any).informational_gap_categories
-    : [];
-  const validationPending = Array.isArray(
-    (c as any).validation_pending_categories,
-  )
-    ? (c as any).validation_pending_categories
-    : [];
-  const authorityGaps = Array.isArray((c as any).authority_gap_categories)
-    ? (c as any).authority_gap_categories
-    : [];
-  const lastValidationAt = (c as any).last_validation_at || null;
-  const nextDueStep =
-    (c as any).next_due_step || nextActions?.next_step || null;
 
-  const repoArtifactSupportState =
-    (c as any).repo_artifact_support_state ||
-    (c as any).artifact_evidence?.artifact_support_state ||
-    null;
-  const repoPolicyRawCount = Number(
-    (c as any).repo_policy_raw_count ||
-      (c as any).artifact_evidence?.repo_policy_raw_count ||
-      0,
-  );
-  const repoPdfCount = Number(
-    (c as any).repo_pdf_count ||
-      (c as any).artifact_evidence?.repo_pdf_count ||
-      0,
-  );
-  const repoPdfNames = Array.isArray((c as any).repo_pdf_names)
-    ? (c as any).repo_pdf_names
-    : Array.isArray((c as any).artifact_evidence?.repo_pdf_names)
-      ? (c as any).artifact_evidence.repo_pdf_names
+  const lockoutCausing = Array.isArray(c.lockout_causing_categories)
+    ? c.lockout_causing_categories
+    : Array.isArray(operational?.lockout_causing_categories)
+      ? operational.lockout_causing_categories
       : [];
+  const informationalGaps = Array.isArray(c.informational_gap_categories)
+    ? c.informational_gap_categories
+    : Array.isArray(operational?.informational_gap_categories)
+      ? operational.informational_gap_categories
+      : [];
+  const validationPending = Array.isArray(c.validation_pending_categories)
+    ? c.validation_pending_categories
+    : Array.isArray(operational?.validation_pending_categories)
+      ? operational.validation_pending_categories
+      : [];
+  const authorityGaps = Array.isArray(c.authority_gap_categories)
+    ? c.authority_gap_categories
+    : Array.isArray(operational?.authority_gap_categories)
+      ? operational.authority_gap_categories
+      : [];
+  const missingCategories = Array.isArray(c.missing_categories)
+    ? c.missing_categories
+    : Array.isArray(c.completeness?.missing_categories)
+      ? c.completeness.missing_categories
+      : [];
+  const conflictingCategories = Array.isArray(c.conflicting_categories)
+    ? c.conflicting_categories
+    : Array.isArray(c.completeness?.conflicting_categories)
+      ? c.completeness.conflicting_categories
+      : [];
+  const lastValidationAt =
+    c.last_validation_at || operational?.last_validation_at || null;
+  const nextDueStep =
+    c.next_due_step ||
+    operational?.next_due_step ||
+    nextActions?.next_step ||
+    null;
+
+  const sourceSummary = c.source_summary || operational?.source_summary || null;
+  const sourceAuthorityScore = Number(
+    c.source_authority_score ?? sourceSummary?.source_authority_score ?? 0,
+  );
+  const authoritativeCount = Number(sourceSummary?.authoritative_count ?? 0);
+  const authorityUseCounts = sourceSummary?.authority_use_counts || {};
 
   if (compact) {
     return (
       <div className="flex flex-wrap items-center gap-2">
         <span className={toneForValue(healthState)}>
-          {norm(healthState) === "healthy" ? (
+          {norm(healthState) === "healthy" || norm(healthState) === "ok" ? (
             <ShieldCheck className="mr-1 h-3.5 w-3.5" />
           ) : (
             <ShieldAlert className="mr-1 h-3.5 w-3.5" />
@@ -293,44 +335,20 @@ export default function JurisdictionCoverageBadge({
           </span>
         ) : null}
 
-        {!!lockoutCausing.length ? (
-          <span className="oh-pill oh-pill-bad">
-            Lockout cats · {lockoutCausing.length}
+        {!!missingCategories.length ? (
+          <span className="oh-pill oh-pill-warn">
+            Missing · {missingCategories.length}
           </span>
         ) : null}
-        {!!validationPending.length ? (
-          <span className="oh-pill oh-pill-warn">
-            Validation pending · {validationPending.length}
+        {!!conflictingCategories.length ? (
+          <span className="oh-pill oh-pill-bad">
+            Conflicts · {conflictingCategories.length}
           </span>
         ) : null}
         {!!authorityGaps.length ? (
           <span className="oh-pill oh-pill-bad">
             Authority gaps · {authorityGaps.length}
           </span>
-        ) : null}
-
-        {lockout?.lockout_active ? (
-          <span className="oh-pill oh-pill-bad">
-            <ShieldAlert className="mr-1 h-3.5 w-3.5" />
-            Lockout
-          </span>
-        ) : null}
-
-        {isStale ? (
-          <span className="oh-pill oh-pill-warn">
-            <AlertTriangle className="mr-1 h-3.5 w-3.5" />
-            Stale
-          </span>
-        ) : null}
-
-        {dueNowSummary(
-          lockoutCausing,
-          informationalGaps,
-          validationPending,
-          authorityGaps,
-          isStale,
-        ) ? (
-          <span className="oh-pill">Due now</span>
         ) : null}
       </div>
     );
@@ -340,7 +358,7 @@ export default function JurisdictionCoverageBadge({
     <div className="rounded-2xl border border-app bg-app-panel px-4 py-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className={toneForValue(healthState)}>
-          {norm(healthState) === "healthy" ? (
+          {norm(healthState) === "healthy" || norm(healthState) === "ok" ? (
             <ShieldCheck className="mr-1 h-3.5 w-3.5" />
           ) : (
             <ShieldAlert className="mr-1 h-3.5 w-3.5" />
@@ -369,12 +387,6 @@ export default function JurisdictionCoverageBadge({
           )}
           {safeToRely ? "Safe to rely on" : titleize(reliabilityState)}
         </span>
-
-        {Number(reviewQueueCount || 0) > 0 ? (
-          <span className="oh-pill oh-pill-warn">
-            Review Queue · {reviewQueueCount}
-          </span>
-        ) : null}
 
         {lockout?.lockout_active ? (
           <span className="oh-pill oh-pill-bad">
@@ -408,6 +420,8 @@ export default function JurisdictionCoverageBadge({
         informationalGaps,
         validationPending,
         authorityGaps,
+        conflictingCategories,
+        missingCategories,
         isStale,
       ) ? (
         <div className="mt-3 rounded-2xl border border-app bg-app-muted px-4 py-3 text-sm text-app-1">
@@ -418,13 +432,15 @@ export default function JurisdictionCoverageBadge({
               informationalGaps,
               validationPending,
               authorityGaps,
+              conflictingCategories,
+              missingCategories,
               isStale,
             )}
           </div>
         </div>
       ) : null}
 
-      <div className="mt-3 grid gap-3 md:grid-cols-5">
+      <div className="mt-3 grid gap-3 md:grid-cols-4 xl:grid-cols-8">
         <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
           <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
             Completeness score
@@ -436,7 +452,52 @@ export default function JurisdictionCoverageBadge({
 
         <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
           <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-            Resolved rule version
+            Missing
+          </div>
+          <div className="mt-2 text-sm font-semibold text-app-0">
+            {missingCategories.length}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Conflicts
+          </div>
+          <div className="mt-2 text-sm font-semibold text-app-0">
+            {conflictingCategories.length}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Authoritative sources
+          </div>
+          <div className="mt-2 text-sm font-semibold text-app-0">
+            {authoritativeCount}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Source authority
+          </div>
+          <div className="mt-2 text-sm font-semibold text-app-0">
+            {pct(sourceAuthorityScore)}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Binding sources
+          </div>
+          <div className="mt-2 text-sm font-semibold text-app-0">
+            {Number(authorityUseCounts["binding"] || 0)}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
+            Rule version
           </div>
           <div className="mt-2 text-sm font-semibold text-app-0">{version}</div>
         </div>
@@ -449,31 +510,77 @@ export default function JurisdictionCoverageBadge({
             {formatDate(refreshed)}
           </div>
         </div>
-
-        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-            Last validation
-          </div>
-          <div className="mt-2 text-sm font-semibold text-app-0">
-            {formatDate(lastValidationAt)}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-app-4">
-            Next step
-          </div>
-          <div className="mt-2 text-sm font-semibold text-app-0">
-            {titleize(nextActions?.next_step || "monitor")}
-          </div>
-          {nextActions?.next_search_retry_due_at ? (
-            <div className="mt-1 flex items-center gap-1 text-xs text-app-4">
-              <Clock3 className="h-3.5 w-3.5" />
-              {formatDate(nextActions.next_search_retry_due_at)}
-            </div>
-          ) : null}
-        </div>
       </div>
+
+      {(missingCategories.length ||
+        conflictingCategories.length ||
+        authorityGaps.length ||
+        validationPending.length) && (
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-app-4">
+              Missing categories
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {missingCategories.length ? (
+                missingCategories.map((item) => (
+                  <span key={item} className="oh-pill oh-pill-warn">
+                    {titleize(item)}
+                  </span>
+                ))
+              ) : (
+                <span className="text-sm text-app-4">None</span>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-app-4">
+              Conflicting categories
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {conflictingCategories.length ? (
+                conflictingCategories.map((item) => (
+                  <span key={item} className="oh-pill oh-pill-bad">
+                    {titleize(item)}
+                  </span>
+                ))
+              ) : (
+                <span className="text-sm text-app-4">None</span>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-app-4">
+              Authority gaps
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {authorityGaps.length ? (
+                authorityGaps.map((item) => (
+                  <span key={item} className="oh-pill oh-pill-bad">
+                    {titleize(item)}
+                  </span>
+                ))
+              ) : (
+                <span className="text-sm text-app-4">None</span>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app bg-app-muted px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-app-4">
+              Next validation
+            </div>
+            <div className="mt-2 space-y-1 text-sm text-app-2">
+              <div>{formatDate(lastValidationAt)}</div>
+              <div className="text-app-4">
+                {titleize(nextDueStep || "monitor")}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

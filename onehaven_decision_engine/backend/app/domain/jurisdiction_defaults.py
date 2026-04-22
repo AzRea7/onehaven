@@ -8,10 +8,12 @@ from .jurisdiction_categories import (
     authority_expectations_for_categories,
     authority_scope_for_categories,
     expected_rule_universe_for_scope,
+    expected_rules_by_category_for_scope,
     get_required_categories,
     legally_binding_categories,
     operational_heuristic_categories,
     property_proof_required_categories,
+    required_categories_by_tier_for_scope,
     required_source_families_for_categories,
     rule_family_inventory_dict,
 )
@@ -145,6 +147,26 @@ class JurisdictionDefault:
             include_section8=include_section8,
         )
 
+    def required_categories_by_tier(self, *, include_section8: bool = True) -> dict[str, list[str]]:
+        return required_categories_by_tier_for_scope(
+            state=self.state,
+            county=self.county,
+            city=self.city,
+            pha_name=self.housing_authority,
+            include_section8=include_section8,
+            tenant_waitlist_depth=self.tenant_waitlist_depth,
+        )
+
+    def expected_rules_by_category(self, *, include_section8: bool = True) -> dict[str, dict[str, Any]]:
+        return expected_rules_by_category_for_scope(
+            state=self.state,
+            county=self.county,
+            city=self.city,
+            pha_name=self.housing_authority,
+            include_section8=include_section8,
+            tenant_waitlist_depth=self.tenant_waitlist_depth,
+        )
+
     def default_discovery_search_hints(self) -> dict[str, Any]:
         if isinstance(self.discovery_search_hints, dict) and self.discovery_search_hints:
             return dict(self.discovery_search_hints)
@@ -263,6 +285,8 @@ class JurisdictionDefault:
                 "jurisdiction_types": list(universe.get("jurisdiction_types", [])),
                 "tier_order": list(universe.get("tier_order", universe.get("jurisdiction_types", []))),
                 "expected_tier_rule_universe": dict(universe.get("category_bundles", {})),
+                "required_categories_by_tier": dict(universe.get("required_categories_by_tier", {})),
+                "expected_rules_by_category": dict(universe.get("expected_rules_by_category", {})),
                 "rule_family_inventory": dict(universe.get("rule_family_inventory", {})),
                 "legally_binding_categories": list(universe.get("legally_binding_categories", [])),
                 "operational_heuristic_categories": list(universe.get("operational_heuristic_categories", [])),
@@ -364,6 +388,45 @@ def expected_rule_universe_defaults_for_scope(
         tenant_waitlist_depth=tenant_waitlist_depth,
     ).to_dict()
 
+
+
+
+def required_categories_by_tier_defaults_for_scope(
+    *,
+    state: str = "MI",
+    county: str | None = None,
+    city: str | None = None,
+    housing_authority: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> dict[str, list[str]]:
+    return required_categories_by_tier_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=housing_authority,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
+
+
+def expected_rules_by_category_defaults_for_scope(
+    *,
+    state: str = "MI",
+    county: str | None = None,
+    city: str | None = None,
+    housing_authority: str | None = None,
+    include_section8: bool = True,
+    tenant_waitlist_depth: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    return expected_rules_by_category_for_scope(
+        state=state,
+        county=county,
+        city=city,
+        pha_name=housing_authority,
+        include_section8=include_section8,
+        tenant_waitlist_depth=tenant_waitlist_depth,
+    )
 
 def michigan_global_defaults() -> List[JurisdictionDefault]:
     return [

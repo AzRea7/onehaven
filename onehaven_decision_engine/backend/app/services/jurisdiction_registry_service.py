@@ -403,3 +403,156 @@ def resolve_jurisdiction_hierarchy(
         "county": _row_to_record(county_row) if county_row else None,
         "city": _row_to_record(city_row) if city_row else None,
     }
+
+# --- additive registry-source mapping overlay ---
+
+def _table_has_column(table: Table, name: str) -> bool:
+    try:
+        return name in table.c
+    except Exception:
+        return False
+
+
+def _safe_json_dict(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = __import__('json').loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _normalize_registry_source_links(payload: dict[str, Any] | None) -> dict[str, Any]:
+    data = _safe_json_dict(payload)
+    normalized: dict[str, Any] = {}
+    for key, value in data.items():
+        k = _norm_lower(key)
+        if not k:
+            continue
+        if isinstance(value, str):
+            url = _sanitize_official_website(value)
+            if url:
+                normalized[k] = {"url": url, "trusted": True}
+            continue
+        if isinstance(value, dict):
+            url = _sanitize_official_website(value.get('url'))
+            if not url:
+                continue
+            row = dict(value)
+            row['url'] = url
+            row['trusted'] = True
+            normalized[k] = row
+    return normalized
+
+
+def _normalize_registry_source_family_map(payload: dict[str, Any] | None) -> dict[str, list[str]]:
+    data = _safe_json_dict(payload)
+    normalized: dict[str, list[str]] = {}
+    for category, families in data.items():
+        key = _norm_lower(category)
+        if not key:
+            continue
+        vals: list[str] = []
+        if isinstance(families, (list, tuple)):
+            vals = [str(x).strip().lower() for x in families if str(x).strip()]
+        elif isinstance(families, str):
+            vals = [str(families).strip().lower()] if str(families).strip() else []
+        if vals:
+            normalized[key] = sorted(dict.fromkeys(vals))
+    return normalized
+
+
+def get_jurisdiction_source_configuration(db: Session, *, jurisdiction_id: int) -> dict[str, Any]:
+    table = _jurisdictions_table(db)
+    row = db.execute(select(table).where(table.c.id == int(jurisdiction_id)).limit(1)).first()
+    if not row:
+        return {}
+    mapping = row._mapping
+    return {
+        'source_links': _safe_json_dict(mapping.get('source_links_json')),
+        'source_family_map': _safe_json_dict(mapping.get('source_family_map_json')),
+        'validation_metadata': _safe_json_dict(mapping.get('validation_metadata_json')),
+        'notes': mapping.get('notes'),
+    }
+
+
+def update_jurisdiction_source_configuration(
+    db: Session,
+    *,
+    jurisdiction_id: int,
+    source_links: dict[str, Any] | None = None,
+    source_family_map: dict[str, Any] | None = None,
+    validation_metadata: dict[str, Any] | None = None,
+    notes: str | None = None,
+) -> JurisdictionRegistryRecord | None:
+    table = _jurisdictions_table(db)
+    values: dict[str, Any] = {'updated_at': datetime.utcnow()}
+    if _table_has_column(table, 'source_links_json') and source_links is not None:
+        values['source_links_json'] = _normalize_registry_source_links(source_links)
+    if _table_has_column(table, 'source_family_map_json') and source_family_map is not None:
+        values['source_family_map_json'] = _normalize_registry_source_family_map(source_family_map)
+    if _table_has_column(table, 'validation_metadata_json') and validation_metadata is not None:
+        values['validation_metadata_json'] = _safe_json_dict(validation_metadata)
+    if _table_has_column(table, 'notes') and notes is not None:
+        values['notes'] = _norm_text(notes)
+    db.execute(update(table).where(table.c.id == int(jurisdiction_id)).values(**values))
+    db.flush()
+    return find_jurisdiction_by_id(db, jurisdiction_id=jurisdiction_id)
+
+
+def get_or_create_jurisdiction_with_sources(
+    db: Session,
+    *,
+    jurisdiction_type: str,
+    state_code: str | None,
+    state_name: str | None = None,
+    county_name: str | None = None,
+    city_name: str | None = None,
+    geoid: str | None = None,
+    lsad: str | None = None,
+    census_class: str | None = None,
+    parent_jurisdiction_id: int | None = None,
+    official_website: str | None = None,
+    onboarding_status: str = ONBOARDING_DISCOVERED,
+    source_confidence: float | None = None,
+    org_id: int | None = None,
+    is_active: bool = True,
+    source_links: dict[str, Any] | None = None,
+    source_family_map: dict[str, Any] | None = None,
+    validation_metadata: dict[str, Any] | None = None,
+    notes: str | None = None,
+) -> JurisdictionRegistryRecord:
+    record = get_or_create_jurisdiction(
+        db,
+        jurisdiction_type=jurisdiction_type,
+        state_code=state_code,
+        state_name=state_name,
+        county_name=county_name,
+        city_name=city_name,
+        geoid=geoid,
+        lsad=lsad,
+        census_class=census_class,
+        parent_jurisdiction_id=parent_jurisdiction_id,
+        official_website=official_website,
+        onboarding_status=onboarding_status,
+        source_confidence=source_confidence,
+        org_id=org_id,
+        is_active=is_active,
+    )
+    update_jurisdiction_source_configuration(
+        db,
+        jurisdiction_id=record.id,
+        source_links=source_links,
+        source_family_map=source_family_map,
+        validation_metadata=validation_metadata,
+        notes=notes,
+    )
+    return find_jurisdiction_by_id(db, jurisdiction_id=record.id) or record

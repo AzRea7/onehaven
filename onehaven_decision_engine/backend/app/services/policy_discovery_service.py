@@ -1499,3 +1499,60 @@ def discover_source_family_candidates(
             program_type=program_type,
         ),
     }
+
+_strict_overlay_previous_upsert_discovery_candidate_inventory = upsert_discovery_candidate_inventory
+_strict_overlay_previous_build_source_family_candidate = build_source_family_candidate
+
+
+# --- additive strict discovery inventory overlay ---
+STRICT_MIN_DISCOVERY_AUTHORITY_SCORE = 0.60
+
+
+def candidate_trust_verdict(*, url: str, title: str | None = None, publisher: str | None = None, probe_result: dict[str, Any] | None = None, authority_score: float | None = None) -> dict[str, Any]:
+    host = _host_from_url(url)
+    reasons: list[str] = []
+    if not host:
+        reasons.append('missing_host')
+    if _host_looks_guessed(host):
+        reasons.append('guessed_domain')
+    if not _is_official_host(url):
+        reasons.append('non_official_host')
+    if _looks_like_placeholder_or_access_page(title=title, publisher=publisher, url=url, http_status=(probe_result or {}).get('http_status')):
+        reasons.append('placeholder_or_access_page')
+    if authority_score is not None and float(authority_score) < STRICT_MIN_DISCOVERY_AUTHORITY_SCORE:
+        reasons.append('low_authority_score')
+    return {'accepted': not reasons, 'reasons': sorted(set(reasons)), 'host': host}
+
+
+def upsert_discovery_candidate_inventory(*args, **kwargs):  # type: ignore[override]
+    verdict = candidate_trust_verdict(
+        url=str(kwargs.get('url') or ''),
+        title=kwargs.get('title'),
+        publisher=kwargs.get('publisher'),
+        probe_result=kwargs.get('probe_result'),
+        authority_score=kwargs.get('authority_score'),
+    )
+    if not verdict['accepted']:
+        kwargs['lifecycle_state'] = INVENTORY_LIFECYCLE_FAILED
+        meta = dict(kwargs.get('metadata') or {})
+        meta['strict_rejection_reasons'] = verdict['reasons']
+        kwargs['metadata'] = meta
+        kwargs['is_official_candidate'] = False
+        kwargs['authority_tier'] = 'derived_or_inferred'
+        kwargs['authority_rank'] = 25
+        kwargs['authority_score'] = min(float(kwargs.get('authority_score') or 0.0), 0.35)
+    return _strict_overlay_previous_upsert_discovery_candidate_inventory(*args, **kwargs)
+
+
+def build_source_family_candidate(*args, **kwargs):  # type: ignore[override]
+    candidate = _strict_overlay_previous_build_source_family_candidate(*args, **kwargs)
+    if candidate is None:
+        return None
+    verdict = candidate_trust_verdict(
+        url=str(getattr(candidate, 'url', '') or ''),
+        title=getattr(candidate, 'title', None),
+        authority_score=getattr(candidate, 'authority_score', None),
+    )
+    if not verdict['accepted']:
+        return None
+    return candidate

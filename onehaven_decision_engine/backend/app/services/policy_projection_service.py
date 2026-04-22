@@ -4313,3 +4313,296 @@ if _final_projection_base_build_brief is not None:
         brief['snapshot'] = snapshot
         brief['covered_categories'] = sorted(covered)
         return brief
+
+
+
+
+# === deterministic truth resolution overlay (surgical) ===
+
+try:
+    _ORIGINAL_BUILD_POLICY_SUMMARY_DETERMINISTIC = build_policy_summary
+except NameError:
+    _ORIGINAL_BUILD_POLICY_SUMMARY_DETERMINISTIC = None
+
+try:
+    _ORIGINAL_MERGE_EFFECTIVE_ASSERTIONS_DETERMINISTIC = _merge_effective_assertions
+except NameError:
+    _ORIGINAL_MERGE_EFFECTIVE_ASSERTIONS_DETERMINISTIC = None
+
+_AUTHORITY_TIER_RANKS_DETERMINISTIC = {
+    "derived_or_inferred": 25,
+    "semi_authoritative_operational": 60,
+    "approved_official_supporting": 85,
+    "authoritative_official": 100,
+}
+_BINDING_USE_TYPE_RANKS_DETERMINISTIC = {
+    "weak": 0,
+    "supporting": 1,
+    "binding": 2,
+}
+_NON_TRUTH_VALIDATION_STATES = {"weak_support", "ambiguous", "unsupported", "conflicting"}
+_NON_TRUTH_COVERAGE_STATUSES = {"candidate", "partial", "inferred", "conflicting", "stale", "superseded"}
+
+
+def _deterministic_authority_tier(assertion: PolicyAssertion) -> str:
+    tier = str(
+        getattr(assertion, "authority_tier", None)
+        or (_loads(getattr(assertion, "change_summary", None), {}) or {}).get("authority_tier")
+        or (_loads(getattr(assertion, "value_json", None), {}) or {}).get("authority_tier")
+        or ""
+    ).strip().lower()
+    return tier or "derived_or_inferred"
+
+
+def _deterministic_binding_use_type(assertion: PolicyAssertion) -> str:
+    use_type = str(
+        getattr(assertion, "authority_use_type", None)
+        or (_loads(getattr(assertion, "change_summary", None), {}) or {}).get("authority_use_type")
+        or (_loads(getattr(assertion, "value_json", None), {}) or {}).get("authority_use_type")
+        or ""
+    ).strip().lower()
+    if use_type in {"binding", "supporting", "weak"}:
+        return use_type
+    if _deterministic_authority_tier(assertion) == "authoritative_official":
+        return "binding"
+    if _deterministic_authority_tier(assertion) in {"approved_official_supporting", "semi_authoritative_operational"}:
+        return "supporting"
+    return "weak"
+
+
+def _deterministic_rule_family(assertion: PolicyAssertion) -> str:
+    for value in [
+        getattr(assertion, "rule_family", None),
+        getattr(assertion, "rule_family_key", None),
+        (_loads(getattr(assertion, "rule_provenance_json", None), {}) or {}).get("rule_family"),
+        (_loads(getattr(assertion, "rule_provenance_json", None), {}) or {}).get("rule_family_key"),
+    ]:
+        text = str(value or "").strip().lower()
+        if text:
+            return text
+    category = _category_for_assertion(assertion)
+    rule_key = str(getattr(assertion, "rule_key", "") or "").strip().lower()
+    return f"{category}:{rule_key}" if rule_key else str(category or "other")
+
+
+def _deterministic_truth_bucket(assertion: PolicyAssertion) -> str:
+    category = _category_for_assertion(assertion)
+    status = _rule_value_state(assertion)
+    return f"{category}:{status}"
+
+
+def _deterministic_assertion_score(assertion: PolicyAssertion) -> tuple:
+    return (
+        int(_AUTHORITY_TIER_RANKS_DETERMINISTIC.get(_deterministic_authority_tier(assertion), 0)),
+        int(_BINDING_USE_TYPE_RANKS_DETERMINISTIC.get(_deterministic_binding_use_type(assertion), 0)),
+        _source_level_rank(getattr(assertion, "source_level", None)),
+        float(getattr(assertion, "confidence", 0.0) or 0.0),
+        _specificity_score(
+            assertion,
+            county=_norm_lower(getattr(assertion, "county", None)),
+            city=_norm_lower(getattr(assertion, "city", None)),
+            pha_name=_norm_text(getattr(assertion, "pha_name", None)),
+        ),
+        -(int(getattr(assertion, "priority", 100) or 100)),
+        -(int(getattr(assertion, "source_rank", 100) or 100)),
+        int(getattr(assertion, "version_number", 1) or 1),
+        int(getattr(assertion, "id", 0) or 0),
+    )
+
+
+def _assertion_is_projectable_truth(assertion: PolicyAssertion) -> bool:
+    if not _is_effective_assertion(assertion):
+        return False
+    validation_state = _norm_status(getattr(assertion, "validation_state", None))
+    trust_state = _norm_status(getattr(assertion, "trust_state", None))
+    coverage_status = _norm_status(getattr(assertion, "coverage_status", None))
+    if validation_state in _NON_TRUTH_VALIDATION_STATES:
+        return False
+    if coverage_status in _NON_TRUTH_COVERAGE_STATUSES:
+        return False
+    if validation_state and validation_state != "validated":
+        return False
+    if trust_state and trust_state not in {"validated", "trusted"}:
+        return False
+    return True
+
+
+def resolve_category_conflicts(assertions: list[PolicyAssertion]) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, list[PolicyAssertion]] = {}
+    for row in assertions:
+        if not _assertion_is_projectable_truth(row):
+            continue
+        category = _category_for_assertion(row)
+        if not category or category == "other":
+            continue
+        grouped.setdefault(category, []).append(row)
+
+    resolved: dict[str, dict[str, Any]] = {}
+    for category, rows in grouped.items():
+        family_groups: dict[str, list[PolicyAssertion]] = {}
+        for row in rows:
+            family_groups.setdefault(_deterministic_rule_family(row), []).append(row)
+
+        winners: list[PolicyAssertion] = []
+        family_conflicts: list[dict[str, Any]] = []
+        category_truth_buckets: set[str] = set()
+        for family_key, family_rows in family_groups.items():
+            family_rows = sorted(family_rows, key=_deterministic_assertion_score, reverse=True)
+            winner = family_rows[0]
+            winners.append(winner)
+            family_truths = sorted({_deterministic_truth_bucket(r) for r in family_rows})
+            category_truth_buckets.update(family_truths)
+            if len(family_truths) > 1:
+                family_conflicts.append({
+                    "category": category,
+                    "rule_family": family_key,
+                    "assertion_ids": [int(getattr(r, "id", 0) or 0) for r in family_rows],
+                    "truth_buckets": family_truths,
+                })
+
+        winners = sorted(winners, key=_deterministic_assertion_score, reverse=True)
+        resolved[category] = {
+            "winner": winners[0] if winners else None,
+            "winners": winners,
+            "conflicting": bool(family_conflicts or len(category_truth_buckets) > 1),
+            "family_conflicts": family_conflicts,
+            "truth_buckets": sorted(category_truth_buckets),
+        }
+    return resolved
+
+
+def _merge_effective_assertions(assertions: list[PolicyAssertion]) -> dict[str, PolicyAssertion]:
+    base = dict(_ORIGINAL_MERGE_EFFECTIVE_ASSERTIONS_DETERMINISTIC(assertions) or {}) if _ORIGINAL_MERGE_EFFECTIVE_ASSERTIONS_DETERMINISTIC else {}
+    resolved = resolve_category_conflicts(assertions)
+    for category_payload in resolved.values():
+        winner = category_payload.get("winner")
+        if winner is None:
+            continue
+        rule_key = str(getattr(winner, "rule_key", "") or "").strip()
+        if rule_key:
+            base[rule_key] = winner
+    return base
+
+
+def build_policy_summary(
+    db: Session,
+    assertions: list[PolicyAssertion],
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> dict[str, Any]:
+    payload = dict(
+        _ORIGINAL_BUILD_POLICY_SUMMARY_DETERMINISTIC(
+            db,
+            assertions,
+            org_id,
+            state,
+            county,
+            city,
+            pha_name,
+        )
+    ) if _ORIGINAL_BUILD_POLICY_SUMMARY_DETERMINISTIC else {}
+
+    resolved = resolve_category_conflicts(assertions)
+    conflicting_categories = sorted([cat for cat, info in resolved.items() if bool(info.get("conflicting"))])
+    category_conflicts = [
+        item
+        for info in resolved.values()
+        for item in list(info.get("family_conflicts") or [])
+    ]
+
+    category_winners: list[PolicyAssertion] = []
+    for category, info in resolved.items():
+        if info.get("conflicting"):
+            continue
+        winner = info.get("winner")
+        if winner is not None:
+            category_winners.append(winner)
+
+    verified_rules: list[dict[str, Any]] = []
+    required_actions: list[dict[str, Any]] = []
+    blocking_items: list[dict[str, Any]] = []
+    evidence_links: list[dict[str, Any]] = []
+    local_rule_statuses: dict[str, str] = {}
+    covered_categories: set[str] = set()
+
+    for row in category_winners:
+        rule_key = str(getattr(row, "rule_key", "") or "").strip()
+        if not rule_key:
+            continue
+        category = _category_for_assertion(row)
+        status = _rule_value_state(row)
+        covered_categories.add(category)
+        local_rule_statuses[rule_key] = status
+        item = {
+            "id": int(getattr(row, "id", 0) or 0),
+            "rule_key": rule_key,
+            "label": _rule_label(row),
+            "category": category,
+            "status": status,
+            "blocking": bool(getattr(row, "blocking", False)),
+            "required": bool(getattr(row, "required", True)),
+            "source_level": getattr(row, "source_level", None),
+            "confidence": float(getattr(row, "confidence", 0.0) or 0.0),
+            "source_citation": getattr(row, "source_citation", None),
+            "raw_excerpt": getattr(row, "raw_excerpt", None),
+            "rule_family": _deterministic_rule_family(row),
+            "authority_tier": _deterministic_authority_tier(row),
+            "authority_use_type": _deterministic_binding_use_type(row),
+        }
+        verified_rules.append(item)
+        if item["required"] and status in {"yes", "conditional"}:
+            required_actions.append({"code": rule_key.upper(), "title": item["label"], "category": category})
+        if item["blocking"]:
+            blocking_items.append({"code": rule_key.upper(), "title": item["label"], "category": category})
+        if item["source_citation"]:
+            evidence_links.append({"rule_key": rule_key, "citation": item["source_citation"]})
+
+    jurisdiction_trust = _jurisdiction_trust_for_scope(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+
+    required_categories = normalize_categories(
+        (payload.get("coverage") or {}).get("required_categories")
+        or jurisdiction_trust.get("required_categories")
+        or required_categories_for_city(city, state=state, include_section8=bool(pha_name))
+        or ["registration", "inspection", "safety"]
+    )
+    category_coverage = {cat: ("verified" if cat in covered_categories else "missing") for cat in required_categories}
+    for category in conflicting_categories:
+        category_coverage[category] = "conflicting"
+
+    coverage = dict(payload.get("coverage") or {})
+    coverage.update({
+        "required_categories": required_categories,
+        "covered_categories": sorted(covered_categories),
+        "missing_categories": [cat for cat in required_categories if category_coverage.get(cat) == "missing"],
+        "conflicting_categories": conflicting_categories,
+        "category_conflicts": category_conflicts,
+        "coverage_status": "conflicting" if conflicting_categories else coverage.get("coverage_status") or ("verified_extended" if verified_rules else "not_started"),
+        "production_readiness": "not_ready" if conflicting_categories else coverage.get("production_readiness") or ("ready" if verified_rules else "partial"),
+    })
+
+    payload.update({
+        "coverage": coverage,
+        "verified_rules": verified_rules,
+        "required_actions": required_actions,
+        "blocking_items": blocking_items,
+        "evidence_links": evidence_links,
+        "local_rule_statuses": local_rule_statuses,
+        "verified_rule_count_local": len(verified_rules),
+        "verified_rule_count_effective": len(verified_rules),
+        "required_categories": required_categories,
+        "category_coverage": category_coverage,
+        "conflicting_categories": conflicting_categories,
+        "category_conflicts": category_conflicts,
+        "completeness_status": coverage.get("completeness_status") or ("conflicting" if conflicting_categories else ("partial" if verified_rules else "missing")),
+    })
+    return payload

@@ -3547,3 +3547,316 @@ def run_market_policy_pipeline(*args, **kwargs):
         refresh_summary['monitor_summary'] = monitor_summary
         result['refresh_summary'] = refresh_summary
     return result
+
+
+# --- registry-first projection gate (integrated final layer) ---
+
+def _registry_first_market_context(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> dict[str, Any]:
+    try:
+        from app.services.jurisdiction_registry_service import find_jurisdiction_by_scope
+    except Exception:
+        find_jurisdiction_by_scope = None  # type: ignore[assignment]
+
+    registry = None
+    if find_jurisdiction_by_scope is not None:
+        try:
+            registry = find_jurisdiction_by_scope(
+                db,
+                org_id=org_id,
+                state_code=_norm_state(state),
+                county_name=_norm_text(county),
+                city_name=_norm_text(city),
+                jurisdiction_type="city" if city else ("county" if county else "state"),
+            )
+        except Exception:
+            registry = None
+
+    registry_sources = {}
+    if registry is not None:
+        registry_sources = getattr(registry, "source_family_map_json", None) or getattr(registry, "source_links_json", None) or {}
+        if isinstance(registry_sources, str):
+            try:
+                registry_sources = json.loads(registry_sources)
+            except Exception:
+                registry_sources = {}
+    return {
+        "registry_found": registry is not None,
+        "registry_id": getattr(registry, "id", None) if registry is not None else None,
+        "registry_slug": getattr(registry, "slug", None) if registry is not None else None,
+        "registry_sources": registry_sources if isinstance(registry_sources, dict) else {},
+    }
+
+
+def _pipeline_projection_guard(
+    *,
+    completeness: dict[str, Any],
+    health: dict[str, Any],
+) -> dict[str, Any]:
+    conflicting = list(completeness.get("conflicting_categories") or [])
+    missing = list(completeness.get("missing_categories") or [])
+    stale_authoritative = list(completeness.get("stale_authoritative_categories") or [])
+    binding_unmet = list(completeness.get("binding_unmet_categories") or [])
+    block = bool(
+        conflicting
+        or stale_authoritative
+        or binding_unmet
+        or not bool(completeness.get("safe_for_projection"))
+        or str(completeness.get("production_readiness") or "").strip().lower() == "not_ready"
+        or (bool(health) and not bool(health.get("safe_for_projection")))
+    )
+    reasons = []
+    if conflicting:
+        reasons.append("conflicting_categories")
+    if stale_authoritative:
+        reasons.append("stale_authoritative_categories")
+    if binding_unmet:
+        reasons.append("missing_binding_authority")
+    if missing and not bool(completeness.get("safe_for_projection")):
+        reasons.append("incomplete_required_coverage")
+    return {
+        "block_projection": block,
+        "stop_reason": reasons[0] if reasons else None,
+        "stop_reasons": reasons,
+    }
+
+
+_run_market_policy_pipeline_registry_first_base = run_market_policy_pipeline
+
+def run_market_policy_pipeline(*args, **kwargs):
+    result = dict(_run_market_policy_pipeline_registry_first_base(*args, **kwargs) or {})
+
+    org_id = kwargs.get("org_id")
+    state = _norm_state(kwargs.get("state"))
+    county = _norm_lower(kwargs.get("county"))
+    city = _norm_lower(kwargs.get("city"))
+    pha_name = _norm_text(kwargs.get("pha_name"))
+    db = kwargs.get("db")
+    if db is None and args:
+        db = args[0]
+
+    source_runs = list((result.get('refresh_summary') or {}).get('source_runs') or result.get('source_runs') or [])
+    if source_runs:
+        monitor_summary = _compact_monitor_summary(source_runs)
+        result['monitor_summary'] = monitor_summary
+        refresh_summary = dict(result.get('refresh_summary') or {})
+        refresh_summary['monitor_summary'] = monitor_summary
+        result['refresh_summary'] = refresh_summary
+
+    if db is None:
+        return result
+
+    registry_context = _registry_first_market_context(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    result["registry_context"] = registry_context
+
+    profile = _refetch_profile_by_scope(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    completeness = {}
+    health = {}
+    if profile is not None:
+        try:
+            completeness = dict(profile_completeness_payload(db, profile))
+        except Exception:
+            completeness = {}
+        try:
+            health = dict(_chunk3_pipeline_get_jurisdiction_health(
+                db,
+                profile_id=int(profile.id),
+                org_id=org_id,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+            ) or {})
+        except Exception:
+            health = {}
+    result["completeness_pre_projection"] = completeness
+    result["health_pre_projection"] = health
+
+    projection_guard = _pipeline_projection_guard(completeness=completeness, health=health)
+    result["projection_guard"] = projection_guard
+
+    if projection_guard["block_projection"]:
+        refresh_summary = dict(result.get("refresh_summary") or {})
+        refresh_summary["projection_skipped"] = True
+        refresh_summary["projection_skip_reason"] = projection_guard["stop_reason"]
+        result["refresh_summary"] = refresh_summary
+        result["projected"] = {
+            "ok": False,
+            "projection_skipped": True,
+            "reason": projection_guard["stop_reason"],
+            "reasons": projection_guard["stop_reasons"],
+        }
+        result["pipeline_stop"] = {
+            "stage": "pre_projection_completeness_gate",
+            "reason": projection_guard["stop_reason"],
+            "reasons": projection_guard["stop_reasons"],
+            "conflict_aware": True,
+            "registry_first": True,
+        }
+    else:
+        result["pipeline_stop"] = None
+
+    return result
+
+
+# -----------------------------
+# Step 2 shared ingestion core bridge
+# -----------------------------
+from app.services.product_ingestion_router_service import route_product_ingestion
+
+
+def run_shared_product_ingestion(
+    db: Session,
+    *,
+    org_id: int,
+    product_surface: str,
+    ingestion_mode: str,
+    payload: dict[str, Any] | None = None,
+    csv_template_key: str | None = None,
+    csv_data: bytes | str | None = None,
+    uploads: list[dict[str, Any]] | None = None,
+    run_enrichment_pipeline: bool = True,
+) -> dict[str, Any]:
+    """
+    Shared ingestion entrypoint for product-first onboarding.
+
+    This lets OneHaven ingest manual property data, CSV portfolio data,
+    and uploaded documents without forcing RentCast or the market-policy
+    pipeline to be the only system entry path.
+    """
+    ingest_result = route_product_ingestion(
+        db,
+        org_id=int(org_id),
+        product_surface=product_surface,
+        ingestion_mode=ingestion_mode,
+        payload=payload,
+        csv_template_key=csv_template_key,
+        csv_data=csv_data,
+        uploads=uploads,
+    )
+    if not bool(ingest_result.get("ok")):
+        return ingest_result
+
+    property_ids = list(ingest_result.get("property_ids") or [])
+    enrichment_runs: list[dict[str, Any]] = []
+
+    if run_enrichment_pipeline and property_ids and product_surface in {"compliance", "intelligence", "acquire", "ops"}:
+        # Keep this conservative in Step 2: only kick off market policy recompute
+        # for properties that now have a market/jurisdiction context.
+        from app.models import Property
+
+        for property_id in property_ids:
+            prop = db.get(Property, int(property_id))
+            if prop is None:
+                continue
+            enrichment_runs.append(
+                run_market_policy_pipeline(
+                    db,
+                    org_id=org_id,
+                    state=str(getattr(prop, "state", "MI") or "MI"),
+                    county=getattr(prop, "county", None),
+                    city=getattr(prop, "city", None),
+                    pha_name=None,
+                )
+            )
+
+    return {
+        "ok": True,
+        "product_surface": product_surface,
+        "ingestion_mode": ingestion_mode,
+        "ingest_result": ingest_result,
+        "enrichment_runs": enrichment_runs,
+        "enrichment_triggered": bool(enrichment_runs),
+    }
+
+
+# -----------------------------
+# Step 3 product service layer bridge
+# -----------------------------
+from app.services.acquisition_workspace_service import build_acquisition_workspace_summary
+from app.services.compliance_brief_service import build_property_compliance_brief_summary
+from app.services.deal_intelligence_service import build_deal_intelligence_summary, rank_deals_for_org
+from app.services.property_ops_summary_service import build_property_ops_summary
+from app.services.tenant_match_service import build_tenant_match_summary
+
+
+def build_product_summary(
+    db: Session,
+    *,
+    org_id: int,
+    product_surface: str,
+    property_id: int | None = None,
+    deal_id: int | None = None,
+    acquisition_deal_id: int | None = None,
+    tenant_id: int | None = None,
+    limit: int = 25,
+) -> dict[str, Any]:
+    """
+    Product-facing summary router.
+
+    Step 3 moves the app away from raw internal modules by giving each surface
+    a business-facing summary layer.
+    """
+    surface = str(product_surface or "").strip().lower()
+
+    if surface == "intelligence":
+        if deal_id is not None:
+            return build_deal_intelligence_summary(db, org_id=int(org_id), deal_id=int(deal_id))
+        return rank_deals_for_org(db, org_id=int(org_id), limit=int(limit))
+
+    if surface == "acquire":
+        if acquisition_deal_id is None:
+            return {"ok": False, "error": "acquisition_deal_id_required", "product_surface": surface}
+        return build_acquisition_workspace_summary(
+            db,
+            org_id=int(org_id),
+            acquisition_deal_id=int(acquisition_deal_id),
+        )
+
+    if surface == "compliance":
+        if property_id is None:
+            return {"ok": False, "error": "property_id_required", "product_surface": surface}
+        return build_property_compliance_brief_summary(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+
+    if surface == "tenants":
+        return build_tenant_match_summary(
+            db,
+            org_id=int(org_id),
+            tenant_id=int(tenant_id) if tenant_id is not None else None,
+        )
+
+    if surface == "ops":
+        if property_id is None:
+            return {"ok": False, "error": "property_id_required", "product_surface": surface}
+        return build_property_ops_summary(
+            db,
+            org_id=int(org_id),
+            property_id=int(property_id),
+        )
+
+    return {"ok": False, "error": "unknown_product_surface", "product_surface": surface}
