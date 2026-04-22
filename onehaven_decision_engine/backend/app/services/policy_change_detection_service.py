@@ -33,31 +33,13 @@ def _json_loads_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
-def compute_next_retry_due(
-    *,
-    retry_count: int,
-    base_dt: datetime | None = None,
-    min_hours: int = 6,
-    max_days: int = 14,
-) -> datetime:
+def compute_next_retry_due(*, retry_count: int, base_dt: datetime | None = None, min_hours: int = 6, max_days: int = 14) -> datetime:
     base = base_dt or _utcnow()
     hours = min(max(min_hours, min_hours * (2 ** max(0, int(retry_count)))), max_days * 24)
     return base + timedelta(hours=hours)
 
 
-def build_source_change_summary(
-    *,
-    previous_fingerprint: str | None,
-    current_fingerprint: str | None,
-    previous_version_id: int | None = None,
-    current_version_id: int | None = None,
-    http_status: int | None = None,
-    fetch_error: str | None = None,
-    authoritative: bool = False,
-    previous_last_changed_at: datetime | None = None,
-    raw_path: str | None = None,
-    retry_due_at: datetime | None = None,
-) -> dict[str, Any]:
+def build_source_change_summary(*, previous_fingerprint: str | None, current_fingerprint: str | None, previous_version_id: int | None = None, current_version_id: int | None = None, http_status: int | None = None, fetch_error: str | None = None, authoritative: bool = False, previous_last_changed_at: datetime | None = None, raw_path: str | None = None, retry_due_at: datetime | None = None) -> dict[str, Any]:
     now = _utcnow()
     previous_fp = (previous_fingerprint or "").strip() or None
     current_fp = (current_fingerprint or "").strip() or None
@@ -131,12 +113,7 @@ def build_source_change_summary(
     }
 
 
-def determine_source_refresh_state(
-    *,
-    fetch_ok: bool,
-    change_summary: dict[str, Any] | None = None,
-    blocked_reason: str | None = None,
-) -> dict[str, Any]:
+def determine_source_refresh_state(*, fetch_ok: bool, change_summary: dict[str, Any] | None = None, blocked_reason: str | None = None) -> dict[str, Any]:
     summary = dict(change_summary or {})
     changed = bool(summary.get("changed"))
     requires_revalidation = bool(summary.get("requires_revalidation"))
@@ -144,91 +121,29 @@ def determine_source_refresh_state(
     change_kind = summary.get("change_kind")
 
     if blocked_reason:
-        return {
-            "refresh_state": "blocked",
-            "status_reason": blocked_reason,
-            "blocked_reason": blocked_reason,
-            "next_step": "manual_unblock",
-            "revalidation_required": False,
-        }
+        return {"refresh_state": "blocked", "status_reason": blocked_reason, "blocked_reason": blocked_reason, "next_step": "manual_unblock", "revalidation_required": False}
     if not fetch_ok:
         next_step = "retry_fetch"
         state = "failed" if fetch_error else "degraded"
-        return {
-            "refresh_state": state,
-            "status_reason": fetch_error or "fetch_failed",
-            "blocked_reason": None,
-            "next_step": next_step,
-            "revalidation_required": False,
-        }
+        return {"refresh_state": state, "status_reason": fetch_error or "fetch_failed", "blocked_reason": None, "next_step": next_step, "revalidation_required": False}
     if requires_revalidation:
-        return {
-            "refresh_state": "validating",
-            "status_reason": summary.get("revalidation_reason") or "authoritative_change_detected",
-            "blocked_reason": None,
-            "next_step": "revalidate_and_recompute",
-            "revalidation_required": True,
-        }
+        return {"refresh_state": "validating", "status_reason": summary.get("revalidation_reason") or "authoritative_change_detected", "blocked_reason": None, "next_step": "revalidate_and_recompute", "revalidation_required": True}
     if changed:
-        return {
-            "refresh_state": "healthy",
-            "status_reason": change_kind or "content_changed",
-            "blocked_reason": None,
-            "next_step": "recompute" if summary.get("current_version_id") else "monitor",
-            "revalidation_required": False,
-        }
-    return {
-        "refresh_state": "healthy",
-        "status_reason": "no_change_detected",
-        "blocked_reason": None,
-        "next_step": "monitor",
-        "revalidation_required": False,
-    }
+        return {"refresh_state": "healthy", "status_reason": change_kind or "content_changed", "blocked_reason": None, "next_step": "recompute" if summary.get("current_version_id") else "monitor", "revalidation_required": False}
+    return {"refresh_state": "healthy", "status_reason": "no_change_detected", "blocked_reason": None, "next_step": "monitor", "revalidation_required": False}
 
 
-def determine_validation_refresh_state(
-    *,
-    validated_count: int,
-    weak_support_count: int,
-    ambiguous_count: int,
-    conflicting_count: int,
-    unsupported_count: int,
-    blocking_issue_count: int = 0,
-) -> dict[str, Any]:
+def determine_validation_refresh_state(*, validated_count: int, weak_support_count: int, ambiguous_count: int, conflicting_count: int, unsupported_count: int, blocking_issue_count: int = 0) -> dict[str, Any]:
+    # Surgical change: weak/ambiguous no longer escalate to a blocked-truth interpretation.
     if blocking_issue_count > 0 or conflicting_count > 0:
-        return {
-            "refresh_state": "blocked",
-            "status_reason": "validation_blocking_conflicts",
-            "next_step": "manual_review",
-            "revalidation_required": False,
-        }
+        return {"refresh_state": "blocked", "status_reason": "validation_blocking_conflicts", "next_step": "manual_review", "revalidation_required": False}
     if unsupported_count > 0:
-        return {
-            "refresh_state": "degraded",
-            "status_reason": "validation_missing_support",
-            "next_step": "retry_validation",
-            "revalidation_required": False,
-        }
+        return {"refresh_state": "degraded", "status_reason": "validation_missing_support", "next_step": "retry_validation", "revalidation_required": False}
     if ambiguous_count > 0 or weak_support_count > 0:
-        return {
-            "refresh_state": "degraded",
-            "status_reason": "validation_needs_review",
-            "next_step": "review_validation_results",
-            "revalidation_required": False,
-        }
+        return {"refresh_state": "degraded", "status_reason": "validation_needs_review", "next_step": "review_validation_results", "revalidation_required": False}
     if validated_count > 0:
-        return {
-            "refresh_state": "healthy",
-            "status_reason": "validation_complete",
-            "next_step": "monitor",
-            "revalidation_required": False,
-        }
-    return {
-        "refresh_state": "pending",
-        "status_reason": "validation_no_assertions",
-        "next_step": "extract_or_retry",
-        "revalidation_required": False,
-    }
+        return {"refresh_state": "healthy", "status_reason": "validation_complete", "next_step": "monitor", "revalidation_required": False}
+    return {"refresh_state": "pending", "status_reason": "validation_no_assertions", "next_step": "extract_or_retry", "revalidation_required": False}
 
 
 def summarize_refresh_runs(source_runs: Iterable[dict[str, Any]]) -> dict[str, Any]:
@@ -237,10 +152,14 @@ def summarize_refresh_runs(source_runs: Iterable[dict[str, Any]]) -> dict[str, A
     failed_count = 0
     blocked_count = 0
     validating_count = 0
+    inventory_failed_count = 0
+    degraded_count = 0
     states: dict[str, int] = {}
     next_steps: dict[str, int] = {}
     for row in rows:
         refresh = row.get("refresh") if isinstance(row, dict) else {}
+        inventory = row.get("inventory") if isinstance(row, dict) else {}
+        validation = row.get("validation") if isinstance(row, dict) else {}
         state = str((refresh or {}).get("refresh_state") or "unknown").strip().lower()
         next_step = str((refresh or {}).get("next_step") or "unknown").strip().lower()
         states[state] = states.get(state, 0) + 1
@@ -249,14 +168,18 @@ def summarize_refresh_runs(source_runs: Iterable[dict[str, Any]]) -> dict[str, A
             changed_count += 1
         if not bool((refresh or {}).get("ok", False)):
             failed_count += 1
+        if not bool((inventory or {}).get("ok", True)):
+            inventory_failed_count += 1
         if state == "blocked":
             blocked_count += 1
         if state == "validating":
             validating_count += 1
+        if state == "degraded" or int((validation or {}).get("blocking_issue_count", 0) or 0) > 0:
+            degraded_count += 1
     market_state = "healthy"
     if blocked_count:
         market_state = "blocked"
-    elif failed_count:
+    elif failed_count or degraded_count or inventory_failed_count:
         market_state = "degraded"
     elif validating_count:
         market_state = "validating"
@@ -268,55 +191,36 @@ def summarize_refresh_runs(source_runs: Iterable[dict[str, Any]]) -> dict[str, A
         "failed_count": failed_count,
         "blocked_count": blocked_count,
         "validating_count": validating_count,
+        "inventory_failed_count": inventory_failed_count,
+        "degraded_count": degraded_count,
     }
 
 
-def determine_profile_refresh_state(
-    *,
-    refresh_runs: Iterable[dict[str, Any]],
-    recompute_ok: bool,
-    missing_categories: list[str] | None = None,
-    stale_categories: list[str] | None = None,
-    profile_is_stale: bool = False,
-) -> dict[str, Any]:
+def determine_profile_refresh_state(*, refresh_runs: Iterable[dict[str, Any]], recompute_ok: bool, missing_categories: list[str] | None = None, stale_categories: list[str] | None = None, overdue_categories: list[str] | None = None, critical_overdue_categories: list[str] | None = None, profile_is_stale: bool = False) -> dict[str, Any]:
     summary = summarize_refresh_runs(refresh_runs)
     missing = [str(x).strip().lower() for x in (missing_categories or []) if str(x).strip()]
     stale = [str(x).strip().lower() for x in (stale_categories or []) if str(x).strip()]
+    overdue = [str(x).strip().lower() for x in (overdue_categories or []) if str(x).strip()]
+    critical_overdue = [str(x).strip().lower() for x in (critical_overdue_categories or []) if str(x).strip()]
 
     if summary["blocked_count"] > 0:
-        state = "blocked"
-        next_step = "manual_review"
-        reason = "blocked_sources_present"
+        state = "blocked"; next_step = "manual_review"; reason = "blocked_sources_present"
     elif not recompute_ok:
-        state = "failed"
-        next_step = "retry_recompute"
-        reason = "recompute_failed"
-    elif summary["failed_count"] > 0 or stale or profile_is_stale:
-        state = "degraded"
-        next_step = "retry_refresh"
-        reason = "stale_or_failed_sources"
+        state = "failed"; next_step = "retry_recompute"; reason = "recompute_failed"
+    elif critical_overdue:
+        state = "degraded"; next_step = "retry_refresh"; reason = "critical_overdue_sources"
+    elif summary["failed_count"] > 0 or stale or overdue or profile_is_stale or summary["inventory_failed_count"] > 0:
+        state = "degraded"; next_step = "retry_refresh"; reason = "stale_or_failed_sources"
     elif missing:
-        state = "pending"
-        next_step = "search_retry"
-        reason = "unresolved_gaps"
+        state = "pending"; next_step = "search_retry"; reason = "unresolved_gaps"
     elif summary["validating_count"] > 0:
-        state = "validating"
-        next_step = "recompute"
-        reason = "authoritative_changes_detected"
+        state = "validating"; next_step = "recompute"; reason = "authoritative_changes_detected"
     else:
-        state = "healthy"
-        next_step = "monitor"
-        reason = "refresh_complete"
+        state = "healthy"; next_step = "monitor"; reason = "refresh_complete"
 
-    return {
-        "refresh_state": state,
-        "status_reason": reason,
-        "next_step": next_step,
-        "summary": summary,
-    }
+    return {"refresh_state": state, "status_reason": reason, "next_step": next_step, "summary": summary}
 
 
-# --- Step 4 additive normalization + diff helpers ---
 def _json_loads_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -385,11 +289,7 @@ def build_assertion_change_summary(*, previous_assertions: Iterable[dict[str, An
     current_rows = [build_assertion_fingerprint_payload(row) for row in (current_assertions or [])]
 
     def _key(row: dict[str, Any]) -> str:
-        return "|".join([
-            str(row.get("rule_key") or "-"),
-            str(row.get("category") or "-"),
-            str(row.get("citation_url") or "-"),
-        ])
+        return "|".join([str(row.get("rule_key") or "-"), str(row.get("category") or "-"), str(row.get("citation_url") or "-")])
 
     prev_map = {_key(row): row for row in previous_rows}
     curr_map = {_key(row): row for row in current_rows}
@@ -426,117 +326,6 @@ def enrich_change_summary_with_diff(*, base_summary: dict[str, Any] | None, prev
     if summary["assertion_diff"].get("changed") and not summary.get("change_kind"):
         summary["change_kind"] = "structured_rules_changed"
     if summary["text_diff"].get("changed") or summary["assertion_diff"].get("changed"):
-        summary["changed"] = True
-        summary["change_detected"] = True
-    return summary
-
-
-# --- Step 4 additive patch v2: richer citation and authority diff summaries ---
-def _citation_payload_from_assertion_like(row: dict[str, Any] | None) -> dict[str, Any]:
-    row = dict(row or {})
-    citation = row.get("citation") if isinstance(row.get("citation"), dict) else {}
-    return {
-        "url": _normalize_text_for_fingerprint(citation.get("url") or row.get("citation_url")),
-        "title": _normalize_text_for_fingerprint(citation.get("title")),
-        "publisher": _normalize_text_for_fingerprint(citation.get("publisher")),
-        "locator": _normalize_text_for_fingerprint(citation.get("locator") or row.get("citation_locator")),
-        "pages": tuple(sorted(int(x) for x in (citation.get("pages") or row.get("citation_pages") or []) if str(x).strip().isdigit())),
-        "publication_type": _normalize_text_for_fingerprint(citation.get("publication_type") or row.get("publication_type")),
-        "is_pdf_backed": bool(citation.get("is_pdf_backed") or row.get("is_pdf_backed")),
-    }
-
-
-def build_citation_change_summary(*, previous_assertions: Iterable[dict[str, Any]] | None, current_assertions: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
-    prev = [_citation_payload_from_assertion_like(row) for row in (previous_assertions or [])]
-    curr = [_citation_payload_from_assertion_like(row) for row in (current_assertions or [])]
-    prev_set = {json.dumps(row, sort_keys=True, default=str) for row in prev}
-    curr_set = {json.dumps(row, sort_keys=True, default=str) for row in curr}
-    added = sorted(curr_set - prev_set)
-    removed = sorted(prev_set - curr_set)
-    return {
-        "changed": bool(added or removed),
-        "added_count": len(added),
-        "removed_count": len(removed),
-        "pdf_backed_current_count": sum(1 for row in curr if row.get("is_pdf_backed")),
-        "pinpoint_current_count": sum(1 for row in curr if row.get("locator") or row.get("pages")),
-    }
-
-
-def build_authority_change_summary(*, previous_assertions: Iterable[dict[str, Any]] | None, current_assertions: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
-    def _levels(rows):
-        counts = {}
-        for row in rows or []:
-            level = str((row or {}).get("authority_level") or "").strip().lower() or "unknown"
-            counts[level] = counts.get(level, 0) + 1
-        return counts
-    prev = _levels(previous_assertions)
-    curr = _levels(current_assertions)
-    changed = prev != curr
-    return {
-        "changed": changed,
-        "previous_levels": prev,
-        "current_levels": curr,
-    }
-
-
-_enrich_change_summary_with_diff_orig = enrich_change_summary_with_diff
-
-def enrich_change_summary_with_diff(*, base_summary: dict[str, Any] | None, previous_text: str | None = None, current_text: str | None = None, previous_assertions: Iterable[dict[str, Any]] | None = None, current_assertions: Iterable[dict[str, Any]] | None = None) -> dict[str, Any]:
-    summary = dict(_enrich_change_summary_with_diff_orig(
-        base_summary=base_summary,
-        previous_text=previous_text,
-        current_text=current_text,
-        previous_assertions=previous_assertions,
-        current_assertions=current_assertions,
-    ))
-    summary["citation_diff"] = build_citation_change_summary(previous_assertions=previous_assertions, current_assertions=current_assertions)
-    summary["authority_diff"] = build_authority_change_summary(previous_assertions=previous_assertions, current_assertions=current_assertions)
-    if summary["citation_diff"].get("changed") and not summary.get("change_kind"):
-        summary["change_kind"] = "citation_support_changed"
-    if summary["authority_diff"].get("changed") and summary.get("change_kind") in {None, "unchanged"}:
-        summary["change_kind"] = "authority_mix_changed"
-    if summary["citation_diff"].get("changed") or summary["authority_diff"].get("changed"):
-        summary["changed"] = True
-        summary["change_detected"] = True
-    return summary
-
-
-# --- Step 4 additive patch v3: diff matched NSPIRE PDF support from uploaded zip catalog ---
-
-def build_pdf_catalog_change_summary(*, previous_assertions: Iterable[dict[str, Any]] | None, current_assertions: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
-    def _names(rows):
-        out=[]
-        for row in rows or []:
-            name = str((row or {}).get("matched_pdf_name") or "").strip()
-            if name:
-                out.append(name)
-        return sorted(set(out))
-    prev = _names(previous_assertions)
-    curr = _names(current_assertions)
-    prev_set = set(prev)
-    curr_set = set(curr)
-    return {
-        "changed": prev_set != curr_set,
-        "previous_pdf_names": prev,
-        "current_pdf_names": curr,
-        "added_pdf_names": sorted(curr_set - prev_set),
-        "removed_pdf_names": sorted(prev_set - curr_set),
-    }
-
-
-_step4_v3_orig_enrich_change_summary_with_diff = enrich_change_summary_with_diff
-
-def enrich_change_summary_with_diff(*, base_summary: dict[str, Any] | None, previous_text: str | None = None, current_text: str | None = None, previous_assertions: Iterable[dict[str, Any]] | None = None, current_assertions: Iterable[dict[str, Any]] | None = None) -> dict[str, Any]:
-    summary = dict(_step4_v3_orig_enrich_change_summary_with_diff(
-        base_summary=base_summary,
-        previous_text=previous_text,
-        current_text=current_text,
-        previous_assertions=previous_assertions,
-        current_assertions=current_assertions,
-    ))
-    summary["pdf_catalog_diff"] = build_pdf_catalog_change_summary(previous_assertions=previous_assertions, current_assertions=current_assertions)
-    if summary["pdf_catalog_diff"].get("changed") and summary.get("change_kind") in {None, "unchanged"}:
-        summary["change_kind"] = "pdf_support_changed"
         summary["changed"] = True
         summary["change_detected"] = True
     return summary

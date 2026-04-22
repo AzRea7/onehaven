@@ -714,14 +714,39 @@ def _effective_gate(
     return base
 
 
-def build_workflow_summary(db, *, org_id: int, property_id: int, principal: Any = None, recompute: bool = True) -> dict[str, Any]:
+def build_workflow_summary(
+    db,
+    *,
+    org_id: int,
+    property_id: int,
+    principal: Any = None,
+    recompute: bool = True,
+) -> dict[str, Any]:
     try:
-        state = get_state_payload(db, org_id=org_id, property_id=property_id, recompute=recompute)
-        tx = get_transition_payload(db, org_id=org_id, property_id=property_id)
+        state = get_state_payload(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            recompute=recompute,
+        )
+        tx = get_transition_payload(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
     except Exception:
         _rollback_quietly(db)
-        state = get_state_payload(db, org_id=org_id, property_id=property_id, recompute=False)
-        tx = get_transition_payload(db, org_id=org_id, property_id=property_id)
+        state = get_state_payload(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+            recompute=False,
+        )
+        tx = get_transition_payload(
+            db,
+            org_id=org_id,
+            property_id=property_id,
+        )
 
     state = _safe_dict(state)
     tx = _safe_dict(tx)
@@ -734,7 +759,12 @@ def build_workflow_summary(db, *, org_id: int, property_id: int, principal: Any 
     stage_completion_summary = _safe_dict(state.get("stage_completion_summary"))
     constraints = _safe_dict(state.get("constraints"))
     outstanding_tasks = _safe_dict(state.get("outstanding_tasks"))
-    pane = build_pane_context(current_stage=cur, constraints=constraints, principal=principal, org_id=org_id)
+    pane = build_pane_context(
+        current_stage=cur,
+        constraints=constraints,
+        principal=principal,
+        org_id=org_id,
+    )
 
     projection_snapshot = _projection_payload(db, org_id=org_id, property_id=property_id) or {}
     compliance_gate = _build_compliance_gate(projection_snapshot, current_stage=cur)
@@ -813,7 +843,6 @@ def build_workflow_summary(db, *, org_id: int, property_id: int, principal: Any 
         "jurisdiction_trust": compliance_gate.get("jurisdiction_trust") or {},
         "post_close_recheck": post_close_recheck,
     }
-
 
 # --- tier-two evidence-first final overrides ---
 

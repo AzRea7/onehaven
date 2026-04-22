@@ -405,6 +405,70 @@ def _profile_pha_value(profile: JurisdictionProfile | None) -> str | None:
         return None
     return _norm_text(getattr(profile, "pha_name", None))
 
+def _build_market_compliance_brief(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> dict[str, Any]:
+    """
+    Safely build a market-scope brief even when build_property_compliance_brief
+    only supports property-scope arguments in the current runtime.
+    """
+    try:
+        return dict(
+            build_property_compliance_brief(
+                db,
+                org_id=org_id,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+            )
+        )
+    except TypeError:
+        governed = governed_assertions_for_scope(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+        category_counts = dict(governed.get("category_counts") or {})
+        covered_categories = sorted(
+            cat
+            for cat, counts in category_counts.items()
+            if int((counts or {}).get("safe", 0) or 0) > 0 or int((counts or {}).get("partial", 0) or 0) > 0
+        )
+        return {
+            "ok": True,
+            "scope": {
+                "state": state,
+                "county": county,
+                "city": city,
+                "pha_name": pha_name,
+            },
+            "covered_categories": covered_categories,
+            "counts": {
+                "safe": len(list(governed.get("safe_assertion_ids") or [])),
+                "partial": len(list(governed.get("partial_assertion_ids") or [])),
+                "manual_review": len(list(governed.get("manual_review_ids") or [])),
+                "excluded": len(list(governed.get("excluded_assertion_ids") or [])),
+            },
+            "category_counts": category_counts,
+            "assertion_ids": {
+                "safe": list(governed.get("safe_assertion_ids") or []),
+                "partial": list(governed.get("partial_assertion_ids") or []),
+                "manual_review": list(governed.get("manual_review_ids") or []),
+                "excluded": list(governed.get("excluded_assertion_ids") or []),
+            },
+        }
+
+
 
 def _create_empty_market_profile(
     db: Session,
@@ -2630,4 +2694,856 @@ def refresh_market_policy_pipeline(
             db.rollback()
             pipeline_result["pipeline_finalization_error"] = str(exc)
     result["pipeline_result"] = pipeline_result
+    return result
+
+
+# === targeted backfill pipeline overlay (current-architecture preserving) ===
+_original_run_market_policy_pipeline = run_market_policy_pipeline
+
+def _source_can_backfill_missing_categories(source: PolicySource, missing_categories: list[str]) -> bool:
+    if not missing_categories:
+        return False
+    text = " ".join([
+        str(getattr(source, "url", "") or ""),
+        str(getattr(source, "title", "") or ""),
+        str(getattr(source, "publisher", "") or ""),
+        str(getattr(source, "notes", "") or ""),
+        str(getattr(source, "normalized_categories_json", "") or ""),
+    ]).lower()
+    category_hints = set()
+    for cat in missing_categories:
+        raw = str(cat or "").strip().lower()
+        if not raw:
+            continue
+        category_hints.add(raw)
+    synonyms = {
+        "rental_license": ["license", "registration", "certificate"],
+        "source_of_income": ["source of income", "fair housing", "civil rights", "discrimination"],
+        "permits": ["permit", "building"],
+        "documents": ["document", "application", "packet", "submit", "form"],
+        "contacts": ["contact", "department", "division", "office"],
+        "fees": ["fee", "payment"],
+        "program_overlay": ["voucher", "hcv", "hap", "section 8", "overlay", "nspire"],
+        "lead": ["lead", "lead-safe", "lead paint"],
+    }
+    for cat in category_hints:
+        if cat in text:
+            return True
+        for s in synonyms.get(cat, []):
+            if s in text:
+                return True
+    return False
+
+def _run_source_refresh_batch(
+    db: Session,
+    *,
+    sources: list[PolicySource],
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    reviewer_user_id: int | None,
+) -> dict[str, Any]:
+    missing_categories = _discovery_missing_categories(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+    )
+    source_runs: list[dict[str, Any]] = []
+    total_changed_rules = 0
+    total_new_rules = 0
+    total_missing_rules = 0
+    changed_source_ids: list[int] = []
+    failed_source_ids: list[int] = []
+
+    for source in sources:
+        fetch_result = refresh_policy_source_and_detect_changes(db, source=source)
+        inventory_result = sync_crawl_result_to_inventory(db, source=source, fetch_result=fetch_result)
+        content_changed = bool(fetch_result.get("change_detected") or fetch_result.get("changed"))
+        should_backfill = (not content_changed) and _source_can_backfill_missing_categories(source, missing_categories)
+        extract_result: dict[str, Any]
+        diff_result: dict[str, Any]
+        normalize_result: dict[str, Any] | None = None
+        validation_result: dict[str, Any] | None = None
+
+        if not fetch_result.get("ok"):
+            failed_source_ids.append(int(source.id))
+            stale_mark_result = mark_assertions_stale_for_source(
+                db,
+                source_id=int(source.id),
+                reason="source_fetch_failed",
+            )
+            extract_result = {"ok": False, "created_count": 0, "assertion_ids": [], "stale_mark_result": stale_mark_result, "reason": "fetch_failed"}
+            diff_result = {"ok": False, "changed_count": 0, "new_count": 0, "missing_count": 0, "reason": "fetch_failed"}
+        else:
+            raw_candidates: list[dict[str, Any]] = []
+            if content_changed or should_backfill:
+                if content_changed:
+                    changed_source_ids.append(int(source.id))
+                    mark_assertions_stale_for_source(db, source_id=int(source.id), reason="source_changed")
+                extracted = extract_assertions_for_source(db, source=source, org_id=org_id, org_scope=(org_id is not None))
+                raw_candidates = _extract_raw_candidates(extracted)
+                extract_result = {
+                    "ok": True,
+                    "created_count": len(extracted),
+                    "assertion_ids": [int(a.id) for a in extracted if getattr(a, "id", None) is not None],
+                    "reason": "content_change" if content_changed else "backfill_missing_categories",
+                }
+                diff_result = diff_active_rules_for_source(
+                    db,
+                    org_id=org_id,
+                    source_id=int(source.id),
+                    state=state,
+                    county=county,
+                    city=city,
+                    pha_name=pha_name,
+                    raw_candidates=raw_candidates,
+                )
+                normalize_result = normalize_market_assertions(
+                    db,
+                    org_id=org_id,
+                    state=state,
+                    county=county,
+                    city=city,
+                    pha_name=pha_name,
+                    reviewer_user_id=reviewer_user_id,
+                    source_id=int(source.id),
+                    raw_candidates=raw_candidates,
+                )
+                validation_result = validate_market_assertions(
+                    db,
+                    org_id=org_id,
+                    state=state,
+                    county=county,
+                    city=city,
+                    pha_name=pha_name,
+                    source_id=int(source.id),
+                )
+            else:
+                extract_result = {"ok": True, "created_count": 0, "assertion_ids": [], "reason": "no_content_change"}
+                diff_result = {"ok": True, "changed_count": 0, "new_count": 0, "missing_count": 0, "reason": "no_content_change"}
+
+        total_changed_rules += int(diff_result.get("changed_count", 0) or 0)
+        total_new_rules += int(diff_result.get("new_count", 0) or 0)
+        total_missing_rules += int(diff_result.get("missing_count", 0) or 0)
+        source_runs.append(
+            {
+                "source_id": int(source.id),
+                "refresh": fetch_result,
+                "inventory": inventory_result,
+                "changed": bool(content_changed),
+                "comparison_state": fetch_result.get("comparison_state"),
+                "change_kind": fetch_result.get("change_kind"),
+                "revalidation_required": bool(fetch_result.get("requires_revalidation") or fetch_result.get("revalidation_required")),
+                "source_version_id": fetch_result.get("source_version_id"),
+                "previous_version_id": fetch_result.get("previous_version_id"),
+                "extract_result": extract_result,
+                "diff": diff_result,
+                "normalized": normalize_result,
+                "validation": validation_result or {"validated_count": 0, "weak_support_count": 0, "ambiguous_count": 0, "conflicting_count": 0, "unsupported_count": 0, "updated_ids": []},
+                "requires_revalidation": bool(fetch_result.get("requires_revalidation") or fetch_result.get("revalidation_required")),
+            }
+        )
+
+    summary = {
+        "changed_source_count": len(changed_source_ids),
+        "failed_source_count": len(failed_source_ids),
+        "changed_rule_count": total_changed_rules,
+        "new_rule_count": total_new_rules,
+        "missing_rule_count": total_missing_rules,
+    }
+    return {
+        "ok": True,
+        "sources_processed": len(sources),
+        "total_changed_rules": total_changed_rules,
+        "total_new_rules": total_new_rules,
+        "total_missing_rules": total_missing_rules,
+        "changed_source_count": len(changed_source_ids),
+        "changed_source_ids": sorted(set(changed_source_ids)),
+        "failed_source_count": len(failed_source_ids),
+        "failed_source_ids": sorted(set(failed_source_ids)),
+        "source_runs": source_runs,
+        "summary": summary,
+    }
+
+def run_market_policy_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    result = dict(
+        _original_run_market_policy_pipeline(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            focus=focus,
+            reviewer_user_id=reviewer_user_id,
+            auto_activate=auto_activate,
+        )
+    )
+    # Always project verified assertions after pipeline backfill so coverage can advance on unchanged sources.
+    try:
+        project_verified_assertions_to_profile(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            notes="post_pipeline_backfill_projection",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return result
+
+
+# === FINAL INCREMENTAL PIPELINE OVERRIDES ===
+
+def _live_projectable_categories_for_market(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> list[str]:
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
+    stmt = select(PolicyAssertion).where(PolicyAssertion.state == st)
+    if org_id is None:
+        stmt = stmt.where(PolicyAssertion.org_id.is_(None))
+    else:
+        stmt = stmt.where(or_(PolicyAssertion.org_id == org_id, PolicyAssertion.org_id.is_(None)))
+
+    rows = list(db.scalars(stmt).all())
+    categories: set[str] = set()
+    for row in rows:
+        row_county = _norm_lower(getattr(row, "county", None))
+        row_city = _norm_lower(getattr(row, "city", None))
+        row_pha = _norm_text(getattr(row, "pha_name", None))
+        if row_county not in {None, cnty}:
+            continue
+        if row_city not in {None, cty}:
+            continue
+        if pha is not None and row_pha not in {None, pha}:
+            continue
+
+        validation_state = str(getattr(row, "validation_state", "") or "").strip().lower()
+        trust_state = str(getattr(row, "trust_state", "") or "").strip().lower()
+        governance_state = str(getattr(row, "governance_state", "") or "").strip().lower()
+        review_status = str(getattr(row, "review_status", "") or "").strip().lower()
+        rule_status = str(getattr(row, "rule_status", "") or "").strip().lower()
+        coverage_status = str(getattr(row, "coverage_status", "") or "").strip().lower()
+
+        if validation_state != "validated":
+            continue
+        if trust_state not in {"validated", "trusted"}:
+            continue
+        if coverage_status in {"conflicting", "unsupported", "superseded", "stale"}:
+            continue
+        if governance_state not in {"active", "approved", "draft", ""}:
+            continue
+        if review_status not in {"verified", "accepted", "approved", "projected", "extracted", ""}:
+            continue
+        if rule_status not in {"active", "candidate", "draft", ""}:
+            continue
+
+        category = str(getattr(row, "normalized_category", None) or getattr(row, "rule_category", None) or "").strip().lower()
+        if category:
+            categories.add(category)
+
+    return sorted(categories)
+
+
+def _effective_missing_categories(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+) -> list[str]:
+    expected = expected_inventory_hints(
+        state=_norm_state(state),
+        county=_norm_lower(county),
+        city=_norm_lower(city),
+        pha_name=_norm_text(pha_name),
+        include_section8=True,
+    )
+    expected_categories = [str(x).strip().lower() for x in (expected.get("expected_categories") or []) if str(x).strip()]
+    live_categories = set(
+        _live_projectable_categories_for_market(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+    )
+    return [cat for cat in expected_categories if cat not in live_categories]
+
+
+_final_incremental_original_run_source_refresh_batch = _run_source_refresh_batch
+def _run_source_refresh_batch(
+    db: Session,
+    *,
+    sources: list[PolicySource],
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    reviewer_user_id: int | None,
+) -> dict[str, Any]:
+    source_runs: list[dict[str, Any]] = []
+    total_changed_rules = 0
+    total_new_rules = 0
+    total_missing_rules = 0
+    changed_source_ids: list[int] = []
+    failed_source_ids: list[int] = []
+
+    for source in sources:
+        fetch_result = refresh_policy_source_and_detect_changes(db, source=source, force=False)
+        inventory_result = sync_crawl_result_to_inventory(db, source=source, fetch_result=fetch_result)
+        skipped = bool(fetch_result.get("skipped"))
+        content_changed = bool(fetch_result.get("change_detected") or fetch_result.get("changed"))
+        needs_revalidation = bool(fetch_result.get("requires_revalidation") or fetch_result.get("revalidation_required"))
+
+        extract_result: dict[str, Any] = {"ok": True, "created_count": 0, "assertion_ids": []}
+        diff_result: dict[str, Any] = {"ok": True, "changed_count": 0, "new_count": 0, "missing_count": 0}
+        normalize_result: dict[str, Any] | None = None
+        validation_result: dict[str, Any] | None = None
+
+        if not fetch_result.get("ok"):
+            failed_source_ids.append(int(source.id))
+            stale_mark_result = mark_assertions_stale_for_source(
+                db,
+                source_id=int(source.id),
+                reason="source_fetch_failed",
+            )
+            extract_result = {
+                "ok": False,
+                "created_count": 0,
+                "assertion_ids": [],
+                "stale_mark_result": stale_mark_result,
+                "reason": "fetch_failed",
+            }
+            diff_result = {
+                "ok": False,
+                "changed_count": 0,
+                "new_count": 0,
+                "missing_count": 0,
+                "reason": "fetch_failed",
+            }
+        elif skipped and not needs_revalidation:
+            extract_result = {
+                "ok": True,
+                "created_count": 0,
+                "assertion_ids": [],
+                "reason": "refresh_skipped_not_due",
+            }
+            diff_result = {
+                "ok": True,
+                "changed_count": 0,
+                "new_count": 0,
+                "missing_count": 0,
+                "reason": "refresh_skipped_not_due",
+            }
+        elif not content_changed:
+            extract_result = {
+                "ok": True,
+                "created_count": 0,
+                "assertion_ids": [],
+                "reason": "no_content_change",
+            }
+            diff_result = {
+                "ok": True,
+                "changed_count": 0,
+                "new_count": 0,
+                "missing_count": 0,
+                "reason": "no_content_change",
+            }
+            if needs_revalidation:
+                validation_result = validate_market_assertions(
+                    db,
+                    org_id=org_id,
+                    state=state,
+                    county=county,
+                    city=city,
+                    pha_name=pha_name,
+                    source_id=int(source.id),
+                )
+        else:
+            changed_source_ids.append(int(source.id))
+            mark_assertions_stale_for_source(
+                db,
+                source_id=int(source.id),
+                reason="source_changed",
+            )
+            extracted = extract_assertions_for_source(
+                db,
+                source=source,
+                org_id=org_id,
+                org_scope=(org_id is not None),
+            )
+            raw_candidates = _extract_raw_candidates(extracted)
+            extract_result = {
+                "ok": True,
+                "created_count": len(extracted),
+                "assertion_ids": [int(a.id) for a in extracted if getattr(a, "id", None) is not None],
+                "reason": "content_changed",
+            }
+            diff_result = diff_active_rules_for_source(
+                db,
+                org_id=org_id,
+                source_id=int(source.id),
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                raw_candidates=raw_candidates,
+            )
+            normalize_result = normalize_market_assertions(
+                db,
+                org_id=org_id,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                reviewer_user_id=reviewer_user_id,
+                source_id=int(source.id),
+                raw_candidates=raw_candidates,
+            )
+            validation_result = validate_market_assertions(
+                db,
+                org_id=org_id,
+                state=state,
+                county=county,
+                city=city,
+                pha_name=pha_name,
+                source_id=int(source.id),
+            )
+
+        total_changed_rules += int(diff_result.get("changed_count") or 0)
+        total_new_rules += int(diff_result.get("new_count") or 0)
+        total_missing_rules += int(diff_result.get("missing_count") or 0)
+
+        source_runs.append(
+            {
+                "source_id": int(source.id),
+                "refresh": fetch_result,
+                "inventory": inventory_result,
+                "changed": bool(content_changed),
+                "comparison_state": fetch_result.get("comparison_state"),
+                "change_kind": fetch_result.get("change_kind"),
+                "revalidation_required": needs_revalidation,
+                "source_version_id": fetch_result.get("source_version_id"),
+                "previous_version_id": fetch_result.get("previous_version_id"),
+                "extract_result": extract_result,
+                "diff": diff_result,
+                "normalized": normalize_result,
+                "validation": validation_result or {
+                    "validated_count": 0,
+                    "weak_support_count": 0,
+                    "ambiguous_count": 0,
+                    "conflicting_count": 0,
+                    "unsupported_count": 0,
+                    "updated_ids": [],
+                },
+                "requires_revalidation": needs_revalidation,
+            }
+        )
+
+    summary = {
+        "changed_source_count": len(changed_source_ids),
+        "failed_source_count": len(failed_source_ids),
+        "changed_rule_count": total_changed_rules,
+        "new_rule_count": total_new_rules,
+        "missing_rule_count": total_missing_rules,
+    }
+    return {
+        "ok": True,
+        "sources_processed": len(sources),
+        "total_changed_rules": total_changed_rules,
+        "total_new_rules": total_new_rules,
+        "total_missing_rules": total_missing_rules,
+        "changed_source_count": len(changed_source_ids),
+        "changed_source_ids": sorted(set(changed_source_ids)),
+        "failed_source_count": len(failed_source_ids),
+        "failed_source_ids": sorted(set(failed_source_ids)),
+        "source_runs": source_runs,
+        "summary": summary,
+    }
+
+
+_final_incremental_original_run_market_policy_pipeline = run_market_policy_pipeline
+def run_market_policy_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
+    inventory_hints = expected_inventory_hints(state=st, county=cnty, city=cty, pha_name=pha, include_section8=True)
+    missing_categories = _effective_missing_categories(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    existing_sources = _market_sources_from_catalog(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        focus=focus,
+    )
+
+    if missing_categories:
+        discovery_result = discover_policy_sources_for_market(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            missing_categories=missing_categories,
+            focus=focus,
+            probe=False,
+        )
+    else:
+        discovery_result = {
+            "ok": True,
+            "discovery_triggered": False,
+            "reason": "live_projectable_categories_cover_expected_scope",
+            "mode": "catalog_selection_only",
+            "status": "completed",
+            "state": st,
+            "county": cnty,
+            "city": cty,
+            "pha_name": pha,
+            "missing_categories": [],
+            "candidate_count": 0,
+            "created_count": 0,
+            "existing_count": len(existing_sources),
+            "created_source_ids": [],
+            "curated_candidate_count": 0,
+            "validated_candidate_count": 0,
+            "rejected_candidate_count": 0,
+            "guessed_candidate_count": 0,
+            "candidates": [],
+            "results": [],
+        }
+
+    sources = _market_sources_from_catalog(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        focus=focus,
+    )
+    refresh_batch = _run_source_refresh_batch(
+        db,
+        sources=sources,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        reviewer_user_id=reviewer_user_id,
+    )
+    inventory_summary = inventory_summary_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        program_type="section8" if "section8" in set(inventory_hints.get("expected_categories") or []) else None,
+    )
+    refresh_state_summary = summarize_refresh_runs(refresh_batch["source_runs"])
+    lifecycle_result = apply_governance_lifecycle(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )
+    recompute = _recompute_profile_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    try:
+        project_verified_assertions_to_profile(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            notes="post_pipeline_incremental_projection",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    review_queue = build_review_queue_payload(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    gap_escalations = []
+    try:
+        profile_id = ((recompute or {}).get("jurisdiction_profile_id") if isinstance(recompute, dict) else None)
+        profile = db.get(JurisdictionProfile, int(profile_id)) if profile_id else None
+        if profile is not None:
+            gap_escalations = [note.as_dict() for note in build_gap_escalation_notifications(db, profile=profile)]
+    except Exception:
+        gap_escalations = []
+
+    return {
+        "ok": True,
+        "missing_categories": missing_categories,
+        "expected_inventory": inventory_hints,
+        "discovery_result": {
+            **discovery_result,
+            "selection_mode": "curated_only",
+            "guessed_source_count": 0,
+        },
+        "sources_processed": len(refresh_batch["source_runs"]),
+        "total_changed_rules": int(refresh_batch["summary"]["changed_rule_count"]),
+        "changed_source_count": int(refresh_batch["summary"]["changed_source_count"]),
+        "failed_source_count": int(refresh_batch["summary"]["failed_source_count"]),
+        "source_runs": refresh_batch["source_runs"],
+        "refresh_summary": {
+            **refresh_batch["summary"],
+            "manual_review_assertion_ids": [],
+            "inventory_sync_failed_source_ids": [
+                row["source_id"] for row in refresh_batch["source_runs"]
+                if not bool((row.get("inventory") or {}).get("ok"))
+            ],
+            "revalidation_required_source_ids": [
+                row["source_id"] for row in refresh_batch["source_runs"]
+                if bool((row.get("refresh") or {}).get("revalidation_required") or row.get("requires_revalidation"))
+            ],
+            "refresh_state_summary": refresh_state_summary,
+        },
+        "inventory_summary": inventory_summary,
+        "lifecycle_result": lifecycle_result,
+        "recompute": recompute,
+        "review_queue": review_queue,
+        "gap_escalations": gap_escalations,
+        "governed": governed_assertions_for_scope(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+        ),
+        "brief": _build_market_compliance_brief(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+        ),
+    }
+
+
+# === Cleanup / optimization pipeline overrides ===
+
+def _is_monitor_noop_source_run(row: dict[str, Any]) -> bool:
+    refresh = dict(row.get('refresh') or {})
+    return (
+        str(refresh.get('comparison_state') or row.get('comparison_state') or '').lower() == 'unchanged'
+        and str(refresh.get('change_kind') or row.get('change_kind') or '').lower() == 'unchanged'
+        and not bool(refresh.get('revalidation_required') or refresh.get('requires_revalidation') or row.get('revalidation_required'))
+        and str((row.get('extract_result') or {}).get('reason') or '').lower() in {'no_content_change', 'monitor_skip_unchanged'}
+    )
+
+
+def _compact_monitor_summary(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
+    unchanged_ids = []
+    changed_ids = []
+    degraded_ids = []
+    failed_ids = []
+    for row in source_runs:
+        sid = int(row.get('source_id') or 0)
+        refresh = dict(row.get('refresh') or {})
+        if not refresh.get('ok', True):
+            failed_ids.append(sid)
+            continue
+        if str(refresh.get('refresh_state') or '').lower() == 'degraded':
+            degraded_ids.append(sid)
+        if _is_monitor_noop_source_run(row):
+            unchanged_ids.append(sid)
+        else:
+            changed_ids.append(sid)
+    return {
+        'mode': 'monitor',
+        'all_sources_unchanged': len(changed_ids) == 0 and len(failed_ids) == 0,
+        'unchanged_source_ids': unchanged_ids,
+        'changed_source_ids': changed_ids,
+        'degraded_nonblocking_source_ids': degraded_ids,
+        'failed_source_ids': failed_ids,
+    }
+
+
+_run_source_refresh_batch_cleanup_base = _run_source_refresh_batch
+
+def _run_source_refresh_batch(
+    db: Session,
+    *,
+    sources: list[PolicySource],
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
+    reviewer_user_id: int | None,
+) -> dict[str, Any]:
+    source_runs: list[dict[str, Any]] = []
+    total_changed_rules = 0
+    total_new_rules = 0
+    total_missing_rules = 0
+    changed_source_ids: list[int] = []
+    failed_source_ids: list[int] = []
+    monitor_skipped_source_ids: list[int] = []
+
+    for source in sources:
+        fetch_result = refresh_policy_source_and_detect_changes(db, source=source)
+        inventory_result = sync_crawl_result_to_inventory(db, source=source, fetch_result=fetch_result)
+        content_changed = bool(fetch_result.get('change_detected') or fetch_result.get('changed'))
+        revalidation_required = bool(fetch_result.get('revalidation_required') or fetch_result.get('requires_revalidation'))
+        monitor_skip = bool(fetch_result.get('ok')) and not content_changed and not revalidation_required
+
+        if not fetch_result.get('ok'):
+            failed_source_ids.append(int(source.id))
+            stale_mark_result = mark_assertions_stale_for_source(db, source_id=int(source.id), reason='source_fetch_failed')
+            extract_result = {'ok': False, 'created_count': 0, 'assertion_ids': [], 'stale_mark_result': stale_mark_result, 'reason': 'fetch_failed'}
+            diff_result = {'ok': False, 'changed_count': 0, 'new_count': 0, 'missing_count': 0, 'reason': 'fetch_failed'}
+            normalize_result = None
+            validation_result = None
+        elif monitor_skip:
+            monitor_skipped_source_ids.append(int(source.id))
+            stale_mark_result = {'ok': True, 'source_id': int(source.id), 'stale_count': 0, 'stale_ids': [], 'reason': 'monitor_skip_unchanged'}
+            extract_result = {'ok': True, 'created_count': 0, 'assertion_ids': [], 'reason': 'monitor_skip_unchanged'}
+            diff_result = {'ok': True, 'changed_count': 0, 'new_count': 0, 'missing_count': 0, 'reason': 'monitor_skip_unchanged'}
+            normalize_result = None
+            validation_result = {'validated_count': 0, 'weak_support_count': 0, 'ambiguous_count': 0, 'conflicting_count': 0, 'unsupported_count': 0, 'updated_ids': [], 'reason': 'monitor_skip_unchanged'}
+        else:
+            raw_candidates: list[dict[str, Any]] = []
+            if content_changed:
+                changed_source_ids.append(int(source.id))
+                stale_mark_result = mark_assertions_stale_for_source(db, source_id=int(source.id), reason='source_changed')
+                extracted = extract_assertions_for_source(db, source=source, org_id=org_id, org_scope=(org_id is not None))
+                raw_candidates = _extract_raw_candidates(extracted)
+                extract_result = {'ok': True, 'created_count': len(extracted), 'assertion_ids': [int(a.id) for a in extracted if getattr(a, 'id', None) is not None]}
+                diff_result = diff_active_rules_for_source(db, org_id=org_id, source_id=int(source.id), state=state, county=county, city=city, pha_name=pha_name, raw_candidates=raw_candidates)
+                normalize_result = normalize_market_assertions(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, reviewer_user_id=reviewer_user_id, source_id=int(source.id), raw_candidates=raw_candidates)
+                validation_result = validate_market_assertions(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, source_id=int(source.id))
+            else:
+                stale_mark_result = {'ok': True, 'source_id': int(source.id), 'stale_count': 0, 'stale_ids': [], 'reason': 'no_source_change'}
+                extract_result = {'ok': True, 'created_count': 0, 'assertion_ids': [], 'reason': 'no_content_change'}
+                diff_result = {'ok': True, 'changed_count': 0, 'new_count': 0, 'missing_count': 0, 'reason': 'no_content_change'}
+                normalize_result = None
+                validation_result = {'validated_count': 0, 'weak_support_count': 0, 'ambiguous_count': 0, 'conflicting_count': 0, 'unsupported_count': 0, 'updated_ids': [], 'reason': 'no_content_change'}
+
+        total_changed_rules += int(diff_result.get('changed_count') or 0)
+        total_new_rules += int(diff_result.get('new_count') or 0)
+        total_missing_rules += int(diff_result.get('missing_count') or 0)
+        source_runs.append({
+            'source_id': int(source.id),
+            'refresh': fetch_result,
+            'inventory': inventory_result,
+            'changed': content_changed,
+            'comparison_state': fetch_result.get('comparison_state'),
+            'change_kind': fetch_result.get('change_kind') or (fetch_result.get('change_summary') or {}).get('change_kind'),
+            'revalidation_required': revalidation_required,
+            'source_version_id': fetch_result.get('source_version_id'),
+            'previous_version_id': fetch_result.get('previous_version_id'),
+            'stale_mark_result': stale_mark_result,
+            'extract_result': extract_result,
+            'diff': diff_result,
+            'normalized': normalize_result,
+            'validation': validation_result,
+        })
+
+    return {
+        'source_runs': source_runs,
+        'summary': {
+            'source_count': len(sources),
+            'changed_source_count': len(changed_source_ids),
+            'changed_source_ids': sorted(set(changed_source_ids)),
+            'failed_source_count': len(failed_source_ids),
+            'failed_source_ids': sorted(set(failed_source_ids)),
+            'monitor_skipped_source_count': len(monitor_skipped_source_ids),
+            'monitor_skipped_source_ids': sorted(set(monitor_skipped_source_ids)),
+            'changed_rule_count': total_changed_rules,
+            'new_rule_count': total_new_rules,
+            'missing_rule_count': total_missing_rules,
+            'monitor_summary': _compact_monitor_summary(source_runs),
+        },
+    }
+
+
+_run_market_policy_pipeline_opt_base = run_market_policy_pipeline
+
+def run_market_policy_pipeline(*args, **kwargs):
+    result = dict(_run_market_policy_pipeline_opt_base(*args, **kwargs) or {})
+    source_runs = list((result.get('refresh_summary') or {}).get('source_runs') or result.get('source_runs') or [])
+    if source_runs:
+        monitor_summary = _compact_monitor_summary(source_runs)
+        result['monitor_summary'] = monitor_summary
+        refresh_summary = dict(result.get('refresh_summary') or {})
+        refresh_summary['monitor_summary'] = monitor_summary
+        result['refresh_summary'] = refresh_summary
     return result

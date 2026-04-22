@@ -4,8 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy.orm import Session
-
+from app.services.policy_source_service import _is_rejected_discovered_source
 from app.policy_models import PolicyAssertion, PolicySource
 from app.services.policy_catalog_admin_service import merged_catalog_for_market
 
@@ -43,6 +42,21 @@ def _append_note(existing: Optional[str], addition: str) -> str:
         return current
     return addition if not current else f"{current} | {addition}"
 
+def _is_invalid_discovered_source(src):
+    notes = (src.notes or "").lower()
+
+    if "[discovered]" not in notes:
+        return False
+
+    if not _is_official_host(src.url):
+        return True
+
+    return _looks_like_placeholder_or_access_page(
+        title=src.title,
+        publisher=src.publisher,
+        url=src.url,
+        http_status=getattr(src, "http_status", None),
+    )
 
 def archive_stale_market_sources(
     db: Session,
@@ -114,7 +128,7 @@ def archive_stale_market_sources(
         if not url:
             continue
 
-        if url in active_urls:
+        if url in active_urls and not _is_rejected_discovered_source(src):
             kept_ids.append(src.id)
             continue
 
@@ -139,6 +153,22 @@ def archive_stale_market_sources(
         "active_catalog_url_count": len(active_urls),
     }
 
+def cleanup_discovered_garbage_sources_for_market(db, state, county, city):
+    rows = db.query(PolicySource).filter_by(state=state).all()
+
+    archived = []
+
+    for src in rows:
+        if _is_invalid_discovered_source(src):
+            src.notes = (src.notes or "") + " [ARCHIVED: rejected_discovery_candidate]"
+            archived.append(src.id)
+
+    db.commit()
+
+    return {
+        "archived": archived,
+        "count": len(archived)
+    }
 
 def cleanup_non_projectable_assertions_for_market(
     db: Session,

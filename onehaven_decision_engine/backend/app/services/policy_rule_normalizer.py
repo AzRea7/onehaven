@@ -132,7 +132,7 @@ def _category_for(rule_key: str) -> str | None:
         "lead_paint_affidavit_required": "lead",
         "lead_clearance_required": "lead",
         "lead_inspection_required": "lead",
-        "rental_license_required": "registration",
+        "rental_license_required": "rental_license",
         "certificate_of_compliance_required": "occupancy",
         "certificate_of_occupancy_required": "occupancy",
         "fire_safety_inspection_required": "inspection",
@@ -146,7 +146,7 @@ def _category_for(rule_key: str) -> str | None:
 def _family_for(rule_key: str) -> str:
     mapping = {
         "rental_registration_required": "registration",
-        "rental_license_required": "registration",
+        "rental_license_required": "rental_license",
         "inspection_program_exists": "inspection",
         "fire_safety_inspection_required": "inspection",
         "certificate_required_before_occupancy": "occupancy",
@@ -678,3 +678,48 @@ def diff_reason(candidate: NormalizedRuleCandidate, assertion: Any) -> str:
 
 def normalized_candidate_payload(candidate: NormalizedRuleCandidate) -> dict[str, Any]:
     return asdict(candidate)
+
+# === targeted category coverage overlay ===
+_EXTRA_CATEGORY_RULE_MAP = {
+    "lead_hazard_assessment_required": "lead",
+    "source_of_income_protection": "source_of_income",
+    "permit_required": "permits",
+    "local_documents_required": "documents",
+    "local_contact_required": "contacts",
+    "rental_license_required": "rental_license",
+    "fee_schedule_reference": "fees",
+    "program_overlay_requirement": "program_overlay",
+}
+
+_EXTRA_RULE_PATTERNS: list[tuple[str, str, float]] = [
+    (r"source of income|voucher discrimination|lawful source of income", "source_of_income_protection", 0.90),
+    (r"permit required|building permit|electrical permit|mechanical permit|plumbing permit", "permit_required", 0.86),
+    (r"documents required|required documents|supporting documents|application packet|submit documentation", "local_documents_required", 0.82),
+    (r"contact us|contact information|phone|email|building department|inspection department", "local_contact_required", 0.78),
+    (r"fee schedule|application fee|inspection fee|registration fee|application with payment", "fee_schedule_reference", 0.84),
+    (r"hap contract|tenancy addendum|voucher packet|nspire compliance date|pbv|mod rehab", "program_overlay_requirement", 0.88),
+    (r"lead hazard|lead-based paint|lead paint|lbp", "lead_hazard_assessment_required", 0.86),
+]
+
+_original_category_for_overlay = _category_for
+_original_family_for_overlay = _family_for
+_original_rule_key_from_text_overlay = _rule_key_from_text
+
+
+def _category_for(rule_key: str) -> str | None:
+    return _EXTRA_CATEGORY_RULE_MAP.get(rule_key, _original_category_for_overlay(rule_key))
+
+
+def _family_for(rule_key: str) -> str:
+    return _EXTRA_CATEGORY_RULE_MAP.get(rule_key, _original_family_for_overlay(rule_key))
+
+
+def _rule_key_from_text(text: str, hint: Optional[str] = None) -> tuple[str | None, float]:
+    key, confidence = _original_rule_key_from_text_overlay(text, hint=hint)
+    if key:
+        return key, confidence
+    whole = f"{_clean(hint)} {_clean(text)}".strip()
+    for pattern, extra_key, extra_conf in _EXTRA_RULE_PATTERNS:
+        if re.search(pattern, whole):
+            return extra_key, extra_conf
+    return None, 0.0

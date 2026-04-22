@@ -10,6 +10,45 @@ from app.services.policy_discovery_service import (
     sync_policy_source_into_inventory,
     update_inventory_after_fetch,
 )
+from app.services.policy_source_service import _is_rejected_discovered_source
+
+
+AUTHORITY_TIER_RANKS: dict[str, int] = {
+    "derived_or_inferred": 25,
+    "semi_authoritative_operational": 60,
+    "approved_official_supporting": 85,
+    "authoritative_official": 100,
+}
+
+
+def _authority_policy_payload(*, authority_tier: str, authority_rank: int | None = None) -> dict[str, Any]:
+    tier = str(authority_tier or "derived_or_inferred").strip() or "derived_or_inferred"
+    rank = int(authority_rank if authority_rank is not None else AUTHORITY_TIER_RANKS.get(tier, 25))
+
+    if tier == "authoritative_official":
+        use_type = "binding"
+        binding_sufficient = True
+        supporting_only = False
+        usable = True
+    elif tier in {"approved_official_supporting", "semi_authoritative_operational"}:
+        use_type = "supporting"
+        binding_sufficient = False
+        supporting_only = True
+        usable = True
+    else:
+        use_type = "weak"
+        binding_sufficient = False
+        supporting_only = False
+        usable = False
+
+    return {
+        "authority_tier": tier,
+        "authority_rank": rank,
+        "use_type": use_type,
+        "binding_sufficient": binding_sufficient,
+        "supporting_only": supporting_only,
+        "usable": usable,
+    }
 
 
 def _change_summary(fetch_result: dict[str, Any]) -> dict[str, Any]:
@@ -24,6 +63,53 @@ def _iso_or_none(value: Any) -> str | None:
         return value.isoformat()
     text = str(value).strip()
     return text or None
+
+
+def _apply_inventory_authority_from_source(inventory: Any, source: PolicySource) -> None:
+    tier = str(getattr(source, "authority_tier", None) or "").strip() or "derived_or_inferred"
+    rank = int(getattr(source, "authority_rank", 0) or 0)
+    explicit_use_type = str(getattr(source, "authority_use_type", None) or "").strip().lower()
+
+    policy = _authority_policy_payload(authority_tier=tier, authority_rank=rank)
+    if explicit_use_type in {"binding", "supporting", "weak"}:
+        policy["use_type"] = explicit_use_type
+        policy["binding_sufficient"] = explicit_use_type == "binding" and tier == "authoritative_official"
+        policy["supporting_only"] = explicit_use_type == "supporting"
+        policy["usable"] = explicit_use_type in {"binding", "supporting"}
+
+    if hasattr(inventory, "authority_use_type"):
+        inventory.authority_use_type = str(policy.get("use_type") or "weak")
+    if hasattr(inventory, "authority_tier"):
+        inventory.authority_tier = tier
+    if hasattr(inventory, "authority_rank"):
+        inventory.authority_rank = int(rank or 0)
+    if hasattr(inventory, "authority_policy_json"):
+        import json
+        try:
+            inventory.authority_policy_json = json.dumps(policy, sort_keys=True, default=str)
+        except Exception:
+            inventory.authority_policy_json = "{}"
+
+
+def _inventory_result_shape(inventory: Any, change_summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ok": inventory is not None,
+        "inventory_id": int(inventory.id) if inventory is not None else None,
+        "lifecycle_state": getattr(inventory, "lifecycle_state", None) if inventory is not None else None,
+        "crawl_status": getattr(inventory, "crawl_status", None) if inventory is not None else None,
+        "refresh_state": getattr(inventory, "refresh_state", None) if inventory is not None else None,
+        "refresh_status_reason": getattr(inventory, "refresh_status_reason", None) if inventory is not None else None,
+        "next_refresh_step": getattr(inventory, "next_refresh_step", None) if inventory is not None else None,
+        "revalidation_required": bool(getattr(inventory, "revalidation_required", False)) if inventory is not None else False,
+        "validation_due_at": (
+            _iso_or_none(getattr(inventory, "validation_due_at", None))
+            if inventory is not None
+            else None
+        ),
+        "current_source_version_id": getattr(inventory, "current_source_version_id", None) if inventory is not None else None,
+        "last_change_summary": change_summary,
+        "authority_use_type": getattr(inventory, "authority_use_type", None) if inventory is not None else None,
+    }
 
 
 def sync_crawl_result_to_inventory(
@@ -116,20 +202,102 @@ def sync_crawl_result_to_inventory(
             org_id=getattr(source, "org_id", None),
         )
 
-    return {
-        "ok": inventory is not None,
-        "inventory_id": int(inventory.id) if inventory is not None else None,
-        "lifecycle_state": getattr(inventory, "lifecycle_state", None) if inventory is not None else None,
-        "crawl_status": getattr(inventory, "crawl_status", None) if inventory is not None else None,
-        "refresh_state": getattr(inventory, "refresh_state", None) if inventory is not None else None,
-        "refresh_status_reason": getattr(inventory, "refresh_status_reason", None) if inventory is not None else None,
-        "next_refresh_step": getattr(inventory, "next_refresh_step", None) if inventory is not None else None,
-        "revalidation_required": bool(getattr(inventory, "revalidation_required", False)) if inventory is not None else False,
-        "validation_due_at": (
-            _iso_or_none(getattr(inventory, "validation_due_at", None))
-            if inventory is not None
-            else None
-        ),
-        "current_source_version_id": getattr(inventory, "current_source_version_id", None) if inventory is not None else None,
-        "last_change_summary": change_summary,
-    }
+    if inventory is not None:
+        _apply_inventory_authority_from_source(inventory, source)
+
+        if _is_rejected_discovered_source(source):
+            inventory.lifecycle_state = "failed"
+            inventory.crawl_status = "failed"
+            inventory.refresh_state = "failed"
+            inventory.refresh_status_reason = "rejected_discovery_candidate"
+            inventory.next_refresh_step = "ignore"
+
+            if hasattr(inventory, "candidate_status_reason"):
+                inventory.candidate_status_reason = "rejected_discovery_candidate"
+
+            if hasattr(inventory, "is_official_candidate"):
+                inventory.is_official_candidate = False
+
+        elif not bool(normalized_fetch.get("ok", False)) and getattr(inventory, "refresh_state", None) in {None, "", "healthy"}:
+            inventory.refresh_state = "failed"
+            inventory.refresh_status_reason = str(
+                normalized_fetch.get("fetch_error")
+                or normalized_fetch.get("status_reason")
+                or "fetch_failed"
+            )
+
+        elif bool(normalized_fetch.get("revalidation_required", False)) and getattr(inventory, "refresh_state", None) == "healthy":
+            inventory.refresh_state = "validating"
+            inventory.refresh_status_reason = str(
+                normalized_fetch.get("revalidation_reason")
+                or "revalidation_required"
+            )
+
+        db.add(inventory)
+        db.flush()
+
+    return _inventory_result_shape(inventory, change_summary)
+
+# === FINAL INVENTORY DE-PRIORITIZATION OVERRIDE ===
+
+def _inventory_nonblocking_failed_with_artifacts(source: PolicySource) -> bool:
+    authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
+    authority_use_type = str(getattr(source, "authority_use_type", "") or "").strip().lower()
+    freshness_status = str(getattr(source, "freshness_status", "") or "").strip().lower()
+    refresh_state = str(getattr(source, "refresh_state", "") or "").strip().lower()
+    notes = str(getattr(source, "notes", "") or "").lower()
+    publication_type = str(getattr(source, "publication_type", "") or "").strip().lower()
+    try:
+        http_status = int(getattr(source, "http_status", 0) or 0)
+    except Exception:
+        http_status = 0
+    try:
+        retry_count = int(getattr(source, "refresh_retry_count", 0) or 0)
+    except Exception:
+        retry_count = 0
+
+    weakish = authority_tier in {"derived_or_inferred", ""} or authority_use_type in {"weak", ""}
+    failed = freshness_status in {"fetch_failed", "error", "blocked"} or refresh_state == "failed" or http_status in {403, 404, 410}
+    repeated = retry_count >= 1
+    alt_backed = publication_type in {"official_document", "official_form", "legal_code"} or "[curated]" in notes or "artifact" in notes or "catalog" in notes
+    return bool(weakish and failed and repeated and alt_backed)
+
+
+_final_inventory_sync_original = sync_crawl_result_to_inventory
+
+def sync_crawl_result_to_inventory(
+    db: Session,
+    *,
+    source: PolicySource,
+    fetch_result: dict[str, Any],
+) -> dict[str, Any]:
+    result = dict(_final_inventory_sync_original(db, source=source, fetch_result=fetch_result) or {})
+    inventory = None
+    try:
+        inventory = sync_policy_source_into_inventory(
+            db,
+            source=source,
+            org_id=getattr(source, "org_id", None),
+        )
+    except Exception:
+        inventory = None
+
+    if inventory is not None and _inventory_nonblocking_failed_with_artifacts(source):
+        inventory.next_refresh_step = "ignore"
+        inventory.revalidation_required = False
+        inventory.refresh_state = "ignored"
+        inventory.refresh_status_reason = "artifact_backed_nonblocking_failed_source_skipped"
+        db.add(inventory)
+        db.flush()
+        result.update({
+            "ok": True,
+            "inventory_id": int(getattr(inventory, "id", 0) or 0),
+            "lifecycle_state": getattr(inventory, "lifecycle_state", None),
+            "crawl_status": getattr(inventory, "crawl_status", None),
+            "refresh_state": "ignored",
+            "refresh_status_reason": "artifact_backed_nonblocking_failed_source_skipped",
+            "next_refresh_step": "ignore",
+            "revalidation_required": False,
+            "authority_use_type": getattr(inventory, "authority_use_type", None),
+        })
+    return result

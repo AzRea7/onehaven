@@ -1,4 +1,3 @@
-# backend/app/services/jurisdiction_refresh_service.py
 from __future__ import annotations
 
 import json
@@ -972,7 +971,7 @@ def refresh_jurisdiction_profile(
         refresh_state=state_payload["refresh_state"],
         reason=state_payload["status_reason"],
         now=_utcnow(),
-        blocked_reason="blocked_sources_present" if state_payload["refresh_state"] == "blocked" else None,
+        blocked_reason="blocked_sources_present" if (state_payload["refresh_state"] == "blocked" and unresolved_missing) else None,
         next_step=state_payload["next_step"],
         requirements=requirements,
         retry_count=(0 if state_payload["refresh_state"] == "healthy" else int(getattr(refreshed_profile, "refresh_retry_count", 0) or 0) + (1 if unresolved_missing else 0)),
@@ -1637,107 +1636,3 @@ def refresh_due_jurisdictions(
     result["blocked_count"] = blocked_count
     result["degraded_count"] = degraded_count
     return result
-
-
-# --- tier-one evidence-first final overrides ---
-
-
-def _next_step_from_health(health: dict[str, Any], requirements: dict[str, Any]) -> str:
-    if bool((health.get("lockout") or {}).get("lockout_active")) or list(health.get("lockout_causing_categories") or []):
-        return "manual_review"
-    if bool(health.get("review_required")) or list(health.get("blocking_validation_pending_categories") or []):
-        return "review"
-    if list(requirements.get("missing_categories") or []):
-        return "expand_evidence"
-    if list(requirements.get("overdue_categories") or []) or list(requirements.get("stale_categories") or []):
-        return "refresh"
-    return "monitor"
-
-
-_tier1_original_finalize_jurisdiction_profile_lifecycle = finalize_jurisdiction_profile_lifecycle
-
-
-def finalize_jurisdiction_profile_lifecycle(
-    db: Session,
-    *,
-    profile: JurisdictionProfile,
-    refresh_results: list[dict[str, Any]] | None,
-    stale_days: int = DEFAULT_JURISDICTION_STALE_DAYS,
-    run_id: str | None = None,
-    discovery_result: dict[str, Any] | None = None,
-    governance_result: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    finalized = dict(
-        _tier1_original_finalize_jurisdiction_profile_lifecycle(
-            db,
-            profile=profile,
-            refresh_results=refresh_results,
-            stale_days=stale_days,
-            run_id=run_id,
-            discovery_result=discovery_result,
-            governance_result=governance_result,
-        )
-    )
-    refreshed_profile = db.get(JurisdictionProfile, int((finalized.get("profile") or {}).get("id") or getattr(profile, "id", 0) or 0))
-    if refreshed_profile is None:
-        return finalized
-
-    health = _chunk3_get_jurisdiction_health(db, profile_id=int(refreshed_profile.id))
-    completeness = dict(finalized.get("completeness") or {})
-    sla_summary = dict(finalized.get("sla_summary") or {})
-    requirements = dict(finalized.get("requirements") or {})
-    next_step = _next_step_from_health(health, requirements)
-
-    requirements = _chunk3_build_refresh_requirements(
-        refreshed_profile,
-        next_step=next_step,
-        missing_categories=list(completeness.get("missing_categories") or []),
-        stale_categories=list(completeness.get("stale_categories") or []),
-        overdue_categories=list(sla_summary.get("overdue_categories") or []),
-        critical_overdue_categories=list(sla_summary.get("critical_overdue_categories") or []),
-        legal_overdue_categories=list(sla_summary.get("legal_overdue_categories") or []),
-        informational_overdue_categories=list(sla_summary.get("informational_overdue_categories") or []),
-        stale_authoritative_categories=list(sla_summary.get("stale_authoritative_categories") or []),
-        inventory_summary=sla_summary,
-        retry_due_at=(
-            compute_next_retry_due(
-                retry_count=int(getattr(refreshed_profile, "refresh_retry_count", 0) or 0),
-                base_dt=_utcnow(),
-                min_hours=24,
-                max_days=14,
-            )
-            if next_step in {"manual_review", "review", "expand_evidence", "refresh"}
-            else None
-        ),
-    )
-
-    refreshed_profile.refresh_requirements_json = json.dumps(requirements, ensure_ascii=False, sort_keys=True, default=str)
-    refreshed_profile.last_refresh_outcome_json = json.dumps(
-        {
-            **_loads_json_dict(getattr(refreshed_profile, "last_refresh_outcome_json", None)),
-            "ok": True,
-            "run_id": run_id,
-            "evidence_state": requirements.get("evidence_state"),
-            "next_step": requirements.get("next_step"),
-            "truth_model": requirements.get("truth_model"),
-            "refresh_requirements": requirements,
-            "health_status": health.get("health_status"),
-            "safe_to_rely_on": health.get("safe_to_rely_on"),
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        default=str,
-    )
-    db.add(refreshed_profile)
-    db.commit()
-
-    finalized["profile"] = {
-        **dict(finalized.get("profile") or {}),
-        "refresh_state": getattr(refreshed_profile, "refresh_state", None),
-        "refresh_status_reason": getattr(refreshed_profile, "refresh_status_reason", None),
-    }
-    finalized["health"] = health
-    finalized["requirements"] = requirements
-    finalized["sla_summary"] = dict(health.get("sla_summary") or sla_summary)
-    finalized["lockout"] = dict(health.get("lockout") or finalized.get("lockout") or {})
-    return finalized

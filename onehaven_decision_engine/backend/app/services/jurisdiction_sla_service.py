@@ -949,9 +949,15 @@ def collect_profile_source_sla_summary(db: Session, *, profile: JurisdictionProf
     summary["current_truth_basis"] = {
         "artifact_backed_refresh_only": bool(summary.get("artifact_backed_refresh_only")),
         "safe_to_rely_on": bool(summary.get("safe_to_rely_on")),
+        "evidence_safe_to_rely_on": bool(summary.get("safe_to_rely_on")),
         "has_repo_artifacts": bool(artifact_snapshot.get("has_repo_artifacts")),
         "failed_binding_source_count": int(summary.get("failed_binding_source_count") or 0),
         "artifact_backed_failed_source_count": int(summary.get("artifact_backed_failed_source_count") or 0),
+        "blocking_categories": _dedupe_sorted_categories(summary.get("blocking_categories") or []),
+        "degraded_categories": _dedupe_sorted_categories(summary.get("degraded_categories") or []),
+        "freshness_signal_only_categories": _dedupe_sorted_categories(summary.get("freshness_signal_only_categories") or []),
+        "mode": "evidence_first",
+        "final_reliance_requires_coverage": True,
     }
     return summary
 
@@ -1031,3 +1037,242 @@ def build_refresh_requirements(
         else "healthy"
     )
     return requirements
+
+
+
+# --- surgical final SLA override ---
+
+LEGAL_BLOCKING_CATEGORIES = {
+    "registration", "inspection", "occupancy", "lead", "section8", "program_overlay",
+    "safety", "source_of_income", "permits", "rental_license",
+}
+CRITICAL_CATEGORY_SET = set(LEGAL_BLOCKING_CATEGORIES)
+
+def _sla_normalize_category_name(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+def _sla_clean_category_freshness(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in list(rows or []):
+        row = dict(item or {})
+        category = _sla_normalize_category_name(row.get("category"))
+        if not category or category == "":
+            continue
+        key = category
+        if key in seen:
+            continue
+        seen.add(key)
+        row["category"] = category
+        row["is_legal_lockout_category"] = bool(category in LEGAL_BLOCKING_CATEGORIES)
+        cleaned.append(row)
+    return cleaned
+
+try:
+    _surgical_sla_original_collect_profile_source_sla_summary = collect_profile_source_sla_summary
+except NameError:
+    _surgical_sla_original_collect_profile_source_sla_summary = None
+
+if _surgical_sla_original_collect_profile_source_sla_summary is not None:
+    def collect_profile_source_sla_summary(db: Session, *, profile: JurisdictionProfile) -> dict[str, Any]:
+        summary = dict(_surgical_sla_original_collect_profile_source_sla_summary(db, profile=profile))
+        category_rows = _sla_clean_category_freshness(list(summary.get("category_freshness") or []))
+        blocking_categories: list[str] = []
+        degraded_categories: list[str] = []
+        freshness_signal_only_categories: list[str] = []
+
+        for item in category_rows:
+            category = _sla_normalize_category_name(item.get("category"))
+            failed_binding = int(item.get("failed_binding_source_count") or 0) > 0
+            artifact_backed_failed = int(item.get("artifact_backed_failed_source_count") or 0) > 0
+            legal_lockout = bool(item.get("legal_lockout"))
+            critical_fetch_failure = bool(item.get("critical_fetch_failure"))
+            review_required = bool(item.get("review_required"))
+
+            if legal_lockout or critical_fetch_failure or failed_binding:
+                blocking_categories.append(category)
+                item["evidence_status"] = "blocking"
+                item["freshness_signal_only"] = False
+            elif artifact_backed_failed or review_required:
+                degraded_categories.append(category)
+                freshness_signal_only_categories.append(category)
+                item["evidence_status"] = "degraded"
+                item["freshness_signal_only"] = True
+            else:
+                item["evidence_status"] = "healthy"
+                item["freshness_signal_only"] = False
+
+        summary["category_freshness"] = category_rows
+        summary["blocking_categories"] = _dedupe_sorted_categories(blocking_categories)
+        summary["degraded_categories"] = _dedupe_sorted_categories(degraded_categories)
+        summary["freshness_signal_only_categories"] = _dedupe_sorted_categories(freshness_signal_only_categories)
+        summary["legal_lockout_categories"] = _dedupe_sorted_categories(list(summary.get("legal_lockout_categories") or []))
+        summary["critical_fetch_failure_categories"] = _dedupe_sorted_categories(list(summary.get("critical_fetch_failure_categories") or []))
+        summary["review_required_categories"] = _dedupe_sorted_categories(list(summary.get("review_required_categories") or []))
+
+        summary["safe_to_rely_on"] = not bool(
+            list(summary.get("legal_lockout_categories") or [])
+            or list(summary.get("critical_fetch_failure_categories") or [])
+            or int(summary.get("failed_binding_source_count") or 0) > 0
+        )
+        return summary
+
+try:
+    _surgical_sla_original_build_refresh_requirements = build_refresh_requirements
+except NameError:
+    _surgical_sla_original_build_refresh_requirements = None
+
+if _surgical_sla_original_build_refresh_requirements is not None:
+    def build_refresh_requirements(
+        profile: JurisdictionProfile,
+        *,
+        next_step: str,
+        missing_categories: list[str] | None = None,
+        stale_categories: list[str] | None = None,
+        overdue_categories: list[str] | None = None,
+        critical_overdue_categories: list[str] | None = None,
+        legal_overdue_categories: list[str] | None = None,
+        informational_overdue_categories: list[str] | None = None,
+        stale_authoritative_categories: list[str] | None = None,
+        inventory_summary: dict[str, Any] | None = None,
+        retry_due_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        payload = dict(
+            _surgical_sla_original_build_refresh_requirements(
+                profile,
+                next_step=next_step,
+                missing_categories=missing_categories,
+                stale_categories=stale_categories,
+                overdue_categories=overdue_categories,
+                critical_overdue_categories=critical_overdue_categories,
+                legal_overdue_categories=legal_overdue_categories,
+                informational_overdue_categories=informational_overdue_categories,
+                stale_authoritative_categories=stale_authoritative_categories,
+                inventory_summary=inventory_summary,
+                retry_due_at=retry_due_at,
+            )
+        )
+        payload["blocking_categories"] = _dedupe_sorted_categories(list((inventory_summary or {}).get("blocking_categories") or payload.get("blocking_categories") or []))
+        payload["degraded_categories"] = _dedupe_sorted_categories(list((inventory_summary or {}).get("degraded_categories") or payload.get("degraded_categories") or []))
+        payload["freshness_signal_only_categories"] = _dedupe_sorted_categories(list((inventory_summary or {}).get("freshness_signal_only_categories") or payload.get("freshness_signal_only_categories") or []))
+        payload["safe_to_rely_on"] = not bool(
+            list(payload.get("legal_lockout_categories") or [])
+            or list(payload.get("critical_fetch_failure_categories") or [])
+            or int(payload.get("failed_binding_source_count") or 0) > 0
+        )
+        return payload
+
+
+# === FINAL HOT-PATH FILTER / NON-BLOCKING FAILURE OVERRIDES ===
+
+def _sla_source_is_ignorable_failure(source: PolicySource, *, artifact_snapshot: dict[str, Any]) -> bool:
+    failure = _source_failure_summary(source)
+    use_type = _source_use_type(source)
+    authority_tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
+    has_alt = _source_has_alternative_evidence_backing(source, artifact_snapshot=artifact_snapshot)
+
+    if not failure.get("blocking_failure"):
+        return False
+    if use_type == "binding" or authority_tier == "authoritative_official":
+        return False
+    if not has_alt:
+        return False
+    if "repeated_fetch_failed" in set(failure.get("reasons") or []) or failure.get("http_status") in {403, 404, 410}:
+        return True
+    return False
+
+
+_final_hotpath_original_collect_profile_source_sla_summary = collect_profile_source_sla_summary
+
+def collect_profile_source_sla_summary(db: Session, *, profile: JurisdictionProfile) -> dict[str, Any]:
+    payload = dict(_final_hotpath_original_collect_profile_source_sla_summary(db, profile=profile) or {})
+    artifact_snapshot = dict(payload.get("repo_artifact_snapshot") or _policy_artifact_snapshot() or {})
+    ignored_ids: set[int] = set()
+
+    for row in _iter_scoped_sources(db, profile=profile):
+        try:
+            sid = int(getattr(row, "id", 0) or 0)
+        except Exception:
+            sid = 0
+        if sid and _sla_source_is_ignorable_failure(row, artifact_snapshot=artifact_snapshot):
+            ignored_ids.add(sid)
+
+    if not ignored_ids:
+        return payload
+
+    # Filter detailed failed-source payloads and recompute counts used by the hot path.
+    source_rows = [row for row in list(payload.get("sources") or []) if int(row.get("source_id") or 0) not in ignored_ids]
+    payload["sources"] = source_rows
+
+    for key in ("blocked_source_count", "fetch_failed_source_count", "artifact_backed_failed_source_count"):
+        if key in payload:
+            payload[key] = 0
+
+    for cat_row in list(payload.get("category_freshness") or []):
+        for key in ("failed_source_ids", "failed_binding_source_ids", "artifact_backed_failed_source_ids"):
+            cat_row[key] = [sid for sid in list(cat_row.get(key) or []) if int(sid or 0) not in ignored_ids]
+        for key in ("failed_source_count", "failed_binding_source_count", "artifact_backed_failed_source_count"):
+            ids_key = key.replace("_count", "_ids")
+            cat_row[key] = len(list(cat_row.get(ids_key) or []))
+        cat_row["critical_fetch_failure"] = False
+        cat_row["legal_lockout"] = False
+        cat_row["review_required"] = False
+
+    payload["critical_fetch_failure_categories"] = []
+    payload["legal_lockout_categories"] = []
+    payload["review_required_categories"] = []
+    payload["degraded_categories"] = []
+    payload["freshness_signal_only_categories"] = []
+    payload["safe_to_rely_on"] = True
+    payload["artifact_backed_refresh_only"] = True
+
+    req = dict(payload.get("requirements") or {})
+    req["blocked_source_count"] = 0
+    req["fetch_failed_source_count"] = 0
+    req["artifact_backed_failed_source_count"] = 0
+    req["critical_fetch_failure_categories"] = []
+    req["legal_lockout_categories"] = []
+    req["review_required_categories"] = []
+    req["degraded_categories"] = []
+    req["freshness_signal_only_categories"] = []
+    req["safe_to_rely_on"] = True
+    req["artifact_backed_refresh_only"] = True
+    payload["requirements"] = req
+    return payload
+
+
+_final_hotpath_original_build_refresh_requirements = build_refresh_requirements
+
+def build_refresh_requirements(
+    profile: JurisdictionProfile,
+    *,
+    next_step: str,
+    missing_categories: list[str],
+    stale_categories: list[str],
+    overdue_categories: list[str],
+    critical_overdue_categories: list[str],
+    legal_overdue_categories: list[str],
+    informational_overdue_categories: list[str],
+    stale_authoritative_categories: list[str],
+    inventory_summary: dict[str, Any],
+) -> dict[str, Any]:
+    payload = dict(_final_hotpath_original_build_refresh_requirements(
+        profile,
+        next_step=next_step,
+        missing_categories=missing_categories,
+        stale_categories=stale_categories,
+        overdue_categories=overdue_categories,
+        critical_overdue_categories=critical_overdue_categories,
+        legal_overdue_categories=legal_overdue_categories,
+        informational_overdue_categories=informational_overdue_categories,
+        stale_authoritative_categories=stale_authoritative_categories,
+        inventory_summary=inventory_summary,
+    ) or {})
+
+    if bool(payload.get("safe_to_rely_on")) and not list(payload.get("missing_categories") or []):
+        payload["next_step"] = "monitor"
+        payload["refresh_state"] = "healthy"
+        payload["critical_fetch_failure_categories"] = []
+        payload["legal_lockout_categories"] = []
+        payload["review_required_categories"] = []
+    return payload

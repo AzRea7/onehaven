@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import MetaData, Table, and_, func, select, update
 from sqlalchemy.orm import Session
@@ -79,6 +80,42 @@ def _slugify(*parts: Any) -> str:
             normalized.append(text)
     return "-".join(normalized)
 
+
+
+
+def _host_from_url(url: Any) -> str:
+    host = urlparse(str(url or "").strip()).netloc.strip().lower()
+    if ":" in host:
+        host = host.split(":", 1)[0].strip()
+    return host
+
+
+def _host_looks_guessed(host: str) -> bool:
+    host = str(host or "").strip().lower()
+    if not host:
+        return True
+    return any(part in host for part in (".ci.", ".co.")) or host.startswith("ci.") or host.startswith("co.")
+
+
+def _is_official_website(url: Any) -> bool:
+    host = _host_from_url(url)
+    if not host or _host_looks_guessed(host):
+        return False
+    return host.endswith(".gov") or host.endswith(".mi.us") or host in {
+        "ecfr.gov", "www.ecfr.gov",
+        "federalregister.gov", "www.federalregister.gov",
+        "hud.gov", "www.hud.gov",
+        "michigan.gov", "www.michigan.gov",
+        "legislature.mi.gov", "www.legislature.mi.gov",
+        "courts.michigan.gov", "www.courts.michigan.gov",
+    }
+
+
+def _sanitize_official_website(url: Any) -> str | None:
+    text = _norm_text(url)
+    if not text:
+        return None
+    return text if _is_official_website(text) else None
 
 def _display_name(
     *,
@@ -240,6 +277,11 @@ def get_or_create_jurisdiction(
     if existing is None:
         existing = find_jurisdiction_by_slug(db, slug=slug)
 
+    official_website_norm = _sanitize_official_website(official_website)
+    onboarding_status_norm = _norm_lower(onboarding_status) or ONBOARDING_DISCOVERED
+    if onboarding_status_norm == ONBOARDING_SITE_CONFIRMED and not official_website_norm:
+        onboarding_status_norm = ONBOARDING_DISCOVERED
+
     payload = {
         "org_id": org_id,
         "jurisdiction_type": jt,
@@ -253,8 +295,8 @@ def get_or_create_jurisdiction(
         "lsad": _norm_text(lsad),
         "census_class": _norm_text(census_class),
         "parent_jurisdiction_id": parent_jurisdiction_id,
-        "official_website": _norm_text(official_website),
-        "onboarding_status": _norm_lower(onboarding_status) or ONBOARDING_DISCOVERED,
+        "official_website": official_website_norm,
+        "onboarding_status": onboarding_status_norm,
         "source_confidence": source_confidence,
         "is_active": bool(is_active),
         "updated_at": datetime.utcnow(),

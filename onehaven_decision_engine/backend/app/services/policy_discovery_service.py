@@ -39,6 +39,83 @@ INVENTORY_CRAWL_FETCHED = "fetched"
 INVENTORY_CRAWL_FAILED = "failed"
 INVENTORY_CRAWL_NOT_FOUND = "not_found"
 
+def _host_from_url(url: str) -> str:
+    host = urlparse(str(url or "").strip()).netloc.strip().lower()
+    if ":" in host:
+        host = host.split(":", 1)[0].strip()
+    return host
+
+
+def _host_looks_guessed(host: str) -> bool:
+    host = str(host or "").strip().lower()
+    if not host:
+        return True
+    guessed_patterns = (
+        r"(^|\.)ci\.",
+        r"(^|\.)co\.",
+        r"(^|\.)cityof[a-z0-9-]+\.",
+        r"(^|\.)countyof[a-z0-9-]+\.",
+        r"(^|\.)housingauthorityof[a-z0-9-]+\.",
+    )
+    return any(__import__("re").search(pat, host) for pat in guessed_patterns)
+
+
+def _is_official_host(url: str) -> bool:
+    host = _host_from_url(url)
+    if not host or _host_looks_guessed(host):
+        return False
+    if host.endswith(".gov") or host.endswith(".mi.us"):
+        return True
+    if host in {
+        "ecfr.gov", "www.ecfr.gov",
+        "federalregister.gov", "www.federalregister.gov",
+        "hud.gov", "www.hud.gov",
+        "michigan.gov", "www.michigan.gov",
+        "legislature.mi.gov", "www.legislature.mi.gov",
+        "courts.michigan.gov", "www.courts.michigan.gov",
+    }:
+        return True
+    return False
+
+# ADD THESE HELPERS (place near existing host helpers)
+
+def _looks_like_placeholder_or_access_page(*, title, publisher, url, http_status=None):
+    text = " ".join([
+        str(title or "").lower(),
+        str(publisher or "").lower(),
+        str(url or "").lower(),
+    ])
+    markers = ["request access", "access denied", "forbidden", "404", "403", "page not found"]
+    if any(m in text for m in markers):
+        return True
+
+    try:
+        code = int(http_status) if http_status else None
+    except:
+        code = None
+
+    return code in {401, 403, 404, 410}
+
+
+def _is_rejected_discovery_candidate(*, url, title=None, publisher=None, probe_result=None):
+    probe = probe_result or {}
+    host = _host_from_url(url)
+
+    if not _is_official_host(url):
+        return True
+
+    if _host_looks_guessed(host):
+        return True
+
+    if _looks_like_placeholder_or_access_page(
+        title=title,
+        publisher=publisher,
+        url=url,
+        http_status=probe.get("http_status"),
+    ):
+        return True
+
+    return False
 
 def _utcnow() -> datetime:
     return datetime.utcnow()
@@ -348,12 +425,45 @@ def upsert_discovery_candidate_inventory(
 ) -> PolicySourceInventory:
     now = _utcnow()
     probe = dict(probe_result or {})
+    rejected_candidate = _is_rejected_discovery_candidate(
+        url=url,
+        title=title,
+        publisher=publisher,
+        probe_result=probe,
+    )
     fetch_error = probe.get("fetch_error")
     ok = bool(probe.get("ok"))
-    crawl_status = INVENTORY_CRAWL_QUEUED if ok else (INVENTORY_CRAWL_FAILED if fetch_error and fetch_error != "probe_skipped" else INVENTORY_CRAWL_PENDING)
-    lifecycle_state = INVENTORY_LIFECYCLE_PENDING_CRAWL if ok else (INVENTORY_LIFECYCLE_DISCOVERED if not fetch_error or fetch_error == "probe_skipped" else INVENTORY_LIFECYCLE_FAILED)
+
+    if rejected_candidate:
+        ok = False
+        fetch_error = str(fetch_error or "rejected_discovery_candidate")
+        authority_tier = "derived_or_inferred"
+        authority_rank = 25
+        authority_score = min(float(authority_score or 0.0), 0.35)
+        probe["ok"] = False
+        probe["fetch_error"] = fetch_error
+
+    crawl_status = (
+        INVENTORY_CRAWL_QUEUED
+        if ok
+        else (
+            INVENTORY_CRAWL_FAILED
+            if fetch_error and fetch_error != "probe_skipped"
+            else INVENTORY_CRAWL_PENDING
+        )
+    )
+    lifecycle_state = (
+        INVENTORY_LIFECYCLE_PENDING_CRAWL
+        if ok
+        else (
+            INVENTORY_LIFECYCLE_DISCOVERED
+            if not fetch_error or fetch_error == "probe_skipped"
+            else INVENTORY_LIFECYCLE_FAILED
+        )
+    )
     refresh_state = "healthy" if ok else ("degraded" if fetch_error and fetch_error != "probe_skipped" else "pending")
     next_step = "crawl" if ok else ("retry_probe" if fetch_error and fetch_error != "probe_skipped" else "crawl")
+
     row = upsert_source_inventory_record(
         db,
         org_id=org_id,
@@ -379,17 +489,33 @@ def upsert_discovery_candidate_inventory(
         inventory_origin="discovered",
         policy_source_id=policy_source_id,
         is_curated=False,
-        is_official_candidate=bool(int(authority_rank or 0) >= 85),
+        is_official_candidate=bool((not rejected_candidate) and _is_official_host(url) and int(authority_rank or 0) >= 85),
         probe_result=probe,
         metadata=metadata,
     )
+
     row.last_seen_at = now
     row.candidate_status_reason = None if ok else str(fetch_error or "discovered_not_probed")
     row.refresh_state = refresh_state
-    row.refresh_status_reason = None if ok else (str(fetch_error or "discovered_not_probed"))
+    row.refresh_status_reason = None if ok else str(fetch_error or "discovered_not_probed")
     row.next_refresh_step = next_step
     row.last_http_status = probe.get("http_status")
-    if fetch_error and fetch_error != "probe_skipped":
+
+    if rejected_candidate:
+        row.lifecycle_state = INVENTORY_LIFECYCLE_FAILED
+        row.crawl_status = INVENTORY_CRAWL_FAILED
+        row.candidate_origin_type = "discovered_rejected"
+        row.is_official_candidate = False
+        row.next_search_retry_due_at = compute_next_retry_due(
+            retry_count=max(1, int(getattr(row, "failure_count", 0) or 0)),
+            base_dt=now,
+            min_hours=24,
+            max_days=max(DEFAULT_DISCOVERY_RETRY_DAYS, 14),
+        )
+        row.next_crawl_due_at = row.next_search_retry_due_at
+        row.failure_count = int(getattr(row, "failure_count", 0) or 0) + 1
+        row.last_failure_at = now
+    elif fetch_error and fetch_error != "probe_skipped":
         row.last_failure_at = now
         row.failure_count = int(row.failure_count or 0) + 1
         row.lifecycle_state = INVENTORY_LIFECYCLE_FAILED
@@ -404,9 +530,12 @@ def upsert_discovery_candidate_inventory(
         row.next_crawl_due_at = row.next_crawl_due_at or now
         if ok:
             row.lifecycle_state = INVENTORY_LIFECYCLE_PENDING_CRAWL
+
     meta = _json_loads_dict(getattr(row, "inventory_metadata_json", None))
     meta["last_probe_result"] = probe
+    meta["rejected_discovery_candidate"] = bool(rejected_candidate)
     row.inventory_metadata_json = _json_dumps(meta)
+
     db.add(row)
     db.flush()
     return row
@@ -453,7 +582,7 @@ def sync_policy_source_into_inventory(
         inventory_origin=inventory_origin,
         policy_source_id=int(getattr(source, "id", 0) or 0) or None,
         is_curated=bool(getattr(source, "source_origin", "") == "curated") if is_curated is None else bool(is_curated),
-        is_official_candidate=bool(getattr(source, "is_authoritative", False) or int(getattr(source, "authority_rank", 0) or 0) >= 85),
+        is_official_candidate=bool(_is_official_host(getattr(source, "url", None) or "") and (getattr(source, "is_authoritative", False) or int(getattr(source, "authority_rank", 0) or 0) >= 85)),
         metadata={
             "registry_status": getattr(source, "registry_status", None),
             "freshness_status": getattr(source, "freshness_status", None),
@@ -721,6 +850,21 @@ def summarize_inventory_for_scope(
     category_map: dict[str, int] = {}
     source_ids: list[int] = []
     authority_use_counts: dict[str, int] = {}
+    filtered_rows = []
+    for row in rows:
+        lifecycle = (getattr(row, "lifecycle_state", None) or "unknown").strip().lower()
+        origin = str(getattr(row, "inventory_origin", None) or "").strip().lower()
+        refresh_reason = str(getattr(row, "refresh_status_reason", None) or "").strip().lower()
+        url = str(getattr(row, "canonical_url", None) or "")
+        if getattr(row, "policy_source_id", None) in (None, 0) and origin == "discovered":
+            continue
+        if "name or service not known" in refresh_reason and origin == "discovered":
+            continue
+        if lifecycle == "failed" and origin == "discovered" and not _is_official_host(url):
+            continue
+        filtered_rows.append(row)
+
+    rows = filtered_rows
     for row in rows:
         lifecycle = (getattr(row, "lifecycle_state", None) or "unknown").strip().lower()
         crawl = (getattr(row, "crawl_status", None) or "unknown").strip().lower()

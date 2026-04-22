@@ -34,7 +34,7 @@ AUTHORITY_TIER_RANKS: dict[str, int] = {
     "authoritative_official": 100,
 }
 
-CRITICAL_BINDING_CATEGORIES = {"registration", "inspection", "occupancy", "lead", "section8", "program_overlay", "safety"}
+CRITICAL_BINDING_CATEGORIES = {"registration", "inspection", "occupancy", "lead", "section8", "program_overlay", "safety", "source_of_income", "permits", "rental_license"}
 
 
 CRITICAL_VALIDATION_MIN_CITATION = 0.70
@@ -394,199 +394,65 @@ def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | Non
     authority_policy = dict(support.get("authority_policy") or {})
     url_validation = dict(support.get("url_validation") or {})
     category_requirement = dict(support.get("category_requirement") or {})
-    required_tier = str(category_requirement.get("required_tier") or "")
     critical_binding_required = bool(support.get("critical_binding_required"))
     binding_sufficient = bool(support.get("binding_sufficient"))
     supporting_only = bool(support.get("supporting_only"))
     unusable = bool(support.get("unusable"))
     source_requires_revalidation = bool(support.get("requires_revalidation"))
     source_rejection_reasons = list(url_validation.get("rejection_reasons") or [])
+    authority_use_type = str(authority_policy.get('use_type') or getattr(source, 'authority_use_type', None) or '').strip().lower()
+    category = _assertion_effective_category(assertion)
+    binding_truth_required = _binding_truth_required(assertion)
 
     min_citation = CRITICAL_VALIDATION_MIN_CITATION if (blocking or critical_binding_required) else GENERAL_VALIDATION_MIN_CITATION
     min_confidence = CRITICAL_VALIDATION_MIN_CONFIDENCE if (blocking or critical_binding_required) else GENERAL_VALIDATION_MIN_CONFIDENCE
 
     if source_requires_revalidation:
-        validation_state = VALIDATION_STATE_AMBIGUOUS
-        validation_quality = 0.25
-        reason = "authoritative_content_changed_requires_revalidation"
-    elif conflict_hints or evidence_state == "conflicting":
-        validation_state = VALIDATION_STATE_CONFLICTING
-        validation_quality = 0.15
-        reason = "conflicting_citation_or_interpretation"
+        validation_state = VALIDATION_STATE_AMBIGUOUS; validation_quality = 0.25; reason = 'authoritative_content_changed_requires_revalidation'
+    elif conflict_hints or evidence_state == 'conflicting':
+        validation_state = VALIDATION_STATE_CONFLICTING; validation_quality = 0.15; reason = 'conflicting_citation_or_interpretation'
     elif unusable:
-        validation_state = VALIDATION_STATE_UNSUPPORTED
-        validation_quality = 0.10
-        if source_rejection_reasons:
-            reason = f"source_authority_unusable_for_policy:{source_rejection_reasons[0]}"
-        else:
-            reason = "source_authority_unusable_for_policy"
+        validation_state = VALIDATION_STATE_UNSUPPORTED; validation_quality = 0.10; reason = f"source_authority_unusable_for_policy:{source_rejection_reasons[0]}" if source_rejection_reasons else 'source_authority_unusable_for_policy'
+    elif binding_truth_required and authority_use_type != 'binding':
+        validation_state = VALIDATION_STATE_UNSUPPORTED; validation_quality = 0.10; reason = 'non_binding_source_not_eligible_for_projectable_truth'
     elif critical_binding_required and not binding_sufficient:
-        validation_state = VALIDATION_STATE_UNSUPPORTED if supporting_only else VALIDATION_STATE_AMBIGUOUS
-        validation_quality = 0.15 if supporting_only else 0.30
-        reason = "critical_category_missing_binding_authority"
-    elif required_tier and authority_score < 0.60 and not authoritative:
-        validation_state = VALIDATION_STATE_WEAK
-        validation_quality = 0.35
-        reason = "authority_below_required_tier"
+        validation_state = VALIDATION_STATE_UNSUPPORTED if supporting_only else VALIDATION_STATE_AMBIGUOUS; validation_quality = 0.15 if supporting_only else 0.30; reason = 'critical_category_missing_binding_authority'
     elif not explicit_excerpt or citation_quality < min_citation:
-        validation_state = VALIDATION_STATE_UNSUPPORTED if (blocking or critical_binding_required) else VALIDATION_STATE_WEAK
-        validation_quality = 0.20 if (blocking or critical_binding_required) else 0.40
-        reason = "missing_or_weak_citation_support"
+        validation_state = VALIDATION_STATE_UNSUPPORTED if (blocking or critical_binding_required) else VALIDATION_STATE_WEAK; validation_quality = 0.20 if (blocking or critical_binding_required) else 0.40; reason = 'missing_or_weak_citation_support'
     elif confidence < min_confidence:
-        validation_state = VALIDATION_STATE_WEAK if not (blocking or critical_binding_required) else VALIDATION_STATE_UNSUPPORTED
-        validation_quality = 0.30 if (blocking or critical_binding_required) else 0.45
-        reason = "confidence_below_required_threshold"
-    elif authoritative and confidence >= 0.80 and citation_quality >= 0.70:
-        validation_state = VALIDATION_STATE_VALIDATED
-        validation_quality = 0.95
-        reason = "authoritative_citation_backed"
-    elif confidence >= 0.70 and citation_quality >= 0.60 and authority_score >= 0.60:
-        validation_state = VALIDATION_STATE_VALIDATED
-        validation_quality = 0.85
-        reason = "supported_and_consistent"
+        validation_state = VALIDATION_STATE_WEAK if not (blocking or critical_binding_required) else VALIDATION_STATE_UNSUPPORTED; validation_quality = 0.30 if (blocking or critical_binding_required) else 0.45; reason = 'confidence_below_required_threshold'
+    elif authoritative and authority_use_type == 'binding' and confidence >= 0.80 and citation_quality >= 0.70:
+        validation_state = VALIDATION_STATE_VALIDATED; validation_quality = 0.95; reason = 'authoritative_binding_citation_backed'
+    elif category in SUPPORTING_ONLY_CATEGORIES and confidence >= 0.70 and citation_quality >= 0.60 and authority_score >= 0.60:
+        validation_state = VALIDATION_STATE_VALIDATED; validation_quality = 0.80; reason = 'supporting_category_consistent'
+    elif confidence >= 0.70 and citation_quality >= 0.60 and authority_score >= 0.60 and authority_use_type == 'binding':
+        validation_state = VALIDATION_STATE_VALIDATED; validation_quality = 0.85; reason = 'binding_supported_and_consistent'
     elif confidence >= 0.55 and citation_quality >= 0.45:
-        validation_state = VALIDATION_STATE_WEAK
-        validation_quality = 0.60
-        reason = "moderate_support_needs_review"
+        validation_state = VALIDATION_STATE_WEAK; validation_quality = 0.60; reason = 'moderate_support_needs_review'
     else:
-        validation_state = VALIDATION_STATE_AMBIGUOUS
-        validation_quality = 0.40
-        reason = "ambiguous_or_low_confidence"
+        validation_state = VALIDATION_STATE_AMBIGUOUS; validation_quality = 0.40; reason = 'ambiguous_or_low_confidence'
 
     if validation_state == VALIDATION_STATE_VALIDATED:
-        trust_state = TRUST_STATE_TRUSTED if authoritative and binding_sufficient else TRUST_STATE_VALIDATED
-    elif validation_state in {VALIDATION_STATE_AMBIGUOUS, VALIDATION_STATE_CONFLICTING, VALIDATION_STATE_WEAK}:
-        trust_state = TRUST_STATE_NEEDS_REVIEW
-    else:
+        trust_state = TRUST_STATE_TRUSTED if authoritative and authority_use_type == 'binding' else TRUST_STATE_VALIDATED
+    elif validation_state == VALIDATION_STATE_WEAK:
         trust_state = TRUST_STATE_DOWNGRADED
-
-    if blocking and validation_state != VALIDATION_STATE_VALIDATED:
-        reason = f"critical_rule_{reason}"
+    else:
+        trust_state = TRUST_STATE_NEEDS_REVIEW if validation_state in {VALIDATION_STATE_AMBIGUOUS, VALIDATION_STATE_CONFLICTING} else TRUST_STATE_DOWNGRADED
 
     return {
-        "validation_state": validation_state,
-        "validation_quality": round(validation_quality, 6),
-        "validation_reason": reason,
-        "citation_quality": round(citation_quality, 6),
-        "extraction_confidence": round(extraction_confidence, 6),
-        "trust_state": trust_state,
-        "validated_at": _utcnow(),
-        "blocking_issue": bool((blocking or critical_binding_required) and validation_state != VALIDATION_STATE_VALIDATED),
-        "authority_policy": authority_policy,
-        "category_requirement": category_requirement,
-        "binding_authority_missing": bool(critical_binding_required and not binding_sufficient),
-        "supporting_only": bool(supporting_only),
-        "requires_revalidation": source_requires_revalidation,
-        "url_validation": url_validation,
-        "source_rejection_reasons": source_rejection_reasons,
+        'validation_state': validation_state,
+        'validation_quality': validation_quality,
+        'validation_reason': reason,
+        'trust_state': trust_state,
+        'validated_at': _utcnow(),
+        'extraction_confidence': extraction_confidence,
+        'requires_revalidation': source_requires_revalidation,
+        'authority_policy': authority_policy,
+        'category_requirement': category_requirement,
+        'url_validation': url_validation,
+        'binding_authority_missing': bool(binding_truth_required and authority_use_type != 'binding'),
+        'blocking_issue': bool((blocking or critical_binding_required) and validation_state != VALIDATION_STATE_VALIDATED),
     }
-
-
-def _apply_validation_state_to_source(
-    db: Session,
-    *,
-    source: PolicySource,
-    assertions: list[PolicyAssertion],
-    counts: dict[str, int],
-    blocking_issue_count: int,
-) -> dict[str, object]:
-    now = _utcnow()
-    state_payload = determine_validation_refresh_state(
-        validated_count=counts.get("validated", 0),
-        weak_support_count=counts.get("weak_support", 0),
-        ambiguous_count=counts.get("ambiguous", 0),
-        conflicting_count=counts.get("conflicting", 0),
-        unsupported_count=counts.get("unsupported", 0),
-        blocking_issue_count=blocking_issue_count,
-    )
-    source.refresh_state = str(state_payload.get("refresh_state") or getattr(source, "refresh_state", None) or "pending")
-    source.refresh_status_reason = str(state_payload.get("status_reason") or "validation_complete")
-    source.revalidation_required = False
-    source.validation_due_at = None
-    source.last_verified_at = now if counts.get("validated", 0) > 0 else getattr(source, "last_verified_at", None)
-    source.last_state_transition_at = now
-    source.last_refresh_completed_at = now
-    if source.refresh_state in {"blocked", "degraded"}:
-        source.registry_status = "warning"
-        source.refresh_retry_count = int(getattr(source, "refresh_retry_count", 0) or 0) + 1
-        if source.refresh_state == "blocked":
-            source.refresh_blocked_reason = source.refresh_status_reason
-        source.next_refresh_due_at = compute_next_retry_due(
-            retry_count=int(getattr(source, "refresh_retry_count", 0) or 0),
-            base_dt=now,
-            min_hours=12,
-            max_days=14,
-        )
-    else:
-        source.registry_status = "active"
-        source.refresh_blocked_reason = None
-        source.refresh_retry_count = 0
-
-    url_validation = _source_url_validation_summary(source)
-    summary = {
-        "validated_count": counts.get("validated", 0),
-        "weak_support_count": counts.get("weak_support", 0),
-        "binding_failure_count": counts.get("binding_failures", 0),
-        "ambiguous_count": counts.get("ambiguous", 0),
-        "conflicting_count": counts.get("conflicting", 0),
-        "unsupported_count": counts.get("unsupported", 0),
-        "blocking_issue_count": blocking_issue_count,
-        "binding_failures": counts.get("binding_failures", 0),
-        "source_id": int(source.id),
-        "assertion_ids": [int(a.id) for a in assertions],
-        "validation_finished_at": now.isoformat(),
-        "refresh_state": source.refresh_state,
-        "status_reason": source.refresh_status_reason,
-        "next_step": state_payload.get("next_step"),
-        "url_validation": url_validation,
-    }
-    source.last_refresh_outcome_json = _dumps({
-        **_loads_dict(getattr(source, "last_refresh_outcome_json", None)),
-        "validation_summary": summary,
-    })
-    source.last_change_summary_json = _dumps({
-        **_loads_dict(getattr(source, "last_change_summary_json", None)),
-        "validation_summary": summary,
-    })
-    db.add(source)
-
-    inventory_rows = list(
-        db.scalars(
-            select(PolicySourceInventory).where(PolicySourceInventory.policy_source_id == int(source.id))
-        ).all()
-    )
-    for row in inventory_rows:
-        row.refresh_state = source.refresh_state
-        row.refresh_status_reason = source.refresh_status_reason
-        row.next_refresh_step = str(state_payload.get("next_step") or row.next_refresh_step or "monitor")
-        row.revalidation_required = False
-        row.validation_due_at = None
-        row.last_state_transition_at = now
-        row.last_refresh_outcome_json = _dumps({
-            **_loads_dict(getattr(row, "last_refresh_outcome_json", None)),
-            "validation_summary": summary,
-        })
-        meta = _loads_dict(getattr(row, "inventory_metadata_json", None))
-        meta["last_validation_summary"] = summary
-        row.inventory_metadata_json = _dumps(meta)
-        if source.refresh_state in {"blocked", "degraded"}:
-            row.lifecycle_state = "failed" if source.refresh_state == "blocked" else row.lifecycle_state
-            row.crawl_status = "validation_failed"
-            row.last_failure_at = now
-            row.failure_count = int(getattr(row, "failure_count", 0) or 0) + 1
-            row.next_search_retry_due_at = compute_next_retry_due(
-                retry_count=int(getattr(row, "failure_count", 0) or 0),
-                base_dt=now,
-                min_hours=12,
-                max_days=14,
-            )
-            row.next_crawl_due_at = row.next_search_retry_due_at
-        else:
-            row.crawl_status = "validated"
-            row.lifecycle_state = "active"
-            row.last_success_at = now
-        db.add(row)
-    return summary
 
 
 def validate_market_assertions(
@@ -1525,117 +1391,365 @@ def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | Non
     return result
 
 
-# --- final gap completion overrides ---
-_COVERAGE_SUPPORTING_CATEGORIES = {'documents', 'contacts', 'fees', 'program_overlay', 'source_of_income'}
-_COVERAGE_BINDING_CATEGORIES = {'lead', 'permits', 'rental_license'}
-
-try:
-    _tier_final_original_validate_assertion = validate_assertion
-except NameError:
-    _tier_final_original_validate_assertion = None
-
-if _tier_final_original_validate_assertion is not None:
-    def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-        result = dict(_tier_final_original_validate_assertion(assertion=assertion, source=source))
-        category = str(getattr(assertion, 'normalized_category', None) or getattr(assertion, 'rule_category', None) or '').strip().lower()
-        citation_json = _loads_dict(getattr(assertion, 'citation_json', None))
-        confidence = float(getattr(assertion, 'confidence', 0.0) or 0.0)
-        citation_quality = _citation_quality_from_assertion(assertion)
-        publication_type = str(getattr(source, 'publication_type', '') or '').strip().lower() if source is not None else ''
-        authority_tier = str(getattr(source, 'authority_tier', '') or '').strip().lower() if source is not None else ''
-        official_ok = bool((_source_url_validation_summary(source) or {}).get('trust_for_extraction')) if source is not None else False
-        authoritative = bool(getattr(source, 'is_authoritative', False)) if source is not None else False
-        pdf_backed = publication_type in {'pdf', 'official_document'} or str(citation_json.get('url') or '').lower().endswith('.pdf')
-        if category in _COVERAGE_SUPPORTING_CATEGORIES:
-            if (official_ok or pdf_backed) and confidence >= 0.55 and citation_quality >= 0.20:
-                result.update({
-                    'validation_state': VALIDATION_STATE_VALIDATED,
-                    'validation_quality': max(float(result.get('validation_quality') or 0.0), 0.76),
-                    'validation_reason': 'supporting_category_accepted',
-                    'trust_state': TRUST_STATE_VALIDATED,
-                    'blocking_issue': False,
-                    'binding_authority_missing': False,
-                })
-        elif category in _COVERAGE_BINDING_CATEGORIES:
-            if (authoritative or authority_tier == 'authoritative_official' or pdf_backed) and (official_ok or pdf_backed) and confidence >= 0.60 and citation_quality >= 0.20:
-                result.update({
-                    'validation_state': VALIDATION_STATE_VALIDATED,
-                    'validation_quality': max(float(result.get('validation_quality') or 0.0), 0.82),
-                    'validation_reason': 'binding_category_accepted',
-                    'trust_state': TRUST_STATE_TRUSTED if (authoritative or authority_tier == 'authoritative_official') else TRUST_STATE_VALIDATED,
-                    'blocking_issue': False,
-                    'binding_authority_missing': False,
-                })
-        return result
 
 
-# --- runtime validation completion overrides ---
-try:
-    _runtime_original_validate_assertion = validate_assertion
-except NameError:
-    _runtime_original_validate_assertion = None
 
-if _runtime_original_validate_assertion is not None:
-    def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-        result = dict(_runtime_original_validate_assertion(assertion=assertion, source=source))
-        category = str(getattr(assertion, 'normalized_category', None) or getattr(assertion, 'rule_category', None) or '').strip().lower()
-        citation_json = _loads_dict(getattr(assertion, 'citation_json', None))
-        confidence = float(getattr(assertion, 'confidence', 0.0) or 0.0)
-        citation_quality = _citation_quality_from_assertion(assertion)
-        source_summary = _source_url_validation_summary(source) if source is not None else {}
-        official_ok = bool(source_summary.get('trust_for_extraction')) or bool(source_summary.get('url_allowed'))
-        publication_type = str(getattr(source, 'publication_type', '') or '').strip().lower() if source is not None else ''
-        authority_tier = str(getattr(source, 'authority_tier', '') or '').strip().lower() if source is not None else ''
-        authoritative = bool(getattr(source, 'is_authoritative', False)) if source is not None else False
-        pdf_backed = publication_type in {'pdf', 'official_document'} or str(citation_json.get('url') or '').lower().endswith('.pdf')
-        if category in {'documents', 'contacts', 'fees', 'program_overlay', 'source_of_income'}:
-            if (official_ok or pdf_backed) and confidence >= 0.50 and citation_quality >= 0.18:
-                result.update({'validation_state': VALIDATION_STATE_VALIDATED, 'validation_quality': max(float(result.get('validation_quality') or 0.0), 0.78), 'validation_reason': 'supporting_category_accepted', 'trust_state': TRUST_STATE_VALIDATED, 'blocking_issue': False, 'binding_authority_missing': False})
-        elif category in {'lead', 'permits', 'rental_license'}:
-            if (authoritative or authority_tier == 'authoritative_official' or pdf_backed) and (official_ok or pdf_backed) and confidence >= 0.58 and citation_quality >= 0.18:
-                result.update({'validation_state': VALIDATION_STATE_VALIDATED, 'validation_quality': max(float(result.get('validation_quality') or 0.0), 0.83), 'validation_reason': 'binding_category_accepted', 'trust_state': TRUST_STATE_TRUSTED if (authoritative or authority_tier == 'authoritative_official') else TRUST_STATE_VALIDATED, 'blocking_issue': False, 'binding_authority_missing': False})
-        return result
 
-# --- append-only final gap completion overrides ---
-_COVERAGE_SUPPORTING_CATEGORIES = {'documents', 'contacts', 'fees', 'program_overlay', 'source_of_income'}
-_COVERAGE_BINDING_CATEGORIES = {'lead', 'permits', 'rental_license'}
+# === targeted promotion/backfill overlay (current-architecture preserving) ===
+_PROMOTION_BINDING_CATEGORIES = {"lead", "source_of_income", "permits", "rental_license", "registration", "inspection", "occupancy"}
+_PROMOTION_SUPPORTING_CATEGORIES = {"documents", "contacts", "fees", "program_overlay", "section8"}
 
-try:
-    _tier_final_original_validate_assertion = validate_assertion
-except NameError:
-    _tier_final_original_validate_assertion = None
+_base_validate_assertion = validate_assertion
+_base_validate_market_assertions = validate_market_assertions
 
-if _tier_final_original_validate_assertion is not None:
-    def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
-        result = dict(_tier_final_original_validate_assertion(assertion=assertion, source=source))
-        category = str(getattr(assertion, 'normalized_category', None) or getattr(assertion, 'rule_category', None) or '').strip().lower()
-        citation_json = _loads_dict(getattr(assertion, 'citation_json', None))
-        confidence = float(getattr(assertion, 'confidence', 0.0) or 0.0)
-        citation_quality = _citation_quality_from_assertion(assertion)
-        publication_type = str(getattr(source, 'publication_type', '') or '').strip().lower() if source is not None else ''
-        authority_tier = str(getattr(source, 'authority_tier', '') or '').strip().lower() if source is not None else ''
-        official_ok = bool((_source_url_validation_summary(source) or {}).get('trust_for_extraction')) if source is not None else False
-        authoritative = bool(getattr(source, 'is_authoritative', False)) if source is not None else False
-        pdf_backed = publication_type in {'pdf', 'official_document'} or str(citation_json.get('url') or '').lower().endswith('.pdf')
 
-        if category in _COVERAGE_SUPPORTING_CATEGORIES:
-            if (official_ok or pdf_backed) and confidence >= 0.55 and citation_quality >= 0.20:
-                result.update({
-                    'validation_state': VALIDATION_STATE_VALIDATED,
-                    'validation_quality': max(float(result.get('validation_quality') or 0.0), 0.76),
-                    'validation_reason': 'supporting_category_accepted',
-                    'trust_state': TRUST_STATE_VALIDATED,
-                    'blocking_issue': False,
-                    'binding_authority_missing': False,
-                })
-        elif category in _COVERAGE_BINDING_CATEGORIES:
-            if (authoritative or authority_tier == 'authoritative_official' or pdf_backed) and (official_ok or pdf_backed) and confidence >= 0.60 and citation_quality >= 0.20:
-                result.update({
-                    'validation_state': VALIDATION_STATE_VALIDATED,
-                    'validation_quality': max(float(result.get('validation_quality') or 0.0), 0.82),
-                    'validation_reason': 'binding_category_accepted',
-                    'trust_state': TRUST_STATE_TRUSTED if (authoritative or authority_tier == 'authoritative_official') else TRUST_STATE_VALIDATED,
-                    'blocking_issue': False,
-                    'binding_authority_missing': False,
-                })
-        return result
+def _is_curated_official_source(source: PolicySource | None) -> bool:
+    if source is None:
+        return False
+    url = str(getattr(source, "url", "") or "").strip()
+    if not url:
+        return False
+    tier = str(getattr(source, "authority_tier", "") or "").strip().lower()
+    publisher = str(getattr(source, "publisher", "") or "").strip().lower()
+    return bool((_official_host_allowed(url) or _is_official_host(url)) and (
+        tier == "authoritative_official"
+        or bool(getattr(source, "is_authoritative", False))
+        or "ecfr" in publisher
+        or "federal register" in publisher
+        or "mshda" in publisher
+        or "michigan legislature" in publisher
+        or "hud" in publisher
+        or "city of dearborn" in publisher
+    ))
+
+
+def _promoted_category(assertion: PolicyAssertion) -> str | None:
+    try:
+        return normalize_category(getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None))
+    except Exception:
+        raw = str(getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None) or "").strip().lower()
+        return raw or None
+
+
+def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    payload = dict(_base_validate_assertion(assertion=assertion, source=source))
+    category = _promoted_category(assertion)
+    if not _is_curated_official_source(source) or not category:
+        return payload
+
+    citation_quality = _safe_float(payload.get("citation_quality"), _citation_quality_from_assertion(assertion))
+    confidence = max(
+        _safe_float(getattr(assertion, "confidence", 0.0)),
+        _safe_float(getattr(assertion, "extraction_confidence", 0.0)),
+    )
+    conflict_hints: list[str] = []
+    try:
+        cj = _loads_dict(getattr(assertion, "citation_json", None))
+        pj = _loads_dict(getattr(assertion, "rule_provenance_json", None))
+        for maybe in (cj.get("conflict_hints"), pj.get("conflict_hints")):
+            if isinstance(maybe, list):
+                conflict_hints.extend(str(x).strip().lower() for x in maybe if str(x).strip())
+    except Exception:
+        pass
+
+    only_soft_conflict = (not conflict_hints) or set(conflict_hints) <= {"category_unmapped"}
+    if category in _PROMOTION_BINDING_CATEGORIES and citation_quality >= 0.30 and confidence >= 0.30 and only_soft_conflict:
+        payload["validation_state"] = VALIDATION_STATE_VALIDATED
+        payload["trust_state"] = TRUST_STATE_TRUSTED
+        payload["authority_use_type"] = "binding"
+        payload["coverage_status"] = "covered"
+        payload["safe_for_projection"] = True
+        payload["manual_review_required"] = False
+        payload["reason"] = "official_binding_category_promoted"
+        payload["binding_authority_missing"] = False
+        payload["blocking_issue"] = False
+        return payload
+
+    if category in _PROMOTION_SUPPORTING_CATEGORIES and citation_quality >= 0.20 and confidence >= 0.20 and only_soft_conflict:
+        payload["validation_state"] = VALIDATION_STATE_VALIDATED
+        payload["trust_state"] = TRUST_STATE_VALIDATED
+        payload["authority_use_type"] = "supporting"
+        payload["coverage_status"] = "covered"
+        payload["safe_for_projection"] = True
+        payload["manual_review_required"] = False
+        payload["reason"] = "official_supporting_category_promoted"
+        payload["binding_authority_missing"] = False
+        payload["blocking_issue"] = False
+        return payload
+
+    return payload
+
+
+def validate_market_assertions(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    source_id: int | None = None,
+) -> dict[str, object]:
+    payload = dict(
+        _base_validate_market_assertions(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+            source_id=source_id,
+        )
+    )
+    try:
+        sources_to_check = []
+        if source_id is not None:
+            src = db.get(PolicySource, int(source_id))
+            if src is not None:
+                sources_to_check.append(src)
+        else:
+            stmt = select(PolicySource)
+            if hasattr(PolicySource, "state"):
+                stmt = stmt.where(PolicySource.state == _norm_state(state))
+            for src in list(db.scalars(stmt).all()):
+                if _norm_lower(getattr(src, "county", None)) not in {None, _norm_lower(county)}:
+                    continue
+                if _norm_lower(getattr(src, "city", None)) not in {None, _norm_lower(city)}:
+                    continue
+                if hasattr(PolicySource, "pha_name") and _norm_text(getattr(src, "pha_name", None)) not in {None, _norm_text(pha_name)}:
+                    continue
+                sources_to_check.append(src)
+
+        touched = False
+        for src in sources_to_check:
+            if not _is_curated_official_source(src):
+                continue
+            a_stmt = select(PolicyAssertion).where(PolicyAssertion.source_id == int(src.id))
+            assertions = list(db.scalars(a_stmt).all())
+            blocking = False
+            for a in assertions:
+                cat = _promoted_category(a)
+                state_now = str(getattr(a, "validation_state", "") or "").strip().lower()
+                if cat in _PROMOTION_BINDING_CATEGORIES and state_now not in {"validated", "trusted", "weak_support"}:
+                    blocking = True
+                    break
+            if not blocking and str(getattr(src, "refresh_state", "") or "").strip().lower() == "blocked":
+                src.refresh_state = "degraded" if str(getattr(src, "freshness_status", "") or "").strip().lower() == "fresh" else "pending"
+                if str(getattr(src, "refresh_status_reason", "") or "").strip().lower() == "validation_blocking_conflicts":
+                    src.refresh_status_reason = None
+                db.add(src)
+                touched = True
+        if touched:
+            db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return payload
+
+# --- artifact-backed validation overlay (surgical, enum-safe) ---
+
+def _artifact_backed_source(source: PolicySource | None) -> bool:
+    if source is None:
+        return False
+    return (
+        str(getattr(source, "source_type", "") or "").strip().lower() in {"artifact", "dataset"}
+        or str(getattr(source, "publication_type", "") or "").strip().lower() in {"pdf", "official_document"}
+        or str(getattr(source, "raw_path", "") or "").strip().lower().endswith(".pdf")
+        or str(getattr(source, "url", "") or "").strip().lower().endswith(".pdf")
+    )
+
+
+def _artifact_backed_assertion(assertion: PolicyAssertion, source: PolicySource | None) -> bool:
+    for raw_payload in (
+        getattr(assertion, "citation_json", None),
+        getattr(assertion, "rule_provenance_json", None),
+        getattr(assertion, "value_json", None),
+    ):
+        payload = _loads_dict(raw_payload)
+        fam = str(payload.get("evidence_family", "") or "").strip().lower()
+        raw = str(payload.get("raw_path", "") or "").strip().lower()
+        url = str(payload.get("url", "") or "").strip().lower()
+        publication_type = str(payload.get("publication_type", "") or "").strip().lower()
+        if fam in {"artifact", "pdf"} or raw.endswith(".pdf") or url.endswith(".pdf") or publication_type in {"pdf", "official_document"}:
+            return True
+    return _artifact_backed_source(source)
+
+
+_previous_validate_assertion = validate_assertion
+
+
+def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    result = dict(_previous_validate_assertion(assertion=assertion, source=source))
+
+    artifact_backed = _artifact_backed_assertion(assertion, source)
+    validation_support = dict(result.get("validation_support") or {})
+    validation_support["artifact_backed"] = artifact_backed
+    result["validation_support"] = validation_support
+
+    category = normalize_category(
+        getattr(assertion, "normalized_category", None)
+        or getattr(assertion, "rule_category", None)
+    )
+    is_critical = bool(category in CRITICAL_BINDING_CATEGORIES)
+
+    if artifact_backed:
+        state = str(result.get("validation_state", "") or "").strip().lower()
+        if state in {VALIDATION_STATE_AMBIGUOUS, VALIDATION_STATE_UNSUPPORTED}:
+            if is_critical:
+                result["validation_state"] = VALIDATION_STATE_WEAK
+                result["validation_quality"] = max(_safe_float(result.get("validation_quality"), 0.0), 0.55)
+                result["validation_reason"] = "artifact_backed_critical_rule_needs_review"
+                result["trust_state"] = TRUST_STATE_DOWNGRADED
+                result["blocking_issue"] = False
+            else:
+                result["validation_state"] = VALIDATION_STATE_VALIDATED
+                result["validation_quality"] = max(_safe_float(result.get("validation_quality"), 0.0), 0.70)
+                result["validation_reason"] = "artifact_backed_noncritical_rule_accepted"
+                result["trust_state"] = TRUST_STATE_VALIDATED
+                result["blocking_issue"] = False
+
+    result["artifact_backed"] = artifact_backed
+    return result
+
+
+# === Final validation hardening overrides ===
+_BASE_VALIDATE_ASSERTION_HARDEN = validate_assertion
+_BASE_VALIDATE_MARKET_ASSERTIONS_HARDEN = validate_market_assertions
+
+SUPPORTING_ONLY_CATEGORIES = {"contacts", "documents", "fees", "program_overlay"}
+
+
+def _normalized_assertion_category(assertion: PolicyAssertion) -> str:
+    return normalize_category(getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None) or "") or ""
+
+
+def _source_is_authoritative_binding(source: PolicySource | None) -> bool:
+    if source is None:
+        return False
+    return (
+        str(getattr(source, "authority_tier", "") or "").strip().lower() == "authoritative_official"
+        and str(getattr(source, "authority_use_type", "") or "").strip().lower() == "binding"
+        and bool(_source_url_validation_summary(source).get("trust_for_extraction"))
+    )
+
+
+def validate_assertion(*, assertion: PolicyAssertion, source: PolicySource | None) -> dict[str, object]:
+    payload = dict(_BASE_VALIDATE_ASSERTION_HARDEN(assertion=assertion, source=source))
+    category = _normalized_assertion_category(assertion)
+    confidence = _safe_float(getattr(assertion, "confidence", 0.0))
+    extraction_confidence = _safe_float(getattr(assertion, "extraction_confidence", confidence))
+    citation_quality = _citation_quality_from_assertion(assertion)
+    explicit_excerpt = str(getattr(assertion, "raw_excerpt", "") or "").strip()
+    support = _validation_support_summary(assertion, source)
+    supporting_only = bool(support.get("supporting_only"))
+    unusable = bool(support.get("unusable"))
+    source_requires_revalidation = bool(support.get("requires_revalidation"))
+    critical_binding_required = bool(support.get("critical_binding_required"))
+    source_binding = _source_is_authoritative_binding(source)
+    official_host = bool((_source_url_validation_summary(source) or {}).get("url_allowed"))
+
+    # Hard reject weak/non-official or unusable sources so they do not pollute the governed pool.
+    if unusable or not official_host:
+        payload.update({
+            "validation_state": VALIDATION_STATE_UNSUPPORTED,
+            "validation_quality": 0.05,
+            "validation_reason": payload.get("validation_reason") or "source_not_trustworthy",
+            "trust_state": TRUST_STATE_DOWNGRADED,
+            "blocking_issue": bool(critical_binding_required),
+        })
+        return payload
+
+    # If official content changed, do not let it silently remain trusted.
+    if source_requires_revalidation:
+        payload.update({
+            "validation_state": VALIDATION_STATE_AMBIGUOUS,
+            "validation_quality": min(float(payload.get("validation_quality") or 0.25), 0.25),
+            "validation_reason": "official_source_changed_requires_revalidation",
+            "trust_state": TRUST_STATE_NEEDS_REVIEW,
+            "blocking_issue": bool(critical_binding_required),
+        })
+        return payload
+
+    # Supporting-only categories should never become projectable trusted truth.
+    if category in SUPPORTING_ONLY_CATEGORIES:
+        if confidence >= 0.65 and citation_quality >= 0.50 and explicit_excerpt:
+            payload.update({
+                "validation_state": VALIDATION_STATE_VALIDATED,
+                "validation_quality": max(float(payload.get("validation_quality") or 0.0), 0.80),
+                "validation_reason": "supporting_category_validated_non_projectable",
+                "trust_state": TRUST_STATE_VALIDATED,
+                "blocking_issue": False,
+            })
+        else:
+            payload.update({
+                "validation_state": VALIDATION_STATE_WEAK,
+                "validation_quality": min(float(payload.get("validation_quality") or 0.55), 0.55),
+                "validation_reason": "supporting_category_weak_support",
+                "trust_state": TRUST_STATE_NEEDS_REVIEW,
+                "blocking_issue": False,
+            })
+        return payload
+
+    # Critical / projectable categories require authoritative binding official support.
+    if critical_binding_required and not source_binding:
+        payload.update({
+            "validation_state": VALIDATION_STATE_UNSUPPORTED,
+            "validation_quality": 0.10,
+            "validation_reason": "critical_category_requires_binding_official_source",
+            "trust_state": TRUST_STATE_DOWNGRADED,
+            "blocking_issue": True,
+            "binding_authority_missing": True,
+        })
+        return payload
+
+    # Strong official evidence can be auto-trusted.
+    if source_binding and explicit_excerpt and confidence >= 0.78 and extraction_confidence >= 0.72 and citation_quality >= 0.70:
+        payload.update({
+            "validation_state": VALIDATION_STATE_VALIDATED,
+            "validation_quality": max(float(payload.get("validation_quality") or 0.0), 0.96),
+            "validation_reason": "binding_official_evidence_validated",
+            "trust_state": TRUST_STATE_TRUSTED,
+            "blocking_issue": False,
+            "binding_authority_missing": False,
+        })
+        return payload
+
+    # Moderate signals should stay weak and not flood governance.
+    if confidence < 0.60 or citation_quality < 0.45 or not explicit_excerpt:
+        payload.update({
+            "validation_state": VALIDATION_STATE_WEAK,
+            "validation_quality": min(float(payload.get("validation_quality") or 0.45), 0.45),
+            "validation_reason": "insufficient_signal_for_projectable_truth",
+            "trust_state": TRUST_STATE_NEEDS_REVIEW,
+            "blocking_issue": False,
+        })
+    return payload
+
+
+def validate_market_assertions(
+    db: Session,
+    *,
+    org_id: int | None,
+    state: str,
+    county: str | None,
+    city: str | None,
+    pha_name: str | None = None,
+    source_id: int | None = None,
+) -> dict[str, object]:
+    payload = dict(_BASE_VALIDATE_MARKET_ASSERTIONS_HARDEN(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        source_id=source_id,
+    ))
+    payload["validation_hardening"] = {
+        "critical_binding_categories": sorted(CRITICAL_BINDING_CATEGORIES),
+        "supporting_only_categories": sorted(SUPPORTING_ONLY_CATEGORIES),
+        "mode": "strict_official_evidence",
+    }
+    return payload

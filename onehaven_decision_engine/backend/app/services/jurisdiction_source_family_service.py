@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import MetaData, Table, and_, func, select, update
 from sqlalchemy.orm import Session
@@ -64,6 +65,28 @@ def _norm_lower(value: Any) -> str | None:
     text = _norm_text(value)
     return text.lower() if text else None
 
+
+
+
+def _host_from_url(url: Any) -> str:
+    host = urlparse(str(url or "").strip()).netloc.strip().lower()
+    if ":" in host:
+        host = host.split(":", 1)[0].strip()
+    return host
+
+
+def _looks_guessed_host(host: str) -> bool:
+    host = str(host or "").strip().lower()
+    if not host:
+        return True
+    return host.startswith("ci.") or host.startswith("co.") or ".ci." in host or ".co." in host
+
+
+def _is_official_url(url: Any) -> bool:
+    host = _host_from_url(url)
+    if not host or _looks_guessed_host(host):
+        return False
+    return host.endswith(".gov") or host.endswith(".mi.us")
 
 def _table(db: Session) -> Table:
     metadata = MetaData()
@@ -164,18 +187,25 @@ def create_source_family(
     last_reviewed_at: datetime | None = None,
 ) -> JurisdictionSourceFamilyRecord:
     table = _table(db)
+    source_url_norm = _norm_text(source_url)
+    is_official_norm = bool(is_official and _is_official_url(source_url_norm))
+    fetch_mode_norm = _norm_lower(fetch_mode)
+    status_norm = _norm_lower(status) or SOURCE_STATUS_ACTIVE
+    if source_url_norm and not is_official_norm and bool(is_official):
+        status_norm = SOURCE_STATUS_MANUAL
+        fetch_mode_norm = FETCH_MODE_MANUAL
     payload = {
         "jurisdiction_id": int(jurisdiction_id),
         "category": _norm_lower(category),
         "source_label": _norm_text(source_label),
-        "source_url": _norm_text(source_url),
+        "source_url": source_url_norm,
         "source_kind": _norm_lower(source_kind),
         "publisher_name": _norm_text(publisher_name),
         "publisher_type": _norm_lower(publisher_type),
         "authority_level": _norm_lower(authority_level),
-        "fetch_mode": _norm_lower(fetch_mode),
-        "status": _norm_lower(status) or SOURCE_STATUS_ACTIVE,
-        "is_official": bool(is_official),
+        "fetch_mode": fetch_mode_norm,
+        "status": status_norm,
+        "is_official": is_official_norm,
         "is_active": bool(is_active),
         "notes": _norm_text(notes),
         "coverage_hint": _norm_text(coverage_hint),
@@ -215,17 +245,31 @@ def upsert_source_family(
     category_norm = _norm_lower(category) or ""
     source_url_norm = _norm_text(source_url)
 
-    row = db.execute(
-        select(table)
-        .where(
-            and_(
-                table.c.jurisdiction_id == int(jurisdiction_id),
-                table.c.category == category_norm,
-                table.c.source_url == source_url_norm,
+    if source_url_norm:
+        row = db.execute(
+            select(table)
+            .where(
+                and_(
+                    table.c.jurisdiction_id == int(jurisdiction_id),
+                    table.c.category == category_norm,
+                    table.c.source_url == source_url_norm,
+                )
             )
-        )
-        .limit(1)
-    ).first()
+            .limit(1)
+        ).first()
+    else:
+        row = db.execute(
+            select(table)
+            .where(
+                and_(
+                    table.c.jurisdiction_id == int(jurisdiction_id),
+                    table.c.category == category_norm,
+                    table.c.source_url.is_(None),
+                )
+            )
+            .order_by(table.c.updated_at.desc().nullslast())
+            .limit(1)
+        ).first()
 
     if row is None:
         return create_source_family(
@@ -250,22 +294,29 @@ def upsert_source_family(
         )
 
     existing = _row_to_record(row)
+    is_official_norm = bool(is_official and _is_official_url(source_url_norm or existing.source_url))
+    fetch_mode_norm = _norm_lower(fetch_mode) or existing.fetch_mode
+    status_norm = _norm_lower(status) or SOURCE_STATUS_ACTIVE
+    if (source_url_norm or existing.source_url) and bool(is_official) and not is_official_norm:
+        status_norm = SOURCE_STATUS_MANUAL
+        fetch_mode_norm = FETCH_MODE_MANUAL
     db.execute(
         update(table)
         .where(table.c.id == existing.id)
         .values(
-            source_label=_norm_text(source_label),
+            source_label=_norm_text(source_label) or existing.source_label,
             source_kind=_norm_lower(source_kind),
-            publisher_name=_norm_text(publisher_name),
-            publisher_type=_norm_lower(publisher_type),
-            authority_level=_norm_lower(authority_level),
-            fetch_mode=_norm_lower(fetch_mode),
-            status=_norm_lower(status) or SOURCE_STATUS_ACTIVE,
-            is_official=bool(is_official),
+            publisher_name=_norm_text(publisher_name) or existing.publisher_name,
+            publisher_type=_norm_lower(publisher_type) or existing.publisher_type,
+            source_url=source_url_norm or existing.source_url,
+            authority_level=_norm_lower(authority_level) or existing.authority_level,
+            fetch_mode=fetch_mode_norm,
+            status=status_norm,
+            is_official=is_official_norm,
             is_active=bool(is_active),
-            notes=_norm_text(notes),
-            coverage_hint=_norm_text(coverage_hint),
-            review_state=_norm_lower(review_state),
+            notes=_norm_text(notes) or existing.notes,
+            coverage_hint=_norm_text(coverage_hint) or existing.coverage_hint,
+            review_state=_norm_lower(review_state) or existing.review_state,
             last_checked_at=last_checked_at,
             last_reviewed_at=last_reviewed_at,
             updated_at=datetime.utcnow(),

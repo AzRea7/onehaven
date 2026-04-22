@@ -156,3 +156,75 @@ def _artifact_snapshot_from_completeness(completeness: dict) -> dict:
     if isinstance(sla_summary, dict) and isinstance(sla_summary.get('repo_artifact_snapshot'), dict):
         return dict(sla_summary.get('repo_artifact_snapshot') or {})
     return {}
+
+
+
+# --- surgical final lockout override ---
+
+LEGAL_BLOCKING_CATEGORIES = {
+    "registration", "inspection", "occupancy", "lead", "section8", "program_overlay",
+    "safety", "source_of_income", "permits", "rental_license",
+}
+
+def _critical_missing_binding_categories(completeness: dict) -> list[str]:
+    required = set(str(x).strip() for x in list(completeness.get("critical_categories") or []) if str(x).strip())
+    legally_binding = set(str(x).strip() for x in list(completeness.get("legally_binding_categories") or []) if str(x).strip())
+    missing = set(str(x).strip() for x in list(completeness.get("missing_categories") or []) if str(x).strip())
+    return sorted((required | legally_binding | LEGAL_BLOCKING_CATEGORIES).intersection(missing))
+
+
+def _lockout_truth_basis(payload: dict) -> dict:
+    lockout_causing_categories = _dedupe(list(payload.get("lockout_causing_categories") or []))
+    authority_gap_categories = _dedupe(list(payload.get("authority_gap_categories") or []))
+    critical_binding_failure_categories = _dedupe(list(payload.get("critical_binding_failure_categories") or []))
+    validation_pending_categories = _dedupe(list(payload.get("validation_pending_categories") or []))
+    safe = not bool(lockout_causing_categories or critical_binding_failure_categories)
+    return {
+        "safe_to_rely_on": bool(safe),
+        "lockout_active": bool(payload.get("lockout_active")),
+        "lockout_reason": payload.get("lockout_reason"),
+        "lockout_causing_categories": lockout_causing_categories,
+        "authority_gap_categories": authority_gap_categories,
+        "critical_binding_failure_categories": critical_binding_failure_categories,
+        "validation_pending_categories": validation_pending_categories,
+    }
+
+try:
+    _surgical_lockout_original_profile_lockout_payload = profile_lockout_payload
+except NameError:
+    _surgical_lockout_original_profile_lockout_payload = None
+
+if _surgical_lockout_original_profile_lockout_payload is not None:
+    def profile_lockout_payload(profile: JurisdictionProfile, completeness: dict) -> dict:
+        payload = dict(_surgical_lockout_original_profile_lockout_payload(profile, completeness))
+        critical_missing_binding = _critical_missing_binding_categories(completeness)
+        authority_gap_categories = _dedupe(
+            list(payload.get("authority_gap_categories") or [])
+            + list(critical_missing_binding)
+        )
+        lockout_causing_categories = _dedupe(
+            [c for c in list(payload.get("lockout_causing_categories") or []) if c in LEGAL_BLOCKING_CATEGORIES]
+            + [c for c in authority_gap_categories if c in LEGAL_BLOCKING_CATEGORIES]
+            + [c for c in list(payload.get("critical_binding_failure_categories") or []) if c in LEGAL_BLOCKING_CATEGORIES]
+        )
+        informational_gap_categories = _dedupe(
+            [c for c in list(payload.get("informational_gap_categories") or []) if c not in set(lockout_causing_categories)]
+            + [c for c in list(payload.get("missing_categories") or []) if c not in set(lockout_causing_categories)]
+            + [c for c in list(payload.get("weak_support_categories") or []) if c not in set(lockout_causing_categories)]
+            + [c for c in list(payload.get("validation_pending_categories") or []) if c not in set(lockout_causing_categories)]
+        )
+        hard_lock = bool(payload.get("lockout_active")) or bool(lockout_causing_categories)
+        lockout_reason = payload.get("lockout_reason")
+        if hard_lock and not lockout_reason:
+            lockout_reason = "critical_categories_missing_binding_authority"
+
+        payload["authority_gap_categories"] = authority_gap_categories
+        payload["lockout_causing_categories"] = lockout_causing_categories
+        payload["informational_gap_categories"] = informational_gap_categories
+        payload["critical_missing_binding_categories"] = critical_missing_binding
+        payload["lockout_active"] = hard_lock
+        payload["blocking_state"] = bool(payload.get("blocking_state")) or hard_lock
+        payload["lockout_reason"] = lockout_reason
+        payload["current_truth_basis"] = _lockout_truth_basis(payload)
+        payload["safe_to_rely_on"] = bool(payload["current_truth_basis"].get("safe_to_rely_on"))
+        return payload

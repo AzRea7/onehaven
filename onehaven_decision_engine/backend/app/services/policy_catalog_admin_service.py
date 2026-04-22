@@ -1,14 +1,19 @@
-# backend/app/services/policy_catalog_admin_service.py
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.policy_models import PolicyCatalogEntry
-from app.services.policy_catalog import PolicyCatalogItem, catalog_for_market, filter_official_catalog_items
+from app.services.policy_catalog import (
+    PolicyCatalogItem,
+    catalog_for_market,
+    filter_official_catalog_items,
+    policy_catalog_source_family,
+)
 
 
 def _norm_state(v: Optional[str]) -> str:
@@ -45,12 +50,14 @@ def _row_to_item(row: PolicyCatalogEntry) -> PolicyCatalogItem:
         priority=int(row.priority or 100),
     )
 
+
 def _item_url_key(item: PolicyCatalogItem) -> str:
     return (item.url or "").strip().lower()
 
 
 def _is_truthy_authoritative(item: PolicyCatalogItem) -> bool:
     return bool(getattr(item, "is_authoritative", False))
+
 
 def _market_stmt(
     *,
@@ -86,17 +93,12 @@ def list_catalog_entries_for_market(
     )
 
     q = select(PolicyCatalogEntry).where(PolicyCatalogEntry.state == st)
-
     if org_id is None:
         q = q.where(PolicyCatalogEntry.org_id.is_(None))
     else:
-        q = q.where(
-            (PolicyCatalogEntry.org_id == org_id)
-            | (PolicyCatalogEntry.org_id.is_(None))
-        )
+        q = q.where((PolicyCatalogEntry.org_id == org_id) | (PolicyCatalogEntry.org_id.is_(None)))
 
     rows = list(db.scalars(q).all())
-
     out: list[PolicyCatalogEntry] = []
     for row in rows:
         if row.county is not None and row.county != cnty:
@@ -111,6 +113,60 @@ def list_catalog_entries_for_market(
     return out
 
 
+_DEFAULT_EVIDENCE_PRIORITY = [
+    "legal_primary",
+    "state_program",
+    "municipal_operations",
+    "program_admin",
+    "supporting_guidance",
+    "unknown",
+]
+
+
+def _catalog_item_source_family(item: PolicyCatalogItem) -> str:
+    try:
+        return str(policy_catalog_source_family(item))
+    except Exception:
+        source_kind = str(getattr(item, "source_kind", None) or "").strip().lower()
+        if "anchor" in source_kind or "code" in source_kind or "ordinance" in source_kind:
+            return "legal_primary"
+        if "state" in source_kind:
+            return "state_program"
+        if "pha" in source_kind or "housing_authority" in source_kind:
+            return "program_admin"
+        if "municipal" in source_kind or "city_" in source_kind or "county_" in source_kind:
+            return "municipal_operations"
+        return "unknown"
+
+
+def _coverage_category_hints_for_item(item: PolicyCatalogItem) -> list[str]:
+    text = " ".join(
+        [
+            str(getattr(item, "title", "") or ""),
+            str(getattr(item, "notes", "") or ""),
+            str(getattr(item, "url", "") or ""),
+        ]
+    ).lower()
+    hints: list[str] = []
+    checks = {
+        "lead": ["lead", "lbp"],
+        "source_of_income": ["source of income", "voucher discrimination", "fair housing"],
+        "permits": ["permit"],
+        "documents": ["document", "application", "packet", "submit"],
+        "contacts": ["contact", "office", "department", "division"],
+        "rental_license": ["license", "registration", "certificate"],
+        "fees": ["fee", "payment"],
+        "program_overlay": ["voucher", "hcv", "nspire", "hap", "overlay"],
+        "inspection": ["inspection"],
+        "occupancy": ["occupancy", "certificate of occupancy", "re-occupancy"],
+        "registration": ["registration"],
+    }
+    for category, pats in checks.items():
+        if any(p in text for p in pats):
+            hints.append(category)
+    return sorted(set(hints))
+
+
 def merged_catalog_for_market(
     db: Session,
     *,
@@ -122,12 +178,7 @@ def merged_catalog_for_market(
     focus: str = "se_mi_extended",
 ) -> list[PolicyCatalogItem]:
     baseline = filter_official_catalog_items(
-        catalog_for_market(
-            state=state,
-            county=county,
-            city=city,
-            focus=focus,
-        )
+        catalog_for_market(state=state, county=county, city=city, focus=focus)
     )
     db_rows = list_catalog_entries_for_market(
         db,
@@ -147,17 +198,15 @@ def merged_catalog_for_market(
 
         if not row.is_active:
             if baseline_url:
-                suppressed_urls.add(baseline_url)
+                suppressed_urls.add(baseline_url.strip().lower())
             if row_url:
-                suppressed_urls.add(row_url)
+                suppressed_urls.add(row_url.strip().lower())
             continue
 
         if not row_url:
             continue
 
         item = _row_to_item(row)
-
-        # Hard boundary: DB overrides may extend the catalog, but only with vetted official sources.
         vetted = filter_official_catalog_items([item])
         if not vetted:
             continue
@@ -166,18 +215,14 @@ def merged_catalog_for_market(
         overrides_by_url[_item_url_key(item)] = item
 
         if baseline_url and baseline_url != row_url:
-            suppressed_urls.add(baseline_url.strip())
+            suppressed_urls.add(baseline_url.strip().lower())
 
     merged: list[PolicyCatalogItem] = []
-
     for item in baseline:
         url_key = _item_url_key(item)
         if not url_key or url_key in suppressed_urls:
             continue
-        if url_key in overrides_by_url:
-            merged.append(overrides_by_url[url_key])
-        else:
-            merged.append(item)
+        merged.append(overrides_by_url.get(url_key, item))
 
     for url_key, item in overrides_by_url.items():
         if url_key in suppressed_urls:
@@ -186,18 +231,46 @@ def merged_catalog_for_market(
             merged.append(item)
 
     merged = filter_official_catalog_items(merged)
-    merged.sort(
-        key=lambda x: (
-            int(x.priority or 100),
-            0 if _is_truthy_authoritative(x) else 1,
-            x.title or "",
-            x.url or "",
+    enriched: list[PolicyCatalogItem] = []
+    for item in merged:
+        notes = str(getattr(item, "notes", "") or "")
+        hints = _coverage_category_hints_for_item(item)
+        if hints:
+            base_parts = [p.strip() for p in notes.split("|") if p.strip() and not p.strip().lower().startswith("category_hints=")]
+            base_parts.append("category_hints=" + ",".join(hints))
+            notes = " | ".join(base_parts).strip()
+        enriched.append(
+            PolicyCatalogItem(
+                url=item.url,
+                state=item.state,
+                county=item.county,
+                city=item.city,
+                pha_name=item.pha_name,
+                program_type=item.program_type,
+                publisher=item.publisher,
+                title=item.title,
+                notes=notes,
+                source_kind=item.source_kind,
+                is_authoritative=item.is_authoritative,
+                priority=item.priority,
+            )
+        )
+
+    enriched.sort(
+        key=lambda item: (
+            _DEFAULT_EVIDENCE_PRIORITY.index(_catalog_item_source_family(item))
+            if _catalog_item_source_family(item) in _DEFAULT_EVIDENCE_PRIORITY
+            else len(_DEFAULT_EVIDENCE_PRIORITY),
+            0 if _is_truthy_authoritative(item) else 1,
+            int(getattr(item, "priority", 100) or 100),
+            str(getattr(item, "title", "") or ""),
+            str(getattr(item, "url", "") or ""),
         )
     )
 
     deduped: list[PolicyCatalogItem] = []
     seen: set[str] = set()
-    for item in merged:
+    for item in enriched:
         key = _item_url_key(item)
         if not key or key in seen:
             continue
@@ -216,13 +289,8 @@ def bootstrap_market_catalog_entries(
     city: Optional[str],
     pha_name: Optional[str] = None,
     focus: str = "se_mi_extended",
-) -> dict:
-    baseline = catalog_for_market(
-        state=state,
-        county=county,
-        city=city,
-        focus=focus,
-    )
+) -> dict[str, Any]:
+    baseline = catalog_for_market(state=state, county=county, city=city, focus=focus)
     existing = list_catalog_entries_for_market(
         db,
         org_id=org_id,
@@ -234,9 +302,7 @@ def bootstrap_market_catalog_entries(
     existing_urls = {r.url.strip() for r in existing if r.url}
 
     created = 0
-    st, cnty, cty, pha = _market_stmt(
-        org_id=org_id, state=state, county=county, city=city, pha_name=pha_name
-    )
+    st, cnty, cty, pha = _market_stmt(org_id=org_id, state=state, county=county, city=city, pha_name=pha_name)
 
     for item in baseline:
         url = item.url.strip()
@@ -278,7 +344,7 @@ def reset_market_catalog_entries(
     county: Optional[str],
     city: Optional[str],
     pha_name: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     rows = list_catalog_entries_for_market(
         db,
         org_id=org_id,
@@ -312,9 +378,7 @@ def create_catalog_entry(
     priority: int,
     baseline_url: Optional[str] = None,
 ) -> PolicyCatalogEntry:
-    st, cnty, cty, pha = _market_stmt(
-        org_id=org_id, state=state, county=county, city=city, pha_name=pha_name
-    )
+    st, cnty, cty, pha = _market_stmt(org_id=org_id, state=state, county=county, city=city, pha_name=pha_name)
     row = PolicyCatalogEntry(
         org_id=org_id,
         state=st,
@@ -413,9 +477,6 @@ def disable_catalog_entry(
     return row
 
 
-_base_source_kind_coverage_for_market = None
-
-
 def source_kind_coverage_for_market(
     db: Session,
     *,
@@ -425,7 +486,7 @@ def source_kind_coverage_for_market(
     city: Optional[str],
     pha_name: Optional[str] = None,
     focus: str = "se_mi_extended",
-) -> dict:
+) -> dict[str, Any]:
     items = merged_catalog_for_market(
         db,
         org_id=org_id,
@@ -441,21 +502,8 @@ def source_kind_coverage_for_market(
         key = (item.source_kind or "unknown").strip()
         counts[key] = counts.get(key, 0) + 1
 
-    required = [
-        "federal_anchor",
-        "state_anchor",
-        "municipal_registration",
-        "municipal_inspection",
-    ]
-
-    recommended = [
-        "municipal_certificate",
-        "municipal_enforcement",
-        "municipal_ordinance",
-        "pha_guidance",
-        "pha_plan",
-        "state_hcv_anchor",
-    ]
+    required = ["federal_anchor", "state_anchor", "municipal_registration", "municipal_inspection"]
+    recommended = ["municipal_certificate", "municipal_enforcement", "municipal_ordinance", "pha_guidance", "pha_plan", "state_hcv_anchor"]
 
     missing_required = [k for k in required if counts.get(k, 0) <= 0]
     missing_recommended = [k for k in recommended if counts.get(k, 0) <= 0]
@@ -473,48 +521,7 @@ def source_kind_coverage_for_market(
             "housing_authority_overlays",
             "org_overrides",
         ],
-        "recommended_source_layers": {
-            "statewide_baseline": ["state statute", "state housing program guidance", "federal anchors"],
-            "county_rules": ["county code", "county health / building authorities"],
-            "city_rules": ["city ordinance", "rental inspection program", "certificate / occupancy pages"],
-            "housing_authority_overlays": ["PHA admin plan", "landlord packet", "program notices"],
-            "org_overrides": ["internal operations memo", "approved exception handling"],
-        },
-        "governance_dependency": {
-            "full_coverage_requires": "governed_active_rules",
-            "partial_coverage_may_include": ["approved_not_active", "inferred", "partial"],
-            "excluded_from_full_coverage": ["draft", "replaced", "superseded", "conflicting"],
-        },
     }
-
-# === Tier 3 control-plane overrides ===
-from typing import Any as _Tier3Any
-
-_DEFAULT_EVIDENCE_PRIORITY = [
-    "legal_primary",
-    "state_program",
-    "municipal_operations",
-    "program_admin",
-    "supporting_guidance",
-    "unknown",
-]
-
-
-def _catalog_item_source_family(item: PolicyCatalogItem) -> str:
-    try:
-        from app.services.policy_catalog import policy_catalog_source_family
-        return str(policy_catalog_source_family(item))
-    except Exception:
-        source_kind = str(getattr(item, "source_kind", None) or "").strip().lower()
-        if "anchor" in source_kind or "code" in source_kind:
-            return "legal_primary"
-        if "state" in source_kind:
-            return "state_program"
-        if "pha" in source_kind or "housing_authority" in source_kind:
-            return "program_admin"
-        if "municipal" in source_kind or "city_" in source_kind or "county_" in source_kind:
-            return "municipal_operations"
-        return "unknown"
 
 
 def catalog_control_plane_for_market(
@@ -525,7 +532,7 @@ def catalog_control_plane_for_market(
     county: Optional[str],
     city: Optional[str],
     pha_name: Optional[str] = None,
-) -> dict[str, _Tier3Any]:
+) -> dict[str, Any]:
     rows = list_catalog_entries_for_market(
         db,
         org_id=org_id,
@@ -537,6 +544,7 @@ def catalog_control_plane_for_market(
     disabled_urls: list[str] = []
     override_urls: list[str] = []
     source_family_counts: dict[str, int] = {}
+
     for row in rows:
         item = _row_to_item(row)
         family = _catalog_item_source_family(item)
@@ -548,6 +556,7 @@ def catalog_control_plane_for_market(
                 disabled_urls.append(str(row.baseline_url).strip())
         else:
             override_urls.append(str(getattr(row, "url", "") or "").strip())
+
     return {
         "truth_model": "catalog_control_plane",
         "service_role": "operational_control_plane",
@@ -563,41 +572,6 @@ def catalog_control_plane_for_market(
     }
 
 
-_tier3_original_merged_catalog_for_market = merged_catalog_for_market
-
-
-def merged_catalog_for_market(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str] = None,
-    focus: str = "se_mi_extended",
-) -> list[PolicyCatalogItem]:
-    items = _tier3_original_merged_catalog_for_market(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-        focus=focus,
-    )
-    items = list(items or [])
-    items.sort(
-        key=lambda item: (
-            _DEFAULT_EVIDENCE_PRIORITY.index(_catalog_item_source_family(item)) if _catalog_item_source_family(item) in _DEFAULT_EVIDENCE_PRIORITY else len(_DEFAULT_EVIDENCE_PRIORITY),
-            0 if bool(getattr(item, "is_authoritative", False)) else 1,
-            int(getattr(item, "priority", 100) or 100),
-            str(getattr(item, "title", "") or ""),
-            str(getattr(item, "url", "") or ""),
-        )
-    )
-    return items
-
-
 def catalog_admin_summary_for_market(
     db: Session,
     *,
@@ -607,7 +581,7 @@ def catalog_admin_summary_for_market(
     city: Optional[str],
     pha_name: Optional[str] = None,
     focus: str = "se_mi_extended",
-) -> dict[str, _Tier3Any]:
+) -> dict[str, Any]:
     items = merged_catalog_for_market(
         db,
         org_id=org_id,
@@ -635,99 +609,3 @@ def catalog_admin_summary_for_market(
         "merged_source_family_counts": families,
         "top_urls": [str(getattr(item, "url", "") or "") for item in items[:20]],
     }
-
-
-# --- coverage completion overrides ---
-
-_admin_original_merged_catalog_for_market = merged_catalog_for_market
-
-
-def _coverage_category_hints_for_item(item: PolicyCatalogItem) -> list[str]:
-    text = ' '.join([
-        str(getattr(item, 'title', '') or ''),
-        str(getattr(item, 'notes', '') or ''),
-        str(getattr(item, 'url', '') or ''),
-    ]).lower()
-    hints: list[str] = []
-    checks = {
-        'lead': ['lead', 'lbp'],
-        'source_of_income': ['source of income', 'voucher discrimination'],
-        'permits': ['permit'],
-        'documents': ['document', 'application', 'packet', 'submit'],
-        'contacts': ['contact', 'office', 'department', 'division'],
-        'rental_license': ['license', 'registration', 'certificate'],
-        'fees': ['fee', 'payment'],
-        'program_overlay': ['voucher', 'hcv', 'nspire', 'hap', 'overlay'],
-        'inspection': ['inspection'],
-        'occupancy': ['occupancy', 'certificate of occupancy', 're-occupancy'],
-        'registration': ['registration'],
-    }
-    for category, pats in checks.items():
-        if any(p in text for p in pats):
-            hints.append(category)
-    return sorted(set(hints))
-
-
-def merged_catalog_for_market(
-    db: Session,
-    *,
-    org_id: Optional[int],
-    state: str,
-    county: Optional[str],
-    city: Optional[str],
-    pha_name: Optional[str] = None,
-    focus: str = 'se_mi_extended',
-) -> list[PolicyCatalogItem]:
-    items = list(_admin_original_merged_catalog_for_market(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, focus=focus))
-    enriched: list[PolicyCatalogItem] = []
-    for item in items:
-        hints = _coverage_category_hints_for_item(item)
-        notes = str(getattr(item, 'notes', '') or '')
-        if hints:
-            notes = (notes + (' | ' if notes else '') + 'category_hints=' + ','.join(hints)).strip()
-        enriched.append(
-            PolicyCatalogItem(
-                url=item.url,
-                state=item.state,
-                county=item.county,
-                city=item.city,
-                pha_name=item.pha_name,
-                program_type=item.program_type,
-                publisher=item.publisher,
-                title=item.title,
-                notes=notes,
-                source_kind=item.source_kind,
-                is_authoritative=item.is_authoritative,
-                priority=item.priority,
-            )
-        )
-    return enriched
-
-
-# --- final gap completion overrides ---
-try:
-    _coverage_final_merged_catalog_orig = merged_catalog_for_market
-except NameError:
-    _coverage_final_merged_catalog_orig = None
-
-if _coverage_final_merged_catalog_orig is not None:
-    def merged_catalog_for_market(db: Session, *, org_id: Optional[int], state: str, county: Optional[str], city: Optional[str], pha_name: Optional[str] = None, focus: str = 'se_mi_extended') -> list[PolicyCatalogItem]:
-        rows = list(_coverage_final_merged_catalog_orig(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, focus=focus))
-        enriched=[]
-        for item in rows:
-            notes = str(getattr(item, 'notes', '') or '')
-            hints = []
-            title = str(getattr(item, 'title', '') or '').lower()
-            url = str(getattr(item, 'url', '') or '').lower()
-            if 'application' in title or 'payment' in title:
-                hints.extend(['fees','documents'])
-            if 'registering' in title or 'rental property' in title:
-                hints.extend(['registration','rental_license'])
-            if 're-occupancy' in title or 'certificate' in title:
-                hints.extend(['occupancy','inspection'])
-            if 'permit' in title or 'permit' in url:
-                hints.append('permits')
-            if hints:
-                notes = (notes + (' | ' if notes else '') + 'category_hints=' + ','.join(sorted(set(hints)))).strip()
-            enriched.append(PolicyCatalogItem(url=item.url,state=item.state,county=item.county,city=item.city,pha_name=item.pha_name,program_type=item.program_type,publisher=item.publisher,title=item.title,notes=notes,source_kind=item.source_kind,is_authoritative=item.is_authoritative,priority=item.priority))
-        return enriched

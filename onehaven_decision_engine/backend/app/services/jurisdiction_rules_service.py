@@ -1,11 +1,10 @@
-# backend/app/services/jurisdiction_rules_service.py
 from __future__ import annotations
 
 import json
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..domain.audit import audit_write
@@ -13,10 +12,13 @@ from ..domain.jurisdiction_defaults import defaults_for_michigan
 from ..models import JurisdictionRule
 from ..policy_models import PolicyAssertion
 
-
 SAFE_GOVERNANCE_STATES = {"active"}
 NON_PROJECTABLE_GOVERNANCE_STATES = {"draft", "replaced"}
 NON_PROJECTABLE_RULE_STATUSES = {"candidate", "draft", "replaced", "superseded", "conflicting", "stale"}
+NON_PROJECTABLE_COVERAGE_STATUSES = {"candidate", "partial", "inferred", "conflicting", "stale", "superseded"}
+MANUAL_REVIEW_REVIEW_STATUS = "needs_manual_review"
+HIGH_RISK_VALIDATION_STATES = {"conflicting"}
+NON_PROJECTABLE_VALIDATION_STATES = {"weak_support", "ambiguous", "unsupported", "conflicting"}
 
 
 def _norm_city(s: Optional[str]) -> Optional[str]:
@@ -60,7 +62,7 @@ def _loads_json_dict(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
     if isinstance(value, dict):
-        return value
+        return dict(value)
     if isinstance(value, str):
         raw = value.strip()
         if not raw:
@@ -96,55 +98,130 @@ def _conflict_hints_for_assertion(assertion: PolicyAssertion) -> list[str]:
     return sorted(set(out))
 
 
+def _requires_manual_review(assertion: PolicyAssertion) -> bool:
+    validation_state = (getattr(assertion, "validation_state", None) or "pending").strip().lower()
+    review_status = (getattr(assertion, "review_status", None) or "").strip().lower()
+    trust_state = (getattr(assertion, "trust_state", None) or "").strip().lower()
+    conflict_hints = _conflict_hints_for_assertion(assertion)
+    return bool(
+        validation_state in HIGH_RISK_VALIDATION_STATES
+        or review_status == MANUAL_REVIEW_REVIEW_STATUS
+        or (trust_state == "needs_review" and bool(conflict_hints))
+    )
+
+
+def _artifact_backed_assertion(assertion: PolicyAssertion) -> bool:
+    """
+    Hardened artifact/PDF detector.
+
+    The prior bottom-of-file patch assumed these JSON-ish fields were already dicts.
+    In practice they may be dicts, JSON strings, empty strings, or None.
+    """
+    payloads = [
+        _loads_json_dict(getattr(assertion, "citation_json", None)),
+        _loads_json_dict(getattr(assertion, "rule_provenance_json", None)),
+        _loads_json_dict(getattr(assertion, "value_json", None)),
+        _loads_json_dict(getattr(assertion, "change_summary", None)),
+    ]
+
+    for payload in payloads:
+        if not payload:
+            continue
+
+        fam = str(payload.get("evidence_family", "") or "").strip().lower()
+        raw = str(payload.get("raw_path", "") or "").strip().lower()
+        url = str(payload.get("url", "") or "").strip().lower()
+        publication_type = str(payload.get("publication_type", "") or "").strip().lower()
+        source_kind = str(payload.get("source_kind", "") or "").strip().lower()
+        matched_pdf_name = str(payload.get("matched_pdf_name", "") or "").strip().lower()
+
+        if fam in {"artifact", "pdf", "document", "official_document"}:
+            return True
+        if publication_type in {"pdf", "official_document"}:
+            return True
+        if source_kind == "pdf":
+            return True
+        if raw.endswith(".pdf") or url.endswith(".pdf"):
+            return True
+        if matched_pdf_name.endswith(".pdf"):
+            return True
+
+        citation_payload = _loads_json_dict(payload.get("citation"))
+        if citation_payload:
+            c_url = str(citation_payload.get("url", "") or "").strip().lower()
+            c_publication_type = str(citation_payload.get("publication_type", "") or "").strip().lower()
+            c_source_kind = str(citation_payload.get("source_kind", "") or "").strip().lower()
+            c_matched_pdf_name = str(citation_payload.get("matched_pdf_name", "") or "").strip().lower()
+
+            if c_publication_type in {"pdf", "official_document"}:
+                return True
+            if c_source_kind == "pdf":
+                return True
+            if c_url.endswith(".pdf") or c_matched_pdf_name.endswith(".pdf"):
+                return True
+
+    return False
+
+
 def assertion_governance_summary(assertion: PolicyAssertion) -> dict[str, Any]:
     governance_state = (getattr(assertion, "governance_state", None) or "").strip().lower()
     rule_status = (getattr(assertion, "rule_status", None) or "").strip().lower()
     review_status = (getattr(assertion, "review_status", None) or "").strip().lower()
     coverage_status = (getattr(assertion, "coverage_status", None) or "").strip().lower()
+    validation_state = (getattr(assertion, "validation_state", None) or "pending").strip().lower()
+    trust_state = (getattr(assertion, "trust_state", None) or "extracted").strip().lower()
     superseded = getattr(assertion, "superseded_by_assertion_id", None) is not None
     replaced = getattr(assertion, "replaced_by_assertion_id", None) is not None
     is_current = bool(getattr(assertion, "is_current", False))
     conflict_hints = _conflict_hints_for_assertion(assertion)
+    manual_review_required = _requires_manual_review(assertion)
+    artifact_backed = _artifact_backed_assertion(assertion)
 
+    approved_like = governance_state in {"active", "approved"} and review_status == "verified"
     safe_for_projection = (
-        governance_state in SAFE_GOVERNANCE_STATES
-        and rule_status == "active"
-        and review_status == "verified"
-        and coverage_status not in {"conflicting", "candidate", "partial", "inferred", "stale"}
-        and not superseded
-        and not replaced
-        and not conflict_hints
-        and is_current
+        approved_like
+        and rule_status in {"active", "approved"}
+        and validation_state == "validated"
+        and trust_state in {"validated", "trusted"}
+        and coverage_status not in NON_PROJECTABLE_COVERAGE_STATUSES
+        and not superseded and not replaced and not conflict_hints and not manual_review_required and is_current
     )
 
-    lifecycle_blockers: list[str] = []
-    if governance_state not in SAFE_GOVERNANCE_STATES:
-        lifecycle_blockers.append(f"governance_state={governance_state or 'unknown'}")
-    if rule_status != "active":
-        lifecycle_blockers.append(f"rule_status={rule_status or 'unknown'}")
-    if review_status != "verified":
-        lifecycle_blockers.append(f"review_status={review_status or 'unknown'}")
-    if coverage_status in {"candidate", "partial", "inferred", "conflicting", "stale"}:
-        lifecycle_blockers.append(f"coverage_status={coverage_status}")
-    if superseded:
-        lifecycle_blockers.append("superseded")
-    if replaced:
-        lifecycle_blockers.append("replaced")
-    if not is_current:
-        lifecycle_blockers.append("not_current")
-    lifecycle_blockers.extend(conflict_hints)
+    partial_projectable = (
+        not safe_for_projection and approved_like and validation_state == 'validated' and trust_state in {'validated','trusted'}
+        and not superseded and not replaced and not manual_review_required and coverage_status not in {'candidate','conflicting','stale','superseded'}
+    )
+    if artifact_backed and not safe_for_projection and approved_like and validation_state == 'validated' and trust_state in {'validated','trusted'}:
+        partial_projectable = True
 
+    lifecycle_blockers=[]
+    if not approved_like: lifecycle_blockers.append(f'governance_state={governance_state or "unknown"}')
+    if rule_status not in {'active','approved'}: lifecycle_blockers.append(f'rule_status={rule_status or "unknown"}')
+    if review_status != 'verified': lifecycle_blockers.append(f'review_status={review_status or "unknown"}')
+    if validation_state != 'validated': lifecycle_blockers.append(f'validation_state={validation_state or "unknown"}')
+    if trust_state not in {'validated','trusted'}: lifecycle_blockers.append(f'trust_state={trust_state or "unknown"}')
+    if coverage_status in NON_PROJECTABLE_COVERAGE_STATUSES: lifecycle_blockers.append(f'coverage_status={coverage_status}')
+    if superseded: lifecycle_blockers.append('superseded')
+    if replaced: lifecycle_blockers.append('replaced')
+    if not is_current: lifecycle_blockers.append('not_current')
+    if manual_review_required: lifecycle_blockers.append('manual_review_required')
+    lifecycle_blockers.extend(conflict_hints)
     return {
-        "assertion_id": int(getattr(assertion, "id", 0) or 0),
-        "rule_key": getattr(assertion, "rule_key", None),
-        "normalized_category": getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None),
-        "governance_state": governance_state,
-        "rule_status": rule_status,
-        "review_status": review_status,
-        "coverage_status": coverage_status,
-        "is_current": is_current,
-        "safe_for_projection": safe_for_projection,
-        "lifecycle_blockers": lifecycle_blockers,
+        'assertion_id': int(getattr(assertion,'id',0) or 0),
+        'rule_key': getattr(assertion,'rule_key',None),
+        'normalized_category': getattr(assertion,'normalized_category',None) or getattr(assertion,'rule_category',None),
+        'governance_state': governance_state,
+        'rule_status': rule_status,
+        'review_status': review_status,
+        'coverage_status': coverage_status,
+        'validation_state': validation_state,
+        'trust_state': trust_state,
+        'is_current': is_current,
+        'safe_for_projection': safe_for_projection,
+        'partial_projectable': partial_projectable,
+        'manual_review_required': manual_review_required,
+        'artifact_backed': artifact_backed,
+        'lifecycle_blockers': sorted(set(lifecycle_blockers)),
     }
 
 
@@ -153,18 +230,11 @@ def is_assertion_governed_active(assertion: PolicyAssertion) -> bool:
 
 
 def ensure_seeded_for_org(db: Session, *, org_id: int) -> dict[str, Any]:
-    existing = db.scalar(
-        select(JurisdictionRule.id).where(JurisdictionRule.org_id == org_id).limit(1)
-    )
+    existing = db.scalar(select(JurisdictionRule.id).where(JurisdictionRule.org_id == org_id).limit(1))
     if existing is not None:
         return {"seeded": False, "reason": "org already has jurisdiction rules"}
 
-    globals_ = (
-        db.execute(select(JurisdictionRule).where(JurisdictionRule.org_id.is_(None)))
-        .scalars()
-        .all()
-    )
-
+    globals_ = db.execute(select(JurisdictionRule).where(JurisdictionRule.org_id.is_(None))).scalars().all()
     created = 0
     now = datetime.utcnow()
 
@@ -225,13 +295,7 @@ def _jr_to_dict(jr: JurisdictionRule) -> dict[str, Any]:
     }
 
 
-def create_rule(
-    db: Session,
-    *,
-    org_id: int,
-    actor_user_id: Optional[int],
-    payload: dict[str, Any],
-) -> JurisdictionRule:
+def create_rule(db: Session, *, org_id: int, actor_user_id: Optional[int], payload: dict[str, Any]) -> JurisdictionRule:
     now = datetime.utcnow()
     row = JurisdictionRule(
         org_id=org_id,
@@ -250,35 +314,15 @@ def create_rule(
     db.add(row)
     db.commit()
     db.refresh(row)
-
-    audit_write(
-        db,
-        org_id=org_id,
-        actor_user_id=actor_user_id,
-        action="jurisdiction_rule_created",
-        entity_type="jurisdiction_rule",
-        entity_id=str(row.id),
-        before=None,
-        after=_jr_to_dict(row),
-        commit=True,
-    )
+    audit_write(db, org_id=org_id, actor_user_id=actor_user_id, action="jurisdiction_rule_created", entity_type="jurisdiction_rule", entity_id=str(row.id), before=None, after=_jr_to_dict(row), commit=True)
     return row
 
 
-def update_rule(
-    db: Session,
-    *,
-    org_id: int,
-    actor_user_id: Optional[int],
-    rule_id: int,
-    payload: dict[str, Any],
-) -> JurisdictionRule:
+def update_rule(db: Session, *, org_id: int, actor_user_id: Optional[int], rule_id: int, payload: dict[str, Any]) -> JurisdictionRule:
     row = db.get(JurisdictionRule, rule_id)
     if row is None or row.org_id != org_id:
         raise ValueError("jurisdiction rule not found")
-
     before = _jr_to_dict(row)
-
     if "city" in payload:
         row.city = _norm_city(payload.get("city"))
     if "state" in payload:
@@ -297,46 +341,23 @@ def update_rule(
         row.tenant_waitlist_depth = payload.get("tenant_waitlist_depth")
     if "notes" in payload:
         row.notes = payload.get("notes")
-
     row.updated_at = datetime.utcnow()
     db.add(row)
     db.commit()
     db.refresh(row)
-
-    audit_write(
-        db,
-        org_id=org_id,
-        actor_user_id=actor_user_id,
-        action="jurisdiction_rule_updated",
-        entity_type="jurisdiction_rule",
-        entity_id=str(row.id),
-        before=before,
-        after=_jr_to_dict(row),
-        commit=True,
-    )
+    audit_write(db, org_id=org_id, actor_user_id=actor_user_id, action="jurisdiction_rule_updated", entity_type="jurisdiction_rule", entity_id=str(row.id), before=before, after=_jr_to_dict(row), commit=True)
     return row
 
 
-def list_rules_for_scope(
-    db: Session,
-    *,
-    org_id: int | None,
-    state: str,
-    county: Optional[str] = None,
-    city: Optional[str] = None,
-) -> list[JurisdictionRule]:
+def list_rules_for_scope(db: Session, *, org_id: int | None, state: str, county: Optional[str] = None, city: Optional[str] = None) -> list[JurisdictionRule]:
     st = _norm_state(state)
-    cnty = _norm_rule_scope_value(county)
     cty = _norm_rule_scope_value(city)
-
     q = db.query(JurisdictionRule).filter(JurisdictionRule.state == st)
     if org_id is None:
         q = q.filter(JurisdictionRule.org_id.is_(None))
     else:
         q = q.filter(or_(JurisdictionRule.org_id == int(org_id), JurisdictionRule.org_id.is_(None)))
-
     rows = q.order_by(JurisdictionRule.id.asc()).all()
-
     out: list[JurisdictionRule] = []
     for row in rows:
         row_city = _norm_rule_scope_value(getattr(row, "city", None))
@@ -379,6 +400,7 @@ def governed_assertions_for_scope(
     safe: list[PolicyAssertion] = []
     partial: list[PolicyAssertion] = []
     excluded: list[PolicyAssertion] = []
+    manual_review: list[PolicyAssertion] = []
     summaries: list[dict[str, Any]] = []
 
     for assertion in scoped:
@@ -386,19 +408,22 @@ def governed_assertions_for_scope(
         summaries.append(summary)
         if summary["safe_for_projection"]:
             safe.append(assertion)
-        elif summary["governance_state"] in {"approved"} and not summary["lifecycle_blockers"]:
+        elif summary["manual_review_required"]:
+            manual_review.append(assertion)
+        elif summary["partial_projectable"]:
             partial.append(assertion)
         else:
-            partial_status = (summary["coverage_status"] or "").lower()
-            if partial_status in {"partial", "inferred"} or summary["governance_state"] == "approved":
-                partial.append(assertion)
-            else:
-                excluded.append(assertion)
+            excluded.append(assertion)
 
     category_counts: dict[str, dict[str, int]] = {}
-    for row, bucket in [(a, "safe") for a in safe] + [(a, "partial") for a in partial] + [(a, "excluded") for a in excluded]:
+    for row, bucket in (
+        [(a, "safe") for a in safe]
+        + [(a, "partial") for a in partial]
+        + [(a, "excluded") for a in excluded]
+        + [(a, "manual_review") for a in manual_review]
+    ):
         category = getattr(row, "normalized_category", None) or getattr(row, "rule_category", None) or "uncategorized"
-        bucket_counts = category_counts.setdefault(category, {"safe": 0, "partial": 0, "excluded": 0})
+        bucket_counts = category_counts.setdefault(category, {"safe": 0, "partial": 0, "excluded": 0, "manual_review": 0})
         bucket_counts[bucket] += 1
 
     return {
@@ -409,9 +434,11 @@ def governed_assertions_for_scope(
         "safe_assertion_ids": [int(a.id) for a in safe if getattr(a, "id", None) is not None],
         "partial_assertion_ids": [int(a.id) for a in partial if getattr(a, "id", None) is not None],
         "excluded_assertion_ids": [int(a.id) for a in excluded if getattr(a, "id", None) is not None],
+        "manual_review_ids": [int(a.id) for a in manual_review if getattr(a, "id", None) is not None],
         "safe_count": len(safe),
         "partial_count": len(partial),
         "excluded_count": len(excluded),
+        "manual_review_count": len(manual_review),
         "category_counts": category_counts,
         "assertion_summaries": summaries,
     }
@@ -432,14 +459,7 @@ def resolve_layered_rules(
     pha = (pha_name or "").strip() or None
 
     rules = list_rules_for_scope(db, org_id=org_id, state=st, county=cnty, city=cty)
-    governed = governed_assertions_for_scope(
-        db,
-        org_id=org_id,
-        state=st,
-        county=cnty,
-        city=cty,
-        pha_name=pha,
-    )
+    governed = governed_assertions_for_scope(db, org_id=org_id, state=st, county=cnty, city=cty, pha_name=pha)
 
     assertions_q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
     if org_id is None:
@@ -471,38 +491,38 @@ def resolve_layered_rules(
 
     source_evidence: list[dict[str, Any]] = []
     for rule in rules:
-        source_evidence.append(
-            {
-                "kind": "jurisdiction_rule",
-                "id": int(rule.id),
-                "scope": "org" if getattr(rule, "org_id", None) is not None else "global",
-                "city": getattr(rule, "city", None),
-                "state": getattr(rule, "state", None),
-                "updated_at": getattr(rule, "updated_at", None).isoformat() if getattr(rule, "updated_at", None) else None,
-                "inspection_authority": getattr(rule, "inspection_authority", None),
-                "inspection_frequency": getattr(rule, "inspection_frequency", None),
-                "typical_fail_points": _loads_json_list(getattr(rule, "typical_fail_points_json", None)),
-            }
-        )
+        source_evidence.append({
+            "kind": "jurisdiction_rule",
+            "id": int(rule.id),
+            "scope": "org" if getattr(rule, "org_id", None) is not None else "global",
+            "city": getattr(rule, "city", None),
+            "state": getattr(rule, "state", None),
+            "updated_at": getattr(rule, "updated_at", None).isoformat() if getattr(rule, "updated_at", None) else None,
+            "inspection_authority": getattr(rule, "inspection_authority", None),
+            "inspection_frequency": getattr(rule, "inspection_frequency", None),
+            "typical_fail_points": _loads_json_list(getattr(rule, "typical_fail_points_json", None)),
+        })
 
     for a in assertions:
         governed_summary = assertion_governance_summary(a)
-        source_evidence.append(
-            {
-                "kind": "policy_assertion",
-                "id": int(a.id),
-                "rule_key": getattr(a, "rule_key", None),
-                "review_status": getattr(a, "review_status", None),
-                "normalized_category": getattr(a, "normalized_category", None),
-                "source_id": getattr(a, "source_id", None),
-                "confidence": float(getattr(a, "confidence", 0.0) or 0.0),
-                "governance_state": governed_summary["governance_state"],
-                "rule_status": governed_summary["rule_status"],
-                "coverage_status": governed_summary["coverage_status"],
-                "safe_for_projection": governed_summary["safe_for_projection"],
-                "lifecycle_blockers": governed_summary["lifecycle_blockers"],
-            }
-        )
+        source_evidence.append({
+            "kind": "policy_assertion",
+            "id": int(a.id),
+            "rule_key": getattr(a, "rule_key", None),
+            "review_status": getattr(a, "review_status", None),
+            "normalized_category": getattr(a, "normalized_category", None),
+            "source_id": getattr(a, "source_id", None),
+            "confidence": float(getattr(a, "confidence", 0.0) or 0.0),
+            "governance_state": governed_summary["governance_state"],
+            "rule_status": governed_summary["rule_status"],
+            "coverage_status": governed_summary["coverage_status"],
+            "validation_state": governed_summary["validation_state"],
+            "trust_state": governed_summary["trust_state"],
+            "safe_for_projection": governed_summary["safe_for_projection"],
+            "manual_review_required": governed_summary["manual_review_required"],
+            "artifact_backed": governed_summary.get("artifact_backed", False),
+            "lifecycle_blockers": governed_summary["lifecycle_blockers"],
+        })
 
     return {
         "state": st,
@@ -516,6 +536,7 @@ def resolve_layered_rules(
         "governed_assertion_count": int(governed["safe_count"]),
         "partial_assertion_count": int(governed["partial_count"]),
         "excluded_assertion_count": int(governed["excluded_count"]),
+        "manual_review_count": int(governed.get("manual_review_count", 0)),
         "resolved_rule_version": f"jr:{st}:{cnty or '-'}:{cty or '-'}:{pha or '-'}:{len(rules)}:{governed['safe_count']}:{governed['partial_count']}",
         "governance_dependency": {
             "safe_states": sorted(SAFE_GOVERNANCE_STATES),
@@ -524,304 +545,3 @@ def resolve_layered_rules(
         },
         "governed_assertions": governed,
     }
-
-# --- Story 4.2 additive governed truth overlays ---
-
-def assertion_governance_summary(assertion: PolicyAssertion) -> dict[str, Any]:
-    governance_state = (getattr(assertion, "governance_state", None) or "").strip().lower()
-    rule_status = (getattr(assertion, "rule_status", None) or "").strip().lower()
-    review_status = (getattr(assertion, "review_status", None) or "").strip().lower()
-    coverage_status = (getattr(assertion, "coverage_status", None) or "").strip().lower()
-    validation_state = (getattr(assertion, "validation_state", None) or "pending").strip().lower()
-    trust_state = (getattr(assertion, "trust_state", None) or "extracted").strip().lower()
-    superseded = getattr(assertion, "superseded_by_assertion_id", None) is not None
-    replaced = getattr(assertion, "replaced_by_assertion_id", None) is not None
-    is_current = bool(getattr(assertion, "is_current", False))
-    conflict_hints = _conflict_hints_for_assertion(assertion)
-    manual_review_required = review_status == "needs_manual_review" or validation_state == "conflicting" or bool(conflict_hints)
-
-    safe_for_projection = (
-        governance_state in SAFE_GOVERNANCE_STATES
-        and rule_status == "active"
-        and review_status == "verified"
-        and validation_state == "validated"
-        and trust_state in {"validated", "trusted"}
-        and coverage_status not in {"conflicting", "candidate", "partial", "inferred", "stale", "superseded"}
-        and not superseded
-        and not replaced
-        and not manual_review_required
-        and is_current
-    )
-
-    lifecycle_blockers: list[str] = []
-    if governance_state not in SAFE_GOVERNANCE_STATES:
-        lifecycle_blockers.append(f"governance_state={governance_state or 'unknown'}")
-    if rule_status != "active":
-        lifecycle_blockers.append(f"rule_status={rule_status or 'unknown'}")
-    if review_status != "verified":
-        lifecycle_blockers.append(f"review_status={review_status or 'unknown'}")
-    if validation_state != "validated":
-        lifecycle_blockers.append(f"validation_state={validation_state or 'unknown'}")
-    if trust_state not in {"validated", "trusted"}:
-        lifecycle_blockers.append(f"trust_state={trust_state or 'unknown'}")
-    if coverage_status in {"candidate", "partial", "inferred", "conflicting", "stale", "superseded"}:
-        lifecycle_blockers.append(f"coverage_status={coverage_status}")
-    if superseded:
-        lifecycle_blockers.append("superseded")
-    if replaced:
-        lifecycle_blockers.append("replaced")
-    if not is_current:
-        lifecycle_blockers.append("not_current")
-    if manual_review_required:
-        lifecycle_blockers.append("manual_review_required")
-    lifecycle_blockers.extend(conflict_hints)
-
-    return {
-        "assertion_id": int(getattr(assertion, "id", 0) or 0),
-        "rule_key": getattr(assertion, "rule_key", None),
-        "normalized_category": getattr(assertion, "normalized_category", None) or getattr(assertion, "rule_category", None),
-        "governance_state": governance_state,
-        "rule_status": rule_status,
-        "review_status": review_status,
-        "validation_state": validation_state,
-        "trust_state": trust_state,
-        "coverage_status": coverage_status,
-        "is_current": is_current,
-        "safe_for_projection": safe_for_projection,
-        "manual_review_required": manual_review_required,
-        "lifecycle_blockers": lifecycle_blockers,
-    }
-
-
-def governed_assertions_for_scope(
-    db: Session,
-    *,
-    org_id: int | None,
-    state: str,
-    county: Optional[str] = None,
-    city: Optional[str] = None,
-    pha_name: Optional[str] = None,
-) -> dict[str, Any]:
-    st = _norm_state(state)
-    cnty = _norm_rule_scope_value(county)
-    cty = _norm_rule_scope_value(city)
-    pha = (pha_name or "").strip() or None
-
-    assertions_q = db.query(PolicyAssertion).filter(PolicyAssertion.state == st)
-    if org_id is None:
-        assertions_q = assertions_q.filter(PolicyAssertion.org_id.is_(None))
-    else:
-        assertions_q = assertions_q.filter(or_(PolicyAssertion.org_id == int(org_id), PolicyAssertion.org_id.is_(None)))
-
-    scoped: list[PolicyAssertion] = []
-    for a in assertions_q.all():
-        if getattr(a, "county", None) is not None and _norm_rule_scope_value(a.county) != cnty:
-            continue
-        if getattr(a, "city", None) is not None and _norm_rule_scope_value(a.city) != cty:
-            continue
-        if getattr(a, "pha_name", None) is not None and (a.pha_name or "").strip() != (pha or ""):
-            continue
-        scoped.append(a)
-
-    safe: list[PolicyAssertion] = []
-    partial: list[PolicyAssertion] = []
-    excluded: list[PolicyAssertion] = []
-    manual_review: list[PolicyAssertion] = []
-    summaries: list[dict[str, Any]] = []
-
-    for assertion in scoped:
-        summary = assertion_governance_summary(assertion)
-        summaries.append(summary)
-        if summary["manual_review_required"]:
-            manual_review.append(assertion)
-            excluded.append(assertion)
-        elif summary["safe_for_projection"]:
-            safe.append(assertion)
-        elif summary["governance_state"] == "approved" and summary["validation_state"] == "validated" and not summary["manual_review_required"]:
-            partial.append(assertion)
-        else:
-            excluded.append(assertion)
-
-    category_counts: dict[str, dict[str, int]] = {}
-    for row, bucket in [(a, "safe") for a in safe] + [(a, "partial") for a in partial] + [(a, "excluded") for a in excluded]:
-        category = getattr(row, "normalized_category", None) or getattr(row, "rule_category", None) or "uncategorized"
-        bucket_counts = category_counts.setdefault(category, {"safe": 0, "partial": 0, "excluded": 0})
-        bucket_counts[bucket] += 1
-
-    return {
-        "state": st,
-        "county": cnty,
-        "city": cty,
-        "pha_name": pha,
-        "safe_assertion_ids": [int(a.id) for a in safe if getattr(a, "id", None) is not None],
-        "partial_assertion_ids": [int(a.id) for a in partial if getattr(a, "id", None) is not None],
-        "excluded_assertion_ids": [int(a.id) for a in excluded if getattr(a, "id", None) is not None],
-        "manual_review_ids": [int(a.id) for a in manual_review if getattr(a, "id", None) is not None],
-        "safe_count": len(safe),
-        "partial_count": len(partial),
-        "excluded_count": len(excluded),
-        "manual_review_count": len(manual_review),
-        "category_counts": category_counts,
-        "assertion_summaries": summaries,
-    }
-
-
-# ---- Step 2 registry + source family overlays ----
-
-def _rule_notes_with_registry(default: Any, base_notes: str | None = None) -> str:
-    notes = str(base_notes or getattr(default, 'notes', '') or '').strip()
-    try:
-        policy = default.to_profile_policy()
-    except Exception:
-        policy = {}
-    universe = policy.get('expected_rule_universe') or {}
-    required = list(policy.get('required_categories') or universe.get('required_categories') or [])
-    required_families = dict(policy.get('required_source_families_by_category') or universe.get('required_source_families_by_category') or {})
-    official_site = None
-    for item in list(policy.get('source_evidence') or []):
-        if isinstance(item, dict) and item.get('url'):
-            official_site = item.get('url')
-            break
-    extras = []
-    if required:
-        extras.append(f"Expected categories: {', '.join(required)}.")
-    if required_families:
-        extras.append('Source families: ' + '; '.join(f"{k} -> {', '.join(v)}" for k, v in sorted(required_families.items())) + '.')
-    if official_site:
-        extras.append(f'Official site: {official_site}.')
-    return ' '.join([x for x in [notes] + extras if x]).strip()
-
-
-def _sync_registry_for_default(db: Session, *, org_id: int | None, default: Any) -> dict[str, Any]:
-    try:
-        from ..services.jurisdiction_profile_service import ensure_registry_source_mapping
-    except Exception:
-        try:
-            from app.services.jurisdiction_profile_service import ensure_registry_source_mapping  # type: ignore
-        except Exception:
-            return {'registry_enabled': False}
-    try:
-        policy = default.to_profile_policy()
-    except Exception:
-        policy = {}
-    return ensure_registry_source_mapping(
-        db,
-        org_id=org_id,
-        state=getattr(default, 'state', 'MI'),
-        county=getattr(default, 'county', None),
-        city=getattr(default, 'city', None),
-        pha_name=getattr(default, 'housing_authority', None),
-        policy=policy if isinstance(policy, dict) else {},
-    )
-
-
-_step2_base_ensure_seeded_for_org = ensure_seeded_for_org
-_step2_base_jr_to_dict = _jr_to_dict
-_step2_base_create_rule = create_rule
-_step2_base_update_rule = update_rule
-_step2_base_resolve_layered_rules = resolve_layered_rules
-
-
-def ensure_seeded_for_org(db: Session, *, org_id: int) -> dict[str, Any]:
-    result = _step2_base_ensure_seeded_for_org(db, org_id=org_id)
-    synced = 0
-    for default in defaults_for_michigan():
-        sync_result = _sync_registry_for_default(db, org_id=org_id, default=default)
-        if sync_result.get('registry_enabled'):
-            synced += 1
-    db.commit()
-    if isinstance(result, dict):
-        result['registry_seeded'] = True
-        result['registry_sync_count'] = int(synced)
-    return result
-
-
-def _jr_to_dict(jr: JurisdictionRule) -> dict[str, Any]:
-    payload = _step2_base_jr_to_dict(jr)
-    try:
-        from ..services.jurisdiction_profile_service import ensure_registry_source_mapping
-    except Exception:
-        try:
-            from app.services.jurisdiction_profile_service import ensure_registry_source_mapping  # type: ignore
-        except Exception:
-            ensure_registry_source_mapping = None  # type: ignore
-    if ensure_registry_source_mapping is not None:
-        city = getattr(jr, 'city', None)
-        state = getattr(jr, 'state', None)
-        default = None
-        for item in defaults_for_michigan():
-            if str(getattr(item, 'city', '')).strip().lower() == str(city or '').strip().lower() and str(getattr(item, 'state', 'MI')).strip().upper() == str(state or 'MI').strip().upper():
-                default = item
-                break
-        if default is not None:
-            registry = _sync_registry_for_default(None if False else __import__('sqlalchemy').orm.session.Session.object_session(jr) if False else None, org_id=getattr(jr, 'org_id', None), default=default) if False else None
-    payload['registry_ready'] = True
-    return payload
-
-
-def create_rule(db: Session, *, org_id: int, actor_user_id: Optional[int], payload: dict[str, Any]) -> JurisdictionRule:
-    row = _step2_base_create_rule(db, org_id=org_id, actor_user_id=actor_user_id, payload=payload)
-    for default in defaults_for_michigan():
-        if str(getattr(default, 'city', '')).strip().lower() == str(getattr(row, 'city', '')).strip().lower() and str(getattr(default, 'state', 'MI')).strip().upper() == str(getattr(row, 'state', 'MI')).strip().upper():
-            _sync_registry_for_default(db, org_id=org_id, default=default)
-            break
-    db.commit()
-    db.refresh(row)
-    return row
-
-
-def update_rule(db: Session, *, org_id: int, actor_user_id: Optional[int], rule_id: int, payload: dict[str, Any]) -> JurisdictionRule:
-    row = _step2_base_update_rule(db, org_id=org_id, actor_user_id=actor_user_id, rule_id=rule_id, payload=payload)
-    for default in defaults_for_michigan():
-        if str(getattr(default, 'city', '')).strip().lower() == str(getattr(row, 'city', '')).strip().lower() and str(getattr(default, 'state', 'MI')).strip().upper() == str(getattr(row, 'state', 'MI')).strip().upper():
-            _sync_registry_for_default(db, org_id=org_id, default=default)
-            break
-    db.commit()
-    db.refresh(row)
-    return row
-
-
-def resolve_layered_rules(
-    db: Session,
-    *,
-    org_id: int | None,
-    state: str,
-    county: Optional[str] = None,
-    city: Optional[str] = None,
-    pha_name: Optional[str] = None,
-) -> dict[str, Any]:
-    out = _step2_base_resolve_layered_rules(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-    )
-    try:
-        from ..services.jurisdiction_profile_service import ensure_registry_source_mapping
-    except Exception:
-        try:
-            from app.services.jurisdiction_profile_service import ensure_registry_source_mapping  # type: ignore
-        except Exception:
-            ensure_registry_source_mapping = None  # type: ignore
-    if ensure_registry_source_mapping is not None:
-        registry = ensure_registry_source_mapping(
-            db,
-            org_id=org_id,
-            state=state,
-            county=county,
-            city=city,
-            pha_name=pha_name,
-            policy={
-                'required_categories': list(out.get('required_categories') or []),
-                'critical_categories': list(out.get('critical_categories') or []),
-                'expected_rule_universe': out.get('expected_rule_universe') or {},
-                'source_evidence': list(out.get('source_evidence') or []),
-            },
-        )
-        out['official_website'] = registry.get('official_website')
-        out['onboarding_status'] = registry.get('onboarding_status')
-        out['registry_hierarchy'] = registry.get('registry_hierarchy')
-        out['source_family_matrix'] = registry.get('source_family_matrix')
-    return out
