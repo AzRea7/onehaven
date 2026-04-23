@@ -6,9 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.domain.workflow.stages import stage_gte
 from app.models import Property
-from app.services.compliance_engine.projection_service import build_property_compliance_brief
-from app.services.properties.state_machine import get_state_payload, get_transition_payload
-from app.services.workflow_gate_service import build_workflow_summary
+from app.products.compliance.services.compliance_engine.projection_service import build_property_compliance_brief
+from app.products.management.services.properties.state_machine import get_state_payload, get_transition_payload
+from app.products.compliance.services.workflow_gate_service import build_workflow_summary
 
 
 def _policy_blockers(db: Session, *, org_id: int, property_id: int) -> list:

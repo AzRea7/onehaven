@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal
+from app.auth import get_principal
 from app.db import get_db
 from app.domain.fingerprint import fingerprint
 from app.domain.importers.investorlift import normalize_investorlift

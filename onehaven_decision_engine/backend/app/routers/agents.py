@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal
+from app.auth import get_principal
 from app.db import get_db
 from app.models import AgentMessage, AgentRun, AgentSlotAssignment, Property, WorkflowEvent
 from app.schemas import (
@@ -23,7 +23,7 @@ from app.schemas import (
 )
 from app.domain.agents.registry import AGENTS, AGENT_SPECS, SLOTS
 from app.services.agent_engine import create_and_execute_run
-from app.services.compliance_photo_analysis_service import (
+from app.products.compliance.services.compliance_photo_analysis_service import (
     analyze_property_photos_for_compliance,
     create_compliance_tasks_from_photo_analysis,
 )

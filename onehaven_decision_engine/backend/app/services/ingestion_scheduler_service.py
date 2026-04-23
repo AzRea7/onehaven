@@ -10,11 +10,11 @@ from sqlalchemy import distinct, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from ..middleware.structured_logging import emit_structured_log
+from app.middleware.structured_logging import emit_structured_log
 from app.models import IngestionSource, Property
 from app.policy_models import JurisdictionProfile
 from .ingestion_source_service import ensure_default_manual_sources, list_sources
-from app.services.policy_governance.refresh_service import (
+from app.products.compliance.services.policy_governance.refresh_service import (
     DEFAULT_JURISDICTION_STALE_DAYS,
     build_jurisdiction_refresh_payload as _build_jurisdiction_refresh_payload,
     list_jurisdictions_needing_refresh as _list_jurisdictions_needing_refresh,

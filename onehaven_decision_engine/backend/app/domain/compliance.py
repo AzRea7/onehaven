@@ -92,7 +92,7 @@ class ChecklistItem:
     item_code: str
     category: str
     description: str
-    severity: int = 2  # 1..5
+    severity: int = 2  # 1.5
     common_fail: bool = False
     applies_if: Optional[str] = None
 

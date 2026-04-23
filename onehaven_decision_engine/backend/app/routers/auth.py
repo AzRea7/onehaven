@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import _jwt_sign, _jwt_verify, get_principal_core, jwt_debug_fingerprint
+from app.auth import _jwt_sign, _jwt_verify, get_principal_core, jwt_debug_fingerprint
 from app.config import settings
 from app.db import get_db
 from app.models import AppUser, Organization, OrgMembership, Plan
@@ -17,7 +17,7 @@ try:
 except Exception:
     from app.models import OrgSubscription  # type: ignore
 from app.schemas import PrincipalOut
-from ..services import auth_service, plan_service
+from app.services import auth_service, plan_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

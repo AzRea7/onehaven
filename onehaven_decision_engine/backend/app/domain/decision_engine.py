@@ -172,7 +172,7 @@ def score_and_decide(*args: Any, **kwargs: Any):
     """
     Supports BOTH call patterns:
       A) score_and_decide(ctx: DealContext) -> Decision
-      B) score_and_decide(property=..., deal=..., rent_assumption=..., underwriting=..., strategy=...) -> (decision, score, reasons)
+      B) score_and_decide(property=., deal=., rent_assumption=., underwriting=., strategy=.) -> (decision, score, reasons)
     """
 
     # --- Mode A

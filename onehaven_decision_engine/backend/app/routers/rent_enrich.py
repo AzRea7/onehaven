@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal
+from app.auth import get_principal
 from app.config import settings
 from app.db import get_db
 from app.models import Property, RentAssumption

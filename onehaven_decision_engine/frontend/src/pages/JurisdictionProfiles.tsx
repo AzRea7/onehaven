@@ -2,7 +2,7 @@ import React from "react";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
 import GlassCard from "../components/GlassCard";
-import JurisdictionCoverageBadge from "../components/JurisdictionCoverageBadge";
+import JurisdictionCoverageBadge from "@/products/compliance/components/JurisdictionCoverageBadge";
 import { api } from "../lib/api";
 
 type ReviewQueuePayload = {

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal, require_operator
+from app.auth import get_principal, require_operator
 from app.db import get_db
 from app.models import (
     Deal,
@@ -25,12 +25,12 @@ from app.models import (
     Valuation,
     WorkflowEvent,
 )
-from app.services.dashboard_rollups import compute_rollups
-from app.services.properties.state_machine import (
+from app.products.management.services.dashboard_rollups import compute_rollups
+from app.products.management.services.properties.state_machine import (
     compute_and_persist_stage,
     get_state_payload,
 )
-from app.services.workflow_gate_service import build_workflow_summary
+from app.products.compliance.services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 

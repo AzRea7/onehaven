@@ -31,8 +31,8 @@ from app.services.ingestion_source_service import (
     list_sources,
     resolve_sources_for_market,
 )
-from app.services.policy_governance.notification_service import notify_stale_jurisdictions
-from app.services.policy_governance.refresh_service import (
+from app.products.compliance.services.policy_governance.notification_service import notify_stale_jurisdictions
+from app.products.compliance.services.policy_governance.refresh_service import (
     DEFAULT_JURISDICTION_STALE_DAYS,
     refresh_jurisdiction_profile,
 )
@@ -50,7 +50,7 @@ from app.services.rent_refresh_queue_service import (
     list_properties_for_budgeted_rent_refresh,
     should_queue_rent_refresh_after_sync,
 )
-from ..workers.celery_app import celery_app
+from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from .middleware.request_id import get_request_id
+from app.middleware.request_id import get_request_id
 
 
 _STANDARD_LOG_RECORD_FIELDS = {
@@ -60,7 +60,7 @@ class JsonFormatter(logging.Formatter):
     JSON formatter with support for:
     - request_id
     - standard log record fields
-    - arbitrary logging extras passed via extra={...}
+    - arbitrary logging extras passed via extra={.}
     - exception and stack details
     """
 

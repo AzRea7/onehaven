@@ -28,10 +28,10 @@ def emit_workflow_event(
     Backwards-compatible workflow event emitter.
 
     ✅ Preferred:
-        emit_workflow_event(db, principal=p, event_type="...", property_id=..., payload={...})
+        emit_workflow_event(db, principal=p, event_type=".", property_id=., payload={.})
 
     ✅ Legacy:
-        emit_workflow_event(db, org_id=p.org_id, actor_user_id=p.user_id, event_type="...", payload={...})
+        emit_workflow_event(db, org_id=p.org_id, actor_user_id=p.user_id, event_type=".", payload={.})
 
     NOTE:
     - Does NOT commit. Adds + flushes only.
@@ -42,7 +42,7 @@ def emit_workflow_event(
         eff_actor_user_id = int(principal.user_id)
     else:
         if org_id is None:
-            raise TypeError("emit_workflow_event requires principal=... OR org_id=...")
+            raise TypeError("emit_workflow_event requires principal=. OR org_id=.")
         eff_org_id = int(org_id)
         eff_actor_user_id = int(actor_user_id) if actor_user_id is not None else None
 
@@ -81,7 +81,7 @@ def emit_audit_event(
         eff_actor_user_id = int(principal.user_id)
     else:
         if org_id is None:
-            raise TypeError("emit_audit_event requires principal=... OR org_id=...")
+            raise TypeError("emit_audit_event requires principal=. OR org_id=.")
         eff_org_id = int(org_id)
         eff_actor_user_id = int(actor_user_id) if actor_user_id is not None else None
 

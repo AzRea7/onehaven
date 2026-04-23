@@ -107,7 +107,7 @@ def _match_pdf_catalog(*values: Any) -> dict[str, str] | None:
 
 def _safe_import_nspire_service():
     try:
-        from app.services.inspections.import_nspire_service import list_active_nspire_rules
+        from app.products.compliance.services.inspections.import_nspire_service import list_active_nspire_rules
         return {"list_active_nspire_rules": list_active_nspire_rules}
     except Exception:
         return {}

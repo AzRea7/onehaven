@@ -52,7 +52,7 @@ def compute_compliance_status(
     org_id: int,
     property_id: int,
 ) -> ComplianceStatus:
-    from app.services.inspections.readiness_service import compute_property_readiness_score
+    from app.products.compliance.services.inspections.readiness_service import compute_property_readiness_score
 
     readiness = compute_property_readiness_score(
         db,

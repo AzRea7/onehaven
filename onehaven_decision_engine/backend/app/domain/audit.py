@@ -64,7 +64,7 @@ def emit_audit(
 ) -> None:
     """
     Back-compat: older call sites expect this to commit immediately.
-    New code should call audit_write(..., commit=False) and commit once at end.
+    New code should call audit_write(., commit=False) and commit once at end.
     """
     audit_write(
         db,

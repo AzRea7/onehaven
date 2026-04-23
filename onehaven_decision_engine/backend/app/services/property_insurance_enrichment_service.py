@@ -179,7 +179,7 @@ def _load_property_row(
     if data is None:
         return None
 
-    # normalize absent optional fields so the rest of the code can safely use .get(...)
+    # normalize absent optional fields so the rest of the code can safely use .get(.)
     for optional_key in preferred_cols:
         data.setdefault(optional_key, None)
 

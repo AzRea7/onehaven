@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal, require_operator
+from app.auth import get_principal, require_operator
 from app.db import get_db
 from app.models import IngestionRun, Property
 from app.schemas import (
@@ -42,7 +42,7 @@ from app.services.portfolio_watchlist_service import (
     upsert_search_preset,
     upsert_watchlist,
 )
-from ..tasks.ingestion_tasks import (
+from app.tasks.ingestion_tasks import (
     daily_market_refresh_task,
     sync_due_sources_task,
     sync_source_task,

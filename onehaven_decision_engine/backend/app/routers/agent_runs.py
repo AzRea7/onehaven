@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal, require_owner
+from app.auth import get_principal, require_owner
 from app.db import SessionLocal, get_db
 from app.models import AgentMessage, AgentRun, AgentRunDeadletter, AgentSlotAssignment, AgentTraceEvent
 from app.services.agent_engine import (
@@ -22,7 +22,7 @@ from app.services.agent_engine import (
     serialize_run,
 )
 from app.services.agent_orchestrator import plan_agent_runs
-from ..workers.agent_tasks import execute_agent_run
+from app.workers.agent_tasks import execute_agent_run
 
 router = APIRouter(prefix="/agent-runs", tags=["agents"])
 

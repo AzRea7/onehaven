@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal, require_owner
+from app.auth import get_principal, require_owner
 from app.db import get_db
 from app.services.trust_service import get_trust_score, recompute_and_persist, record_signal
 

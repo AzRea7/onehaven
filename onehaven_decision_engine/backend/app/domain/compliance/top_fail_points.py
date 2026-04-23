@@ -12,13 +12,13 @@ def _extract_fail_points(row: Any) -> list[str]:
     Flexible extractor for inspection, compliance, and photo-analysis fail points.
 
     Supported shapes:
-      1) {"fail_items_json": "[...json list...]"}
-      2) {"typical_fail_points_json": "[...json list...]"}
-      3) {"items": [{"code": "...", "failed": true}, ...]}
-      4) {"code": "...", "failed": true}
-      5) {"code": "...", "result_status": "fail"}
-      6) {"findings": [{"code": "..."}, ...]}
-      7) {"probable_failed_inspection_item": "...", "rule_mapping": {"code": "..."}}
+      1) {"fail_items_json": "[.json list.]"}
+      2) {"typical_fail_points_json": "[.json list.]"}
+      3) {"items": [{"code": ".", "failed": true}, .]}
+      4) {"code": ".", "failed": true}
+      5) {"code": ".", "result_status": "fail"}
+      6) {"findings": [{"code": "."}, .]}
+      7) {"probable_failed_inspection_item": ".", "rule_mapping": {"code": "."}}
       8) bare string
     """
     if row is None:

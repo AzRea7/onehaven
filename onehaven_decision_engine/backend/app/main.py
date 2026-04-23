@@ -5,35 +5,35 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from .logging_config import configure_logging
-from .middleware.request_id import RequestIDMiddleware
-from .middleware.structured_logging import StructuredLoggingMiddleware
+from app.middleware.request_id import RequestIDMiddleware
+from app.middleware.structured_logging import StructuredLoggingMiddleware
 
-from .routers.markets import router as markets_router
+from .products.compliance.routers.markets import router as markets_router
 from .routers.ingestion import router as ingestion_router
 from .routers.health import router as health_router
 from .routers.meta import router as meta_router
-from .routers.dashboard import router as dashboard_router
+from .products.management.routers.dashboard import router as dashboard_router
 from .routers.photos import router as photos_router
 
-from .routers.properties import router as properties_router
-from .routers.deals import router as deals_router
-from .routers.jurisdictions import router as jurisdictions_router
-from .routers.evaluate import router as evaluate_router
+from .products.management.routers.properties import router as properties_router
+from .products.investor_intelligence.routers.deals import router as deals_router
+from .products.compliance.routers.jurisdictions import router as jurisdictions_router
+from .products.investor_intelligence.routers.evaluate import router as evaluate_router
 
 from .routers.imports import router as imports_router
 from .routers.imports_alias import router as imports_alias_router
 from .routers.rent import router as rent_router
 from .routers.rent_enrich import router as rent_enrich_router
 
-from .routers.compliance import router as compliance_router
-from .routers.inspections import router as inspections_router
+from .products.compliance.routers.compliance import router as compliance_router
+from .products.compliance.routers.inspections import router as inspections_router
 
 from .routers.rehab import router as rehab_router
-from .routers.tenants import router as tenants_router
-from .routers.cash import router as cash_router
-from .routers.equity import router as equity_router
-from .routers.ops import router as ops_router
-from .routers.acquisition import router as acquisition_router
+from .products.tenant.routers.tenants import router as tenants_router
+from .products.investor_intelligence.routers.cash import router as cash_router
+from .products.investor_intelligence.routers.equity import router as equity_router
+from app.routers.ops import router as ops_router
+from .products.acquire.routers.acquisition import router as acquisition_router
 
 from .routers.agents import router as agents_router
 from .routers.agent_runs import router as agent_runs_router
@@ -45,11 +45,11 @@ from .routers.auth import router as auth_router
 from .routers.api_keys import router as api_keys_router
 from .routers.automation import router as automation_router
 
-from .routers.jurisdiction_profiles import router as jurisdiction_profiles_router
+from .products.compliance.routers.jurisdiction_profiles import router as jurisdiction_profiles_router
 from .routers.policy_seed import router as policy_seed_router
-from .routers.policy_evidence import router as policy_evidence_router
-from .routers.policy import router as policy_router
-from .routers.policy_catalog_admin import router as policy_catalog_admin_router
+from .products.compliance.routers.policy_evidence import router as policy_evidence_router
+from .products.compliance.routers.policy import router as policy_router
+from .products.compliance.routers.policy_catalog_admin import router as policy_catalog_admin_router
 
 API_PREFIX = "/api"
 

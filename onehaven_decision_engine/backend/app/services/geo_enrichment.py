@@ -16,7 +16,7 @@ from app.config import settings
 from app.models import Property
 from app.services.address_normalization import normalize_full_address
 from app.services.geocoding_service import GeocodingService
-from app.services.risk_scoring import compute_property_risk
+from app.products.investor_intelligence.services.risk_scoring import compute_property_risk
 
 log = logging.getLogger("onehaven.geo_enrichment")
 

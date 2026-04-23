@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal
-from ..clients.federal_register import FederalRegisterClient
-from ..clients.govinfo import GovInfoClient
+from app.auth import get_principal
+from app.clients.federal_register import FederalRegisterClient
+from app.clients.govinfo import GovInfoClient
 from app.config import settings
 from app.db import get_db
 from app.models import (

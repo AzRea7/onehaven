@@ -656,7 +656,7 @@ def resolve_operational_policy(
     state: str = "MI",
     pha_name: Optional[str] = None,
 ) -> dict[str, Any]:
-    from app.services.compliance_engine.projection_service import build_property_compliance_brief
+    from app.products.compliance.services.compliance_engine.projection_service import build_property_compliance_brief
 
     base = resolve_profile(
         db,

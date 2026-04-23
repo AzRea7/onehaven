@@ -13,8 +13,8 @@ from app.auth import get_principal, require_operator
 from app.db import get_db
 from app.models import Property, PropertyPhoto
 from app.schemas import PropertyPhotoCreate, PropertyPhotoOut
-from app.services.compliance_document_service import create_compliance_document_from_path
-from app.services.compliance_photo_analysis_service import (
+from app.products.compliance.services.compliance_document_service import create_compliance_document_from_path
+from app.products.compliance.services.compliance_photo_analysis_service import (
     analyze_property_photos_for_compliance,
     create_compliance_tasks_from_photo_analysis,
 )

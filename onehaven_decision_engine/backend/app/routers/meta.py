@@ -5,11 +5,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends
 
-from ..auth import get_principal
+from app.auth import get_principal
 
 router = APIRouter(prefix="/meta", tags=["meta"])
 
-REPO_ROOT = Path(__file__).resolve().parents[3]  # .../onehaven_decision_engine
+REPO_ROOT = Path(__file__).resolve().parents[3]  # ./onehaven_decision_engine
 DOCS_DIR = REPO_ROOT / "docs"
 
 

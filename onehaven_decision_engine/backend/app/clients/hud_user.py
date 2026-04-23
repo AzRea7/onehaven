@@ -31,7 +31,7 @@ class HudUserClient(_ServiceHudUserClient):
     ) -> dict[str, Any]:
         """
         Backward-compatible shape:
-          {"fmr": 1500.0, "state": "MI", "area_name": "...", "year": 2026, "bedrooms": 3, "raw": {...}}
+          {"fmr": 1500.0, "state": "MI", "area_name": ".", "year": 2026, "bedrooms": 3, "raw": {.}}
 
         Prefer entityid-based lookup in the router/service layer. This method is
         retained so older code paths do not break immediately.

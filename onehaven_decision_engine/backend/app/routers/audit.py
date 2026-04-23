@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal
+from app.auth import get_principal
 from app.db import get_db
 from app.models import AuditEvent
 from app.schemas import AuditEventOut

@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal, require_operator
+from app.auth import get_principal, require_operator
 from app.db import get_db
 from app.services.inspection_scheduling_service import (
     list_due_inspection_reminders,

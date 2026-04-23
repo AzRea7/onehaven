@@ -36,12 +36,12 @@ import {
   RotateCcw,
 } from "lucide-react";
 
-import AcquisitionParticipantsPanel from "../components/AcquisitionParticipantsPanel";
+import AcquisitionParticipantsPanel from "@/products/acquire/components/AcquisitionParticipantsPanel";
 import EmptyState from "../components/EmptyState";
 import Golem from "../components/Golem";
 import PageHero from "../components/PageHero";
 import PageShell from "../components/PageShell";
-import RiskBadges from "../components/RiskBadges";
+import RiskBadges from "@/products/investor_intelligence/components/RiskBadges";
 import StatPill from "../components/StatPill";
 import Surface from "../components/Surface";
 import { nextPaneKey, paneLabel } from "../components/PaneSwitcher";

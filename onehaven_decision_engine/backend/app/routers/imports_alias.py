@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal
+from app.auth import get_principal
 from app.db import get_db
 from .imports import import_status
 

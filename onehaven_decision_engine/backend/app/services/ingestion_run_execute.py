@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.db import rollback_quietly
 
 from app.config import settings
-from ..middleware.structured_logging import emit_structured_log
+from app.middleware.structured_logging import emit_structured_log
 from app.models import Deal, Property, PropertyPhoto, RentAssumption
 from app.services.ingestion_dedupe_service import (
     build_property_fingerprint,
@@ -52,7 +52,7 @@ from app.services.rentcast_listing_source import (
     RentCastListingFetchResult,
     RentCastListingSource,
 )
-from ..workers.celery_app import celery_app
+from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 

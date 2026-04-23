@@ -57,11 +57,11 @@ def _plan_limit_for_metric(plan_limits: dict[str, Any], metric_key: str) -> int:
 
     2) nested:
        {
-         "features": {...},
+         "features": {.},
          "limits": {
            "external_calls_per_day": 50
          },
-         "soft_limits": {...}
+         "soft_limits": {.}
        }
     """
     if not isinstance(plan_limits, dict):

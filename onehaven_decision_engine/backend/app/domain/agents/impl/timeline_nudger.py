@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Property
-from app.services.properties.state_machine import compute_and_persist_stage
+from app.products.management.services.properties.state_machine import compute_and_persist_stage
 
 
 def run_timeline_nudger(

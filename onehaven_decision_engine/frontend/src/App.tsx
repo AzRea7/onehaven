@@ -2,23 +2,23 @@ import React from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import AppShell from "./components/AppShell";
 
-import Dashboard from "./pages/Dashboard";
+import Dashboard from "@/products/management/pages/Dashboard";
 import Property from "./pages/Property";
 
 import Agents from "./pages/Agents";
 import Constitution from "./pages/Constitution";
-import DealIntake from "./pages/DealIntake";
+import DealIntake from "@/products/acquire/pages/DealIntake";
 import Jurisdictions from "./pages/Jurisdictions";
 import JurisdictionProfiles from "./pages/JurisdictionProfiles";
 import ImportsPage from "./pages/ImportsPage";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import PolicyReview from "./pages/PolicyReview";
-import InvestorPane from "./pages/InvestorPane";
-import AcquisitionPane from "./pages/AcquisitionPane";
-import CompliancePane from "./pages/CompliancePane";
-import TenantsPane from "./pages/TenantsPane";
-import ManagementPane from "./pages/ManagementPane";
+import InvestorPane from "@/products/investor_intelligence/pages/InvestorPane";
+import AcquisitionPane from "@/products/acquire/pages/AcquisitionPane";
+import CompliancePane from "@/products/compliance/pages/CompliancePane";
+import TenantsPane from "@/products/tenant/pages/TenantsPane";
+import ManagementPane from "@/products/management/pages/ManagementPane";
 
 import { AuthGate } from "./lib/auth";
 

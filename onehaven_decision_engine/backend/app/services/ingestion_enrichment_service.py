@@ -694,8 +694,8 @@ def execute_post_ingestion_pipeline(
         _record_step("rent", False, {"ok": False, "error": str(e)})
 
     try:
-        from ..routers.evaluate import evaluate_property_core
-        from ..routers.rent import explain_rent
+        from .routers.evaluate import evaluate_property_core
+        from .routers.rent import explain_rent
 
         principal_shim = type("PrincipalShim", (), {"org_id": int(org_id), "user_id": actor_user_id})()
 
@@ -739,7 +739,7 @@ def execute_post_ingestion_pipeline(
         _record_step("evaluate", False, {"ok": False, "error": str(e)})
 
     try:
-        from app.services.properties.state_machine import sync_property_state
+        from app.products.management.services.properties.state_machine import sync_property_state
 
         _timed_step(result, step_key="state", fn=lambda: sync_property_state(db, org_id=int(org_id), property_id=int(property_id)))
         result["state_ok"] = True
@@ -750,7 +750,7 @@ def execute_post_ingestion_pipeline(
         _record_step("state", False, {"ok": False, "error": str(e)})
 
     try:
-        from app.services.workflow_gate_service import build_workflow_summary
+        from app.products.compliance.services.workflow_gate_service import build_workflow_summary
 
         workflow_res = _timed_step(
             result,

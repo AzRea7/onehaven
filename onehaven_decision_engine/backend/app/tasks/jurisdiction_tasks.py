@@ -8,9 +8,9 @@ from sqlalchemy import select
 from app.config import settings
 from app.db import SessionLocal
 from app.policy_models import JurisdictionProfile
-from app.services.policy_coverage.health_service import get_jurisdiction_health
-from app.services.policy_governance.notification_service import notify_if_jurisdiction_stale
-from app.services.policy_governance.refresh_service import refresh_due_jurisdictions
+from app.products.compliance.services.policy_coverage.health_service import get_jurisdiction_health
+from app.products.compliance.services.policy_governance.notification_service import notify_if_jurisdiction_stale
+from app.products.compliance.services.policy_governance.refresh_service import refresh_due_jurisdictions
 from app.workers.celery_app import celery_app
 
 log = logging.getLogger("onehaven.jurisdiction.tasks")

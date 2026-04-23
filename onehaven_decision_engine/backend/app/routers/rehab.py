@@ -6,15 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from ..auth import get_principal
+from app.auth import get_principal
 from app.db import get_db
 from app.domain.audit import emit_audit
 from app.domain.events import emit_workflow_event
 from app.models import Property, RehabTask
 from app.schemas import RehabTaskCreate, RehabTaskOut, RehabPhotoAnalysisOut
-from app.services.properties.state_machine import sync_property_state
+from app.products.management.services.properties.state_machine import sync_property_state
 from app.services.stage_guard import require_stage
-from app.services.workflow_gate_service import build_workflow_summary
+from app.products.compliance.services.workflow_gate_service import build_workflow_summary
 from app.services.photo_rehab_agent import analyze_property_photos, analyze_and_create_rehab_tasks
 
 router = APIRouter(prefix="/rehab", tags=["rehab"])

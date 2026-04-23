@@ -58,7 +58,7 @@ def record_signal(
 ) -> TrustSignal:
     """
     Append-only trust signal stream.
-    value clamped to [0..1] for safety.
+    value clamped to [0.1] for safety.
     """
     v = _clamp(float(value), 0.0, 1.0)
     w = max(0.0, float(weight))
