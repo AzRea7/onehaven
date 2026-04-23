@@ -1,9 +1,18 @@
+
 from __future__ import annotations
 
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.domain.policy_evidence import (
+    EVIDENCE_TYPE_API,
+    EVIDENCE_TYPE_DATASET,
+    EVIDENCE_TYPE_PDF,
+    determine_evidence_role,
+    determine_truth_role,
+    evidence_boundary_summary,
+)
 from app.services.policy_catalog_admin_service import merged_catalog_for_market
 
 
@@ -75,47 +84,66 @@ def _dataset_publication_type(item: Any) -> str:
     source_kind = str(getattr(item, "source_kind", "") or "").strip().lower()
     title = str(getattr(item, "title", "") or "").strip().lower()
     if url.endswith(".pdf") or "pdf" in source_kind:
-        return "pdf"
+        return EVIDENCE_TYPE_PDF
     if any(token in url for token in ("api", "json", "csv", "xml")):
-        return "api"
+        return EVIDENCE_TYPE_API
     if "checklist" in title or "packet" in title or "form" in title:
         return "document"
     return "web_page"
 
 
-def _dataset_truth_policy(item: Any) -> dict[str, Any]:
+def classify_dataset_truth_role(item: Any) -> dict[str, Any]:
     publication_type = _dataset_publication_type(item)
     is_authoritative = bool(getattr(item, "is_authoritative", False))
     dataset_family = dataset_family_for_item(item)
+    source_kind = str(getattr(item, "source_kind", "") or "").strip().lower()
 
-    if publication_type == "pdf":
-        return {
-            "publication_type": publication_type,
-            "dataset_use_role": "evidence_backed_assertions",
-            "truth_role": "evidence_only",
-            "projectable_truth": False,
-            "requires_validation": True,
-            "requires_binding_authority": True,
-            "source_authority_score": 0.80 if is_authoritative else 0.55,
-        }
-    if publication_type == "api":
-        return {
-            "publication_type": publication_type,
-            "dataset_use_role": "structured_truth_input",
-            "truth_role": "primary_or_supporting_truth",
-            "projectable_truth": bool(is_authoritative),
-            "requires_validation": True,
-            "requires_binding_authority": True,
-            "source_authority_score": 0.95 if is_authoritative else 0.70,
-        }
+    evidence_type = EVIDENCE_TYPE_DATASET
+    pdf_only = publication_type == EVIDENCE_TYPE_PDF
+    dataset_only = publication_type != EVIDENCE_TYPE_API
+    if publication_type == EVIDENCE_TYPE_PDF:
+        evidence_type = EVIDENCE_TYPE_PDF
+    elif publication_type == EVIDENCE_TYPE_API:
+        evidence_type = EVIDENCE_TYPE_API
+
+    boundary = evidence_boundary_summary(
+        evidence_type=evidence_type,
+        source_is_authoritative=is_authoritative,
+        pdf_only=pdf_only,
+        dataset_only=dataset_only,
+    )
+    truth_role = determine_truth_role(
+        evidence_type=evidence_type,
+        source_is_authoritative=is_authoritative,
+        pdf_only=pdf_only,
+        dataset_only=dataset_only,
+    )
+
+    if truth_role == "binding_candidate" and publication_type == EVIDENCE_TYPE_API and is_authoritative:
+        dataset_truth_role = "binding_candidate"
+    elif truth_role == "support_only":
+        dataset_truth_role = "support-only"
+    elif truth_role == "evidence_only":
+        dataset_truth_role = "evidence-only"
+    else:
+        dataset_truth_role = "untrusted"
+
+    if source_kind in {"manual", "artifact", "repo_artifact"} and not is_authoritative:
+        dataset_truth_role = "evidence-only" if pdf_only else "untrusted"
+
     return {
         "publication_type": publication_type,
-        "dataset_use_role": "catalog_reference",
-        "truth_role": "supporting_reference",
-        "projectable_truth": False,
+        "dataset_family": dataset_family,
+        "dataset_truth_role": dataset_truth_role,
+        "evidence_type": evidence_type,
+        "evidence_role": boundary["evidence_role"],
+        "truth_role": boundary["truth_role"],
+        "projectable_truth": dataset_truth_role == "binding_candidate",
         "requires_validation": True,
         "requires_binding_authority": True,
-        "source_authority_score": 0.85 if is_authoritative and dataset_family in {"federal_dataset", "state_dataset", "municipal_dataset"} else 0.60,
+        "support_only_marker": bool(boundary["support_only_marker"]),
+        "truth_eligible": bool(boundary["truth_eligible"]),
+        "source_authority_score": 0.95 if (publication_type == EVIDENCE_TYPE_API and is_authoritative) else (0.80 if is_authoritative else 0.50),
     }
 
 
@@ -129,8 +157,8 @@ def dataset_priority_for_item(item: Any) -> int:
         "program_dataset": 15,
         "catalog_dataset": 20,
     }.get(family, 25)
-    truth_policy = _dataset_truth_policy(item)
-    evidence_penalty = 5 if truth_policy["publication_type"] == "pdf" else 0
+    truth_policy = classify_dataset_truth_role(item)
+    evidence_penalty = 5 if truth_policy["publication_type"] == EVIDENCE_TYPE_PDF else 0
     return raw + family_boost + evidence_penalty
 
 
@@ -155,7 +183,7 @@ def policy_catalog_dataset_for_market(
     )
     rows = []
     for item in items:
-        truth_policy = _dataset_truth_policy(item)
+        truth_policy = classify_dataset_truth_role(item)
         rows.append(
             {
                 "url": getattr(item, "url", None),
@@ -213,9 +241,9 @@ def dataset_snapshot_for_market(
     for row in rows:
         family = str(row.get("dataset_family") or "unknown")
         counts[family] = counts.get(family, 0) + 1
-        role = str(row.get("dataset_use_role") or "unknown")
+        role = str(row.get("dataset_truth_role") or "untrusted")
         role_counts[role] = role_counts.get(role, 0) + 1
-        for category in list(row.get("category_hints") or []):
+        for category in row.get("category_hints") or []:
             hinted[category] = hinted.get(category, 0) + 1
     return {
         "ok": True,
@@ -229,10 +257,8 @@ def dataset_snapshot_for_market(
         "summary": {
             "dataset_count": len(rows),
             "dataset_family_counts": counts,
-            "dataset_use_role_counts": role_counts,
+            "dataset_truth_role_counts": role_counts,
             "category_hint_counts": hinted,
-            "service_role": "dataset_registry_with_truth_boundary",
-            "truth_model": "evidence_first",
-            "pdfs_are_primary_truth": False,
+            "truth_model": "evidence_boundary",
         },
     }

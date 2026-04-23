@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -102,13 +103,17 @@ def _nspire_truth_metadata(item: dict[str, Any]) -> dict[str, Any]:
     source_url = _norm_text(item.get("source_url"))
     is_pdf = bool(source_url and source_url.lower().endswith(".pdf"))
     return {
-        "evidence_role": "evidence_backed_assertion",
-        "truth_role": "supporting_evidence_not_primary_truth",
+        "evidence_role": "support_only",
+        "truth_role": "evidence_only",
+        "truth_eligible": False,
         "projectable_truth": False,
         "requires_validation": True,
         "requires_binding_authority": True,
         "source_authority_score": 0.80 if source_url else 0.65,
         "publication_type": "pdf" if is_pdf else "official_document",
+        "domain_role": "inspection_evidence",
+        "operational_value": "high",
+        "not_primary_truth_for_unrelated_legal_requirements": True,
     }
 
 
@@ -214,6 +219,6 @@ def import_nspire_rules(
         "total_processed": inserted + updated,
         "rule_keys": seen_keys,
         "truth_rows": truth_rows,
-        "truth_model": "evidence_first",
-        "projectable_truth_from_nspire_import": False,
+        "truth_model": "inspection_evidence_support_only",
+        "projectable_truth_from_nspire_alone": False,
     }

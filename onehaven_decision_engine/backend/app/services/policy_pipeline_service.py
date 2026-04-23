@@ -405,6 +405,7 @@ def _profile_pha_value(profile: JurisdictionProfile | None) -> str | None:
         return None
     return _norm_text(getattr(profile, "pha_name", None))
 
+
 def _build_market_compliance_brief(
     db: Session,
     *,
@@ -416,7 +417,7 @@ def _build_market_compliance_brief(
 ) -> dict[str, Any]:
     """
     Safely build a market-scope brief even when build_property_compliance_brief
-    only supports property-scope arguments in the current runtime.
+    has been overridden elsewhere to a property-only signature.
     """
     try:
         return dict(
@@ -467,7 +468,6 @@ def _build_market_compliance_brief(
                 "excluded": list(governed.get("excluded_assertion_ids") or []),
             },
         }
-
 
 
 def _create_empty_market_profile(
@@ -3405,7 +3405,7 @@ def _is_monitor_noop_source_run(row: dict[str, Any]) -> bool:
     return (
         str(refresh.get('comparison_state') or row.get('comparison_state') or '').lower() == 'unchanged'
         and str(refresh.get('change_kind') or row.get('change_kind') or '').lower() == 'unchanged'
-        and not bool(refresh.get('revalidation_required') or refresh.get('requires_revalidation') or row.get('revalidation_required'))
+        and not bool(refresh.get('requires_revalidation') or row.get('revalidation_required'))
         and str((row.get('extract_result') or {}).get('reason') or '').lower() in {'no_content_change', 'monitor_skip_unchanged'}
     )
 
@@ -3462,9 +3462,7 @@ def _run_source_refresh_batch(
         fetch_result = refresh_policy_source_and_detect_changes(db, source=source)
         inventory_result = sync_crawl_result_to_inventory(db, source=source, fetch_result=fetch_result)
         content_changed = bool(fetch_result.get('change_detected') or fetch_result.get('changed'))
-        revalidation_required = bool(fetch_result.get('revalidation_required') or fetch_result.get('requires_revalidation'))
-        monitor_skip = bool(fetch_result.get('ok')) and not content_changed and not revalidation_required
-
+        monitor_skip = bool(fetch_result.get('ok')) and not content_changed and not bool(fetch_result.get('requires_revalidation'))
         if not fetch_result.get('ok'):
             failed_source_ids.append(int(source.id))
             stale_mark_result = mark_assertions_stale_for_source(db, source_id=int(source.id), reason='source_fetch_failed')
@@ -3474,7 +3472,6 @@ def _run_source_refresh_batch(
             validation_result = None
         elif monitor_skip:
             monitor_skipped_source_ids.append(int(source.id))
-            stale_mark_result = {'ok': True, 'source_id': int(source.id), 'stale_count': 0, 'stale_ids': [], 'reason': 'monitor_skip_unchanged'}
             extract_result = {'ok': True, 'created_count': 0, 'assertion_ids': [], 'reason': 'monitor_skip_unchanged'}
             diff_result = {'ok': True, 'changed_count': 0, 'new_count': 0, 'missing_count': 0, 'reason': 'monitor_skip_unchanged'}
             normalize_result = None
@@ -3483,7 +3480,7 @@ def _run_source_refresh_batch(
             raw_candidates: list[dict[str, Any]] = []
             if content_changed:
                 changed_source_ids.append(int(source.id))
-                stale_mark_result = mark_assertions_stale_for_source(db, source_id=int(source.id), reason='source_changed')
+                mark_assertions_stale_for_source(db, source_id=int(source.id), reason='source_changed')
                 extracted = extract_assertions_for_source(db, source=source, org_id=org_id, org_scope=(org_id is not None))
                 raw_candidates = _extract_raw_candidates(extracted)
                 extract_result = {'ok': True, 'created_count': len(extracted), 'assertion_ids': [int(a.id) for a in extracted if getattr(a, 'id', None) is not None]}
@@ -3491,12 +3488,10 @@ def _run_source_refresh_batch(
                 normalize_result = normalize_market_assertions(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, reviewer_user_id=reviewer_user_id, source_id=int(source.id), raw_candidates=raw_candidates)
                 validation_result = validate_market_assertions(db, org_id=org_id, state=state, county=county, city=city, pha_name=pha_name, source_id=int(source.id))
             else:
-                stale_mark_result = {'ok': True, 'source_id': int(source.id), 'stale_count': 0, 'stale_ids': [], 'reason': 'no_source_change'}
                 extract_result = {'ok': True, 'created_count': 0, 'assertion_ids': [], 'reason': 'no_content_change'}
                 diff_result = {'ok': True, 'changed_count': 0, 'new_count': 0, 'missing_count': 0, 'reason': 'no_content_change'}
                 normalize_result = None
-                validation_result = {'validated_count': 0, 'weak_support_count': 0, 'ambiguous_count': 0, 'conflicting_count': 0, 'unsupported_count': 0, 'updated_ids': [], 'reason': 'no_content_change'}
-
+                validation_result = {'validated_count': 0, 'weak_support_count': 0, 'ambiguous_count': 0, 'conflicting_count': 0, 'unsupported_count': 0, 'updated_ids': []}
         total_changed_rules += int(diff_result.get('changed_count') or 0)
         total_new_rules += int(diff_result.get('new_count') or 0)
         total_missing_rules += int(diff_result.get('missing_count') or 0)
@@ -3506,52 +3501,122 @@ def _run_source_refresh_batch(
             'inventory': inventory_result,
             'changed': content_changed,
             'comparison_state': fetch_result.get('comparison_state'),
-            'change_kind': fetch_result.get('change_kind') or (fetch_result.get('change_summary') or {}).get('change_kind'),
-            'revalidation_required': revalidation_required,
+            'change_kind': fetch_result.get('change_kind'),
+            'revalidation_required': bool(fetch_result.get('revalidation_required')),
             'source_version_id': fetch_result.get('source_version_id'),
             'previous_version_id': fetch_result.get('previous_version_id'),
-            'stale_mark_result': stale_mark_result,
             'extract_result': extract_result,
             'diff': diff_result,
             'normalized': normalize_result,
             'validation': validation_result,
+            'requires_revalidation': bool(fetch_result.get('requires_revalidation') or fetch_result.get('revalidation_required')),
+            'monitor_skipped': monitor_skip,
         })
-
     return {
         'source_runs': source_runs,
         'summary': {
-            'source_count': len(sources),
-            'changed_source_count': len(changed_source_ids),
-            'changed_source_ids': sorted(set(changed_source_ids)),
-            'failed_source_count': len(failed_source_ids),
-            'failed_source_ids': sorted(set(failed_source_ids)),
-            'monitor_skipped_source_count': len(monitor_skipped_source_ids),
-            'monitor_skipped_source_ids': sorted(set(monitor_skipped_source_ids)),
             'changed_rule_count': total_changed_rules,
             'new_rule_count': total_new_rules,
             'missing_rule_count': total_missing_rules,
-            'monitor_summary': _compact_monitor_summary(source_runs),
+            'changed_source_count': len(changed_source_ids),
+            'failed_source_count': len(failed_source_ids),
+            'changed_source_ids': sorted(set(changed_source_ids)),
+            'failed_source_ids': sorted(set(failed_source_ids)),
+            'monitor_skipped_source_ids': sorted(set(monitor_skipped_source_ids)),
+            'monitor_skipped_source_count': len(set(monitor_skipped_source_ids)),
         },
     }
 
 
-_run_market_policy_pipeline_opt_base = run_market_policy_pipeline
+_pipeline_cleanup_base = run_market_policy_pipeline
 
-def run_market_policy_pipeline(*args, **kwargs):
-    result = dict(_run_market_policy_pipeline_opt_base(*args, **kwargs) or {})
-    source_runs = list((result.get('refresh_summary') or {}).get('source_runs') or result.get('source_runs') or [])
-    if source_runs:
-        monitor_summary = _compact_monitor_summary(source_runs)
+def run_market_policy_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = 'se_mi_extended',
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    result = dict(_pipeline_cleanup_base(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    ) or {})
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+    inventory_hints = expected_inventory_hints(state=st, county=cnty, city=cty, pha_name=pha, include_section8=True)
+    live_inventory = inventory_summary_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        program_type='section8' if 'section8' in set(inventory_hints.get('expected_categories') or []) else None,
+    )
+    discovery_result = dict(result.get('discovery_result') or {})
+    discovery_result['inventory_summary'] = live_inventory
+    result['discovery_result'] = discovery_result
+
+    cleanup_market_stale_assertions(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        reviewer_user_id=reviewer_user_id,
+    )
+    cleanup_non_projectable_assertions_for_market(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    archive_stale_market_sources(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        focus=focus,
+    )
+
+    source_runs = list(result.get('source_runs') or [])
+    monitor_summary = _compact_monitor_summary(source_runs)
+    if (
+        not list(result.get('missing_categories') or [])
+        and int(result.get('total_changed_rules') or 0) == 0
+        and int(result.get('changed_source_count') or 0) == 0
+        and int(result.get('failed_source_count') or 0) == 0
+        and monitor_summary.get('all_sources_unchanged')
+    ):
+        result['response_mode'] = 'monitor'
         result['monitor_summary'] = monitor_summary
-        refresh_summary = dict(result.get('refresh_summary') or {})
-        refresh_summary['monitor_summary'] = monitor_summary
-        result['refresh_summary'] = refresh_summary
+    else:
+        result['response_mode'] = result.get('response_mode') or 'full_pipeline'
     return result
 
 
-# --- registry-first projection gate (integrated final layer) ---
+# === FINAL RESPONSE TRUTH PATCH ===
 
-def _registry_first_market_context(
+def _pipeline_fresh_coverage_payload(
     db: Session,
     *,
     org_id: Optional[int],
@@ -3559,304 +3624,274 @@ def _registry_first_market_context(
     county: Optional[str],
     city: Optional[str],
     pha_name: Optional[str],
+    focus: str = "se_mi_extended",
 ) -> dict[str, Any]:
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
+
+    payload = dict(
+        compute_coverage_status(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            focus=focus,
+        )
+        or {}
+    )
+
+    # Persist, but do not trust the row as the response source of truth.
     try:
-        from app.services.jurisdiction_registry_service import find_jurisdiction_by_scope
+        upsert_coverage_status(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            focus=focus,
+        )
     except Exception:
-        find_jurisdiction_by_scope = None  # type: ignore[assignment]
+        db.rollback()
 
-    registry = None
-    if find_jurisdiction_by_scope is not None:
-        try:
-            registry = find_jurisdiction_by_scope(
-                db,
-                org_id=org_id,
-                state_code=_norm_state(state),
-                county_name=_norm_text(county),
-                city_name=_norm_text(city),
-                jurisdiction_type="city" if city else ("county" if county else "state"),
-            )
-        except Exception:
-            registry = None
+    return payload
 
-    registry_sources = {}
-    if registry is not None:
-        registry_sources = getattr(registry, "source_family_map_json", None) or getattr(registry, "source_links_json", None) or {}
-        if isinstance(registry_sources, str):
-            try:
-                registry_sources = json.loads(registry_sources)
-            except Exception:
-                registry_sources = {}
+
+def _pipeline_compact_coverage_view(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(payload or {})
     return {
-        "registry_found": registry is not None,
-        "registry_id": getattr(registry, "id", None) if registry is not None else None,
-        "registry_slug": getattr(registry, "slug", None) if registry is not None else None,
-        "registry_sources": registry_sources if isinstance(registry_sources, dict) else {},
+        "id": payload.get("id"),
+        "coverage_status": payload.get("coverage_status"),
+        "production_readiness": payload.get("production_readiness"),
+        "completeness_status": payload.get("completeness_status"),
+        "is_stale": bool(payload.get("is_stale", False)),
+        "safe_to_rely_on": bool(payload.get("safe_to_rely_on")),
+        "safe_for_user_reliance": bool(payload.get("safe_for_user_reliance")),
+        "safe_for_projection": bool(payload.get("safe_for_projection")),
+        "blocking_categories": list(payload.get("blocking_categories") or []),
+        "legal_lockout_categories": list(payload.get("legal_lockout_categories") or []),
+        "critical_fetch_failure_categories": list(payload.get("critical_fetch_failure_categories") or []),
+        "source_of_truth_strategy": dict(payload.get("source_of_truth_strategy") or {}),
     }
 
 
-def _pipeline_projection_guard(
+def _pipeline_apply_fresh_coverage_to_result(
+    result: dict[str, Any],
     *,
-    completeness: dict[str, Any],
-    health: dict[str, Any],
+    coverage_payload: dict[str, Any],
+    db: Session,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str],
 ) -> dict[str, Any]:
-    conflicting = list(completeness.get("conflicting_categories") or [])
-    missing = list(completeness.get("missing_categories") or [])
-    stale_authoritative = list(completeness.get("stale_authoritative_categories") or [])
-    binding_unmet = list(completeness.get("binding_unmet_categories") or [])
-    block = bool(
-        conflicting
-        or stale_authoritative
-        or binding_unmet
-        or not bool(completeness.get("safe_for_projection"))
-        or str(completeness.get("production_readiness") or "").strip().lower() == "not_ready"
-        or (bool(health) and not bool(health.get("safe_for_projection")))
+    result = dict(result or {})
+    coverage_payload = dict(coverage_payload or {})
+
+    # Top-level response should use fresh computed truth, not stale persisted row snapshots.
+    result["coverage"] = coverage_payload
+
+    recompute = dict(result.get("recompute") or {})
+    recompute["coverage"] = _pipeline_compact_coverage_view(coverage_payload)
+    recompute["coverage"]["safe_to_rely_on"] = bool(coverage_payload.get("safe_to_rely_on"))
+    recompute["coverage"]["safe_for_user_reliance"] = bool(coverage_payload.get("safe_for_user_reliance"))
+    recompute["coverage"]["safe_for_projection"] = bool(coverage_payload.get("safe_for_projection"))
+    result["recompute"] = recompute
+
+    # Keep brief aligned with fresh coverage truth.
+    try:
+        brief = _build_market_compliance_brief(
+            db,
+            org_id=org_id,
+            state=state,
+            county=county,
+            city=city,
+            pha_name=pha_name,
+        )
+        if isinstance(brief, dict):
+            brief = dict(brief)
+            brief["coverage"] = coverage_payload
+            result["brief"] = brief
+    except Exception:
+        pass
+
+    # Effective missing categories should come from fresh coverage truth.
+    safe = bool(
+        coverage_payload.get("safe_to_rely_on")
+        or coverage_payload.get("safe_for_user_reliance")
+        or (coverage_payload.get("trust_decision") or {}).get("safe_for_user_reliance")
     )
-    reasons = []
-    if conflicting:
-        reasons.append("conflicting_categories")
-    if stale_authoritative:
-        reasons.append("stale_authoritative_categories")
-    if binding_unmet:
-        reasons.append("missing_binding_authority")
-    if missing and not bool(completeness.get("safe_for_projection")):
-        reasons.append("incomplete_required_coverage")
-    return {
-        "block_projection": block,
-        "stop_reason": reasons[0] if reasons else None,
-        "stop_reasons": reasons,
-    }
-
-
-_run_market_policy_pipeline_registry_first_base = run_market_policy_pipeline
-
-def run_market_policy_pipeline(*args, **kwargs):
-    result = dict(_run_market_policy_pipeline_registry_first_base(*args, **kwargs) or {})
-
-    org_id = kwargs.get("org_id")
-    state = _norm_state(kwargs.get("state"))
-    county = _norm_lower(kwargs.get("county"))
-    city = _norm_lower(kwargs.get("city"))
-    pha_name = _norm_text(kwargs.get("pha_name"))
-    db = kwargs.get("db")
-    if db is None and args:
-        db = args[0]
-
-    source_runs = list((result.get('refresh_summary') or {}).get('source_runs') or result.get('source_runs') or [])
-    if source_runs:
-        monitor_summary = _compact_monitor_summary(source_runs)
-        result['monitor_summary'] = monitor_summary
-        refresh_summary = dict(result.get('refresh_summary') or {})
-        refresh_summary['monitor_summary'] = monitor_summary
-        result['refresh_summary'] = refresh_summary
-
-    if db is None:
-        return result
-
-    registry_context = _registry_first_market_context(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-    )
-    result["registry_context"] = registry_context
-
-    profile = _refetch_profile_by_scope(
-        db,
-        org_id=org_id,
-        state=state,
-        county=county,
-        city=city,
-        pha_name=pha_name,
-    )
-    completeness = {}
-    health = {}
-    if profile is not None:
-        try:
-            completeness = dict(profile_completeness_payload(db, profile))
-        except Exception:
-            completeness = {}
-        try:
-            health = dict(_chunk3_pipeline_get_jurisdiction_health(
-                db,
-                profile_id=int(profile.id),
-                org_id=org_id,
-                state=state,
-                county=county,
-                city=city,
-                pha_name=pha_name,
-            ) or {})
-        except Exception:
-            health = {}
-    result["completeness_pre_projection"] = completeness
-    result["health_pre_projection"] = health
-
-    projection_guard = _pipeline_projection_guard(completeness=completeness, health=health)
-    result["projection_guard"] = projection_guard
-
-    if projection_guard["block_projection"]:
-        refresh_summary = dict(result.get("refresh_summary") or {})
-        refresh_summary["projection_skipped"] = True
-        refresh_summary["projection_skip_reason"] = projection_guard["stop_reason"]
-        result["refresh_summary"] = refresh_summary
-        result["projected"] = {
-            "ok": False,
-            "projection_skipped": True,
-            "reason": projection_guard["stop_reason"],
-            "reasons": projection_guard["stop_reasons"],
-        }
-        result["pipeline_stop"] = {
-            "stage": "pre_projection_completeness_gate",
-            "reason": projection_guard["stop_reason"],
-            "reasons": projection_guard["stop_reasons"],
-            "conflict_aware": True,
-            "registry_first": True,
-        }
+    if safe:
+        result["missing_categories"] = []
     else:
-        result["pipeline_stop"] = None
+        missing = list(coverage_payload.get("missing_categories") or [])
+        critical_missing = list(coverage_payload.get("critical_missing_categories") or [])
+        authority_unmet = list(coverage_payload.get("authority_unmet_categories") or [])
+        weak_support = list(coverage_payload.get("weak_support_categories") or [])
+        result["missing_categories"] = sorted(
+            set(
+                str(x).strip().lower()
+                for x in (missing + critical_missing + authority_unmet + weak_support)
+                if str(x).strip()
+            )
+        )
+
+    # Normalize discovery payload after recompute.
+    if isinstance(result.get("discovery_result"), dict):
+        discovery_result = dict(result["discovery_result"])
+        discovery_result["missing_categories"] = list(result.get("missing_categories") or [])
+        if not discovery_result["missing_categories"]:
+            discovery_result["discovery_triggered"] = False
+            discovery_result["status"] = "skipped"
+            discovery_result["reason"] = "no_missing_categories_after_recompute"
+        result["discovery_result"] = discovery_result
 
     return result
 
 
-# -----------------------------
-# Step 2 shared ingestion core bridge
-# -----------------------------
-from app.services.product_ingestion_router_service import route_product_ingestion
+_pipeline_response_truth_base_run_market_policy_pipeline = run_market_policy_pipeline
 
-
-def run_shared_product_ingestion(
+def run_market_policy_pipeline(
     db: Session,
     *,
-    org_id: int,
-    product_surface: str,
-    ingestion_mode: str,
-    payload: dict[str, Any] | None = None,
-    csv_template_key: str | None = None,
-    csv_data: bytes | str | None = None,
-    uploads: list[dict[str, Any]] | None = None,
-    run_enrichment_pipeline: bool = True,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
 ) -> dict[str, Any]:
-    """
-    Shared ingestion entrypoint for product-first onboarding.
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
 
-    This lets OneHaven ingest manual property data, CSV portfolio data,
-    and uploaded documents without forcing RentCast or the market-policy
-    pipeline to be the only system entry path.
-    """
-    ingest_result = route_product_ingestion(
-        db,
-        org_id=int(org_id),
-        product_surface=product_surface,
-        ingestion_mode=ingestion_mode,
-        payload=payload,
-        csv_template_key=csv_template_key,
-        csv_data=csv_data,
-        uploads=uploads,
+    result = dict(
+        _pipeline_response_truth_base_run_market_policy_pipeline(
+            db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            focus=focus,
+            reviewer_user_id=reviewer_user_id,
+            auto_activate=auto_activate,
+        )
+        or {}
     )
-    if not bool(ingest_result.get("ok")):
-        return ingest_result
+    if not result.get("ok"):
+        return result
 
-    property_ids = list(ingest_result.get("property_ids") or [])
-    enrichment_runs: list[dict[str, Any]] = []
+    coverage_payload = _pipeline_fresh_coverage_payload(
+        db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+        focus=focus,
+    )
 
-    if run_enrichment_pipeline and property_ids and product_surface in {"compliance", "intelligence", "acquire", "ops"}:
-        # Keep this conservative in Step 2: only kick off market policy recompute
-        # for properties that now have a market/jurisdiction context.
-        from app.models import Property
-
-        for property_id in property_ids:
-            prop = db.get(Property, int(property_id))
-            if prop is None:
-                continue
-            enrichment_runs.append(
-                run_market_policy_pipeline(
-                    db,
-                    org_id=org_id,
-                    state=str(getattr(prop, "state", "MI") or "MI"),
-                    county=getattr(prop, "county", None),
-                    city=getattr(prop, "city", None),
-                    pha_name=None,
-                )
-            )
-
-    return {
-        "ok": True,
-        "product_surface": product_surface,
-        "ingestion_mode": ingestion_mode,
-        "ingest_result": ingest_result,
-        "enrichment_runs": enrichment_runs,
-        "enrichment_triggered": bool(enrichment_runs),
-    }
+    result = _pipeline_apply_fresh_coverage_to_result(
+        result,
+        coverage_payload=coverage_payload,
+        db=db,
+        org_id=org_id,
+        state=st,
+        county=cnty,
+        city=cty,
+        pha_name=pha,
+    )
+    return result
 
 
-# -----------------------------
-# Step 3 product service layer bridge
-# -----------------------------
-from app.services.acquisition_workspace_service import build_acquisition_workspace_summary
-from app.services.compliance_brief_service import build_property_compliance_brief_summary
-from app.services.deal_intelligence_service import build_deal_intelligence_summary, rank_deals_for_org
-from app.services.property_ops_summary_service import build_property_ops_summary
-from app.services.tenant_match_service import build_tenant_match_summary
+_pipeline_response_truth_base_refresh_market_policy_pipeline = refresh_market_policy_pipeline
 
-
-def build_product_summary(
+def refresh_market_policy_pipeline(
     db: Session,
     *,
-    org_id: int,
-    product_surface: str,
-    property_id: int | None = None,
-    deal_id: int | None = None,
-    acquisition_deal_id: int | None = None,
-    tenant_id: int | None = None,
-    limit: int = 25,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
 ) -> dict[str, Any]:
-    """
-    Product-facing summary router.
+    st = _norm_state(state)
+    cnty = _norm_lower(county)
+    cty = _norm_lower(city)
+    pha = _norm_text(pha_name)
 
-    Step 3 moves the app away from raw internal modules by giving each surface
-    a business-facing summary layer.
-    """
-    surface = str(product_surface or "").strip().lower()
-
-    if surface == "intelligence":
-        if deal_id is not None:
-            return build_deal_intelligence_summary(db, org_id=int(org_id), deal_id=int(deal_id))
-        return rank_deals_for_org(db, org_id=int(org_id), limit=int(limit))
-
-    if surface == "acquire":
-        if acquisition_deal_id is None:
-            return {"ok": False, "error": "acquisition_deal_id_required", "product_surface": surface}
-        return build_acquisition_workspace_summary(
+    result = dict(
+        _pipeline_response_truth_base_refresh_market_policy_pipeline(
             db,
-            org_id=int(org_id),
-            acquisition_deal_id=int(acquisition_deal_id),
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            focus=focus,
+            reviewer_user_id=reviewer_user_id,
+            auto_activate=auto_activate,
         )
+        or {}
+    )
 
-    if surface == "compliance":
-        if property_id is None:
-            return {"ok": False, "error": "property_id_required", "product_surface": surface}
-        return build_property_compliance_brief_summary(
+    pipeline_result = dict(result.get("pipeline_result") or {})
+    if pipeline_result.get("ok"):
+        coverage_payload = _pipeline_fresh_coverage_payload(
             db,
-            org_id=int(org_id),
-            property_id=int(property_id),
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
+            focus=focus,
         )
-
-    if surface == "tenants":
-        return build_tenant_match_summary(
-            db,
-            org_id=int(org_id),
-            tenant_id=int(tenant_id) if tenant_id is not None else None,
+        pipeline_result = _pipeline_apply_fresh_coverage_to_result(
+            pipeline_result,
+            coverage_payload=coverage_payload,
+            db=db,
+            org_id=org_id,
+            state=st,
+            county=cnty,
+            city=cty,
+            pha_name=pha,
         )
+    result["pipeline_result"] = pipeline_result
+    return result
 
-    if surface == "ops":
-        if property_id is None:
-            return {"ok": False, "error": "property_id_required", "product_surface": surface}
-        return build_property_ops_summary(
-            db,
-            org_id=int(org_id),
-            property_id=int(property_id),
-        )
 
-    return {"ok": False, "error": "unknown_product_surface", "product_surface": surface}
+def run_market_pipeline(
+    db: Session,
+    *,
+    org_id: Optional[int],
+    state: str,
+    county: Optional[str],
+    city: Optional[str],
+    pha_name: Optional[str] = None,
+    focus: str = "se_mi_extended",
+    reviewer_user_id: int | None = None,
+    auto_activate: bool = True,
+) -> dict[str, Any]:
+    return run_market_policy_pipeline(
+        db,
+        org_id=org_id,
+        state=state,
+        county=county,
+        city=city,
+        pha_name=pha_name,
+        focus=focus,
+        reviewer_user_id=reviewer_user_id,
+        auto_activate=auto_activate,
+    )

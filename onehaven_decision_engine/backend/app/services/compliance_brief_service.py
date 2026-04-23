@@ -6,6 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import ComplianceProfile, Inspection, InspectionItem, Property, RehabTask
+from app.services.compliance_recommendation_service import build_compliance_recommendation
+from app.services.fix_plan_service import build_fix_plan
+from app.services.inspection_risk_service import build_inspection_risk_summary
+from app.services.jurisdiction_health_service import get_jurisdiction_health
+from app.services.revenue_risk_service import build_revenue_risk_summary
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -17,12 +22,20 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _inspection_risk_label(score: float) -> str:
-    if score >= 70:
-        return "high"
-    if score >= 40:
-        return "medium"
-    return "low"
+def _norm_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _profile_monthly_rent(profile: Any) -> float | None:
+    for name in ("market_rent_monthly", "monthly_rent", "rent_monthly", "expected_rent_monthly"):
+        if hasattr(profile, name):
+            value = _safe_float(getattr(profile, name), -1.0)
+            if value >= 0:
+                return value
+    return None
 
 
 def build_property_compliance_brief_summary(
@@ -50,7 +63,7 @@ def build_property_compliance_brief_summary(
             )
         ).all()
     )
-    inspection_ids = [int(item.id) for item in inspections]
+    inspection_ids = [int(item.id) for item in inspections if getattr(item, "id", None) is not None]
     inspection_items: list[InspectionItem] = []
     if inspection_ids:
         inspection_items = list(
@@ -58,6 +71,7 @@ def build_property_compliance_brief_summary(
                 select(InspectionItem).where(InspectionItem.inspection_id.in_(inspection_ids))
             ).all()
         )
+
     rehab_tasks = list(
         db.scalars(
             select(RehabTask).where(
@@ -67,37 +81,93 @@ def build_property_compliance_brief_summary(
         ).all()
     )
 
-    failed_items = [item for item in inspection_items if bool(getattr(item, "failed", False))]
-    critical_failed_items = [
-        item for item in failed_items if int(getattr(item, "severity", 0) or 0) >= 3
-    ]
+    jurisdiction_health = {}
+    property_state = getattr(property_row, "state", None)
+    property_county = getattr(property_row, "county", None)
+    property_city = getattr(property_row, "city", None)
+    try:
+        jurisdiction_health = get_jurisdiction_health(
+            db,
+            org_id=int(org_id),
+            state=property_state,
+            county=property_county,
+            city=property_city,
+            pha_name=None,
+        )
+    except Exception:
+        jurisdiction_health = {"ok": False, "error": "jurisdiction_health_unavailable"}
 
-    inspection_risk_score = _safe_float(getattr(profile, "inspection_risk_score", None), float(min(100, len(failed_items) * 12)))
-    money_at_risk = _safe_float(getattr(profile, "money_at_risk_monthly", None), float(len(critical_failed_items) * 150.0))
-    safe_to_rent = bool(getattr(profile, "safe_to_rent", False)) if profile is not None else len(critical_failed_items) == 0
+    completeness = dict(jurisdiction_health.get("completeness") or {})
+    lockout = dict(jurisdiction_health.get("lockout") or {})
+    sla_summary = dict(jurisdiction_health.get("sla_summary") or {})
 
-    missing_critical_items = [
-        str(getattr(item, "code", None) or getattr(item, "category", None) or "inspection_item")
-        for item in critical_failed_items
-    ]
+    missing_categories = list(completeness.get("missing_categories") or [])
+    missing_critical_categories = list(
+        completeness.get("missing_critical_categories")
+        or completeness.get("critical_missing_categories")
+        or lockout.get("critical_missing_binding_categories")
+        or []
+    )
+    stale_authoritative_categories = list(
+        completeness.get("stale_authoritative_categories")
+        or jurisdiction_health.get("stale_authoritative_categories")
+        or []
+    )
+    conflicting_categories = list(completeness.get("conflicting_categories") or [])
+    manual_review_reasons = list(jurisdiction_health.get("manual_review_reasons") or [])
 
-    fix_plan = [
-        {
-            "title": task.title,
-            "category": task.category,
-            "status": task.status,
-            "cost_estimate": _safe_float(getattr(task, "cost_estimate", None), 0.0),
-            "deadline": task.deadline.isoformat() if getattr(task, "deadline", None) else None,
-        }
-        for task in rehab_tasks
-        if str(getattr(task, "status", "") or "").lower() not in {"done", "completed"}
-    ]
+    inspection_risk = build_inspection_risk_summary(
+        inspection_items=inspection_items,
+        unresolved_requirements=missing_critical_categories,
+        unresolved_conflicts=conflicting_categories,
+        stale_authoritative_categories=stale_authoritative_categories,
+    )
 
-    recommendation = "safe_to_operate"
-    if not safe_to_rent:
-        recommendation = "hold_and_remediate"
-    elif inspection_risk_score >= 40:
-        recommendation = "monitor_and_fix"
+    fix_plan = build_fix_plan(
+        rehab_tasks=rehab_tasks,
+        missing_critical_requirements=missing_critical_categories,
+        unresolved_categories=missing_categories,
+        inspection_findings=inspection_risk.get("findings"),
+    )
+
+    revenue_risk = build_revenue_risk_summary(
+        monthly_rent=_profile_monthly_rent(profile),
+        section8_monthly_rent=_safe_float(getattr(profile, "money_at_risk_monthly", None), 0.0) or None,
+        lockout_active=bool(lockout.get("lockout_active")),
+        blocking_categories=list(lockout.get("lockout_causing_categories") or []),
+        inspection_risk_level=str(inspection_risk.get("inspection_risk_level") or ""),
+        failed_item_count=int(inspection_risk.get("failed_item_count") or 0),
+        critical_failed_item_count=int(inspection_risk.get("critical_failed_item_count") or 0),
+        stale_authoritative_categories=stale_authoritative_categories,
+    )
+
+    recommendation = build_compliance_recommendation(
+        safe_for_projection=bool(jurisdiction_health.get("safe_for_projection", completeness.get("safe_for_projection", False))),
+        safe_for_user_reliance=bool(jurisdiction_health.get("safe_to_rely_on", completeness.get("safe_for_user_reliance", False))),
+        lockout_active=bool(lockout.get("lockout_active")),
+        missing_categories=missing_categories,
+        missing_critical_categories=missing_critical_categories,
+        stale_authoritative_categories=stale_authoritative_categories,
+        conflicting_categories=conflicting_categories,
+        manual_review_reasons=manual_review_reasons,
+        inspection_risk_level=str(inspection_risk.get("inspection_risk_level") or ""),
+    )
+
+    confidence = float(
+        completeness.get("overall_completeness")
+        or completeness.get("completeness_score")
+        or getattr(profile, "confidence_score", None)
+        or 0.0
+    )
+    evidence_basis = {
+        "health_status": jurisdiction_health.get("health_status"),
+        "confidence_label": completeness.get("confidence_label") or jurisdiction_health.get("confidence_label"),
+        "covered_categories": list(completeness.get("covered_categories") or []),
+        "missing_categories": missing_categories,
+        "stale_authoritative_categories": stale_authoritative_categories,
+        "lockout_causing_categories": list(lockout.get("lockout_causing_categories") or []),
+        "review_required_categories": list(sla_summary.get("review_required_categories") or []),
+    }
 
     return {
         "ok": True,
@@ -105,13 +175,35 @@ def build_property_compliance_brief_summary(
         "address": getattr(property_row, "address", None),
         "city": getattr(property_row, "city", None),
         "state": getattr(property_row, "state", None),
-        "safe_to_rent": safe_to_rent,
-        "inspection_risk_score": inspection_risk_score,
-        "inspection_risk": _inspection_risk_label(inspection_risk_score),
-        "missing_critical_items": missing_critical_items,
-        "fix_plan": fix_plan,
-        "money_at_risk_monthly": money_at_risk,
-        "recommendation": recommendation,
-        "failed_item_count": len(failed_items),
-        "critical_failed_item_count": len(critical_failed_items),
+        "status": recommendation["status"],
+        "safe_to_rent": recommendation["safe_to_operate"],
+        "inspection_risk_score": inspection_risk["inspection_risk_score"],
+        "inspection_risk": inspection_risk["inspection_risk_level"],
+        "inspection_timeline_risk": inspection_risk["inspection_timeline_risk"],
+        "missing_critical_requirements": missing_critical_categories,
+        "missing_categories": missing_categories,
+        "fix_plan": fix_plan["steps"],
+        "fix_plan_summary": fix_plan,
+        "money_at_risk_monthly": revenue_risk["money_at_risk_monthly"],
+        "revenue_risk": revenue_risk,
+        "recommendation": recommendation["recommendation"],
+        "why": recommendation["why"],
+        "confidence": round(confidence, 4),
+        "evidence_basis": evidence_basis,
+        "jurisdiction_health": jurisdiction_health,
+        "failed_item_count": inspection_risk["failed_item_count"],
+        "critical_failed_item_count": inspection_risk["critical_failed_item_count"],
     }
+
+
+def build_property_compliance_brief(
+    db: Session,
+    *,
+    org_id: int,
+    property_id: int,
+) -> dict[str, Any]:
+    return build_property_compliance_brief_summary(
+        db,
+        org_id=org_id,
+        property_id=property_id,
+    )

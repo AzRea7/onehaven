@@ -3292,4 +3292,3 @@ def inventory_summary_for_market(
     payload['truth_eligible_source_ids'] = sorted(set(truth_eligible_source_ids))
     payload['truth_eligible_source_count'] = len(payload['truth_eligible_source_ids'])
     return payload
-
