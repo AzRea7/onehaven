@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.product_surfaces import PRODUCT_SURFACES
 from app.services.csv_import_mapping_service import map_csv_payload
-from app.products.acquire.services.document_ingestion_router_service import route_document_upload
+from products.acquire.backend.src.services.document_ingestion_router_service import route_document_upload
 from app.services.portfolio_ingestion_service import import_portfolio_rows
 
 

@@ -1,0 +1,71 @@
+{
+  "product": "intelligence",
+  "legacy_backend_exists": true,
+  "legacy_frontend_exists": true,
+  "new_backend_exists": true,
+  "new_frontend_exists": true,
+  "legacy_hit_count": 10,
+  "legacy_hits": [
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/geo.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 15
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/geo_enrichment.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_dashboard_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 21
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_summary_snapshot_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 8
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/dashboard.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 15
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/inventory_snapshot_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/state_machine.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 40
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 21
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 8
+    },
+    {
+      "file": "tools/repo/validate_product_migration.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.investor_intelligence",
+      "line": 16
+    }
+  ],
+  "ready_to_remove_legacy": false
+}

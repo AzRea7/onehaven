@@ -1,0 +1,17 @@
+{
+  "product": "tenants",
+  "legacy_backend_exists": true,
+  "legacy_frontend_exists": true,
+  "new_backend_exists": true,
+  "new_frontend_exists": true,
+  "legacy_hit_count": 1,
+  "legacy_hits": [
+    {
+      "file": "tools/repo/validate_product_migration.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.tenant",
+      "line": 24
+    }
+  ],
+  "ready_to_remove_legacy": false
+}

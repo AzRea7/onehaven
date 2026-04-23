@@ -1,0 +1,154 @@
+{
+  "status": "success",
+  "phase": 3,
+  "product": "acquire",
+  "dry_run": false,
+  "rewrite_file_count": 12,
+  "rewrites": [
+    {
+      "file": "fix_frontend_product_imports.py",
+      "replacements": [
+        {
+          "rule": "frontend_src_product_reference",
+          "pattern": "\\bsrc/products/acquire\\b",
+          "replacement": "products/acquire/frontend/src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "docs/architecture/bootstrap-inventory.md",
+      "replacements": [
+        {
+          "rule": "frontend_src_product_reference",
+          "pattern": "\\bsrc/products/acquire\\b",
+          "replacement": "products/acquire/frontend/src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/product_ingestion_router_service.py",
+      "replacements": [
+        {
+          "rule": "python_abs_product_import",
+          "pattern": "\\bapp\\.products\\.acquire\\b",
+          "replacement": "products.acquire.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/routers/acquisition.py",
+      "replacements": [
+        {
+          "rule": "python_abs_product_import",
+          "pattern": "\\bapp\\.products\\.acquire\\b",
+          "replacement": "products.acquire.backend.src",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_document_review_service.py",
+      "replacements": [
+        {
+          "rule": "python_abs_product_import",
+          "pattern": "\\bapp\\.products\\.acquire\\b",
+          "replacement": "products.acquire.backend.src",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_service.py",
+      "replacements": [
+        {
+          "rule": "python_abs_product_import",
+          "pattern": "\\bapp\\.products\\.acquire\\b",
+          "replacement": "products.acquire.backend.src",
+          "count": "5"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/properties.py",
+      "replacements": [
+        {
+          "rule": "python_abs_product_import",
+          "pattern": "\\bapp\\.products\\.acquire\\b",
+          "replacement": "products.acquire.backend.src",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/inventory_snapshot_service.py",
+      "replacements": [
+        {
+          "rule": "python_abs_product_import",
+          "pattern": "\\bapp\\.products\\.acquire\\b",
+          "replacement": "products.acquire.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/state_machine.py",
+      "replacements": [
+        {
+          "rule": "python_abs_product_import",
+          "pattern": "\\bapp\\.products\\.acquire\\b",
+          "replacement": "products.acquire.backend.src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "replacements": [
+        {
+          "rule": "python_abs_product_import",
+          "pattern": "\\bapp\\.products\\.acquire\\b",
+          "replacement": "products.acquire.backend.src",
+          "count": "19"
+        },
+        {
+          "rule": "frontend_src_product_reference",
+          "pattern": "\\bsrc/products/acquire\\b",
+          "replacement": "products/acquire/frontend/src",
+          "count": "4"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/migration-manifest.json",
+      "replacements": [
+        {
+          "rule": "frontend_src_product_reference",
+          "pattern": "\\bsrc/products/acquire\\b",
+          "replacement": "products/acquire/frontend/src",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "tools/repo/move_product_acquire_phase2.py",
+      "replacements": [
+        {
+          "rule": "python_abs_product_import",
+          "pattern": "\\bapp\\.products\\.acquire\\b",
+          "replacement": "products.acquire.backend.src",
+          "count": "1"
+        },
+        {
+          "rule": "frontend_src_product_reference",
+          "pattern": "\\bsrc/products/acquire\\b",
+          "replacement": "products/acquire/frontend/src",
+          "count": "1"
+        }
+      ]
+    }
+  ],
+  "remaining_legacy_references": []
+}

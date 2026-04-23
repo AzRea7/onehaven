@@ -1,0 +1,5 @@
+packages:
+  - apps/*
+  - products/*/frontend
+  - packages/*
+  - platform/frontend

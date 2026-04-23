@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "product": "ops",
+  "display_name": "OneHaven Ops",
+  "legacy_backend": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\backend\\app\\products\\management",
+  "legacy_frontend": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\frontend\\src\\products\\management",
+  "target_backend": "C:\\Users\\austin\\onehaven\\products\\ops\\backend\\src",
+  "target_frontend": "C:\\Users\\austin\\onehaven\\products\\ops\\frontend\\src",
+  "backend_rewrites": [],
+  "frontend_rewrites": [],
+  "unresolved_hits": []
+}

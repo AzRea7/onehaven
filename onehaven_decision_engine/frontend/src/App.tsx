@@ -7,7 +7,7 @@ import Property from "./pages/Property";
 
 import Agents from "./pages/Agents";
 import Constitution from "./pages/Constitution";
-import DealIntake from "@/products/acquire/pages/DealIntake";
+import DealIntake from "products/acquire/frontend/src/pages/DealIntake";
 import Jurisdictions from "./pages/Jurisdictions";
 import JurisdictionProfiles from "./pages/JurisdictionProfiles";
 import ImportsPage from "./pages/ImportsPage";
@@ -15,7 +15,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import PolicyReview from "./pages/PolicyReview";
 import InvestorPane from "@/products/investor_intelligence/pages/InvestorPane";
-import AcquisitionPane from "@/products/acquire/pages/AcquisitionPane";
+import AcquisitionPane from "products/acquire/frontend/src/pages/AcquisitionPane";
 import CompliancePane from "@/products/compliance/pages/CompliancePane";
 import TenantsPane from "@/products/tenant/pages/TenantsPane";
 import ManagementPane from "@/products/management/pages/ManagementPane";

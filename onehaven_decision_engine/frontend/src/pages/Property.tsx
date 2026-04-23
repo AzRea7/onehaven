@@ -36,7 +36,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 
-import AcquisitionParticipantsPanel from "@/products/acquire/components/AcquisitionParticipantsPanel";
+import AcquisitionParticipantsPanel from "products/acquire/frontend/src/components/AcquisitionParticipantsPanel";
 import EmptyState from "../components/EmptyState";
 import Golem from "../components/Golem";
 import PageHero from "../components/PageHero";

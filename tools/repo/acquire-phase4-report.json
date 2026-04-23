@@ -1,0 +1,66 @@
+{
+  "phase": 4,
+  "product": "acquire",
+  "dry_run": false,
+  "candidate_files": [
+    "onehaven_decision_engine/backend/app/main.py",
+    "onehaven_decision_engine/backend/app/__init__.py",
+    "onehaven_decision_engine/backend/app/routers/__init__.py",
+    "onehaven_decision_engine/frontend/src/App.tsx",
+    "onehaven_decision_engine/frontend/src/main.tsx",
+    "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+    "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx"
+  ],
+  "patched_files": [
+    {
+      "file": "onehaven_decision_engine/backend/app/main.py",
+      "changed": true,
+      "replacements": [
+        {
+          "rule": "backend_relative_product_import",
+          "pattern": "(?<!\\.)\\bfrom\\s+\\.products\\.acquire(\\b|\\.)",
+          "replacement": "<callable>",
+          "count": "1"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/__init__.py",
+      "changed": false,
+      "replacements": []
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/App.tsx",
+      "changed": true,
+      "replacements": [
+        {
+          "rule": "frontend_alias_import",
+          "pattern": "([\"\\'])@/products/acquire/",
+          "replacement": "<callable>",
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/main.tsx",
+      "changed": false,
+      "replacements": []
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "changed": false,
+      "replacements": []
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+      "changed": false,
+      "replacements": []
+    }
+  ],
+  "backup_files": [
+    "tools/repo/_phase4_backups/onehaven_decision_engine/backend/app/main.py",
+    "tools/repo/_phase4_backups/onehaven_decision_engine/frontend/src/App.tsx"
+  ],
+  "remaining_legacy_runtime_references": [],
+  "status": "success"
+}

@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "product": "intelligence",
+  "display_name": "OneHaven Intelligence",
+  "legacy_backend": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\backend\\app\\products\\investor_intelligence",
+  "legacy_frontend": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\frontend\\src\\products\\investor_intelligence",
+  "target_backend": "C:\\Users\\austin\\onehaven\\products\\intelligence\\backend\\src",
+  "target_frontend": "C:\\Users\\austin\\onehaven\\products\\intelligence\\frontend\\src",
+  "backend_rewrites": [],
+  "frontend_rewrites": [],
+  "unresolved_hits": []
+}

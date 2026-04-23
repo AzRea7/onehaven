@@ -1,0 +1,27 @@
+{
+  "phase": 6,
+  "product": "acquire",
+  "dry_run": false,
+  "status": "success",
+  "checked": {
+    "phase5_report": "tools/repo/acquire-phase5-report.json",
+    "phase5_ready_to_remove_legacy": true,
+    "new_backend_exists": true,
+    "new_backend_file_count": 22,
+    "new_frontend_exists": true,
+    "new_frontend_file_count": 9,
+    "legacy_backend_exists": true,
+    "legacy_backend_file_count": 22,
+    "legacy_frontend_exists": true,
+    "legacy_frontend_file_count": 9
+  },
+  "backup": {
+    "backup_root": "tools/repo/_phase6_backups/acquire_20260423_125245",
+    "backend_backup": "tools/repo/_phase6_backups/acquire_20260423_125245/backend",
+    "frontend_backup": "tools/repo/_phase6_backups/acquire_20260423_125245/frontend"
+  },
+  "removal": {
+    "backend_removed": true,
+    "frontend_removed": true
+  }
+}

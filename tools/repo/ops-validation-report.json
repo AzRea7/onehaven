@@ -1,0 +1,245 @@
+{
+  "product": "ops",
+  "legacy_backend_exists": true,
+  "legacy_frontend_exists": true,
+  "new_backend_exists": true,
+  "new_frontend_exists": true,
+  "legacy_hit_count": 39,
+  "legacy_hits": [
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/ops.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 28
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/ops.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 29
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/rehab.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 15
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/workflow.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 16
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/agent_actions.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 15
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/agent_orchestrator.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 15
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/ingestion_enrichment_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 742
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/stage_guard.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 10
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/domain/agents/impl/timeline_nudger.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 10
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/compliance.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 68
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/routers/inspections.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 57
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/compliance/services/workflow_gate_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 16
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/routers/cash.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/routers/deals.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 26
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/routers/equity.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_dashboard_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 20
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_dashboard_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 23
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/investor_intelligence/services/pane_summary_snapshot_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 9
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/dashboard.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 13
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/properties.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 59
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/properties.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 69
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/dashboard_rollups.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 8
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/inventory_snapshot_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 16
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/tenant/routers/tenants.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 18
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 36
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/cash.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 17
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/deals.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 26
+    },
+    {
+      "file": "products/intelligence/backend/src/routers/equity.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 17
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 20
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_dashboard_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 23
+    },
+    {
+      "file": "products/intelligence/backend/src/services/pane_summary_snapshot_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 9
+    },
+    {
+      "file": "products/ops/backend/src/routers/dashboard.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 13
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 59
+    },
+    {
+      "file": "products/ops/backend/src/routers/properties.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 69
+    },
+    {
+      "file": "products/ops/backend/src/services/dashboard_rollups.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 8
+    },
+    {
+      "file": "products/ops/backend/src/services/properties/inventory_snapshot_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 16
+    },
+    {
+      "file": "products/tenants/backend/src/routers/tenants.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 18
+    },
+    {
+      "file": "tools/repo/validate_product_migration.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 32
+    },
+    {
+      "file": "tools/repo/_phase6_backups/acquire_20260423_125245/backend/services/acquisition_service.py",
+      "type": "legacy_backend_import",
+      "match": "app.products.management",
+      "line": 36
+    }
+  ],
+  "ready_to_remove_legacy": false
+}

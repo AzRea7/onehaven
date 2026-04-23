@@ -1,0 +1,2074 @@
+{
+  "platform_candidates": [
+    {
+      "source": "backend/app/auth.py",
+      "target": "platform/backend/src/identity/interfaces",
+      "reason": "explicit_platform_mapping"
+    },
+    {
+      "source": "backend/app/config.py",
+      "target": "platform/backend/src/config",
+      "reason": "explicit_platform_mapping"
+    },
+    {
+      "source": "backend/app/db.py",
+      "target": "platform/backend/src/db",
+      "reason": "explicit_platform_mapping"
+    },
+    {
+      "source": "backend/app/logging_config.py",
+      "target": "platform/backend/src/observability",
+      "reason": "explicit_platform_mapping"
+    },
+    {
+      "source": "backend/app/middleware",
+      "target": "platform/backend/src/observability",
+      "reason": "explicit_platform_mapping"
+    },
+    {
+      "source": "backend/app/routers/auth.py",
+      "target": "platform/backend/src/identity/interfaces",
+      "reason": "explicit_platform_mapping"
+    },
+    {
+      "source": "backend/app/routers/health.py",
+      "target": "apps/suite-api/app/api/health",
+      "reason": "explicit_platform_mapping"
+    },
+    {
+      "source": "frontend/src/lib/auth.tsx",
+      "target": "platform/frontend/src/auth",
+      "reason": "explicit_platform_mapping"
+    }
+  ],
+  "manual_split": [
+    {
+      "source": "backend/app/domain",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__init__.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/__init__.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/audit.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/compliance.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/decision_engine.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/events.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/fingerprint.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/jurisdiction_categories.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/jurisdiction_defaults.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/jurisdiction_scoring.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/operating_truth.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/operating_truth_enforcement.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/policy_authority.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/policy_conflicts.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/policy_decisions.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/policy_evidence.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/policy_expected_universe.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/policy_materiality.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/rent_learning.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/__pycache__/underwriting.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/__pycache__/contracts.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/__pycache__/executor.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/__pycache__/llm_router.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/__pycache__/registry.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/apply.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/contracts.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/executor.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/deal_intake.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/hqs_precheck.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/hqs_precheck_agent.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/next_actions_agent.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/ops_judge.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/packet_builder_agent.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/photo_rehab_agent.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/rent_reasonableness_agent.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/timeline_nudger.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/__pycache__/underwrite_agent.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/deal_intake.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/hqs_precheck_agent.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/next_actions_agent.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/ops_judge.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/packet_builder_agent.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/photo_rehab_agent.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/public_records_check.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/rent_reasonableness_agent.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/timeline_nudger.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/impl/underwrite_agent.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/llm_router.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/registry.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/run_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/agents/validate.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/audit.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/cashflow.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__init__.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/__init__.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/checklist_templates.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/compliance_completion.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/compliance_stats.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/hqs.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/hqs_library.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/inspection_mapping.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/inspection_rules.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/photo_to_hqs_mapper.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/__pycache__/top_fail_points.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/checklist_templates.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/compliance_completion.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/compliance_stats.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/hqs.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/hqs_library.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/inspection_mapping.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/inspection_rules.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/photo_to_hqs_mapper.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance/top_fail_points.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/compliance.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/decision_engine.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/events.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/fingerprint.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers/__init__.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers/__pycache__/__init__.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers/__pycache__/base.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers/__pycache__/investorlift.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers/__pycache__/zillow.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers/base.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers/investorlift.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/importers/zillow.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/jurisdiction_scoring.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/operating_truth.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/operating_truth_enforcement.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/__init__.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/__pycache__/__init__.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/__pycache__/categories.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/__pycache__/defaults.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/authority.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/categories.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/conflicts.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/decisions.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/defaults.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/evidence.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/expected_universe.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/policy/materiality.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/rent_explain_runs.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/rent_learning.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/section8",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/section8/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/section8/__pycache__/rent_rules.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/section8/rent_rules.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/shared",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/shared/__init__.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/underwriting.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/valuation_cadence.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/workflow",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/workflow/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/workflow/__pycache__/panes.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/workflow/__pycache__/stages.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/workflow/panes.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/domain/workflow/stages.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/acquisition.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/agent_runs.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/agents.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/api_keys.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/audit.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/auth.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/automation.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/cash.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/compliance.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/dashboard.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/deals.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/equity.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/evaluate.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/health.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/imports.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/imports_alias.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/ingestion.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/inspections.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/jurisdiction_profiles.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/jurisdictions.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/markets.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/meta.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/ops.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/photos.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/policy.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/policy_catalog_admin.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/policy_evidence.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/policy_seed.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/properties.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/rehab.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/rent.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/rent_enrich.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/tenants.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/trust.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/__pycache__/workflow.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/agent_runs.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/agents.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/api_keys.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/audit.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/automation.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/geo.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/imports.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/imports_alias.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/ingestion.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/meta.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/metrics.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/ops.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/photos.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/policy_seed.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/rehab.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/rent.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/rent_enrich.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/streetview.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/trust.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/routers/workflow.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/acquisition_deadline_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/acquisition_document_review_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/acquisition_participant_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/acquisition_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/acquisition_tag_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/address_normalization.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/agent_actions.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/agent_concurrency.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/agent_engine.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/agent_orchestrator.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/agent_orchestrator_runtime.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/agent_trace.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/api_budget.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/auth_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/budget_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/compliance_brief_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/compliance_document_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/compliance_photo_analysis_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/compliance_recommendation_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/compliance_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/crime_index.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/dashboard_rollups.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/document_parsing_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/events_facade.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/fix_plan_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/fmr.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/geo_enrichment.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/geocode_cache_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/geocoding_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/hud_fmr_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/ingestion_dedupe_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/ingestion_enrichment_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/ingestion_run_execute.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/ingestion_run_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/ingestion_scheduler_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/ingestion_source_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/inspection_failure_task_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/inspection_readiness_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/inspection_risk_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/inspection_scheduling_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/inspection_template_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/inspector_communication_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_completeness_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_expected_universe_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_health_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_lockout_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_notification_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_profile_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_refresh_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_registry_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_rules_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_sla_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/jurisdiction_task_mapper.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/lease_rules.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/locks_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/market_catalog_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/market_sync_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/offender_index.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/ownership.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/pane_dashboard_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/pane_routing_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/photo_rehab_agent.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/plan_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_catalog.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_catalog_admin_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_change_detection_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_cleanup_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_coverage_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_crawl_inventory_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_crawl_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_dataset_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_discovery_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_evidence_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_evidence_version_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_extractor_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_extractor_v1.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_fetch_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_pipeline_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_projection_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_review_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_rule_normalizer.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_seed.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_source_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_truth_resolution_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/policy_validation_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/portfolio_watchlist_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/product_ingestion_router_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/property_insurance_enrichment_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/property_inventory_snapshot_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/property_photo_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/property_price_resolution_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/property_state_machine.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/property_tax_enrichment_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/public_tax_lookup_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/rent_refresh_queue_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/rentcast_listing_source.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/rentcast_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/revenue_risk_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/risk_scoring.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/runtime_metrics.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/stage_guard.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/trust_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/usage_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/virus_scanning_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/workflow_gate_service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/__pycache__/zillow_photo_source.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/address_normalization.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/agent_actions.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/agent_concurrency.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/agent_engine.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/agent_orchestrator.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/agent_orchestrator_runtime.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/agent_threads.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/agent_trace.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/auth_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/budget_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/crime_index.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/csv_import_mapping_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/events_facade.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/external_budget.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/fmr.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/geo_enrichment.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/geocode_cache_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/geocoding_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/hud_fmr_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/ingestion_dedupe_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/ingestion_enrichment_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/ingestion_run_execute.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/ingestion_run_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/ingestion_scheduler_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/ingestion_source_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/inspection_scheduling_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/inspector_communication_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_profile_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_registry_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_source_family_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/jurisdiction_task_mapper.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/lease_rules.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/locks_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/market_catalog_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/market_sync_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/offender_index.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/onboarding_flows.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/ownership.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/pane_routing_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/photo_rehab_agent.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/plan_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/policy_catalog.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/policy_change_detection_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/policy_crawl_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/policy_evidence_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/policy_evidence_version_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/policy_market_seed_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/policy_rule_normalizer.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/policy_seed.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/portfolio_ingestion_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/portfolio_watchlist_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/product_ingestion_router_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/product_surfaces.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/property_insurance_enrichment_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/property_normalization_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/property_photo_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/property_price_resolution_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/property_tax_enrichment_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/public_tax_lookup_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/rent_comp_selection.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/rent_refresh_queue_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/rentcast_listing_source.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/rentcast_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/runtime_metrics.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/shared",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/shared/__init__.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/stage_guard.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/__init__.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/__pycache__/__init__.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/__pycache__/base.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/__pycache__/cache.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/__pycache__/fallbacks.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/__pycache__/registry.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/__pycache__/service.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/__init__.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/__pycache__",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/__pycache__/__init__.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/__pycache__/bsa_adapter.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/__pycache__/county_rate_adapter.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/__pycache__/public_record_adapter.cpython-312.pyc",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/bsa_adapter.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/county_rate_adapter.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/adapters/public_record_adapter.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/base.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/cache.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/fallbacks.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/registry.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/tax/service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/trust_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/usage_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/virus_scanning_service.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/zillow_api_source.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "backend/app/services/zillow_photo_source.py",
+      "reason": "shared_or_cross_cutting_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AgentRunCompare.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AgentRunHistory.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AgentRunsPanel.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AgentSlots.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AnimatedBackdrop.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AppFooter.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AppHeader.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AppSelect.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AppShell.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/Artwork.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/AuroraBackground.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/EmptyState.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/FilterBar.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/GlassCard.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/GlobalFilters.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/Golem.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/IngestionErrorsDrawer.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/IngestionLaunchCard.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/IngestionRunsPanel.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/IngestionSourcesPanel.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/KpiCard.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/MarketSourcePackModal.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/PageHero.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/PageShell.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/PaneSwitcher.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/RehabFromPhotosCTA.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/Shell.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/Spinner.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/StatCard.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/StatPill.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/Surface.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/components/VirtualList.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/lib",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/lib/api.ts",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/lib/authFlow.ts",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/lib/dealRules.ts",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/lib/filters.ts",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/lib/ingestionClient.ts",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/Agents.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/AgentsPanel.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/Constitution.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/drilldowns",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/drilldowns/README_STEP8_AUDIT.md",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/ImportsPage.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/JurisdictionProfiles.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/Jurisdictions.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/Login.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/PolicyReview.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/Property.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    },
+    {
+      "source": "frontend/src/pages/Register.tsx",
+      "reason": "frontend_shell_or_shared_ui_needs_manual_review"
+    }
+  ],
+  "untouched": [
+    "backend/app/__init__.py",
+    "backend/app/__pycache__",
+    "backend/app/__pycache__/__init__.cpython-312.pyc",
+    "backend/app/__pycache__/auth.cpython-312.pyc",
+    "backend/app/__pycache__/config.cpython-312.pyc",
+    "backend/app/__pycache__/db.cpython-312.pyc",
+    "backend/app/__pycache__/logging_config.cpython-312.pyc",
+    "backend/app/__pycache__/main.cpython-312.pyc",
+    "backend/app/__pycache__/models.cpython-312.pyc",
+    "backend/app/__pycache__/policy_models.cpython-312.pyc",
+    "backend/app/__pycache__/schemas.cpython-312.pyc",
+    "backend/app/alembic",
+    "backend/app/alembic/__pycache__",
+    "backend/app/alembic/__pycache__/env.cpython-312.pyc",
+    "backend/app/alembic/env.py",
+    "backend/app/alembic/script.py.mako",
+    "backend/app/alembic/versions",
+    "backend/app/alembic/versions/0001_init.py",
+    "backend/app/alembic/versions/0002_compliance.py",
+    "backend/app/alembic/versions/0003_imports.py",
+    "backend/app/alembic/versions/0004_rent_learning.py",
+    "backend/app/alembic/versions/0005_api_usage.py",
+    "backend/app/alembic/versions/0006_compliance_and_rent_policy_fields.py",
+    "backend/app/alembic/versions/0007_add_deal_strategy.py",
+    "backend/app/alembic/versions/0008_ops_and_agents.py",
+    "backend/app/alembic/versions/0009_add_underwriting_result_meta.py",
+    "backend/app/alembic/versions/0010_agent_slots.py",
+    "backend/app/alembic/versions/0011_multitenant_rbac_audit_eventlog.py",
+    "backend/app/alembic/versions/0012_fix_org_scoping_not_null.py",
+    "backend/app/alembic/versions/0013_property_checklist_items_and_org_scoping.py",
+    "backend/app/alembic/versions/0014_rehab_tasks_and_basic_ops_tables.py",
+    "backend/app/alembic/versions/0015_jurisdiction_org_scope.py",
+    "backend/app/alembic/versions/0016_import_snapshots_org_scope.py",
+    "backend/app/alembic/versions/0017_rent_explain_runs.py",
+    "backend/app/alembic/versions/0018_seed_jurisdiction_defaults.py",
+    "backend/app/alembic/versions/0019_agent_messages_link_run_id.py",
+    "backend/app/alembic/versions/0020_policy_tables.py",
+    "backend/app/alembic/versions/0021_inspections_add_org_id.py",
+    "backend/app/alembic/versions/0022_agent_runs_reliability_fields.py",
+    "backend/app/alembic/versions/0023_agent_messages_add_run_id.py",
+    "backend/app/alembic/versions/0024_add_agent_trace_events.py",
+    "backend/app/alembic/versions/0025_saas_core_tables.py",
+    "backend/app/alembic/versions/0026_add_limits_json_to_plans.py",
+    "backend/app/alembic/versions/0027_widen_alembic_version.py",
+    "backend/app/alembic/versions/0028_add_last_login_at_to_app_users.py",
+    "backend/app/alembic/versions/0029_create_checklist_template_items.py",
+    "backend/app/alembic/versions/0030_add_trust_tables.py",
+    "backend/app/alembic/versions/0031_add_saas_tables.py",
+    "backend/app/alembic/versions/0032_fix_schema_drift.py",
+    "backend/app/alembic/versions/0033_force_schema_fix_rent_explain_run_id.py",
+    "backend/app/alembic/versions/0034_add_leases_org_id.py",
+    "backend/app/alembic/versions/0035_ops_add_org_id_transactions_valuations.py",
+    "backend/app/alembic/versions/0036_add_geo_risk_workflow_pipeline.py",
+    "backend/app/alembic/versions/0037_add_org_id_to_app_users.py",
+    "backend/app/alembic/versions/0038_repair_app_users_columns.py",
+    "backend/app/alembic/versions/0039_safe_add_org_updated_at.py",
+    "backend/app/alembic/versions/0040_policy_models_bootstrap.py",
+    "backend/app/alembic/versions/0041_fix_policy_models_schema.py",
+    "backend/app/alembic/versions/0042_repair_jurisdiction_profiles.py",
+    "backend/app/alembic/versions/0043_make_jp_legacy_nullable.py",
+    "backend/app/alembic/versions/0044_fix_jp_created_at_default.py",
+    "backend/app/alembic/versions/0045_add_policy_sources_and_assertions.py",
+    "backend/app/alembic/versions/0046_policy_governance_and_coverage.py",
+    "backend/app/alembic/versions/0047_property_state_stage_index_and_transition_ts.py",
+    "backend/app/alembic/versions/0048_add_properties_updated_at.py",
+    "backend/app/alembic/versions/0049_add_deal_pipeline_fields.py",
+    "backend/app/alembic/versions/0050_add_property_photos.py",
+    "backend/app/alembic/versions/0051_add_policy_catalog_entries.py",
+    "backend/app/alembic/versions/0052_add_ingestion_tables.py",
+    "backend/app/alembic/versions/0053_add_seen_columns_to_ingestion_record_links.py",
+    "backend/app/alembic/versions/0054_add_location_automation_foundation.py",
+    "backend/app/alembic/versions/0055_add_jurisdiction_finalize_foundation.py",
+    "backend/app/alembic/versions/0056_add_real_inspection_compliance_foundation.py",
+    "backend/app/alembic/versions/0057_add_is_authoritative_to_policy_sources.py",
+    "backend/app/alembic/versions/0058_add_org_locks.py",
+    "backend/app/alembic/versions/0059_add_inventory_and_pane_snapshot_tables.py",
+    "backend/app/alembic/versions/0060_add_acquisition_workflow_tables.py",
+    "backend/app/alembic/versions/0061_add_acquisition_search_and_tagging.py",
+    "backend/app/alembic/versions/0062_add_acquisition_document_workflow_engine.py",
+    "backend/app/alembic/versions/0063_add_market_sync_states.py",
+    "backend/app/alembic/versions/0064_fix_org_locks_schema_for_dataset_locks.py",
+    "backend/app/alembic/versions/0065_widen_property_acquisition_source_columns.py",
+    "backend/app/alembic/versions/0066_add_property_listing_visibility_fields.py",
+    "backend/app/alembic/versions/0067_add_productionized_crime_risk_fields.py",
+    "backend/app/alembic/versions/0068_add_property_tax_insurance_fields.py",
+    "backend/app/alembic/versions/0069_add_property_tax_lookup_metadata.py",
+    "backend/app/alembic/versions/0070_repair_acquisition_contacts_columns.py",
+    "backend/app/alembic/versions/0071_add_property_scoped_inspection_execution_fields.py",
+    "backend/app/alembic/versions/0072_add_inspection_appointment_fields_and_reminders.py",
+    "backend/app/alembic/versions/0073_add_compliance_documents.py",
+    "backend/app/alembic/versions/0074_add_compliance_rule_projection_foundation.py",
+    "backend/app/alembic/versions/0075_expand_policy_foundation_for_trustworthy_projection.py",
+    "backend/app/alembic/versions/0076_add_property_evidence_proof_fields.py",
+    "backend/app/alembic/versions/0077_add_jurisdiction_completeness_metadata_fields.py",
+    "backend/app/alembic/versions/0078_add_policy_source_authority_tiering_fields.py",
+    "backend/app/alembic/versions/0079_add_policy_source_inventory_foundation.py",
+    "backend/app/alembic/versions/0080_add_policy_refresh_state_machine.py",
+    "backend/app/alembic/versions/0081_add_policy_assertion_validation_gate.py",
+    "backend/app/alembic/versions/0082_add_policy_override_ledger.py",
+    "backend/app/alembic/versions/0083_repair_jurisdiction_schema_drift.py",
+    "backend/app/alembic/versions/0084_repair_remaining_jurisdiction_schema_drift.py",
+    "backend/app/alembic/versions/0085_fix_jurisdiction_json_default_casts.py",
+    "backend/app/alembic/versions/0086_add_projection_item_updated_at.py",
+    "backend/app/alembic/versions/0087_fix_hqs_rules_schema_drift.py",
+    "backend/app/alembic/versions/0088_add_jurisdiction_registry_and_source_families.py",
+    "backend/app/alembic/versions/0089_add_nspire_rule_catalog.py",
+    "backend/app/alembic/versions/0090_add_property_compliance_resolution_snapshots.py",
+    "backend/app/alembic/versions/0091_add_jurisdiction_registry.py",
+    "backend/app/alembic/versions/0092_add_registry_completeness_metadata.py",
+    "backend/app/alembic/versions/__pycache__",
+    "backend/app/alembic/versions/__pycache__/0001_init.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0002_compliance.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0003_imports.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0004_rent_learning.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0005_api_usage.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0006_compliance_and_rent_policy_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0007_add_deal_strategy.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0008_ops_and_agents.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0009_add_underwriting_result_meta.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0010_agent_slots.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0011_multitenant_rbac_audit_eventlog.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0012_fix_org_scoping_not_null.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0013_property_checklist_items_and_org_scoping.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0014_rehab_tasks_and_basic_ops_tables.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0015_jurisdiction_org_scope.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0016_import_snapshots_org_scope.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0017_rent_explain_runs.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0018_seed_jurisdiction_defaults.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0019_agent_messages_link_run_id.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0020_policy_tables.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0021_inspections_add_org_id.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0022_agent_runs_reliability_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0023_agent_messages_add_run_id.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0024_add_agent_trace_events.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0025_saas_core_tables.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0026_add_limits_json_to_plans.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0027_widen_alembic_version.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0028_add_last_login_at_to_app_users.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0029_create_checklist_template_items.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0030_add_trust_tables.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0031_add_saas_tables.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0032_fix_schema_drift.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0033_force_schema_fix_rent_explain_run_id.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0034_add_leases_org_id.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0035_ops_add_org_id_transactions_valuations.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0036_add_geo_risk_workflow_pipeline.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0037_add_org_id_to_app_users.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0038_repair_app_users_columns.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0039_safe_add_org_updated_at.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0040_policy_models_bootstrap.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0041_fix_policy_models_schema.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0042_repair_jurisdiction_profiles.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0043_make_jp_legacy_nullable.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0044_fix_jp_created_at_default.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0045_add_policy_sources_and_assertions.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0046_policy_governance_and_coverage.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0047_property_state_stage_index_and_transition_ts.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0048_add_properties_updated_at.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0049_add_deal_pipeline_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0050_add_property_photos.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0051_add_policy_catalog_entries.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0052_add_ingestion_tables.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0053_add_seen_columns_to_ingestion_record_links.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0054_add_location_automation_foundation.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0055_add_jurisdiction_finalize_foundation.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0056_add_real_inspection_compliance_foundation.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0057_add_is_authoritative_to_policy_sources.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0058_add_org_locks.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0059_add_inventory_and_pane_snapshot_tables.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0060_add_acquisition_workflow_tables.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0061_add_acquisition_search_and_tagging.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0062_add_acquisition_document_workflow_engine.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0063_add_market_sync_states.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0064_fix_org_locks_schema_for_dataset_locks.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0065_widen_property_acquisition_source_columns.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0066_add_property_listing_visibility_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0067_add_productionized_crime_risk_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0068_add_property_tax_insurance_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0069_add_property_tax_lookup_metadata.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0070_repair_acquisition_contacts_columns.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0071_add_property_scoped_inspection_execution_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0072_add_inspection_appointment_fields_and_reminders.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0073_add_compliance_documents.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0074_add_compliance_rule_projection_foundation.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0075_expand_policy_foundation_for_trustworthy_projection.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0076_add_property_evidence_proof_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0077_add_jurisdiction_completeness_metadata_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0078_add_policy_source_authority_tiering_fields.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0079_add_policy_source_inventory_foundation.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0080_add_policy_refresh_state_machine.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0081_add_policy_assertion_validation_gate.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0082_add_policy_override_ledger.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0083_repair_jurisdiction_schema_drift.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0084_repair_remaining_jurisdiction_schema_drift.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0085_fix_jurisdiction_json_default_casts.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0086_add_projection_item_updated_at.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0087_fix_hqs_rules_schema_drift.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0088_add_jurisdiction_registry_and_source_families.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0089_add_nspire_rule_catalog.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0090_add_property_compliance_resolution_snapshots.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0091_add_jurisdiction_registry.cpython-312.pyc",
+    "backend/app/alembic/versions/__pycache__/0092_add_registry_completeness_metadata.cpython-312.pyc",
+    "backend/app/alembic.ini",
+    "backend/app/cli",
+    "backend/app/cli/__main__.py",
+    "backend/app/cli/seed_demo.py",
+    "backend/app/clients",
+    "backend/app/clients/__pycache__",
+    "backend/app/clients/__pycache__/federal_register.cpython-312.pyc",
+    "backend/app/clients/__pycache__/google_geocode.cpython-312.pyc",
+    "backend/app/clients/__pycache__/govinfo.cpython-312.pyc",
+    "backend/app/clients/__pycache__/nominatim.cpython-312.pyc",
+    "backend/app/clients/federal_register.py",
+    "backend/app/clients/govinfo.py",
+    "backend/app/clients/hud_counselor.py",
+    "backend/app/clients/hud_user.py",
+    "backend/app/clients/rentcast.py",
+    "backend/app/data",
+    "backend/app/data/crime",
+    "backend/app/data/crime/README.md",
+    "backend/app/data/red_zones_detroit.geojson",
+    "backend/app/integrations",
+    "backend/app/integrations/__pycache__",
+    "backend/app/integrations/__pycache__/lm_studio_client.cpython-312.pyc",
+    "backend/app/integrations/lm_studio_client.py",
+    "backend/app/main.py",
+    "backend/app/middleware/__pycache__",
+    "backend/app/middleware/__pycache__/request_id.cpython-312.pyc",
+    "backend/app/middleware/__pycache__/structured_logging.cpython-312.pyc",
+    "backend/app/middleware/request_id.py",
+    "backend/app/middleware/structured_logging.py",
+    "backend/app/models.py",
+    "backend/app/policy_models.py",
+    "backend/app/products",
+    "backend/app/schemas.py",
+    "backend/app/seed",
+    "backend/app/seed/jurisdictions_seed.py",
+    "backend/app/tasks",
+    "backend/app/tasks/__pycache__",
+    "backend/app/tasks/__pycache__/ingestion_tasks.cpython-312.pyc",
+    "backend/app/tasks/__pycache__/jurisdiction_tasks.cpython-312.pyc",
+    "backend/app/tasks/__pycache__/market_sync_tasks.cpython-312.pyc",
+    "backend/app/tasks/ingestion_tasks.py",
+    "backend/app/tasks/jurisdiction_tasks.py",
+    "backend/app/tasks/market_sync_tasks.py",
+    "backend/app/workers",
+    "backend/app/workers/__pycache__",
+    "backend/app/workers/__pycache__/agent_tasks.cpython-312.pyc",
+    "backend/app/workers/__pycache__/agent_worker.cpython-312.pyc",
+    "backend/app/workers/__pycache__/celery_app.cpython-312.pyc",
+    "backend/app/workers/agent_tasks.py",
+    "backend/app/workers/agent_worker.py",
+    "backend/app/workers/celery_app.py",
+    "backend/app/workers/risk_tasks.py",
+    "frontend/src/App.tsx",
+    "frontend/src/main.tsx",
+    "frontend/src/products",
+    "frontend/src/styles",
+    "frontend/src/styles/globals.css",
+    "frontend/src/styles/motion.css",
+    "frontend/src/styles/tokens.css",
+    "frontend/src/styles.css"
+  ]
+}

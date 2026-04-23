@@ -1,0 +1,54 @@
+{
+  "status": "success",
+  "product": "acquire",
+  "display_name": "OneHaven Acquire",
+  "legacy_root": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine",
+  "repo_root": "C:\\Users\\austin\\onehaven",
+  "legacy_removed": false,
+  "backend": {
+    "from": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\backend\\app\\products\\acquire",
+    "to": "C:\\Users\\austin\\onehaven\\products\\acquire\\backend\\src",
+    "rewrite_count": 3,
+    "rewrites": [
+      {
+        "file": "C:\\Users\\austin\\onehaven\\products\\acquire\\backend\\src\\routers\\acquisition.py",
+        "replacements": [
+          {
+            "rule": "python_abs_product_import",
+            "pattern": "\\bapp\\.products\\.acquire\\b",
+            "replacement": "products.acquire.backend.src",
+            "count": "4"
+          }
+        ]
+      },
+      {
+        "file": "C:\\Users\\austin\\onehaven\\products\\acquire\\backend\\src\\services\\acquisition_document_review_service.py",
+        "replacements": [
+          {
+            "rule": "python_abs_product_import",
+            "pattern": "\\bapp\\.products\\.acquire\\b",
+            "replacement": "products.acquire.backend.src",
+            "count": "4"
+          }
+        ]
+      },
+      {
+        "file": "C:\\Users\\austin\\onehaven\\products\\acquire\\backend\\src\\services\\acquisition_service.py",
+        "replacements": [
+          {
+            "rule": "python_abs_product_import",
+            "pattern": "\\bapp\\.products\\.acquire\\b",
+            "replacement": "products.acquire.backend.src",
+            "count": "5"
+          }
+        ]
+      }
+    ]
+  },
+  "frontend": {
+    "from": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\frontend\\src\\products\\acquire",
+    "to": "C:\\Users\\austin\\onehaven\\products\\acquire\\frontend\\src",
+    "rewrite_count": 0,
+    "rewrites": []
+  }
+}

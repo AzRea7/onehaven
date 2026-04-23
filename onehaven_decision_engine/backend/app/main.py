@@ -33,7 +33,7 @@ from .products.tenant.routers.tenants import router as tenants_router
 from .products.investor_intelligence.routers.cash import router as cash_router
 from .products.investor_intelligence.routers.equity import router as equity_router
 from app.routers.ops import router as ops_router
-from .products.acquire.routers.acquisition import router as acquisition_router
+from products.acquire.backend.src.routers.acquisition import router as acquisition_router
 
 from .routers.agents import router as agents_router
 from .routers.agent_runs import router as agent_runs_router

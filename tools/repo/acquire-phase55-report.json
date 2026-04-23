@@ -1,0 +1,9 @@
+{
+  "phase": "5.5",
+  "product": "acquire",
+  "dry_run": false,
+  "rewrite_file_count": 0,
+  "rewrites": [],
+  "remaining_nonlegacy_tree_hits": [],
+  "status": "success"
+}

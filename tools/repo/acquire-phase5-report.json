@@ -1,0 +1,1044 @@
+{
+  "phase": 5,
+  "product": "acquire",
+  "status": "success",
+  "summary": {
+    "legacy_reference_count": 0,
+    "new_reference_count": 158,
+    "legacy_runtime_reference_count": 0,
+    "new_runtime_reference_count": 3,
+    "ready_to_remove_legacy": true
+  },
+  "directories": {
+    "legacy_backend": {
+      "path": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\backend\\app\\products\\acquire",
+      "exists": true,
+      "file_count": 22
+    },
+    "legacy_frontend": {
+      "path": "C:\\Users\\austin\\onehaven\\onehaven_decision_engine\\frontend\\src\\products\\acquire",
+      "exists": true,
+      "file_count": 9
+    },
+    "new_backend": {
+      "path": "C:\\Users\\austin\\onehaven\\products\\acquire\\backend\\src",
+      "exists": true,
+      "file_count": 22
+    },
+    "new_frontend": {
+      "path": "C:\\Users\\austin\\onehaven\\products\\acquire\\frontend\\src",
+      "exists": true,
+      "file_count": 9
+    }
+  },
+  "runtime_files": [
+    {
+      "file": "onehaven_decision_engine/backend/app/main.py",
+      "exists": true,
+      "legacy_hits": [],
+      "new_hits": [
+        {
+          "type": "new_backend_import",
+          "match": "products.acquire.backend.src"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/__init__.py",
+      "exists": true,
+      "legacy_hits": [],
+      "new_hits": []
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/routers/__init__.py",
+      "exists": false,
+      "legacy_hits": [],
+      "new_hits": []
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/App.tsx",
+      "exists": true,
+      "legacy_hits": [],
+      "new_hits": [
+        {
+          "type": "new_frontend_import",
+          "match": "\"products/acquire/frontend/src/"
+        },
+        {
+          "type": "new_frontend_import",
+          "match": "\"products/acquire/frontend/src/"
+        }
+      ]
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/main.tsx",
+      "exists": true,
+      "legacy_hits": [],
+      "new_hits": []
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/ImportsPage.tsx",
+      "exists": true,
+      "legacy_hits": [],
+      "new_hits": []
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/PolicyReview.tsx",
+      "exists": true,
+      "legacy_hits": [],
+      "new_hits": []
+    }
+  ],
+  "legacy_hits": [],
+  "new_hits": [
+    {
+      "file": "onehaven_decision_engine/backend/app/main.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 36
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/services/product_ingestion_router_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 10
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/routers/acquisition.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 17
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/routers/acquisition.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 22
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/routers/acquisition.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 28
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/routers/acquisition.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 34
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_document_review_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 11
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_document_review_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 12
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_document_review_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 258
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_document_review_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 509
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 18
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 23
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 28
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/acquire/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 30
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/properties.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 67
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/routers/properties.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 68
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/inventory_snapshot_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 19
+    },
+    {
+      "file": "onehaven_decision_engine/backend/app/products/management/services/properties/state_machine.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 37
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/App.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 10
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/App.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 18
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/pages/Property.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 39
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/acquire/pages/AcquisitionPane.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 27
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/acquire/pages/AcquisitionPane.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 32
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/acquire/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 23
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/acquire/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 26
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/acquire/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 29
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/acquire/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 30
+    },
+    {
+      "file": "onehaven_decision_engine/frontend/src/products/acquire/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 33
+    },
+    {
+      "file": "products/acquire/backend/src/routers/acquisition.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 17
+    },
+    {
+      "file": "products/acquire/backend/src/routers/acquisition.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 22
+    },
+    {
+      "file": "products/acquire/backend/src/routers/acquisition.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 28
+    },
+    {
+      "file": "products/acquire/backend/src/routers/acquisition.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 34
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_document_review_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 11
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_document_review_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 12
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_document_review_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 258
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_document_review_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 509
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 18
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 19
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 23
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 28
+    },
+    {
+      "file": "products/acquire/backend/src/services/acquisition_service.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 30
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionPane.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 27
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionPane.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 32
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 23
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 26
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 29
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 30
+    },
+    {
+      "file": "products/acquire/frontend/src/pages/AcquisitionQueue.tsx",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 33
+    },
+    {
+      "file": "tools/repo/acquire-phase2-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 19
+    },
+    {
+      "file": "tools/repo/acquire-phase2-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 30
+    },
+    {
+      "file": "tools/repo/acquire-phase2-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 41
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 36
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 47
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 58
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 69
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 80
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 91
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 102
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 113
+    },
+    {
+      "file": "tools/repo/acquire-phase3-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 141
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 42
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 188
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 194
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 200
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 206
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 212
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 218
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 224
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 230
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 236
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 242
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 248
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 254
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 260
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 266
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 272
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 278
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 284
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 290
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 296
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 314
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 320
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 326
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 332
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 338
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 344
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 350
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 356
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 362
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 368
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 374
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 380
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 386
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 392
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 398
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 404
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 410
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 416
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 422
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 428
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 434
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 440
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 446
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 452
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 458
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 494
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 500
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 506
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 512
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 518
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 524
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 530
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 536
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 65
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 69
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 96
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 102
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 108
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 114
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 120
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 126
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 132
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 138
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 142
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 144
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 148
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 150
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 154
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 156
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 160
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 162
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 166
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 168
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 172
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 174
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 178
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 180
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 302
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 308
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 464
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 470
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 476
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 482
+    },
+    {
+      "file": "tools/repo/acquire-phase5-report.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 488
+    },
+    {
+      "file": "tools/repo/bootstrap-summary.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 99
+    },
+    {
+      "file": "tools/repo/bootstrap-summary.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 100
+    },
+    {
+      "file": "tools/repo/bootstrap-summary.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 101
+    },
+    {
+      "file": "tools/repo/bootstrap-summary.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 102
+    },
+    {
+      "file": "tools/repo/bootstrap-summary.json",
+      "type": "new_frontend_import",
+      "match": "\"products/acquire/frontend/src/",
+      "line": 103
+    },
+    {
+      "file": "tools/repo/integrate_acquire_phase3.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 52
+    },
+    {
+      "file": "tools/repo/move_product_acquire_phase2.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 72
+    },
+    {
+      "file": "tools/repo/move_product_acquire_phase2.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 78
+    },
+    {
+      "file": "tools/repo/move_product_acquire_phase2.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 79
+    },
+    {
+      "file": "tools/repo/runtime_register_acquire_phase4.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 37
+    },
+    {
+      "file": "tools/repo/runtime_register_acquire_phase4.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 42
+    },
+    {
+      "file": "tools/repo/runtime_register_acquire_phase4.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 47
+    },
+    {
+      "file": "tools/repo/runtime_register_acquire_phase4.py",
+      "type": "new_backend_import",
+      "match": "products.acquire.backend.src",
+      "line": 53
+    }
+  ],
+  "next_action": "Legacy Acquire can be removed."
+}
