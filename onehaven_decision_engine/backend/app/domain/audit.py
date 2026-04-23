@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from ..models import AuditEvent
+from app.models import AuditEvent
 
 
 def _dumps(v: Optional[dict[str, Any]]) -> Optional[str]:

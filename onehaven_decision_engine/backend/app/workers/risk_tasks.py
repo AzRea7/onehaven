@@ -3,9 +3,9 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from .celery_app import celery_app
-from ..db import SessionLocal
-from ..models import Property
-from ..services.geo_enrichment import enrich_property_geo
+from app.db import SessionLocal
+from app.models import Property
+from app.services.geo_enrichment import enrich_property_geo
 
 
 @celery_app.task(name="risk.recompute_property", autoretry_for=(Exception,), retry_backoff=True, max_retries=3)

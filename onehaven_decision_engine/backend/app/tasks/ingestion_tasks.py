@@ -8,15 +8,15 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
-from ..config import settings
-from ..db import SessionLocal, rollback_quietly
-from ..services.geo_enrichment import enrich_property_geo
-from ..services.ingestion_enrichment_service import (
+from app.config import settings
+from app.db import SessionLocal, rollback_quietly
+from app.services.geo_enrichment import enrich_property_geo
+from app.services.ingestion_enrichment_service import (
     execute_post_ingestion_pipeline,
     refresh_property_rent_assumptions,
 )
-from ..services.ingestion_run_execute import execute_source_sync
-from ..services.ingestion_scheduler_service import (
+from app.services.ingestion_run_execute import execute_source_sync
+from app.services.ingestion_scheduler_service import (
     build_jurisdiction_refresh_payload,
     build_location_refresh_payload,
     build_lock_owner,
@@ -25,28 +25,28 @@ from ..services.ingestion_scheduler_service import (
     list_org_ids_with_enabled_sources,
     list_properties_needing_location_refresh,
 )
-from ..services.ingestion_source_service import (
+from app.services.ingestion_source_service import (
     ensure_default_manual_sources,
     get_source,
     list_sources,
     resolve_sources_for_market,
 )
-from ..services.jurisdiction_notification_service import notify_stale_jurisdictions
-from ..services.jurisdiction_refresh_service import (
+from app.services.policy_governance.notification_service import notify_stale_jurisdictions
+from app.services.policy_governance.refresh_service import (
     DEFAULT_JURISDICTION_STALE_DAYS,
     refresh_jurisdiction_profile,
 )
-from ..services.locks_service import (
+from app.services.locks_service import (
     acquire_lock,
     is_lock_active,
     release_lock,
     release_ingestion_execution_lock_in_new_session,
 )
-from ..services.market_sync_service import (
+from app.services.market_sync_service import (
     get_market_sync_state_by_id,
     mark_backfill_completed,
 )
-from ..services.rent_refresh_queue_service import (
+from app.services.rent_refresh_queue_service import (
     list_properties_for_budgeted_rent_refresh,
     should_queue_rent_refresh_after_sync,
 )

@@ -5,8 +5,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
-from ..domain.jurisdiction_categories import normalize_categories
-from ..policy_models import JurisdictionProfile
+from app.domain.policy.categories import normalize_categories
+from app.policy_models import JurisdictionProfile
 
 
 TASK_PRIORITY_HIGH = "high"

@@ -10,10 +10,10 @@ Run example:
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..db import SessionLocal
-from ..models import JurisdictionRule
-from ..domain.jurisdiction_defaults import defaults_for_michigan
-from ..services.jurisdiction_profile_service import ensure_registry_source_mapping
+from app.db import SessionLocal
+from app.models import JurisdictionRule
+from app.domain.policy.defaults import defaults_for_michigan
+from app.services.jurisdiction_profile_service import ensure_registry_source_mapping
 
 
 def _notes_from_default(default) -> str:
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     main()
 
 
-from ..services.jurisdiction_registry_service import (
+from app.services.jurisdiction_registry_service import (
     JURISDICTION_TYPE_CITY,
     JURISDICTION_TYPE_COUNTY,
     JURISDICTION_TYPE_PHA,

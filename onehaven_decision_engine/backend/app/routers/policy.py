@@ -14,48 +14,48 @@ from app.auth import get_principal, require_owner
 from app.db import get_db, rollback_quietly
 from app.models import Property
 from app.policy_models import JurisdictionProfile, PolicyAssertion, PolicySource
-from app.services.jurisdiction_completeness_service import profile_completeness_payload
-from app.services.jurisdiction_health_service import get_jurisdiction_health
-from app.services.jurisdiction_notification_service import build_review_queue_entries, persist_review_queue_decision
+from app.services.policy_coverage.completeness_service import profile_completeness_payload
+from app.services.policy_coverage.health_service import get_jurisdiction_health
+from app.services.policy_governance.notification_service import build_review_queue_entries, persist_review_queue_decision
 from app.services.policy_catalog import (
     catalog_for_market,
     catalog_mi_authoritative,
     catalog_municipalities,
 )
-from app.services.policy_coverage_service import (
+from app.services.policy_coverage.coverage_service import (
     compute_coverage_status,
     upsert_coverage_status,
 )
-from app.services.policy_extractor_service import (
+from app.services.policy_assertions.extractor_service import (
     _assertion_type_for,
     _priority_for,
     _rule_family_for,
     _source_rank_for,
     extract_assertions_for_source,
 )
-from app.services.policy_pipeline_service import (
+from app.services.policy_pipeline.pipeline_service import (
     cleanup_market,
     repair_market,
     run_market_pipeline,
 )
-from app.services.policy_projection_service import (
+from app.services.compliance_engine.projection_service import (
     build_property_compliance_brief,
     project_verified_assertions_to_profile,
 )
-from app.services.policy_review_service import (
+from app.services.policy_assertions.review_service import (
     auto_verify_market_assertions,
     create_policy_override,
     list_policy_overrides,
     revoke_policy_override,
     supersede_replaced_assertions,
 )
-from app.services.policy_source_service import (
+from app.services.policy_sources.source_service import (
     collect_catalog_all_municipalities,
     collect_catalog_for_focus,
     collect_catalog_for_market,
     collect_url,
 )
-from app.services.policy_validation_service import _source_url_validation_summary
+from app.services.policy_assertions.validation_service import _source_url_validation_summary
 
 router = APIRouter(prefix="/policy", tags=["policy"])
 
@@ -272,7 +272,7 @@ def _normalize_category_value(value: Any) -> Optional[str]:
     if raw is None:
         return None
     try:
-        from app.domain.jurisdiction_categories import normalize_category as _normalize_category
+        from app.domain.policy.categories import normalize_category as _normalize_category
         normalized = _normalize_category(raw)
         return normalized or None
     except Exception:
@@ -518,7 +518,7 @@ def _market_sources_for_catalog(
     focus: str,
 ):
     from app.policy_models import PolicySource
-    from app.services.policy_catalog_admin_service import merged_catalog_for_market
+    from app.services.policy_sources.catalog_admin_service import merged_catalog_for_market
 
     items = merged_catalog_for_market(
         db,
@@ -1615,7 +1615,7 @@ def get_policy_profile_coverage_matrix(
     if profile.org_id is not None and profile.org_id != principal.org_id:
         raise HTTPException(status_code=403, detail="Forbidden")
     if recompute:
-        from app.services.jurisdiction_completeness_service import recompute_profile_and_coverage
+        from app.services.policy_coverage.completeness_service import recompute_profile_and_coverage
         profile, _ = recompute_profile_and_coverage(db, profile, commit=True)
     return {"ok": True, **(_coverage_matrix_payload(db, profile) or {})}
 
@@ -2565,7 +2565,7 @@ def get_policy_dataset_market(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.services.policy_dataset_service import dataset_snapshot_for_market
+    from app.services.policy_sources.dataset_service import dataset_snapshot_for_market
     return dataset_snapshot_for_market(
         db,
         org_id=getattr(principal, "org_id", None),

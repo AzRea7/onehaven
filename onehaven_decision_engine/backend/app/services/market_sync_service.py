@@ -8,10 +8,10 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import settings
-from ..db import SessionLocal, rollback_quietly
-from ..models import MarketSyncState
-from .ingestion_scheduler_service import build_runtime_payload
+from app.config import settings
+from app.db import SessionLocal, rollback_quietly
+from app.models import MarketSyncState
+from app.services.ingestion_scheduler_service import build_runtime_payload
 from .ingestion_source_service import (
     ensure_default_manual_sources,
     ensure_market_slug_on_sources,

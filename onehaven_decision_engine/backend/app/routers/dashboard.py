@@ -8,11 +8,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..domain.workflow.panes import clamp_pane, pane_catalog
-from ..services.dashboard_rollups import compute_rollups
-from ..services.ownership import ensure_pane_access
-from ..services.pane_dashboard_service import (
+from app.db import get_db
+from app.domain.workflow.panes import clamp_pane, pane_catalog
+from app.services.dashboard_rollups import compute_rollups
+from app.services.ownership import ensure_pane_access
+from app.services.pane_dashboard_service import (
     build_all_pane_summaries,
     build_pane_dashboard,
     build_portfolio_rollup_with_panes,

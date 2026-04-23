@@ -7,12 +7,12 @@ import random
 
 from sqlalchemy import select
 
-from ..config import settings
-from ..db import SessionLocal
-from ..models import AgentRun, AgentRunDeadletter
-from ..services.agent_engine import execute_run_now, sweep_stuck_runs
-from ..services.agent_orchestrator_runtime import on_run_terminal
-from ..services.trust_service import record_signal, recompute_and_persist
+from app.config import settings
+from app.db import SessionLocal
+from app.models import AgentRun, AgentRunDeadletter
+from app.services.agent_engine import execute_run_now, sweep_stuck_runs
+from app.services.agent_orchestrator_runtime import on_run_terminal
+from app.services.trust_service import record_signal, recompute_and_persist
 from .celery_app import celery_app
 
 TERMINAL = {"done", "failed", "timed_out", "blocked"}

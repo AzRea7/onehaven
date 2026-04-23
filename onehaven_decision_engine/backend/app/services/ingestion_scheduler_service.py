@@ -9,12 +9,12 @@ from typing import Any, Callable
 from sqlalchemy import distinct, or_, select
 from sqlalchemy.orm import Session
 
-from ..config import settings
+from app.config import settings
 from ..middleware.structured_logging import emit_structured_log
-from ..models import IngestionSource, Property
-from ..policy_models import JurisdictionProfile
+from app.models import IngestionSource, Property
+from app.policy_models import JurisdictionProfile
 from .ingestion_source_service import ensure_default_manual_sources, list_sources
-from .jurisdiction_refresh_service import (
+from app.services.policy_governance.refresh_service import (
     DEFAULT_JURISDICTION_STALE_DAYS,
     build_jurisdiction_refresh_payload as _build_jurisdiction_refresh_payload,
     list_jurisdictions_needing_refresh as _list_jurisdictions_needing_refresh,
@@ -490,7 +490,7 @@ def dispatch_daily_sync_for_org(
     queued = 0
     results: list[dict[str, Any]] = []
 
-    from .market_sync_service import build_market_runtime_payload, get_or_create_market_sync_state
+    from app.services.market_sync_service import build_market_runtime_payload, get_or_create_market_sync_state
 
     for market in markets:
         source = pick_primary_source_for_market(sources, market)

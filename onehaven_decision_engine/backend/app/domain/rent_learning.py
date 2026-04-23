@@ -8,8 +8,8 @@ from typing import Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import settings
-from ..models import Property, RentAssumption, RentCalibration, RentComp, RentObservation
+from app.config import settings
+from app.models import Property, RentAssumption, RentCalibration, RentComp, RentObservation
 from .underwriting import (
     RentCapReason,
     compute_effective_rent_used,

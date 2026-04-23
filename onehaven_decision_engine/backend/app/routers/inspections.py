@@ -10,11 +10,11 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
-from ..db import get_db
-from ..domain.audit import emit_audit
-from ..domain.compliance import compliance_stats, top_fail_points
-from ..domain.compliance.inspection_mapping import map_inspection_code
-from ..models import (
+from app.db import get_db
+from app.domain.audit import emit_audit
+from app.domain.compliance import compliance_stats, top_fail_points
+from app.domain.compliance.inspection_mapping import map_inspection_code
+from app.models import (
     Inspection,
     InspectionItem,
     Inspector,
@@ -22,7 +22,7 @@ from ..models import (
     PropertyChecklistItem,
     RehabTask,
 )
-from ..schemas import (
+from app.schemas import (
     ComplianceStatsOut,
     InspectionCreate,
     InspectionItemCreate,
@@ -33,14 +33,14 @@ from ..schemas import (
     InspectorUpsert,
     PredictFailPointsOut,
 )
-from ..services.compliance_service import apply_inspection_form_results
-from ..services.events_facade import wf
-from ..services.inspection_failure_task_service import (
+from app.services.compliance_service import apply_inspection_form_results
+from app.services.events_facade import wf
+from app.services.inspections.failure_task_service import (
     build_failure_next_actions,
     create_failure_tasks_from_inspection,
 )
-from ..services.inspection_readiness_service import build_property_readiness_summary
-from ..services.inspection_scheduling_service import (
+from app.services.inspections.readiness_service import build_property_readiness_summary
+from app.services.inspection_scheduling_service import (
     build_inspection_ics_payload,
     build_inspection_timeline,
     build_property_schedule_summary,
@@ -49,14 +49,14 @@ from ..services.inspection_scheduling_service import (
     schedule_inspection_appointment,
     send_inspection_reminder,
 )
-from ..services.inspector_communication_service import (
+from app.services.inspector_communication_service import (
     build_inspection_reminder_message,
     build_inspector_contact_payload,
 )
-from ..services.ownership import must_get_property
-from ..services.property_state_machine import sync_property_state
-from ..services.stage_guard import require_stage
-from ..services.workflow_gate_service import build_workflow_summary
+from app.services.ownership import must_get_property
+from app.services.properties.state_machine import sync_property_state
+from app.services.stage_guard import require_stage
+from app.services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/inspections", tags=["inspections"])
 
@@ -1076,7 +1076,7 @@ def inspection_template_preview(
 ):
     _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
     _require_inspection_preview_stage(db, org_id=p.org_id, property_id=property_id, action="preview inspection template")
-    from ..services.inspection_template_service import build_inspection_template
+    from app.services.inspections.template_service import build_inspection_template
     payload = build_inspection_template(db, org_id=p.org_id, property_id=property_id)
     if isinstance(payload, dict):
         payload.setdefault("pdf_dataset_status", _step7_pdf_dataset_status())
@@ -1092,7 +1092,7 @@ def inspection_task_preview(
 ):
     _must_get_property_for_inspection(db, org_id=p.org_id, property_id=property_id)
     _require_inspection_preview_stage(db, org_id=p.org_id, property_id=property_id, action="preview inspection tasks")
-    from ..services.inspection_failure_task_service import collect_failure_task_blueprints
+    from app.services.inspections.failure_task_service import collect_failure_task_blueprints
     payload = collect_failure_task_blueprints(db, org_id=p.org_id, property_id=property_id, inspection_id=inspection_id)
     if isinstance(payload, dict):
         payload.setdefault("pdf_dataset_status", _step7_pdf_dataset_status())

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..domain.workflow.stages import (
+from app.domain.workflow.stages import (
     STAGES,
     clamp_stage,
     next_stage,
@@ -12,8 +12,8 @@ from ..domain.workflow.stages import (
     stage_rank,
 )
 from .pane_routing_service import build_pane_context
-from .policy_projection_service import build_property_projection_snapshot
-from .property_state_machine import get_state_payload, get_transition_payload
+from app.services.compliance_engine.projection_service import build_property_projection_snapshot
+from app.services.properties.state_machine import get_state_payload, get_transition_payload
 
 
 def _rollback_quietly(db) -> None:

@@ -12,16 +12,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_owner
-from ..db import SessionLocal, get_db
-from ..models import AgentMessage, AgentRun, AgentRunDeadletter, AgentSlotAssignment, AgentTraceEvent
-from ..services.agent_engine import (
+from app.db import SessionLocal, get_db
+from app.models import AgentMessage, AgentRun, AgentRunDeadletter, AgentSlotAssignment, AgentTraceEvent
+from app.services.agent_engine import (
     apply_approved,
     create_run,
     mark_approved,
     reject_run,
     serialize_run,
 )
-from ..services.agent_orchestrator import plan_agent_runs
+from app.services.agent_orchestrator import plan_agent_runs
 from ..workers.agent_tasks import execute_agent_run
 
 router = APIRouter(prefix="/agent-runs", tags=["agents"])

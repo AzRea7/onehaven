@@ -12,11 +12,11 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import settings
-from ..models import Property
-from ..services.address_normalization import normalize_full_address
-from ..services.geocoding_service import GeocodingService
-from ..services.risk_scoring import compute_property_risk
+from app.config import settings
+from app.models import Property
+from app.services.address_normalization import normalize_full_address
+from app.services.geocoding_service import GeocodingService
+from app.services.risk_scoring import compute_property_risk
 
 log = logging.getLogger("onehaven.geo_enrichment")
 

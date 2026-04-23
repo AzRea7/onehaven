@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Property
+from app.models import Property
 from .crime_index import compute_crime_metrics
 from .offender_index import compute_offender_metrics
 

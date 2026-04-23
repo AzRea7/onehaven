@@ -13,14 +13,14 @@ from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import settings
-from .db import get_db
-from .models import ApiKey, AppUser, Organization, OrgMembership
+from app.config import settings
+from app.db import get_db
+from app.models import ApiKey, AppUser, Organization, OrgMembership
 
 try:
-    from .models import Subscription as Subscription  # type: ignore
+    from app.models import Subscription as Subscription  # type: ignore
 except Exception:
-    from .models import OrgSubscription as Subscription  # type: ignore
+    from app.models import OrgSubscription as Subscription  # type: ignore
 
 from .services import plan_service
 

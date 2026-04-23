@@ -6,8 +6,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..domain.workflow.panes import allowed_panes_for_principal, clamp_pane
-from ..models import Lease, Property, Tenant
+from app.domain.workflow.panes import allowed_panes_for_principal, clamp_pane
+from app.models import Lease, Property, Tenant
 
 
 def must_get_property(db: Session, *, org_id: int, property_id: int) -> Property:

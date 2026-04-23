@@ -9,9 +9,9 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..models import AgentMessage, AgentRun, AgentSlotAssignment, Property, WorkflowEvent
-from ..schemas import (
+from app.db import get_db
+from app.models import AgentMessage, AgentRun, AgentSlotAssignment, Property, WorkflowEvent
+from app.schemas import (
     AgentMessageCreate,
     AgentMessageOut,
     AgentRunCreate,
@@ -21,15 +21,15 @@ from ..schemas import (
     AgentSlotSpecOut,
     AgentSpecOut,
 )
-from ..domain.agents.registry import AGENTS, AGENT_SPECS, SLOTS
-from ..services.agent_engine import create_and_execute_run
-from ..services.compliance_photo_analysis_service import (
+from app.domain.agents.registry import AGENTS, AGENT_SPECS, SLOTS
+from app.services.agent_engine import create_and_execute_run
+from app.services.compliance_photo_analysis_service import (
     analyze_property_photos_for_compliance,
     create_compliance_tasks_from_photo_analysis,
 )
 
 try:
-    from ..services.trust_service import record_signal, recompute_and_persist  # type: ignore
+    from app.services.trust_service import record_signal, recompute_and_persist  # type: ignore
 except Exception:  # pragma: no cover
     def record_signal(*args, **kwargs):  # type: ignore
         return None

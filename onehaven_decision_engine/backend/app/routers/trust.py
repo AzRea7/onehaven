@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_owner
-from ..db import get_db
-from ..services.trust_service import get_trust_score, recompute_and_persist, record_signal
+from app.db import get_db
+from app.services.trust_service import get_trust_score, recompute_and_persist, record_signal
 
 router = APIRouter(prefix="/trust", tags=["trust"])
 

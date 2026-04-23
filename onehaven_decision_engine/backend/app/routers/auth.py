@@ -9,14 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import _jwt_sign, _jwt_verify, get_principal_core, jwt_debug_fingerprint
-from ..config import settings
-from ..db import get_db
-from ..models import AppUser, Organization, OrgMembership, Plan
+from app.config import settings
+from app.db import get_db
+from app.models import AppUser, Organization, OrgMembership, Plan
 try:
-    from ..models import Subscription as OrgSubscription  # type: ignore
+    from app.models import Subscription as OrgSubscription  # type: ignore
 except Exception:
-    from ..models import OrgSubscription  # type: ignore
-from ..schemas import PrincipalOut
+    from app.models import OrgSubscription  # type: ignore
+from app.schemas import PrincipalOut
 from ..services import auth_service, plan_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])

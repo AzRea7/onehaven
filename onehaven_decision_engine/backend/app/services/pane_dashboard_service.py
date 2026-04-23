@@ -8,19 +8,19 @@ from typing import Any, Optional
 from sqlalchemy import desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
-from ..config import settings
-from ..domain.workflow.panes import (
+from app.config import settings
+from app.domain.workflow.panes import (
     PANES,
     allowed_panes_for_principal,
     clamp_pane,
     pane_catalog,
     pane_label,
 )
-from ..models import Deal, Property, UnderwritingResult
-from ..services.property_state_machine import get_state_payload
-from ..services.risk_scoring import classify_deal_candidate, compute_risk_adjusted_score
-from ..domain.underwriting import compute_monthly_housing_costs
-from ..services.property_inventory_snapshot_service import build_property_inventory_snapshot
+from app.models import Deal, Property, UnderwritingResult
+from app.services.properties.state_machine import get_state_payload
+from app.services.risk_scoring import classify_deal_candidate, compute_risk_adjusted_score
+from app.domain.underwriting import compute_monthly_housing_costs
+from app.services.properties.inventory_snapshot_service import build_property_inventory_snapshot
 from .property_tax_enrichment_service import get_property_tax_context
 from .property_insurance_enrichment_service import get_property_insurance_context
 

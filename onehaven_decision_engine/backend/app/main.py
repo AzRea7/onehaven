@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import settings
+from app.config import settings
 from .logging_config import configure_logging
 from .middleware.request_id import RequestIDMiddleware
 from .middleware.structured_logging import StructuredLoggingMiddleware

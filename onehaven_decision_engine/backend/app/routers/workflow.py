@@ -8,14 +8,14 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..domain.workflow.panes import pane_catalog
-from ..domain.workflow.stages import clamp_stage, stage_catalog, stage_gte
-from ..models import Property, WorkflowEvent
-from ..schemas import PropertyStateUpsert, WorkflowEventCreate, WorkflowEventOut
-from ..services.property_state_machine import ensure_state_row, get_state_payload, get_transition_payload, sync_property_state
-from ..services.stage_guard import require_start_acquisition
-from ..services.workflow_gate_service import build_workflow_summary
+from app.db import get_db
+from app.domain.workflow.panes import pane_catalog
+from app.domain.workflow.stages import clamp_stage, stage_catalog, stage_gte
+from app.models import Property, WorkflowEvent
+from app.schemas import PropertyStateUpsert, WorkflowEventCreate, WorkflowEventOut
+from app.services.properties.state_machine import ensure_state_row, get_state_payload, get_transition_payload, sync_property_state
+from app.services.stage_guard import require_start_acquisition
+from app.services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
 

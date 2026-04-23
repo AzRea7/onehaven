@@ -8,22 +8,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
-from ..db import get_db
-from ..models import IngestionRun, Property
-from ..schemas import (
+from app.db import get_db
+from app.models import IngestionRun, Property
+from app.schemas import (
     IngestionOverviewOut,
     IngestionRunListItem,
     IngestionSourceCreate,
     IngestionSourceOut,
     IngestionSourceUpdate,
 )
-from ..services.ingestion_run_execute import execute_source_sync
-from ..services.ingestion_run_service import get_ingestion_overview, list_runs
-from ..services.ingestion_scheduler_service import (
+from app.services.ingestion_run_execute import execute_source_sync
+from app.services.ingestion_run_service import get_ingestion_overview, list_runs
+from app.services.ingestion_scheduler_service import (
     collapse_dispatches_to_primary_source,
     list_default_daily_markets,
 )
-from ..services.ingestion_source_service import (
+from app.services.ingestion_source_service import (
     create_source,
     ensure_default_manual_sources,
     ensure_market_slug_on_sources,
@@ -32,9 +32,9 @@ from ..services.ingestion_source_service import (
     list_sources,
     update_source,
 )
-from ..services.market_catalog_service import list_active_supported_markets
-from ..services.market_sync_service import build_supported_market_sync_plan_for_db
-from ..services.portfolio_watchlist_service import (
+from app.services.market_catalog_service import list_active_supported_markets
+from app.services.market_sync_service import build_supported_market_sync_plan_for_db
+from app.services.portfolio_watchlist_service import (
     delete_search_preset,
     delete_watchlist,
     list_search_presets,
@@ -47,8 +47,8 @@ from ..tasks.ingestion_tasks import (
     sync_due_sources_task,
     sync_source_task,
 )
-from ..services.property_tax_enrichment_service import enrich_property_tax
-from ..services.property_insurance_enrichment_service import enrich_property_insurance
+from app.services.property_tax_enrichment_service import enrich_property_tax
+from app.services.property_insurance_enrichment_service import enrich_property_insurance
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 

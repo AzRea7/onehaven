@@ -9,8 +9,8 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import settings
-from ..models import GeocodeCache
+from app.config import settings
+from app.models import GeocodeCache
 from .address_normalization import make_normalized_cache_key
 
 

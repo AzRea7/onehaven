@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ..config import settings
-from ..services.fmr import HudUserClient as _ServiceHudUserClient
+from app.config import settings
+from app.services.fmr import HudUserClient as _ServiceHudUserClient
 
 
 class HudUserClient(_ServiceHudUserClient):

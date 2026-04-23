@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
+from app.db import get_db
 from .imports import import_status
 
 router = APIRouter(prefix="/imports", tags=["import"])

@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from ..config import settings
+from app.config import settings
 
 
 RentCapReason = Literal[

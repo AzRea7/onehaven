@@ -5,9 +5,9 @@ from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..models import AuditEvent
-from ..schemas import AuditEventOut
+from app.db import get_db
+from app.models import AuditEvent
+from app.schemas import AuditEventOut
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 

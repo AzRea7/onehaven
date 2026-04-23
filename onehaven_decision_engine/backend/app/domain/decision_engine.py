@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Optional, List, Any
 
-from ..config import settings
+from app.config import settings
 
 
 # ---------------------------- Data Structures ----------------------------

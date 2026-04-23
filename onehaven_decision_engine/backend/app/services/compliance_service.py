@@ -10,9 +10,9 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from ..domain.compliance.hqs import summarize_items, top_fix_candidates
-from ..domain.compliance.hqs_library import get_effective_hqs_items
-from ..models import (
+from app.domain.compliance.hqs import summarize_items, top_fix_candidates
+from app.domain.compliance.hqs_library import get_effective_hqs_items
+from app.models import (
     AuditEvent,
     Inspection,
     InspectionItem,
@@ -21,27 +21,27 @@ from ..models import (
     RehabTask,
     WorkflowEvent,
 )
-from ..services.inspection_failure_task_service import (
+from app.services.inspections.failure_task_service import (
     build_failure_next_actions,
     create_failure_tasks_from_inspection,
 )
-from ..services.inspection_readiness_service import (
+from app.services.inspections.readiness_service import (
     build_property_readiness_summary,
     compute_property_readiness_score,
 )
-from ..services.inspection_template_service import (
+from app.services.inspections.template_service import (
     apply_raw_inspection_payload,
     build_inspection_template,
     ensure_template_backed_checklist,
 )
-from ..services.jurisdiction_profile_service import resolve_operational_policy
-from ..services.policy_projection_service import (
+from app.services.jurisdiction_profile_service import resolve_operational_policy
+from app.services.compliance_engine.projection_service import (
     build_property_compliance_brief,
     build_property_projection_snapshot,
     rebuild_property_projection,
 )
-from ..services.compliance_document_service import build_property_document_stack
-from ..services.workflow_gate_service import build_property_jurisdiction_blocker
+from app.services.compliance_document_service import build_property_document_stack
+from app.services.workflow_gate_service import build_property_jurisdiction_blocker
 
 
 STATUS_PASS = "pass"
@@ -1669,7 +1669,7 @@ def _safe_property_compliance_resolution(
     property_id: int,
 ) -> dict[str, Any]:
     try:
-        from ..services.property_compliance_resolution_service import resolve_property_compliance
+        from app.services.property_compliance_resolution_service import resolve_property_compliance
 
         payload = resolve_property_compliance(
             db,

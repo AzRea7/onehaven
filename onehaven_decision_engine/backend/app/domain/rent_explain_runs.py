@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from ..models import RentExplainRun
+from app.models import RentExplainRun
 
 
 def create_rent_explain_run(

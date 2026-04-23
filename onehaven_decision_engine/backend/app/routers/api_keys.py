@@ -12,8 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import Principal, _hash_api_key, get_principal, require_owner
-from ..db import get_db
-from ..models import ApiKey
+from app.db import get_db
+from app.models import ApiKey
 from ..services import plan_service, usage_service
 
 router = APIRouter(prefix="/api-keys", tags=["api_keys"])

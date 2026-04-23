@@ -6,32 +6,32 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..schemas import (
+from app.db import get_db
+from app.schemas import (
     AcquisitionDeadlineUpsert,
     AcquisitionDocumentCreate,
     AcquisitionFieldOverrideIn,
     AcquisitionParticipantUpsert,
     AcquisitionRecordUpdate,
 )
-from ..services.acquisition_deadline_service import (
+from app.services.acquisition_deadline_service import (
     delete_deadline,
     list_deadlines,
     upsert_deadline_by_code,
 )
-from ..services.acquisition_document_review_service import (
+from app.services.acquisition_document_review_service import (
     accept_field_value,
     list_document_field_values,
     override_field_value,
     reject_field_value,
 )
-from ..services.acquisition_participant_service import (
+from app.services.acquisition_participant_service import (
     delete_participant,
     list_participants,
     seed_listing_contacts_from_property,
     upsert_participant,
 )
-from ..services.acquisition_service import (
+from app.services.acquisition_service import (
     ACQUISITION_DOCUMENT_KIND_LABELS,
     ALLOWED_ACQUISITION_DOCUMENT_KINDS,
     add_acquisition_document,

@@ -6,7 +6,7 @@ from collections import defaultdict
 from typing import Any, Optional
 
 from .acquisition_tag_service import count_tags_for_scope
-from .property_inventory_snapshot_service import build_inventory_snapshots_for_scope
+from app.services.properties.inventory_snapshot_service import build_inventory_snapshots_for_scope
 from .runtime_metrics import METRICS
 
 log = logging.getLogger("onehaven.pane_snapshot")

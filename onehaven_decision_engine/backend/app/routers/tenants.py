@@ -8,16 +8,16 @@ from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..domain.audit import emit_audit
-from ..models import Lease, Tenant
-from ..schemas import LeaseCreate, LeaseOut, TenantCreate, TenantOut
-from ..services.events_facade import wf
-from ..services.lease_rules import ensure_no_lease_overlap
-from ..services.ownership import must_get_lease, must_get_property, must_get_tenant
-from ..services.property_state_machine import sync_property_state
-from ..services.stage_guard import require_stage
-from ..services.workflow_gate_service import build_workflow_summary
+from app.db import get_db
+from app.domain.audit import emit_audit
+from app.models import Lease, Tenant
+from app.schemas import LeaseCreate, LeaseOut, TenantCreate, TenantOut
+from app.services.events_facade import wf
+from app.services.lease_rules import ensure_no_lease_overlap
+from app.services.ownership import must_get_lease, must_get_property, must_get_tenant
+from app.services.properties.state_machine import sync_property_state
+from app.services.stage_guard import require_stage
+from app.services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 

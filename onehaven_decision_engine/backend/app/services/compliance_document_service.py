@@ -11,7 +11,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .policy_projection_service import (
+from app.services.compliance_engine.projection_service import (
     build_property_projection_snapshot,
     rebuild_property_projection,
     sync_document_evidence_for_property,

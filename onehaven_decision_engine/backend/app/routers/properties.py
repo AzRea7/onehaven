@@ -16,10 +16,10 @@ from sqlalchemy import asc, desc, func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth import get_principal
-from ..config import settings
-from ..db import get_db
-from ..domain.jurisdiction_scoring import compute_friction
-from ..models import (
+from app.config import settings
+from app.db import get_db
+from app.domain.jurisdiction_scoring import compute_friction
+from app.models import (
     AppUser,
     Deal,
     JurisdictionRule,
@@ -33,7 +33,7 @@ from ..models import (
     UnderwritingResult,
     Valuation,
 )
-from ..schemas import (
+from app.schemas import (
     CeilingCandidate,
     ChecklistItemOut,
     ChecklistOut,
@@ -53,26 +53,26 @@ from ..schemas import (
     PropertyTaxEnrichmentOut,
     FinancialEnrichmentBatchOut,
 )
-from ..services.geo_enrichment import enrich_property_geo
-from ..services.property_tax_enrichment_service import enrich_property_tax
-from ..services.property_insurance_enrichment_service import enrich_property_insurance
-from ..services.property_state_machine import (
+from app.services.geo_enrichment import enrich_property_geo
+from app.services.property_tax_enrichment_service import enrich_property_tax
+from app.services.property_insurance_enrichment_service import enrich_property_insurance
+from app.services.properties.state_machine import (
     compute_and_persist_stage,
     get_state_payload,
     normalize_decision_bucket,
 )
-from ..services.workflow_gate_service import build_workflow_summary, build_property_jurisdiction_blocker
-from ..services.compliance_document_service import build_property_document_stack
-from ..services.policy_projection_service import build_property_compliance_brief, build_property_projection_snapshot
-from ..services.acquisition_tag_service import list_property_tags, replace_property_tags
-from ..services.acquisition_participant_service import list_participants
-from ..services.property_inventory_snapshot_service import (
+from app.services.workflow_gate_service import build_workflow_summary, build_property_jurisdiction_blocker
+from app.services.compliance_document_service import build_property_document_stack
+from app.services.compliance_engine.projection_service import build_property_compliance_brief, build_property_projection_snapshot
+from app.services.acquisition_tag_service import list_property_tags, replace_property_tags
+from app.services.acquisition_participant_service import list_participants
+from app.services.properties.inventory_snapshot_service import (
     build_property_inventory_snapshot,
     build_inventory_snapshots_for_scope,
 )
-from ..services.property_price_resolution_service import resolve_prices_from_sources
+from app.services.property_price_resolution_service import resolve_prices_from_sources
 
-from ..domain.rent_learning import recompute_rent_fields
+from app.domain.rent_learning import recompute_rent_fields
 
 router = APIRouter(prefix="/properties", tags=["properties"])
 log = logging.getLogger("onehaven.properties")

@@ -11,13 +11,13 @@ from sqlalchemy.orm import Session
 from app.auth import get_principal, require_owner
 from app.db import get_db
 from app.policy_models import PolicyCatalogEntry, JurisdictionProfile, PolicySource
-from app.services.jurisdiction_completeness_service import profile_completeness_payload
-from app.services.jurisdiction_notification_service import (
+from app.services.policy_coverage.completeness_service import profile_completeness_payload
+from app.services.policy_governance.notification_service import (
     build_jurisdiction_review_queue,
     build_review_queue_entry,
     notify_unresolved_jurisdiction_gaps,
 )
-from app.services.policy_catalog_admin_service import (
+from app.services.policy_sources.catalog_admin_service import (
     bootstrap_market_catalog_entries,
     create_catalog_entry,
     disable_catalog_entry,
@@ -640,7 +640,7 @@ def market_dataset_summary(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.services.policy_dataset_service import dataset_snapshot_for_market
+    from app.services.policy_sources.dataset_service import dataset_snapshot_for_market
     target_org_id = principal.org_id if payload.org_scope else None
     return dataset_snapshot_for_market(
         db,

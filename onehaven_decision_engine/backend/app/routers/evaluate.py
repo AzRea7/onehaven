@@ -10,14 +10,14 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..config import settings
-from ..db import get_db
-from ..domain.decision_engine import score_and_decide
-from ..domain.events import emit_workflow_event
-from ..domain.jurisdiction_scoring import compute_friction
-from ..domain.underwriting import underwrite
-from ..models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule
-from ..schemas import UnderwritingResultOut
+from app.config import settings
+from app.db import get_db
+from app.domain.decision_engine import score_and_decide
+from app.domain.events import emit_workflow_event
+from app.domain.jurisdiction_scoring import compute_friction
+from app.domain.underwriting import underwrite
+from app.models import Deal, Property, RentAssumption, UnderwritingResult, JurisdictionRule
+from app.schemas import UnderwritingResultOut
 
 from .rent import explain_rent
 

@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 from typing import Any, Optional
 
-from app.domain.jurisdiction_categories import normalize_category
+from app.domain.policy.categories import normalize_category
 
 
 @dataclass(frozen=True)

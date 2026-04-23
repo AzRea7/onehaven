@@ -10,9 +10,9 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_owner
-from ..db import get_db
-from ..domain.compliance.compliance_completion import compute_compliance_status
-from ..models import (
+from app.db import get_db
+from app.domain.compliance.compliance_completion import compute_compliance_status
+from app.models import (
     AppUser,
     AuditEvent,
     ChecklistTemplateItem,
@@ -22,7 +22,7 @@ from ..models import (
     PropertyChecklistItem,
     WorkflowEvent,
 )
-from ..schemas import (
+from app.schemas import (
     ChecklistItemOut,
     ChecklistItemUpdateIn,
     ChecklistOut,
@@ -30,13 +30,13 @@ from ..schemas import (
     ChecklistTemplateItemUpsert,
     PropertyChecklistOut,
 )
-from ..services.compliance_document_service import (
+from app.services.compliance_document_service import (
     create_compliance_document_from_upload,
     delete_compliance_document,
     get_compliance_document,
     list_compliance_documents,
 )
-from ..services.compliance_service import (
+from app.services.compliance_service import (
     apply_inspection_form_results,
     build_property_document_stack_snapshot,
     build_property_inspection_readiness,
@@ -44,30 +44,30 @@ from ..services.compliance_service import (
     preview_property_inspection_template,
     run_hqs as run_hqs_service,
 )
-from ..services.inspection_failure_task_service import (
+from app.services.inspections.failure_task_service import (
     build_failure_next_actions,
     create_failure_tasks_from_inspection,
 )
-from ..services.inspection_readiness_service import build_property_readiness_summary
-from ..services.inspection_scheduling_service import (
+from app.services.inspections.readiness_service import build_property_readiness_summary
+from app.services.inspection_scheduling_service import (
     build_inspection_timeline,
     build_property_schedule_summary,
 )
-from ..services.inspector_communication_service import build_inspector_contact_payload
-from ..services.jurisdiction_notification_service import (
+from app.services.inspector_communication_service import build_inspector_contact_payload
+from app.services.policy_governance.notification_service import (
     build_impacted_property_notifications,
     notify_impacted_properties_for_rule_change,
 )
-from ..services.jurisdiction_profile_service import resolve_operational_policy
-from ..services.policy_projection_service import (
+from app.services.jurisdiction_profile_service import resolve_operational_policy
+from app.services.compliance_engine.projection_service import (
     build_property_compliance_brief,
     build_property_projection_snapshot,
     rebuild_property_projection,
     sync_document_evidence_for_property,
 )
-from ..services.property_state_machine import sync_property_state
-from ..services.stage_guard import require_stage
-from ..services.workflow_gate_service import build_workflow_summary
+from app.services.properties.state_machine import sync_property_state
+from app.services.stage_guard import require_stage
+from app.services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 

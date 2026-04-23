@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..db import SessionLocal, rollback_quietly
+from app.db import SessionLocal, rollback_quietly
 from app.models import OrgLock
 
 

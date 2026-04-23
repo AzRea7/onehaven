@@ -10,21 +10,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..config import settings
-from ..db import get_db
-from ..models import Property, RentAssumption
-from ..services.budget_service import consume_external_budget, get_external_budget_status
-from ..services.fmr import HudUserClient
-from ..services.rentcast_service import (
+from app.config import settings
+from app.db import get_db
+from app.models import Property, RentAssumption
+from app.services.budget_service import consume_external_budget, get_external_budget_status
+from app.services.fmr import HudUserClient
+from app.services.rentcast_service import (
     RentCastClient,
     persist_rentcast_comps_and_get_median,
 )
-from ..domain.rent_learning import recompute_rent_fields
-from ..domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used, summarize_nspire_pdf_dataset
-from ..domain.underwriting import describe_rent_cap_reason
+from app.domain.rent_learning import recompute_rent_fields
+from app.domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used, summarize_nspire_pdf_dataset
+from app.domain.underwriting import describe_rent_cap_reason
 
 try:
-    from ..services.trust_service import (
+    from app.services.trust_service import (
         record_signal,
         recompute_and_persist,
         record_dispersion_signal,

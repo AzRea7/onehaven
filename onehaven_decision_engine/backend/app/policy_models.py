@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects import postgresql
 
-from .db import Base
+from app.db import Base
 
 JSONB = postgresql.JSONB(astext_type=Text())
 

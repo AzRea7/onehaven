@@ -9,16 +9,16 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from ..domain.compliance.hqs_library import get_effective_hqs_items
-from ..models import Inspection, InspectionItem, Property, PropertyChecklistItem
-from ..services.compliance_document_service import build_property_document_stack
-from ..services.jurisdiction_profile_service import resolve_operational_policy
-from ..services.policy_projection_service import (
+from app.domain.compliance.hqs_library import get_effective_hqs_items
+from app.models import Inspection, InspectionItem, Property, PropertyChecklistItem
+from app.services.compliance_document_service import build_property_document_stack
+from app.services.jurisdiction_profile_service import resolve_operational_policy
+from app.services.compliance_engine.projection_service import (
     build_property_compliance_brief,
     build_property_projection_snapshot,
     rebuild_property_projection,
 )
-from ..services.workflow_gate_service import build_property_jurisdiction_blocker
+from app.services.workflow_gate_service import build_property_jurisdiction_blocker
 
 STATUS_PASS = "pass"
 STATUS_FAIL = "fail"

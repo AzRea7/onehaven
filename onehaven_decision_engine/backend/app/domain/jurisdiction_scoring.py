@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 import json
 
-from ..models import JurisdictionRule
-from ..policy_models import JurisdictionProfile
-from .jurisdiction_categories import (
+from app.models import JurisdictionRule
+from app.policy_models import JurisdictionProfile
+from app.domain.policy.categories import (
     compute_completeness_score,
     expected_rule_universe_for_scope,
     normalize_categories,

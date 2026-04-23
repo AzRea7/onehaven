@@ -13,23 +13,23 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..domain.fingerprint import fingerprint
-from ..domain.importers.investorlift import normalize_investorlift
-from ..domain.importers.zillow import normalize_zillow
-from ..domain.operating_truth import (
+from app.db import get_db
+from app.domain.fingerprint import fingerprint
+from app.domain.importers.investorlift import normalize_investorlift
+from app.domain.importers.zillow import normalize_zillow
+from app.domain.operating_truth import (
     TruthViolation,
     enforce_deal_truth,
     enforce_property_truth,
 )
-from ..models import Deal, ImportSnapshot, IngestionRun, Property, RentAssumption
-from ..schemas import ImportErrorRow, ImportResultOut, IngestionOverviewOut
-from ..services.geo_enrichment import enrich_property_geo
-from ..services.ingestion_enrichment_service import execute_post_ingestion_pipeline
-from ..services.ingestion_run_service import get_ingestion_overview
-from ..services.ingestion_source_service import ensure_default_manual_sources
-from ..services.property_photo_service import upsert_zillow_photos
-from ..services.zillow_photo_source import extract_zillow_photo_urls
+from app.models import Deal, ImportSnapshot, IngestionRun, Property, RentAssumption
+from app.schemas import ImportErrorRow, ImportResultOut, IngestionOverviewOut
+from app.services.geo_enrichment import enrich_property_geo
+from app.services.ingestion_enrichment_service import execute_post_ingestion_pipeline
+from app.services.ingestion_run_service import get_ingestion_overview
+from app.services.ingestion_source_service import ensure_default_manual_sources
+from app.services.property_photo_service import upsert_zillow_photos
+from app.services.zillow_photo_source import extract_zillow_photo_urls
 
 router = APIRouter(prefix="/import", tags=["import"])
 

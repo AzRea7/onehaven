@@ -51,7 +51,7 @@ def evidence_for_market(
     principal=Depends(get_principal),
 ):
     from app.services.policy_evidence_service import evidence_for_market as _svc_evidence_for_market
-    from app.services.policy_dataset_service import dataset_snapshot_for_market as _svc_dataset_snapshot_for_market
+    from app.services.policy_sources.dataset_service import dataset_snapshot_for_market as _svc_dataset_snapshot_for_market
     from app.services.policy_evidence_version_service import evidence_versions_for_market as _svc_versions_for_market
 
     st = _norm_state(state) or "MI"
@@ -123,7 +123,7 @@ def dataset_summary_for_market_route(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.services.policy_dataset_service import dataset_snapshot_for_market
+    from app.services.policy_sources.dataset_service import dataset_snapshot_for_market
     return dataset_snapshot_for_market(
         db,
         org_id=getattr(principal, "org_id", None),

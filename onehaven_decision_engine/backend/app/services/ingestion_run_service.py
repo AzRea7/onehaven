@@ -7,8 +7,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..db import SessionLocal, rollback_quietly
-from ..models import IngestionRun, IngestionSource
+from app.db import SessionLocal, rollback_quietly
+from app.models import IngestionRun, IngestionSource
 
 
 def _json_safe(value: Any) -> Any:

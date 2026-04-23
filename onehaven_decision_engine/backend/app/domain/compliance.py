@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
-from ..models import Property, Inspection, InspectionItem, Inspector
+from app.models import Property, Inspection, InspectionItem, Inspector
 
 
 # -------------------- Analytics --------------------

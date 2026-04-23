@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.db import SessionLocal
 from app.models import AgentRun
 from app.services.agent_engine import execute_run_now
-from ..config import settings
+from app.config import settings
 
 broker = getattr(settings, "celery_broker_url", None) or "redis://redis:6379/0"
 backend = getattr(settings, "celery_result_backend", None) or "redis://redis:6379/1"

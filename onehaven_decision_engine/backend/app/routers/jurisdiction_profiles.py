@@ -14,7 +14,7 @@ from app.schemas import (
     JurisdictionProfileOut,
     JurisdictionProfileResolveOut,
 )
-from app.services.jurisdiction_completeness_service import (
+from app.services.policy_coverage.completeness_service import (
     profile_completeness_payload,
     recompute_profile_and_coverage,
 )
@@ -540,7 +540,7 @@ def get_profile_datasets(
     db: Session = Depends(get_db),
     principal=Depends(get_principal),
 ):
-    from app.services.policy_dataset_service import dataset_snapshot_for_market
+    from app.services.policy_sources.dataset_service import dataset_snapshot_for_market
     row = db.get(JurisdictionProfile, int(profile_id))
     if row is None:
         raise HTTPException(status_code=404, detail="Jurisdiction profile not found")

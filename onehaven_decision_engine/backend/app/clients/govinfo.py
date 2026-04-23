@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 import httpx
 
-from ..config import settings
+from app.config import settings
 
 
 class GovInfoClient:

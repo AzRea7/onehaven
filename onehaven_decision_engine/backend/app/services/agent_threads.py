@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
-from ..models import AgentMessage, AgentRun
+from app.models import AgentMessage, AgentRun
 
 
 def thread_key_for_run(run_id: int) -> str:

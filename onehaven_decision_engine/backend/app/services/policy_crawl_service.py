@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.policy_models import PolicySource
-from app.services.policy_discovery_service import sync_policy_source_into_inventory, update_inventory_after_fetch
+from app.services.policy_sources.discovery_service import sync_policy_source_into_inventory, update_inventory_after_fetch
 
 
 def _change_summary(fetch_result: dict[str, Any]) -> dict[str, Any]:
@@ -141,8 +141,8 @@ def sync_crawl_result_to_inventory(
     }
 
 
-from app.services.policy_fetch_service import fetch_policy_source_candidate
-from app.services.policy_discovery_service import discover_source_family_candidates
+from app.services.policy_sources.fetch_service import fetch_policy_source_candidate
+from app.services.policy_sources.discovery_service import discover_source_family_candidates
 
 
 def _resolution_counts(rows: list[dict[str, Any]]) -> dict[str, int]:

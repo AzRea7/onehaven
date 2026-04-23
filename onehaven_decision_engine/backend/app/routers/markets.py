@@ -4,12 +4,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..auth import get_principal, require_operator
-from ..services.market_catalog_service import (
+from app.services.market_catalog_service import (
     find_market_by_city,
     get_market,
     list_active_supported_markets,
 )
-from ..services.market_sync_service import build_supported_market_sync_plan
+from app.services.market_sync_service import build_supported_market_sync_plan
 from ..tasks.ingestion_tasks import sync_source_task
 
 router = APIRouter(prefix="/markets", tags=["markets"])

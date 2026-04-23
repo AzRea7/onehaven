@@ -7,9 +7,9 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from ..models import AuditEvent, Inspection, Property
-from ..services.events_facade import wf
-from ..services.inspector_communication_service import (
+from app.models import AuditEvent, Inspection, Property
+from app.services.events_facade import wf
+from app.services.inspector_communication_service import (
     build_inspection_reminder_message,
     build_inspector_contact_payload,
 )

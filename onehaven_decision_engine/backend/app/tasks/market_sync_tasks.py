@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from ..db import SessionLocal
+from app.db import SessionLocal
 from ..workers.celery_app import celery_app
-from ..services.ingestion_scheduler_service import collapse_dispatches_to_primary_source
-from ..services.market_sync_service import (
+from app.services.ingestion_scheduler_service import collapse_dispatches_to_primary_source
+from app.services.market_sync_service import (
     build_daily_dispatch_plan,
     build_supported_market_sync_plan_for_db,
 )

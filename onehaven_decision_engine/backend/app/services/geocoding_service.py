@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ..config import settings
+from app.config import settings
 from .address_normalization import normalize_full_address, normalize_address_line1
 from .geocode_cache_service import (
     GeocodeCachePayload,

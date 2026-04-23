@@ -21,7 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .db import Base
+from app.db import Base
 
 
 # -----------------------------
@@ -1664,7 +1664,7 @@ class TaxLookupResult:
         self.raw = raw
         self.cached = cached
 
-from .policy_models import JurisdictionProfile, HqsRule, HqsAddendumRule, HudFmrRecord  # noqa: E402,F401
+from app.policy_models import JurisdictionProfile, HqsRule, HqsAddendumRule, HudFmrRecord  # noqa: E402,F401
 
 
 

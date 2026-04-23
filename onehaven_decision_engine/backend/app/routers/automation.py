@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
-from ..db import get_db
-from ..services.inspection_scheduling_service import (
+from app.db import get_db
+from app.services.inspection_scheduling_service import (
     list_due_inspection_reminders,
     send_inspection_reminder,
 )

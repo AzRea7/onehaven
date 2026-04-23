@@ -7,7 +7,7 @@ from datetime import date, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..policy_models import JurisdictionProfile, HqsRule
+from app.policy_models import JurisdictionProfile, HqsRule
 
 
 def _j(v) -> str:

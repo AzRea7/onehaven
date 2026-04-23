@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 from ..auth import get_principal
 from ..clients.federal_register import FederalRegisterClient
 from ..clients.govinfo import GovInfoClient
-from ..config import settings
-from ..db import get_db
-from ..models import (
+from app.config import settings
+from app.db import get_db
+from app.models import (
     AuditEvent,
     Property,
     RentAssumption,
@@ -23,7 +23,7 @@ from ..models import (
     RentExplainRun,
     RentObservation,
 )
-from ..schemas import (
+from app.schemas import (
     RentAssumptionOut,
     RentAssumptionUpsert,
     RentCalibrationOut,
@@ -35,15 +35,15 @@ from ..schemas import (
     RentObservationOut,
     RentRecomputeOut,
 )
-from ..domain.events import emit_workflow_event
-from ..domain.rent_learning import (
+from app.domain.events import emit_workflow_event
+from app.domain.rent_learning import (
     get_or_create_rent_assumption,
     recompute_rent_fields,
     summarize_comps,
     update_calibration_from_observation,
 )
-from ..domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used, summarize_nspire_pdf_dataset
-from ..domain.underwriting import describe_rent_cap_reason
+from app.domain.section8.rent_rules import compute_approved_ceiling, compute_rent_used, summarize_nspire_pdf_dataset
+from app.domain.underwriting import describe_rent_cap_reason
 
 router = APIRouter(prefix="/rent", tags=["rent"])
 

@@ -10,9 +10,9 @@ from typing import Any, List, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..config import settings
-from ..models import AgentRun, Property
-from .property_state_machine import compute_and_persist_stage, get_state_payload
+from app.config import settings
+from app.models import AgentRun, Property
+from app.services.properties.state_machine import compute_and_persist_stage, get_state_payload
 
 
 @dataclass(frozen=True)

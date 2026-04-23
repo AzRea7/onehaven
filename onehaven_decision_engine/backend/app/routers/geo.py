@@ -9,10 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
-from ..db import get_db
-from ..models import Property
-from ..services.geo_enrichment import enrich_property_geo, is_in_redzone
-from ..services.risk_scoring import compute_property_risk
+from app.db import get_db
+from app.models import Property
+from app.services.geo_enrichment import enrich_property_geo, is_in_redzone
+from app.services.risk_scoring import compute_property_risk
 
 router = APIRouter(prefix="/geo", tags=["geo"])
 

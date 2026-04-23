@@ -10,8 +10,8 @@ from typing import Any, Optional
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
-from app.domain.jurisdiction_categories import expected_rule_universe_for_scope
-from app.domain.jurisdiction_defaults import default_policy_for_scope
+from app.domain.policy.categories import expected_rule_universe_for_scope
+from app.domain.policy.defaults import default_policy_for_scope
 from app.policy_models import JurisdictionProfile
 
 
@@ -656,7 +656,7 @@ def resolve_operational_policy(
     state: str = "MI",
     pha_name: Optional[str] = None,
 ) -> dict[str, Any]:
-    from app.services.policy_projection_service import build_property_compliance_brief
+    from app.services.compliance_engine.projection_service import build_property_compliance_brief
 
     base = resolve_profile(
         db,
@@ -1017,7 +1017,7 @@ def set_profile_operational_rollup(
 
 # ---- Step 2 jurisdiction registry + source family mapping overlays ----
 try:
-    from app.domain.jurisdiction_categories import (
+    from app.domain.policy.categories import (
         authority_scope_for_categories,
         required_source_families_for_categories,
     )

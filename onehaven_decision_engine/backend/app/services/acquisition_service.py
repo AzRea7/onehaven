@@ -33,7 +33,7 @@ from .acquisition_tag_service import (
     normalize_preserve_tags,
     replace_property_tags,
 )
-from .property_state_machine import get_state_payload, sync_property_state
+from app.services.properties.state_machine import get_state_payload, sync_property_state
 
 DEFAULT_REQUIRED_DOCS = [
     {"kind": "purchase_agreement", "label": "Purchase agreement"},

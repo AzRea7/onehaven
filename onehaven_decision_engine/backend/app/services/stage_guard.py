@@ -4,11 +4,11 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..domain.workflow.stages import stage_gte
-from ..models import Property
-from ..services.policy_projection_service import build_property_compliance_brief
-from ..services.property_state_machine import get_state_payload, get_transition_payload
-from ..services.workflow_gate_service import build_workflow_summary
+from app.domain.workflow.stages import stage_gte
+from app.models import Property
+from app.services.compliance_engine.projection_service import build_property_compliance_brief
+from app.services.properties.state_machine import get_state_payload, get_transition_payload
+from app.services.workflow_gate_service import build_workflow_summary
 
 
 def _policy_blockers(db: Session, *, org_id: int, property_id: int) -> list:

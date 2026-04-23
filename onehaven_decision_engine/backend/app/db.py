@@ -4,7 +4,7 @@ from __future__ import annotations
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from .config import settings
+from app.config import settings
 
 
 class Base(DeclarativeBase):

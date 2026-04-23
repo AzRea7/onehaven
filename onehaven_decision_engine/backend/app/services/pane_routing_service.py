@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from ..domain.workflow.panes import (
+from app.domain.workflow.panes import (
     allowed_panes_for_principal,
     next_stage_to_pane,
     pane_catalog,
@@ -11,7 +11,7 @@ from ..domain.workflow.panes import (
     principal_roles,
     stage_to_pane,
 )
-from ..domain.workflow.stages import next_stage, stage_label
+from app.domain.workflow.stages import next_stage, stage_label
 
 
 def _turnover_target_from_constraints(constraints: dict[str, Any]) -> str:

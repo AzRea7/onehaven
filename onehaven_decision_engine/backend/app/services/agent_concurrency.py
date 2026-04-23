@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ..config import settings
+from app.config import settings
 
 
 def _is_postgres() -> bool:

@@ -11,8 +11,8 @@ from typing import Any, Optional
 from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
-from ..config import settings
-from ..models import Property, RentAssumption
+from app.config import settings
+from app.models import Property, RentAssumption
 from .rent_refresh_queue_service import publish_without_rent, should_run_inline_rent_refresh
 from .rentcast_service import RentCastClient, persist_rentcast_comps_and_get_median
 from .address_normalization import normalize_full_address
@@ -606,7 +606,7 @@ def execute_post_ingestion_pipeline(
             result[step] = payload
 
     try:
-        from ..services.geo_enrichment import enrich_property_geo
+        from app.services.geo_enrichment import enrich_property_geo
 
         geo_res = _timed_step(
             result,
@@ -739,7 +739,7 @@ def execute_post_ingestion_pipeline(
         _record_step("evaluate", False, {"ok": False, "error": str(e)})
 
     try:
-        from ..services.property_state_machine import sync_property_state
+        from app.services.properties.state_machine import sync_property_state
 
         _timed_step(result, step_key="state", fn=lambda: sync_property_state(db, org_id=int(org_id), property_id=int(property_id)))
         result["state_ok"] = True
@@ -750,7 +750,7 @@ def execute_post_ingestion_pipeline(
         _record_step("state", False, {"ok": False, "error": str(e)})
 
     try:
-        from ..services.workflow_gate_service import build_workflow_summary
+        from app.services.workflow_gate_service import build_workflow_summary
 
         workflow_res = _timed_step(
             result,

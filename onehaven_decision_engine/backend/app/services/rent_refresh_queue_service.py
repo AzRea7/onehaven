@@ -6,8 +6,8 @@ from typing import Any
 from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session
 
-from ..config import settings
-from ..models import Property, RentAssumption
+from app.config import settings
+from app.models import Property, RentAssumption
 
 
 def should_run_inline_rent_refresh() -> bool:

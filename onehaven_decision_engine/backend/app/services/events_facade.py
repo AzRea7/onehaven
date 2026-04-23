@@ -44,7 +44,7 @@ class WorkflowFacade:
     without duplicating JSON plumbing.
 
     Routers import:
-        from ..services.events_facade import wf
+        from app.services.events_facade import wf
     """
 
     def emit(

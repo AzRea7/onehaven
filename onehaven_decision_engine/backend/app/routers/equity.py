@@ -8,15 +8,15 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..domain.audit import emit_audit
-from ..models import Property, Valuation
-from ..schemas import ValuationCreate, ValuationOut
-from ..services.events_facade import wf
-from ..services.ownership import must_get_property
-from ..services.property_state_machine import sync_property_state
-from ..services.stage_guard import require_stage
-from ..services.workflow_gate_service import build_workflow_summary
+from app.db import get_db
+from app.domain.audit import emit_audit
+from app.models import Property, Valuation
+from app.schemas import ValuationCreate, ValuationOut
+from app.services.events_facade import wf
+from app.services.ownership import must_get_property
+from app.services.properties.state_machine import sync_property_state
+from app.services.stage_guard import require_stage
+from app.services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/equity", tags=["equity"])
 

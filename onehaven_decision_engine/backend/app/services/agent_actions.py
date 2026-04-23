@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.domain.agents.contracts import get_contract, validate_agent_output
 from app.models import AgentRun, WorkflowEvent, RehabTask, PropertyChecklistItem
 from app.services.agent_trace import emit_trace_safe
-from app.services.property_state_machine import sync_property_state
+from app.services.properties.state_machine import sync_property_state
 
 
 def _loads(s: Optional[str], default: Any) -> Any:

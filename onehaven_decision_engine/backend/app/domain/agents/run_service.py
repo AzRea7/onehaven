@@ -7,7 +7,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...models import AgentRun, AgentMessage
+from app.models import AgentRun, AgentMessage
 
 
 def create_run(

@@ -8,7 +8,7 @@ from typing import Any, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import IngestionRecordLink, Property
+from app.models import IngestionRecordLink, Property
 
 
 _ADDR_ABBREV = {

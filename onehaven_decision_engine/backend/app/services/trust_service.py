@@ -10,7 +10,7 @@ from typing import Any, Optional
 from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session
 
-from ..models import TrustSignal, TrustScore
+from app.models import TrustSignal, TrustScore
 
 
 @dataclass(frozen=True)

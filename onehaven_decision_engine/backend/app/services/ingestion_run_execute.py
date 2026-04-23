@@ -13,26 +13,26 @@ from typing import Any
 from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
-from ..db import rollback_quietly
+from app.db import rollback_quietly
 
-from ..config import settings
+from app.config import settings
 from ..middleware.structured_logging import emit_structured_log
-from ..models import Deal, Property, PropertyPhoto, RentAssumption
-from ..services.ingestion_dedupe_service import (
+from app.models import Deal, Property, PropertyPhoto, RentAssumption
+from app.services.ingestion_dedupe_service import (
     build_property_fingerprint,
     find_existing_by_external_id,
     find_existing_property,
     upsert_record_link,
 )
-from ..services.address_normalization import normalize_full_address
-from ..services.ingestion_enrichment_service import (
+from app.services.address_normalization import normalize_full_address
+from app.services.ingestion_enrichment_service import (
     apply_pipeline_summary,
     canonical_listing_payload,
     derive_photo_kind,
     execute_post_ingestion_pipeline,
 )
-from ..services.ingestion_run_service import finish_run, finish_run_in_new_session, start_run
-from ..services.locks_service import (
+from app.services.ingestion_run_service import finish_run, finish_run_in_new_session, start_run
+from app.services.locks_service import (
     acquire_ingestion_execution_lock,
     build_ingestion_execution_lock_key,
     clear_stale_lock,
@@ -41,14 +41,14 @@ from ..services.locks_service import (
     release_ingestion_execution_lock,
     release_ingestion_execution_lock_in_new_session,
 )
-from ..services.market_sync_service import (
+from app.services.market_sync_service import (
     advance_market_cursor,
     build_market_dataset_identity,
     get_market_sync_state_by_id,
     mark_market_sync_completed,
     mark_market_sync_started,
 )
-from ..services.rentcast_listing_source import (
+from app.services.rentcast_listing_source import (
     RentCastListingFetchResult,
     RentCastListingSource,
 )

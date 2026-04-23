@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import IngestionSource
+from app.models import IngestionSource
 from .market_catalog_service import (
     canonical_source_slug_for_market_slug,
     get_active_supported_market_by_slug,

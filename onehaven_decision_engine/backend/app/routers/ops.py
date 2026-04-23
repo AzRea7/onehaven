@@ -10,8 +10,8 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal, require_operator
-from ..db import get_db
-from ..models import (
+from app.db import get_db
+from app.models import (
     Deal,
     Inspection,
     InspectionItem,
@@ -25,12 +25,12 @@ from ..models import (
     Valuation,
     WorkflowEvent,
 )
-from ..services.dashboard_rollups import compute_rollups
-from ..services.property_state_machine import (
+from app.services.dashboard_rollups import compute_rollups
+from app.services.properties.state_machine import (
     compute_and_persist_stage,
     get_state_payload,
 )
-from ..services.workflow_gate_service import build_workflow_summary
+from app.services.workflow_gate_service import build_workflow_summary
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 

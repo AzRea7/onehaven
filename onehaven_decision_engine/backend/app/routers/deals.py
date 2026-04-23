@@ -8,11 +8,11 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_principal
-from ..db import get_db
-from ..domain.audit import emit_audit
-from ..domain.operating_truth_enforcement import enforce_constitution_for_property_and_price
-from ..models import Deal, ImportSnapshot, Property, RentAssumption, UnderwritingResult
-from ..schemas import (
+from app.db import get_db
+from app.domain.audit import emit_audit
+from app.domain.operating_truth_enforcement import enforce_constitution_for_property_and_price
+from app.models import Deal, ImportSnapshot, Property, RentAssumption, UnderwritingResult
+from app.schemas import (
     DealCreate,
     DealIntakeIn,
     DealIntakeOut,
@@ -22,8 +22,8 @@ from ..schemas import (
     RentAssumptionUpsert,
     SurvivorOut,
 )
-from ..services.events_facade import wf
-from ..services.property_state_machine import sync_property_state
+from app.services.events_facade import wf
+from app.services.properties.state_machine import sync_property_state
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 
